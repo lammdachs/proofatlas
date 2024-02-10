@@ -3,16 +3,14 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fo-reduce"
+name = "foreduce"
 dynamic = [
     "version",
     "dependencies",
-    "optional-dependencies",
+    "optional-dependencies"
 ]
-requires-python = ">=3.11, <3.12"
+requires-python = ">=3.11"
 
 [tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
-
-[tool.setuptools.dynamic.optional-dependencies]
-optional-dependencies = {file = ["requirements-dev.txt"]}
+dependencies = { file = ["requirements.txt"]}
+optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}

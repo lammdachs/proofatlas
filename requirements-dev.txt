@@ -1,5 +1,5 @@
 z3-solver
 ipykernel
 numpy
-pytorch
+torch
 lightning
