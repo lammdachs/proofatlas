@@ -1,0 +1,1 @@
+The transformer model. The code builds on [Transformer-XL](https://github.com/kimiyoung/transformer-xl/)

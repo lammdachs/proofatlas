@@ -1,0 +1,5 @@
+z3-solver
+ipykernel
+numpy
+pytorch
+lightning
