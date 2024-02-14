@@ -1,6 +1,5 @@
 from torch import nn
-from attention import MultiHeadAttention
-from lightning import LightningModule
+from foreduce.transformer.attention import MultiHeadAttention
 
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, model_dim, inner_dim, dropout):

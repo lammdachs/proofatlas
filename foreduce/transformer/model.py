@@ -1,10 +1,9 @@
 import torch
 from torch import nn
 from decoder import DecoderLayer
-from config import Config
 from lightning import LightningModule
-from ..fol import *
 
+from foreduce.transformer.config import Config
 
 class Transformer(LightningModule):
     @staticmethod

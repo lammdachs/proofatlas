@@ -1,1 +1,1 @@
-print("Inside fol/__init__.py")
+from .logic import Constant, Function, Predicate, Term, Variable, Clause, eq, Problem, Literal

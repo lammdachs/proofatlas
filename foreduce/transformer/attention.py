@@ -1,4 +1,3 @@
-from lightning import LightningModule
 import torch
 from torch import nn
         

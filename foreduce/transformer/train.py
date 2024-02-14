@@ -1,11 +1,11 @@
 import torch
 import wandb
-from data import IntegerSortingConfig, IntegerSortingDataModule
 import argparse
 from lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
-from model import Transformer
+from foreduce.transformer.model import Transformer
+from foreduce.transformer.data import IntegerSortingConfig, IntegerSortingDataModule
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
