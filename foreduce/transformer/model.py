@@ -1,34 +1,25 @@
 import torch
-from torch import nn
-from decoder import DecoderLayer
+import torch.nn as nn
+from torch import nan_to_num
 from lightning import LightningModule
 
 from foreduce.transformer.config import Config
+from foreduce.transformer.decoder import DecoderLayer
 
 class Transformer(LightningModule):
     @staticmethod
     def default_config():
-        config = Config()
-        config.model_dim = 128
-        config.vocab_size = 10
-        config.embed_dim = 32
-        config.seg_len = 39
-        config.num_heads = 4
-        config.dropout = 0
-        config.inner_dim = 128
-        config.num_layers = 2
-        return config
+        Config()
     
     def __init__(self, config):
         super().__init__()
         self.seg_len = config.seg_len
         self.model_dim = config.model_dim
-        self.vocab_size = config.vocab_size
-        self.embed = nn.Embedding(config.vocab_size, config.model_dim)
+        self.vocab_size = config.vocab_size()
+        self.embed = nn.Embedding(self.vocab_size, self.model_dim)
         self.layers = nn.ModuleList()
         self.dropout = nn.Dropout(config.dropout)
-        total_len = config.seg_len
-        pos_encoding = self.get_sinusoid_pos_encoding(total_len, config.model_dim).clone()
+        pos_encoding = self.get_sinusoid_pos_encoding(self.seg_len, self.model_dim).clone()
         self.register_buffer("R", pos_encoding)
         
         for _ in range(config.num_layers):
@@ -42,7 +33,7 @@ class Transformer(LightningModule):
             )
             self.layers.append(dec)
             
-        self.out_layer = nn.Linear(config.model_dim, config.vocab_size)
+        self.out_layer = nn.Linear(self.model_dim, self.vocab_size)
         
         self.save_hyperparameters()
     

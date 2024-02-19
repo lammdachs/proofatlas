@@ -51,3 +51,45 @@ class TermInsteadOfPredicateError(Exception):
     def __init__(self, term):
         super().__init__(f"Expected predicate, got term {term}")
         self.term = term
+
+
+class FunctionArityError(Exception):
+    def __init__(self, arity, config):
+        super().__init__(f"Expected function arity between 0 and {
+            len(config.function_arity)}, got {arity}")
+        self.arity = arity
+        self.config = config
+
+
+class FunctionCountError(Exception):
+    def __init__(self, count, arity, config):
+        super().__init__(f"Expected at most {config.function_arity[arity]} \
+                          functions with arity {arity}, got {count}")
+        self.count = count
+        self.arity = arity
+        self.config = config
+
+
+class PredicateArityError(Exception):
+    def __init__(self, arity, config):
+        super().__init__(f"Expected predicate arity between 0 and {
+            len(config.proposition_arity)}, got {arity}")
+        self.arity = arity
+        self.config = config
+
+
+class PredicateCountError(Exception):
+    def __init__(self, count, arity, config):
+        super().__init__(f"Expected at most {config.proposition_arity[arity]} \
+                         predicates with arity {arity}, got {count}")
+        self.count = count
+        self.arity = arity
+        self.config = config
+
+
+class VariableCountError(Exception):
+    def __init__(self, count, config):
+        super().__init__(f"Expected at most {
+            config.variable_count} variables, got {count}")
+        self.count = count
+        self.config = config

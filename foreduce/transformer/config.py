@@ -1,17 +1,125 @@
+from dataclasses import dataclass
+from itertools import groupby, takewhile
+from operator import attrgetter
+
+import numpy.random as random
+from foreduce.fol import eq
+from bidict import bidict
+
+from foreduce.fol.exception import FunctionArityError, FunctionCountError, PredicateArityError, PredicateCountError, VariableCountError
+from foreduce.fol.logic import Clause, Literal, Problem
+
+
+@dataclass
 class Config:
-    def __init__(self,
-                 model_dim=None,
-                 embed_dim=None,
-                 seg_len=None,
-                 num_heads=None,
-                 dropout=None,
-                 inner_dim=None,
-                 num_layers=None):
-        
-        self.model_dim = model_dim
-        self.embed_dim = embed_dim
-        self.seg_len = seg_len
-        self.num_heads = num_heads
-        self.dropout = dropout
-        self.inner_dim = inner_dim
-        self.num_layers = num_layers
+    model_dim : int = 128
+    embed_dim : int = 32
+    seg_len : int = 128
+    num_heads : int = 4
+    dropout : int = 0
+    inner_dim : int = 128
+    num_layers : int = 2
+    proposition_arity = [4, 4, 2]
+    function_arity = [4, 4, 2]
+    variable_count = 4
+    defined = ["&", "|", "+", "-", eq]
+
+    def vocab_size(self):
+        return len(self.defined) + sum(self.function_arity) + \
+            sum(self.proposition_arity) + \
+            self.variable_count
+
+    def mapping(self, problem):
+        random.seed(hash(problem) % 2**32)
+        mapping = bidict({symbol: i for i, symbol in enumerate(self.defined)})
+        reserved = len(mapping)
+        function_symbols = list(problem.function_symbols())
+        predicate_symbols = list(problem.predicate_symbols())
+        variables = list(problem.variables())
+        function_symbols.sort(key=attrgetter('arity'))
+        predicate_symbols.remove(eq)
+        predicate_symbols.sort(key=attrgetter('arity'))
+        for arity, functions in groupby(
+                function_symbols, attrgetter('arity')):
+            if arity >= len(self.function_arity):
+                raise FunctionArityError(arity, self)
+            functions_list = list(functions)
+            if len(functions_list) > self.function_arity[arity]:
+                raise FunctionCountError(len(functions_list), arity, self)
+            ids = random.choice(
+                range(self.function_arity[arity]),
+                len(functions_list), replace=False)
+            for i, function in enumerate(functions_list):
+                mapping[function] = reserved + ids[i] + sum(
+                    self.function_arity[:arity]
+                )
+        for arity, predicates in groupby(
+                predicate_symbols, attrgetter('arity')):
+            if arity >= len(self.proposition_arity):
+                raise PredicateArityError(arity, self)
+            predicates_list = list(predicates)
+            if len(predicates_list) > self.proposition_arity[arity]:
+                raise PredicateCountError(len(predicates_list), arity, self)
+            ids = random.choice(
+                range(self.proposition_arity[arity]),
+                len(predicates_list), replace=False)
+            for i, predicate in enumerate(predicates_list):
+                mapping[predicate] = reserved + ids[i] + sum(
+                    self.function_arity
+                    ) + sum(
+                    self.proposition_arity[:arity]
+                )
+        if len(variables) > self.variable_count:
+            raise VariableCountError(len(variables), self)
+        ids = random.choice(
+            range(self.variable_count), len(variables), replace=False)
+        for i, variable in enumerate(variables):
+            mapping[variable] = reserved + ids[i] + sum(
+                self.function_arity
+                ) + sum(
+                self.proposition_arity
+                )
+        return mapping
+
+    def encode(self, problem: Problem):
+        return problem.encode(self.mapping(problem))
+
+    def decode(self, encoding, mapping):
+        clauses = []
+        it = iter(encoding)
+        while True:
+            clause = list(takewhile(lambda x: x != mapping["&"], it))
+            if not clause:
+                break
+            clauses.append(self.decode_clause(
+                clause,
+                mapping
+            ))
+        return Problem(*clauses)
+
+    def decode_clause(self, clause, mapping):
+        literals = []
+        it = iter(clause)
+        while True:
+            literal = list(takewhile(lambda x: x != mapping["|"], it))
+            if not literal:
+                break
+            literals.append(self.decode_literal(
+                literal,
+                mapping
+            ))
+        return Clause(*literals)
+
+    def decode_literal(self, literal: list, mapping):
+        polarity = literal[0] == mapping["+"]
+        predicate = self.decode_term(iter(literal[1:]), mapping)
+        return Literal(predicate, polarity)
+
+    def decode_term(self, it, mapping):
+        symbol = mapping.inverse[next(it)]
+        if symbol.arity == 0:
+            return symbol
+        args = []
+        while len(args) < symbol.arity:
+            args.append(self.decode_term(it, mapping))
+        return symbol(*args)

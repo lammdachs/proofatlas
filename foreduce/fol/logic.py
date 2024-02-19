@@ -1,5 +1,7 @@
-from enum import Enum
-from .exception import *
+from itertools import groupby
+from operator import attrgetter
+
+from foreduce.fol.exception import *
 
 
 class _Context:
@@ -34,6 +36,8 @@ class _Symbol:
         return f"{self.name}/{self.arity}"
 
     def __call__(self, *args):
+        if isinstance(self, Constant) or isinstance(self, Variable):
+            return self
         return Term(self, *args)
 
 
@@ -43,6 +47,13 @@ class Function(_Symbol):
         global _context
         _context.functions.add(name)
 
+    def __eq__(self, other):
+        return self.name == other.name and \
+            self.arity == other.arity
+
+    def __hash__(self):
+        return hash((self.name, self.arity))
+
 
 class Predicate(_Symbol):
     def __init__(self, name, arity):
@@ -50,19 +61,26 @@ class Predicate(_Symbol):
         global _context
         _context.predicates.add(name)
 
+    def __eq__(self, other):
+        return self.name == other.name and \
+            self.arity == other.arity
+
+    def __hash__(self):
+        return hash((self.name, self.arity))
+
 
 class Term:
     @staticmethod
     def check(symbol, *args):
         if not isinstance(symbol, _Symbol):
-            raise NotFunctionError(symbol)
+            raise TypeError(f"Expected Symbol, got {symbol}")
         if len(args) != symbol.arity:
-            raise ArguementNumberError(symbol.arity, len(args))
+            raise TypeError(f"Expected {symbol.arity} arguments, got {len(args)}")
         for arg in args:
             if not isinstance(arg, Term):
-                raise NotTermError(arg)
+                raise TypeError(f"Expected Term, got {arg}")
             if isinstance(arg, Predicate):
-                raise PrdicateInsteadOfTermError(arg)
+                raise TypeError(f"Expected Term, got Predicate {arg}")
 
     def __init__(self, symbol, *args):
         self.symbol = symbol
@@ -72,6 +90,8 @@ class Term:
         return hash((self.symbol, *self.args))
 
     def __eq__(self, other):
+        if not isinstance(other, Term):
+            return False
         return self.symbol == other.symbol and \
             self.args == other.args
 
@@ -79,7 +99,7 @@ class Term:
         return f"{self.symbol.name}({', '.join(map(str, self.args))})"
 
     def function_symbols(self):
-        if isinstance(self.symbol, Function):    
+        if isinstance(self.symbol, Function):
             symbols = {self.symbol}
         else:
             symbols = set()
@@ -97,13 +117,24 @@ class Term:
         return variables
 
     def terms(self):
-        if isinstance(self.symbol, Predicate):    
+        if isinstance(self.symbol, Predicate):
             terms = set()
         else:
             terms = {self}
         for arg in self.args:
             terms |= arg.terms()
         return terms
+
+    def encode(self, mapping):
+        result = [mapping[self.symbol]]
+        for arg in self.args:
+            result += arg.encode(mapping)
+        return result
+
+    def substitute(self, t1, t2):
+        if self == t1:
+            return t2
+        return self.symbol(*[arg.substitute(t1, t2) for arg in self.args])
 
 
 class Constant(Function, Term):
@@ -129,21 +160,29 @@ class Variable(_Symbol, Term):
 eq = Predicate('eq', 2)
 
 
-class Literal:
+class Literal(Term):
     @staticmethod
     def check(predicate, polarity):
         if not isinstance(predicate.symbol, Predicate):
-            raise NotPredicateError(predicate)
+            raise TypeError(f"Expected Predicate, got {predicate.symbol}")
         if not isinstance(polarity, bool):
             raise TypeError(f"Expected bool, got {polarity}")
-    
+
     def __init__(self, predicate, polarity=True):
         Literal.check(predicate, polarity)
         self.predicate = predicate
         self.polarity = polarity
+        self.symbol = predicate.symbol
+        self.args = predicate.args
 
     def __repr__(self):
         return f"{'¬' if not self.polarity else ''}{self.predicate}"
+
+    def __eq__(self, other):
+        if not isinstance(other, Literal):
+            return False
+        return self.predicate == other.predicate and \
+            self.polarity == other.polarity
 
     def __hash__(self):
         return hash((self.predicate, self.polarity))
@@ -154,11 +193,11 @@ class Clause:
     def check(literals):
         for literal in literals:
             if not isinstance(literal, Literal):
-                raise NotLiteralError(literal)
+                raise TypeError(f"Expected Literal, got {literal}")
 
     def __init__(self, *literals):
         Clause.check(literals)
-        self.literals = literals
+        self.literals = list(set(literals))
 
     def __repr__(self):
         return f"{' | '.join(map(str, self.literals))}"
@@ -189,13 +228,21 @@ class Clause:
             terms |= literal.predicate.terms()
         return terms
 
+    def encode(self, mapping):
+        result = []
+        for literal in self.literals:
+            result.append(mapping["+"] if literal.polarity else mapping["-"])
+            result += literal.predicate.encode(mapping)
+            result.append(mapping["|"])
+        return result
+
 
 class Problem:
     @staticmethod
     def check(clauses):
         for clause in clauses:
             if not isinstance(clause, Clause):
-                raise NotClauseError(clause)
+                raise TypeError(f"Expected Clause, got {clause}")
 
     def __init__(self, *clauses):
         Problem.check(clauses)
@@ -227,3 +274,10 @@ class Problem:
         for clause in self.clauses:
             terms |= clause.terms()
         return terms
+
+    def encode(self, mapping):
+        result = []
+        for clause in self.clauses:
+            result += clause.encode(mapping)
+            result.append(mapping["&"])
+        return result
