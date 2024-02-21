@@ -13,13 +13,13 @@ class Transformer(LightningModule):
     
     def __init__(self, config):
         super().__init__()
-        self.seg_len = config.seg_len
+        self.seq_len = config.seq_len
         self.model_dim = config.model_dim
         self.vocab_size = config.vocab_size()
         self.embed = nn.Embedding(self.vocab_size, self.model_dim)
         self.layers = nn.ModuleList()
         self.dropout = nn.Dropout(config.dropout)
-        pos_encoding = self.get_sinusoid_pos_encoding(self.seg_len, self.model_dim).clone()
+        pos_encoding = self.get_sinusoid_pos_encoding(self.seq_len, self.model_dim).clone()
         self.register_buffer("R", pos_encoding)
         
         for _ in range(config.num_layers):

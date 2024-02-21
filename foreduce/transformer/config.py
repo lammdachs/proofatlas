@@ -14,12 +14,12 @@ from foreduce.fol.logic import Clause, Literal, Problem
 class Config:
     model_dim : int = 128
     embed_dim : int = 32
-    seg_len : int = 128
+    seq_len : int = 128
     num_heads : int = 4
     dropout : int = 0
     inner_dim : int = 128
     num_layers : int = 2
-    proposition_arity = [4, 4, 2]
+    proposition_arity = [4, 2]
     function_arity = [4, 4, 2]
     variable_count = 4
     defined = ["&", "|", "+", "-", eq]
@@ -37,7 +37,8 @@ class Config:
         predicate_symbols = list(problem.predicate_symbols())
         variables = list(problem.variables())
         function_symbols.sort(key=attrgetter('arity'))
-        predicate_symbols.remove(eq)
+        if eq in predicate_symbols:
+            predicate_symbols.remove(eq)
         predicate_symbols.sort(key=attrgetter('arity'))
         for arity, functions in groupby(
                 function_symbols, attrgetter('arity')):
@@ -55,19 +56,19 @@ class Config:
                 )
         for arity, predicates in groupby(
                 predicate_symbols, attrgetter('arity')):
-            if arity >= len(self.proposition_arity):
+            if arity == 0 or arity >= len(self.proposition_arity) + 1:
                 raise PredicateArityError(arity, self)
             predicates_list = list(predicates)
-            if len(predicates_list) > self.proposition_arity[arity]:
+            if len(predicates_list) > self.proposition_arity[arity - 1]:
                 raise PredicateCountError(len(predicates_list), arity, self)
             ids = random.choice(
-                range(self.proposition_arity[arity]),
+                range(self.proposition_arity[arity - 1]),
                 len(predicates_list), replace=False)
             for i, predicate in enumerate(predicates_list):
                 mapping[predicate] = reserved + ids[i] + sum(
                     self.function_arity
                     ) + sum(
-                    self.proposition_arity[:arity]
+                    self.proposition_arity[:arity-1]
                 )
         if len(variables) > self.variable_count:
             raise VariableCountError(len(variables), self)
@@ -123,3 +124,10 @@ class Config:
         while len(args) < symbol.arity:
             args.append(self.decode_term(it, mapping))
         return symbol(*args)
+
+    def encode_substitution_proof(self, substitution_proof):
+        axioms = substitution_proof[0]
+        substitutions = substitution_proof[1]
+        problem = Problem(*axioms + substitutions)
+        mapping = self.mapping(problem)
+        return (len(axioms), problem.encode(mapping))

@@ -1,6 +1,9 @@
 import torch
 import os
 from lightning import LightningDataModule
+from foreduce.fol.random import RandomSignature, RandomSubstitutionProof
+
+from foreduce.transformer.config import Config
 
 
 class IntegerSortingConfig:
@@ -69,3 +72,36 @@ class IntegerSortingDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return self.val_dataloader()
+
+
+class FirstOrderConfig:
+    def __init__(self, config=Config(), num_samples=50000, derivation_depth=3):
+        self.config = config
+        self.num_samples = num_samples
+        self.derivation_depth = derivation_depth
+
+    def __repr__(self):
+        return f"FirstOrderConfig{self.config}-{self.num_samples}"
+
+
+class FirstOrderDataset(torch.utils.data.Dataset):
+    def __init__(self, config=FirstOrderConfig(), overwrite=False):
+        self.config = config
+        self.overwrite = overwrite
+        self.generate(self.config.num_samples)
+        self.inputs, self.targets = torch.load(repr(self.config) + ".pt")
+
+    def __len__(self):
+        return self.config.num_samples
+
+    def __getitem__(self, idx):
+        name = repr(self.config)
+        return self.inputs[idx], self.targets[idx]
+
+    def generate(self):
+        name = repr(self.config)
+        if not self.overwrite and os.path.exists(name + ".pt"):
+            return
+        sig = RandomSignature(self.config)
+        proofs = [RandomSubstitutionProof(sig) for _ in range(self.config.num_samples)]
+        #todo

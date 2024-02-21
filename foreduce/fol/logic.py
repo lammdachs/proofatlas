@@ -48,6 +48,8 @@ class Function(_Symbol):
         _context.functions.add(name)
 
     def __eq__(self, other):
+        if not isinstance(other, Function):
+            return False
         return self.name == other.name and \
             self.arity == other.arity
 
@@ -92,6 +94,16 @@ class Term:
     def __eq__(self, other):
         if not isinstance(other, Term):
             return False
+        if isinstance(self, Variable):
+            if not isinstance(other, Variable):
+                return False
+            else:
+                return self.name == other.name
+        if isinstance(self, Constant):
+            if not isinstance(other, Constant):
+                return False
+            else:
+                return self.name == other.name
         return self.symbol == other.symbol and \
             self.args == other.args
 
@@ -187,6 +199,9 @@ class Literal(Term):
     def __hash__(self):
         return hash((self.predicate, self.polarity))
 
+    def substitute(self, t1, t2):
+        return Literal(self.predicate.substitute(t1, t2), self.polarity)
+
 
 class Clause:
     @staticmethod
@@ -197,10 +212,18 @@ class Clause:
 
     def __init__(self, *literals):
         Clause.check(literals)
-        self.literals = list(set(literals))
+        self.literals = tuple(set(literals))
 
     def __repr__(self):
         return f"{' | '.join(map(str, self.literals))}"
+
+    def __eq__(self, other):
+        if not isinstance(other, Clause):
+            return False
+        return self.literals == other.literals
+
+    def __hash__(self):
+        return hash(tuple(self.literals))
 
     def predicate_symbols(self):
         predicates = set()
@@ -227,6 +250,9 @@ class Clause:
         for literal in self.literals:
             terms |= literal.predicate.terms()
         return terms
+
+    def substitute(self, t1, t2):
+        return Clause(*[literal.substitute(t1, t2) for literal in self.literals])
 
     def encode(self, mapping):
         result = []

@@ -1,6 +1,6 @@
 import numpy.random as random
 from foreduce.fol.logic import Clause, Constant, Function, Literal, Predicate, Variable, eq
-
+from foreduce.fol.derivation import DerivedClause, Axiom, Substitution, Resolution, Superposition
 
 class RandomSignature:
     def __init__(self, config):
@@ -54,11 +54,114 @@ def RandomEquality(signature, depth=2.0):
 
 def RandomLiteral(signature, depth=2.0, p_eq=0.25):
     polarity = random.choice([True, False]).item()
-    if random.rand() > p_eq:
-        return Literal(RandomPredicate(signature, depth), polarity)
-    else:
+    if random.rand() < p_eq:
         return Literal(RandomEquality(signature, depth), polarity)
+    else:
+        return Literal(RandomPredicate(signature, depth), polarity)
 
 def RandomClause(signature, size, depth=2.0, p_eq=0.25):
     return Clause(*[RandomLiteral(signature, depth, p_eq) for i in range(size)])
-    
+
+
+def RandomAxiom(signature, size, depth=2.0, p_eq=0.25, verifying_substitution=dict()):
+    return Axiom(RandomClause(signature, size, depth, p_eq, verifying_substitution))
+
+
+def RandomSubstitution(signature, clause, verifying_substitution=dict()):
+    candidates = list(set(signature.variables) - clause.variables())
+    if not candidates:
+        return Axiom(clause, verifying_substitution)
+    term = random.choice(list(clause.terms()))
+    variable = random.choice(list(set(signature.variables) - clause.variables()))
+    return Substitution(Axiom(clause.substitute(term, variable)), variable, term, verifying_substitution)
+
+
+def RandomResolution(signature, clause, depth=2.0, p_eq=0.25, p_double=0.2, verifying_substitution=dict()):
+    left = []
+    right = []
+    for literal in clause.literals:
+        if random.rand() < p_double:
+            left.append(literal)
+            right.append(literal)
+        elif random.rand() < 0.5:
+            left.append(literal)
+        else:
+            right.append(literal)
+    resolvent = RandomLiteral(signature, depth, p_eq)
+    left.append(Literal(resolvent.predicate, True))
+    right.append(Literal(resolvent.predicate, False))
+    return Resolution(
+        Axiom(Clause(*left)),
+        Axiom(Clause(*right)),
+        resolvent.predicate,
+        verifying_substitution
+    )
+
+
+def RandomSuperposition(signature, clause, depth=2.0, p_eq=0.25, p_double=0.2, verifying_substitution=dict()):
+    left = []
+    right = [random.choice(clause.literals)]
+    for literal in [lit for lit in clause.literals if lit != right[0]]:
+        if random.rand() < p_double:
+            left.append(literal)
+            right.append(literal)
+        elif random.rand() < 0.5:
+            left.append(literal)
+        else:
+            right.append(literal)
+    term1 = RandomTerm(signature, depth)
+    term2 = random.choice([lit for r in right for lit in r.terms()])
+    right = [lit.substitute(term2, term1) for lit in right]
+    left_to_right = random.choice([True, False]).item()
+    equality = eq(term1, term2) if left_to_right else eq(term2, term1)
+    left.append(Literal(equality, True))
+    return Superposition(
+        Axiom(Clause(*left)),
+        Axiom(Clause(*right)),
+        equality, left_to_right,
+        verifying_substitution
+    )
+
+
+def RandomDerivation(
+    signature,
+    clause,
+    derivation_depth,
+    p_rules = None,
+    depth=2.0,
+    p_eq=0.25,
+    p_double=0.2,
+    verifying_substitution=dict()
+):
+    if derivation_depth == 0:
+        return Axiom(clause, verifying_substitution)
+    if not clause.literals:
+        result = RandomResolution(signature, clause, depth, p_eq, p_double, verifying_substitution)
+    else:
+        rule = random.choice(range(4), p=p_rules)
+        if rule == 0:
+            result = RandomSubstitution(signature, clause, verifying_substitution)
+        elif rule == 1:
+            result = RandomResolution(signature, clause, depth, p_eq, p_double, verifying_substitution)
+        elif rule == 2:
+            result = RandomSuperposition(signature, clause, depth, p_eq, p_double, verifying_substitution)
+        else:
+            result = Axiom(clause, verifying_substitution)
+    children = tuple(RandomDerivation(
+        signature, child, derivation_depth - 1, p_rules, depth, p_eq, p_double, child.verifying_substitution
+    ) for child in result.children)
+    result.children = children
+    return result
+
+
+def RandomSubstitutionProof(signature, derivation_depth, p_rules=None, depth=2.0, p_eq=0.25, p_double=0.2):
+    derivation = RandomDerivation(
+        signature,
+        Clause(),
+        derivation_depth,
+        p_rules,
+        depth,
+        p_eq,
+        p_double
+    )
+    return derivation.substitution_proof()
