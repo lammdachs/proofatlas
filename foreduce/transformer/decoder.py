@@ -1,28 +1,43 @@
 from torch import nn
+import torch
 from foreduce.transformer.attention import MultiHeadAttention
 
 class PositionwiseFeedForward(nn.Module):
-    def __init__(self, model_dim, inner_dim, dropout):
+    def __init__(self, args):
         super().__init__()
         
         self.net = nn.Sequential(
-            nn.Linear(model_dim, inner_dim),
-            nn.Dropout(dropout),
-            nn.ReLU(),
-            nn.Linear(inner_dim, model_dim),
-            nn.Dropout(dropout)
+            nn.Linear(args.embed_dim, args.inner_dim),
+            nn.Dropout(args.dropout),
+            nn.SiLU(),
+            nn.Linear(args.inner_dim, args.embed_dim),
+            nn.Dropout(args.dropout)
         )
-        self.layer_norm = nn.LayerNorm(model_dim)
+        self.norm = RMSNorm(args.embed_dim)
         
     def forward(self, x):
-        return self.layer_norm(self.net(x) + x)
+        return self.norm(self.net(x) + x)
 
 class DecoderLayer(nn.Module):
-    def __init__(self, model_dim, embed_dim, num_heads, inner_dim, dropout, R):
+    def __init__(self, args):
         super().__init__()
-        self.attn = MultiHeadAttention(model_dim, embed_dim, num_heads, dropout, R)
-        self.pos_ff = PositionwiseFeedForward(model_dim, inner_dim, dropout)
+        self.attn = MultiHeadAttention(args)
+        self.pos_ff = PositionwiseFeedForward(args)
+        self.n1 = RMSNorm(args.embed_dim)
+        self.n2 = RMSNorm(args.embed_dim)
     
     def forward(self, x):
-        att_out = self.attn(x)
-        return self.pos_ff(att_out)
+        x = x + self.attn(self.n1(x))
+        x = x + self.pos_ff(self.n2(x))
+        return x
+
+class RMSNorm(nn.Module):
+    def __init__(self, embed_dim, eps=1e-6):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(embed_dim))
+        self.register_buffer("eps", torch.tensor(eps))
+
+    def forward(self, x):
+        return x * torch.rsqrt(
+            torch.mean(x**2, dim=-1, keepdim=True) + self.eps
+        ) * self.scale

@@ -1,32 +1,51 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import groupby, takewhile
 from operator import attrgetter
 
 import numpy.random as random
+import torch
 from foreduce.fol import eq
 from bidict import bidict
 
 from foreduce.fol.exception import FunctionArityError, FunctionCountError, PredicateArityError, PredicateCountError, VariableCountError
-from foreduce.fol.logic import Clause, Literal, Problem
+from foreduce.fol.logic import Clause, Constant, Function, Literal, Predicate, Problem, Variable
 
 
 @dataclass
-class Config:
-    model_dim : int = 128
-    embed_dim : int = 32
+class ModelArgs:
+    embed_dim : int = 128
     seq_len : int = 128
     num_heads : int = 4
     dropout : int = 0
     inner_dim : int = 128
     num_layers : int = 2
-    proposition_arity = [4, 2]
-    function_arity = [4, 4, 2]
-    variable_count = 4
+    predicate_arity : list[int] = field(default_factory=lambda: [4, 2])
+    function_arity : list[int] = field(default_factory=lambda: [4, 4, 2])
+    variable_count : int = 4
     defined = ["&", "|", "+", "-", eq]
+
+    def default_mapping(self):
+        mapping = bidict({symbol: i for i, symbol in enumerate(self.defined)})
+        counter = len(self.defined)
+        for arity, i in enumerate(self.function_arity):
+            for j in range(i):
+                if arity == 0:
+                    mapping[Constant(f"c_{j}")] = counter
+                else:
+                    mapping[Function(f"f{arity}_{j}", arity)] = counter
+                counter += 1
+        for arity, i in enumerate(self.predicate_arity):
+            for j in range(i):
+                mapping[Predicate(f"p{arity+1}_{j}", arity+1)] = counter
+                counter += 1
+        for i in range(self.variable_count):
+            mapping[Variable(f"X{i}")] = counter
+            counter += 1
+        return mapping
 
     def vocab_size(self):
         return len(self.defined) + sum(self.function_arity) + \
-            sum(self.proposition_arity) + \
+            sum(self.predicate_arity) + \
             self.variable_count
 
     def mapping(self, problem):
@@ -56,19 +75,19 @@ class Config:
                 )
         for arity, predicates in groupby(
                 predicate_symbols, attrgetter('arity')):
-            if arity == 0 or arity >= len(self.proposition_arity) + 1:
+            if arity == 0 or arity >= len(self.predicate_arity) + 1:
                 raise PredicateArityError(arity, self)
             predicates_list = list(predicates)
-            if len(predicates_list) > self.proposition_arity[arity - 1]:
+            if len(predicates_list) > self.predicate_arity[arity - 1]:
                 raise PredicateCountError(len(predicates_list), arity, self)
             ids = random.choice(
-                range(self.proposition_arity[arity - 1]),
+                range(self.predicate_arity[arity - 1]),
                 len(predicates_list), replace=False)
             for i, predicate in enumerate(predicates_list):
                 mapping[predicate] = reserved + ids[i] + sum(
                     self.function_arity
                     ) + sum(
-                    self.proposition_arity[:arity-1]
+                    self.predicate_arity[:arity-1]
                 )
         if len(variables) > self.variable_count:
             raise VariableCountError(len(variables), self)
@@ -78,7 +97,7 @@ class Config:
             mapping[variable] = reserved + ids[i] + sum(
                 self.function_arity
                 ) + sum(
-                self.proposition_arity
+                self.predicate_arity
                 )
         return mapping
 
@@ -130,4 +149,16 @@ class Config:
         substitutions = substitution_proof[1]
         problem = Problem(*axioms + substitutions)
         mapping = self.mapping(problem)
-        return (len(axioms), problem.encode(mapping))
+        encoding = problem.encode(mapping)
+        index = [i for i, a in enumerate(encoding) if a == mapping["&"]][len(axioms) - 1]
+        return (index, problem.encode(mapping))
+
+    def next_clause(self, problem, mapping, model):
+        encoding = problem.encode(mapping)
+        next = -1
+        while next != mapping["&"] and len(encoding) < self.seq_len:
+            p_next = model(torch.tensor([encoding]))[0, -1, :]
+            next = int(torch.argmax(p_next))
+            encoding.append(next)
+        return self.decode(encoding, mapping).clauses[-1]
+        

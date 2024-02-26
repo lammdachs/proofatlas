@@ -19,7 +19,7 @@ class RandomSignature:
                     for i in range(count)
                 ]
         self.predicates = {}
-        for arity, count in enumerate(config.proposition_arity):
+        for arity, count in enumerate(config.predicate_arity):
             self.predicates[arity] = [
                 Predicate(f"p{arity + 1}_{i}", arity + 1)
                 for i in range(count)
@@ -42,7 +42,7 @@ def RandomTerm(signature, depth=2.0):
 
 
 def RandomPredicate(signature, depth=2.0):
-    max_arity = len(signature.config.proposition_arity)
+    max_arity = len(signature.config.predicate_arity)
     arity_minus_one = random.choice(range(max_arity))
     symbol = random.choice(signature.predicates[arity_minus_one])
     return symbol(*[RandomTerm(signature, depth - 1) for i in range(arity_minus_one + 1)])
@@ -64,15 +64,18 @@ def RandomClause(signature, size, depth=2.0, p_eq=0.25):
 
 
 def RandomAxiom(signature, size, depth=2.0, p_eq=0.25, verifying_substitution=dict()):
-    return Axiom(RandomClause(signature, size, depth, p_eq, verifying_substitution))
+    return Axiom(RandomClause(signature, size, depth, p_eq))
 
 
 def RandomSubstitution(signature, clause, verifying_substitution=dict()):
     candidates = list(set(signature.variables) - clause.variables())
     if not candidates:
         return Axiom(clause, verifying_substitution)
-    term = random.choice(list(clause.terms()))
-    variable = random.choice(list(set(signature.variables) - clause.variables()))
+    candiate_terms = list(clause.terms() - clause.variables())
+    if not candiate_terms:
+        return Axiom(clause, verifying_substitution)
+    variable = random.choice(candidates)
+    term = random.choice(candiate_terms)
     return Substitution(Axiom(clause.substitute(term, variable)), variable, term, verifying_substitution)
 
 
@@ -154,14 +157,43 @@ def RandomDerivation(
     return result
 
 
-def RandomSubstitutionProof(signature, derivation_depth, p_rules=None, depth=2.0, p_eq=0.25, p_double=0.2):
+def RandomSubstitutionProof(
+    signature,
+    derivation_depth,
+    p_rules=None,
+    depth=2.0,
+    p_eq=0.25,
+    p_double=0.2,
+    random_axiom=0
+):
     derivation = RandomDerivation(
         signature,
         Clause(),
         derivation_depth,
-        p_rules,
+        [0, 1/3, 1/3, 1/3],
         depth,
         p_eq,
         p_double
     )
-    return derivation.substitution_proof()
+    for node in derivation.nodes():
+        for i, child in enumerate(node.children):
+            if isinstance(child, Axiom):
+                node.children = tuple(
+                    node.children[:i] +
+                    (RandomSubstitution(signature, child, child.verifying_substitution),) +
+                    node.children[i+1:]
+                )
+    proof = derivation.substitution_proof()
+    axioms = proof[0]
+    result = [
+        RandomAxiom(signature, random.choice(range(2)) + 1, depth, p_eq)
+        for i in range(random.binomial(len(axioms), random_axiom/len(axioms)))
+    ]
+    for axiom in axioms:
+        result.append(axiom)
+        result += [
+            RandomAxiom(signature, random.choice(range(2)) + 1, depth, p_eq)
+            for i in range(random.binomial(len(axioms), random_axiom/len(axioms)))
+        ]
+    return (tuple(result), proof[1])
+    

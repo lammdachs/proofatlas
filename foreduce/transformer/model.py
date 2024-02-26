@@ -1,50 +1,50 @@
 import torch
 import torch.nn as nn
-from torch import nan_to_num
 from lightning import LightningModule
 
-from foreduce.transformer.config import Config
-from foreduce.transformer.decoder import DecoderLayer
+from foreduce.transformer.modelargs import ModelArgs
+from foreduce.transformer.decoder import DecoderLayer, RMSNorm
 
 class Transformer(LightningModule):
     @staticmethod
-    def default_config():
-        Config()
+    def default_args():
+        ModelArgs()
     
-    def __init__(self, config):
+    def __init__(self, args):
         super().__init__()
-        self.seq_len = config.seq_len
-        self.model_dim = config.model_dim
-        self.vocab_size = config.vocab_size()
-        self.embed = nn.Embedding(self.vocab_size, self.model_dim)
+        self.seq_len = args.seq_len
+        self.embed_dim = args.embed_dim
+        if self.embed_dim % 2 != 0:
+            raise ValueError("Embedding dimension must be even")
+        self.vocab_size = args.vocab_size()
+        self.embed = nn.Embedding(self.vocab_size, self.embed_dim)
         self.layers = nn.ModuleList()
-        self.dropout = nn.Dropout(config.dropout)
-        pos_encoding = self.get_sinusoid_pos_encoding(self.seq_len, self.model_dim).clone()
-        self.register_buffer("R", pos_encoding)
-        
-        for _ in range(config.num_layers):
+        self.dropout = nn.Dropout(args.dropout)
+        self.norm = RMSNorm(self.embed_dim)
+
+        for _ in range(args.num_layers):
             dec = DecoderLayer(
-                config.model_dim,
-                config.embed_dim,
-                config.num_heads,
-                config.inner_dim,
-                config.dropout,
-                self.R
+                args
             )
             self.layers.append(dec)
             
-        self.out_layer = nn.Linear(self.model_dim, self.vocab_size)
+        self.out_layer = nn.Linear(self.embed_dim, self.vocab_size)
         
         self.save_hyperparameters()
-    
+
     def forward(self, x):
         x = self.dropout(self.embed(x))
         for dec in self.layers:
             x = dec(x)
+        x = self.norm(x)
         return self.out_layer(x)
 
+    def next(self, x):
+        p_next = self(x)
+        return torch.argmax(p_next, dim=-1)
+
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters())
         return {
             "optimizer": optimizer,
             "lr_scheduler": torch.optim.lr_scheduler.LinearLR(
@@ -53,35 +53,23 @@ class Transformer(LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        preds = self(x)
+        x, mask = batch
+        preds = self(x)[:,:-1,:]
         loss = nn.functional.cross_entropy(
-            preds[:, 19:].reshape(-1, 10), y.flatten()
+            mask[:, 1:].reshape(-1, 1) * preds.flatten(start_dim=0, end_dim=1),
+            mask[:, 1:].flatten() * x[:, 1:].flatten()
         )
         self.log("train_loss", loss,
             on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        preds = self(x)
+        x, mask = batch
+        preds = self(x)[:,1:,:]
         loss = nn.functional.cross_entropy(
-            preds[:, 19:].reshape(-1, 10), y.flatten()
+            mask[:, 1:].reshape(-1, 1) * preds.flatten(start_dim=0, end_dim=1),
+            mask[:, :-1].flatten() * x[:, :-1].flatten()
         )
         self.log("val_loss", loss,
             on_epoch=True, logger=True, sync_dist=True)
         return loss
-
-    def get_sinusoid_pos_encoding(self, total_len, embed_dim):
-        """
-        Standard sinusoid positional encoding method outlined in the original
-        Transformer paper. In this case, we use the encodings not to represent
-        each token's position in a sequence but to represent the distance
-        between two tokens (i.e. as a *relative* positional encoding).
-        """
-        pos = torch.arange(total_len).unsqueeze(1)
-        enc = torch.arange(embed_dim).float()
-        enc = enc.unsqueeze(0).repeat(total_len, 1)
-        enc[:, ::2] = torch.sin(pos / 10000**(2*enc[:, ::2]/embed_dim))
-        enc[:, 1::2] = torch.cos(pos / 10000**(2*enc[:, 1::2]/embed_dim))
-        return enc

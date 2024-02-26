@@ -212,7 +212,7 @@ class Clause:
 
     def __init__(self, *literals):
         Clause.check(literals)
-        self.literals = tuple(set(literals))
+        self.literals = tuple(literals)
 
     def __repr__(self):
         return f"{' | '.join(map(str, self.literals))}"

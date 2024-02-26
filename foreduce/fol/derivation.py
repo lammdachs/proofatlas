@@ -27,16 +27,24 @@ class DerivedClause(Clause):
         ))
 
     def substitution_proof(self):
-        axioms = self.leaves()
+        axioms = []
         substitutions = []
-        for axiom in axioms:
+        for axiom in self.leaves():
+            axioms.append(axiom)
             substitution = axiom
             for k, v in axiom.verifying_substitution.items():
                 substitution = substitution.substitute(k, v)
             substitutions.append(substitution)
-        axioms = set(axioms)
-        substitutions = set(substitutions) - axioms
         return tuple(axioms), tuple(substitutions)
+
+    def potential_steps(self):
+        return self._potential_steps(self.leaves())
+
+    def _potential_steps(self, axioms):
+        potential_next = []
+        for node in self.nodes():
+            if all([child in axioms for child in node.children]):
+                potential_next.append(node)
 
 
 class Axiom(DerivedClause):

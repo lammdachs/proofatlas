@@ -73,14 +73,14 @@ class FunctionCountError(Exception):
 class PredicateArityError(Exception):
     def __init__(self, arity, config):
         super().__init__(f"Expected predicate arity between 0 and {
-            len(config.proposition_arity)}, got {arity}")
+            len(config.predicate_arity)}, got {arity}")
         self.arity = arity
         self.config = config
 
 
 class PredicateCountError(Exception):
     def __init__(self, count, arity, config):
-        super().__init__(f"Expected at most {config.proposition_arity[arity]} \
+        super().__init__(f"Expected at most {config.predicate_arity[arity]} \
                          predicates with arity {arity}, got {count}")
         self.count = count
         self.arity = arity
