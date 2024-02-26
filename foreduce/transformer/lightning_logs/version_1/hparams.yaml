@@ -1,8 +1,0 @@
-config: !!python/object:foreduce.transformer.config.Config
-  dropout: 0
-  embed_dim: 32
-  inner_dim: 128
-  model_dim: 128
-  num_heads: 4
-  num_layers: 2
-  seq_len: 128
