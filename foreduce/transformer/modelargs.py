@@ -159,6 +159,6 @@ class ModelArgs:
         while next != mapping["&"] and len(encoding) < self.seq_len:
             p_next = model(torch.tensor([encoding]))[0, -1, :]
             next = int(torch.argmax(p_next))
-            encoding.append(next)
+            encoding = encoding + (next,)
         return self.decode(encoding, mapping).clauses[-1]
         

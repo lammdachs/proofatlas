@@ -17,11 +17,14 @@ class Transformer(LightningModule):
         if self.embed_dim % 2 != 0:
             raise ValueError("Embedding dimension must be even")
         self.vocab_size = args.vocab_size()
+        self.num_heads = args.num_heads
+        self.inner_dim = args.inner_dim
+        self.num_layers = args.num_layers
+
         self.embed = nn.Embedding(self.vocab_size, self.embed_dim)
         self.layers = nn.ModuleList()
         self.dropout = nn.Dropout(args.dropout)
         self.norm = RMSNorm(self.embed_dim)
-
         for _ in range(args.num_layers):
             dec = DecoderLayer(
                 args
@@ -48,7 +51,8 @@ class Transformer(LightningModule):
         return {
             "optimizer": optimizer,
             "lr_scheduler": torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=1.0, end_factor=0.01, total_iters=16*1000
+                optimizer, start_factor=1.0,
+                end_factor=0.01, total_iters=16*1000
             )
         }
 

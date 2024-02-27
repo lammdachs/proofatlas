@@ -306,4 +306,4 @@ class Problem:
         for clause in self.clauses:
             result += clause.encode(mapping)
             result.append(mapping["&"])
-        return result
+        return tuple(result)

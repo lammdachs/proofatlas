@@ -8,17 +8,25 @@ from foreduce.transformer.modelargs import ModelArgs
 
 
 class FirstOrderConfig:
-    def __init__(self, args=ModelArgs(), num_samples=100_000, derivation_depth=3):
+    def __init__(
+        self,
+        args=ModelArgs(),
+        num_samples=100_000,
+        derivation_depth=3,
+        random_axioms = 0.
+    ):
         self.args = args
         self.num_samples = num_samples
         self.derivation_depth = derivation_depth
+        self.random_axioms = random_axioms
 
     def __repr__(self):
         return f"FO-{self.args.function_arity}-\
             {self.args.predicate_arity}-\
             {self.args.variable_count}-\
             {self.num_samples}-\
-            {self.derivation_depth}".replace(" ", "")
+            {self.derivation_depth}-\
+            {self.random_axioms}".replace(" ", "").replace(".", "")
 
 
 class FirstOrderDataset(torch.utils.data.Dataset):
@@ -30,7 +38,7 @@ class FirstOrderDataset(torch.utils.data.Dataset):
         self.inputs = inputs.long()
 
     def __len__(self):
-        return self.config.num_samples
+        return len(self.inputs)
 
     def __getitem__(self, idx):
         name = repr(self.config)
@@ -42,12 +50,18 @@ class FirstOrderDataset(torch.utils.data.Dataset):
             return
         sig = RandomSignature(self.config.args)
         proofs = [self.config.args.encode_substitution_proof(
-            RandomSubstitutionProof(sig, self.config.derivation_depth)
+            RandomSubstitutionProof(
+                sig,
+                self.config.derivation_depth,
+                random_axiom=self.config.random_axioms
+            )
         ) for _ in tqdm(
             range(int(self.config.num_samples)),
             desc='Generating proofs',
             miniters=1000
         )]
+        proofs = list(set(p for p in proofs if len(p[1]) <= self.config.args.seq_len))
+        print(f"Generated {len(proofs)} unique proofs")
         inputs = [p[1][:self.config.args.seq_len] for p in proofs]
         inputs = [torch.concatenate([
             torch.tensor(input, dtype=torch.int8),
@@ -81,12 +95,12 @@ class FirstOrderDataModule(LightningDataModule):
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
-            self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=4
+            self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=15
         )
 
     def val_dataloader(self):
         return torch.utils.data.DataLoader(
-            self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=4
+            self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=15
         )
 
     def test_dataloader(self):

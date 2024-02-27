@@ -164,7 +164,7 @@ def RandomSubstitutionProof(
     depth=2.0,
     p_eq=0.25,
     p_double=0.2,
-    random_axiom=0
+    random_axiom=0.0
 ):
     derivation = RandomDerivation(
         signature,
