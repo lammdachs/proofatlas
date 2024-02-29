@@ -63,7 +63,7 @@ if __name__ == "__main__":
         foconfig,
         batch_size=args.batch_size
     )
-    logger = WandbLogger(project="fo-reduce", group="integer-sorting")
+    logger = WandbLogger(project="foreduce", group="foreduce")
     
     trainer = Trainer(
         min_epochs=args.num_epochs,
