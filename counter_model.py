@@ -154,7 +154,7 @@ class MambaBlock(nn.Module):
         self.conv_state = torch.zeros(
             batch_size, self.mamba.d_model * 2, self.mamba.d_conv
         ).to(self.mamba.D)
-        self.smm_state = torch.zeros(
+        self.ssm_state = torch.zeros(
             batch_size, self.mamba.d_model * 2, self.mamba.d_state
         ).to(self.mamba.D)
 
@@ -167,10 +167,10 @@ class MambaBlock(nn.Module):
         Returns:
             torch.Tensor: The output token.
         """
-        if not hasattr(self, "conv_state") or not hasattr(self, "smm_state"):
+        if not hasattr(self, "conv_state") or not hasattr(self, "ssm_state"):
             raise ValueError("Model not in inference mode. Call `model.inference()` first.")
-        out, self.conv_state, self.smm_state = self.mamba.step(
-            self.norm(x), self.conv_state, self.smm_state)
+        out, self.conv_state, self.ssm_state = self.mamba.step(
+            self.norm(x), self.conv_state, self.ssm_state)
         return x + out
 
 class MambaModel(LightningModule):
@@ -235,7 +235,16 @@ class MambaModel(LightningModule):
         emb = self.dropout(self.t_emb(x) + self.p_emb(self.pos)).view(-1, input_len, self.d_tf)
         enc = self.encoder(emb).view(batches, length, self.input_len * self.d_tf)
         out = self.proj(enc)
-        for block in self.mamba_blocks[:-1]:
-            out = block.step(out)
-        out = self.mamba_blocks[-1].step(out)
+        for i in range(length):
+            for block in self.mamba_blocks[:-1]:
+                out[:, i:i+1] = block.step(out[:, i:i+1])
+            out[:, i:i+1] = self.mamba_blocks[-1].step(out[:, i:i+1])
         return F.log_softmax(self.out(out).view(batches, length, self.output_len, len(mapping)), dim=-1)
+
+    def get_state(self):
+        return [(layer.conv_state, layer.ssm_state) for layer in self.mamba_blocks]
+
+    def set_state(self, state):
+        for layer, (conv, ssm) in zip(self.mamba_blocks, state):
+            layer.conv_state = conv
+            layer.ssm_state = ssm
