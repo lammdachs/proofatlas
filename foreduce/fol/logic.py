@@ -14,6 +14,11 @@ class _Context:
 _context = _Context()
 
 
+def reset_context():
+    global _context
+    _context = _Context()
+
+
 def get_predicates():
     global _context
     return set(_context.predicates)
@@ -45,7 +50,7 @@ class Function(_Symbol):
     def __init__(self, name, arity):
         super().__init__(name, arity)
         global _context
-        _context.functions.add(name)
+        _context.functions.add(self)
 
     def __eq__(self, other):
         if not isinstance(other, Function):
@@ -61,7 +66,7 @@ class Predicate(_Symbol):
     def __init__(self, name, arity):
         super().__init__(name, arity)
         global _context
-        _context.predicates.add(name)
+        _context.predicates.add(self)
 
     def __eq__(self, other):
         return self.name == other.name and \
@@ -163,7 +168,7 @@ class Variable(_Symbol, Term):
         _Symbol.__init__(self, name, 0)
         Term.__init__(self, self)
         global _context
-        _context.variables.add(name)
+        _context.variables.add(self)
 
     def __repr__(self):
         return self.name

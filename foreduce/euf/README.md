@@ -1,1 +1,0 @@
-### This directory contains utility modules of managing the equality with uninterpreted functions context.
