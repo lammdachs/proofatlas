@@ -6,47 +6,39 @@ tptplexer = Lark(r"""
     %ignore COMMENT_LINE
     %ignore COMMENT_BLOCK
 
-    tptp_file : tptp_input*
-    tptp_input : formula | include
+    tptp_file : (formula | include)*
 
     formula : fof | cnf
+    
+    include : "include(" FILE_NAME formula_selection* ")."
+    formula_selection : ",[" NAME ("," NAME)* "]"
 
     fof : "fof(" NAME "," FORMULA_ROLE "," fof_formula")."
     cnf : "cnf(" NAME "," FORMULA_ROLE "," cnf_formula")."
 
     FORMULA_ROLE : "axiom" | "hypothesis" | "definition" | "assumption" | "lemma" | "theorem" | "corollary" | "conjecture" | "negated_conjecture"
 
-
-    fof_formula : fof_logic_formula | fof_sequent
-    fof_logic_formula : fof_binary | fof_unary
+    fof_formula : fof_binary | fof_unary
     fof_binary : fof_unary BINARY_CONNECTIVE fof_unary | fof_unary BINARY_CONNECTIVE fof_binary
-    fof_unary : fof_quantified_formula | fof_negation | fof_atom | "(" fof_logic_formula ")"
+    fof_unary : fof_quantified_formula | fof_negation | fof_atom | "(" fof_formula ")"
 
     fof_quantified_formula : FOF_QUANTIFIER "[" VARIABLE ("," VARIABLE)* "] :" fof_unary
     fof_negation : "~" fof_unary
     fof_atom : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | DEFINED_UNARY_PREDICATE | fof_term DEFINED_BINARY_PREDICATE fof_term
     fof_term : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | VARIABLE
 
-    fof_sequent : fof_formula_tuple "-->" fof_formula_tuple | "(" fof_sequent ")"
-    fof_formula_tuple : "[" [fof_formula_tuple_list] "]"
-    fof_formula_tuple_list : fof_logic_formula ("," fof_logic_formula)*
-
-    cnf_formula : disjunction | "(" disjunction ")"
-    disjunction : literal ("|" literal)*
-    literal : fof_atom | "~" fof_atom
-
     FOF_QUANTIFIER : "!" | "?"
     BINARY_CONNECTIVE : "<=>" | "=>" | "<=" | "<~>" | "~|" | "~&" | "&" | "|"
-
     DEFINED_UNARY_PREDICATE :  "$true" | "$false"
     DEFINED_BINARY_PREDICATE : "=" | "!="
 
+    cnf_formula : disjunction | "(" disjunction ")"
+    disjunction : literal ("|" literal)*
+    literal : fof_atom | fof_negated_atom
+    fof_negated_atom : "~" fof_atom
+
     FUNCTOR : ATOMIC_WORD
     VARIABLE : UPPER_WORD
-
-    include : "include(" FILE_NAME formula_selection* ")."
-    formula_selection : ",[" name_list "]"
-    name_list : NAME ("," NAME)*
 
     NAME : ATOMIC_WORD | "0".."9"+
     ATOMIC_WORD : LOWER_WORD | SINGLE_QUOTED
