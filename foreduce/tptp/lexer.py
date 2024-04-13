@@ -1,7 +1,7 @@
 from lark import Lark
 
 tptplexer = Lark(r"""
-    %import common.WS  
+    %import common.WS
     %ignore WS
     %ignore COMMENT_LINE
     %ignore COMMENT_BLOCK
@@ -43,18 +43,14 @@ tptplexer = Lark(r"""
     NAME : ATOMIC_WORD | "0".."9"+
     ATOMIC_WORD : LOWER_WORD | SINGLE_QUOTED
     FILE_NAME : SINGLE_QUOTED
-    COMMENT_LINE : "%" PRINTABLE_CHAR* "\n"
+    COMMENT_LINE : /%[^\n]*/
     COMMENT_BLOCK : "/*" NOT_STAR_SLASH? "*"+ "/"
     NOT_STAR_SLASH : ("^*"* "*"+ "^/*") ("^*")*
     SINGLE_QUOTED : "'" SQ_CHAR+ "'"
-    DISTINCT_OBJECT : "\"" DQ_CHAR* "\""
     UPPER_WORD : UPPER_ALPHA ALPHA_NUMERIC*
     LOWER_WORD : LOWER_ALPHA ALPHA_NUMERIC*
-    DQ_CHAR : " ".."!" | "#".."~" | "\""
     SQ_CHAR : " ".."&" | "(".."~" | "\'"
-    PRINTABLE_CHAR : " ".."~"
     LOWER_ALPHA : "a".."z"
     UPPER_ALPHA : "A".."Z"
     ALPHA_NUMERIC : LOWER_ALPHA | UPPER_ALPHA | "0".."9" | "_"
-    VIEWABLE_CHAR : "\n"
 """, start="tptp_file")

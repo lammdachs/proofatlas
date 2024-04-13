@@ -1,6 +1,5 @@
 from itertools import chain
 from lark import Transformer, Tree, Token, Visitor
-from lark.visitors import Transformer_InPlace
 
 from foreduce.tptp.lexer import tptplexer
 
@@ -20,196 +19,228 @@ def normalform(tree, include_path='/'):
 
 
 def include(tree, include_path='/'):
-    transformer = Include(include_path=include_path)
-    transformer.transform(tree)
+    visitor = Include(include_path=include_path)
+    visitor.visit(tree)
     return tree
 
-class Include(Transformer_InPlace):
+
+class Include(Visitor):
     def __init__(self, include_path='/'):
         self.include_path = include_path
     
     def include(self, tree):
-        with open(self.include_path + tree.children[0].value, "r") as f:
+        with open(self.include_path + tree.children[0].value[1:-1], "r") as f:
             data = f.read()
         input = tptplexer.parse(data)
-        Include(include_path=self.include_path).transform(input)
-        return Tree("include", [i for i in input.children if input.data == "formula"])
+        Include(include_path=self.include_path).visit(input)
+        tree.children = [entry for entry in input.children if entry.data == "formula"]
     
-    def tptp_file(self, children):
-        formulas  = [formula for formula in children if formula.data == "formula"]
-        included = list(chain(*[include.children for include in children if include.data == "include"]))
-        return Tree("tptp_file", formulas + included)
+    def tptp_file(self, tree):
+        formulas  = [formula for formula in tree.children if formula.data == "formula"]
+        included = list(chain(*[include.children for include in tree.children if include.data == "include"]))
+        tree.children = formulas + included
+
 
 # Remove all connectives except for ~, |, &, <=>, <~>
-
 def opsimp(tree):
-    transformer = OpSimplify()
-    transformer.transform(tree)
+    OpSimplify().visit(tree)
     return tree
 
-class OpSimplify(Transformer_InPlace):
+class OpSimplify(Visitor):
     # p => q -> ~p | q
     # p <= q -> p | ~q
     # p ~| q -> ~(p | q)
     # p ~& q -> ~(p & q)
-    def fof_binary(self, children):
-        match children[1].value:
+    def fof_binary(self, tree):
+        match tree.children[1].value:
             case "=>":
-                return Tree("fof_binary", [Tree("fof_unary", [Tree("fof_negation", [children[0]])]), Token("BINARY_CONNECTIVE", "|"), children[2]])  
+                tree.children = [Tree("fof_unary", [Tree("fof_negation", [tree.children[0]])]), Token("BINARY_CONNECTIVE", "|"), tree.children[2]]
             case "<=":
-                return Tree("fof_binary", [children[0], Token("BINARY_CONNECTIVE", "|"), Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [children[2]])])])])])
+                tree.children = [tree.children[0], Token("BINARY_CONNECTIVE", "|"), Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [tree.children[2]])])])])]
             case "~|":
-                return Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [children[0], Token("BINARY_CONNECTIVE", "|"), children[2]])])])])])
+                tree.children = [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [tree.children[0], Token("BINARY_CONNECTIVE", "|"), tree.children[2]])])])])]
             case "~&":
-                return Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [children[0], Token("BINARY_CONNECTIVE", "&"), children[2]])])])])])
-        return Tree("fof_binary", children)
-            
+                tree.children = [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [tree.children[0], Token("BINARY_CONNECTIVE", "&"), tree.children[2]])])])])]
+
+    def fof(self, tree):
+        match tree.children[1].value:
+            case "conjecture" | "theorem" | "lemma" | "corollary":
+                tree.children[1] = Token("FORMULA_ROLE", "negated_conjecture")
+                tree.children[2] = Tree("fof_formula", [Tree("fof_unary", [Tree("fof_negation", [tree.children[2]])])])
+                
 
 # Simplify occurences of $true, $false and redundant parentheses
 
 def simplify(tree):
-    transformer = Simplify()
-    transformer.transform(tree)
+    tree = Simplify().visit(tree)
     return tree
 
 
-class Simplify(Transformer_InPlace):
+class Simplify(Visitor):
     def __init__(self):
         self.unchanged = False
 
-    def fof_negation(self, children):
-        if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+    def fof_negation(self, tree):
+        if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
             self.unchanged = False
-            return Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])
-        elif children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+            tree.data = "fof_atom"
+            tree.children = [Token("DEFINED_UNARY_PREDICATE", "$true")]
+        elif tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
             self.unchanged = False
-            return Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])
-        return Tree("fof_negation", children)
+            tree.data = "fof_atom"
+            tree.children = [Token("DEFINED_UNARY_PREDICATE", "$false")]
 
-    def fof_binary(self, children):
-        match children[1].value:
+    def fof_binary(self, tree):
+        match tree.children[1].value:
             case "|":
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]) or children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]) or tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])])
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return children[2]
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = tree.children[2].data
+                    tree.children = tree.children[2].children
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return children[0]
+                    tree.data = "fof_unary"
+                    tree.children = tree.children[0].children
+                    return
             case "&":
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]) or children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]) or tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])])
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return children[2]
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = tree.children[2].data
+                    tree.children = tree.children[2].children
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return children[0]
+                    tree.data = "fof_unary"
+                    tree.children = tree.children[0].children
+                    return
             case "<=>":
-                if children[0] == children[2]:
+                if tree.children[0] == tree.children[2]:
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])])
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return children[2]
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = tree.children[2].data
+                    tree.children = tree.children[2].children
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_negation", [children[2]])])
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_negation", [tree.children[2]])]
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return children[0]
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = "fof_unary"
+                    tree.children = tree.children[0].children
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_negation", [children[0]])])
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_negation", [tree.children[0]])]
+                    return
             case "<~>":
-                if children[0] == children[2]:
+                if tree.children[0] == tree.children[2]:
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])])
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_negation", [children[2]])])
-                if children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_negation", [tree.children[2]])]
+                    return
+                if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return children[2]
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
+                    tree.data = tree.children[2].data
+                    tree.children = tree.children[2].children
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
                     self.unchanged = False
-                    return Tree("fof_unary", [Tree("fof_negation", [children[0]])])
-                if children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
+                    tree.data = "fof_unary"
+                    tree.children = [Tree("fof_negation", [tree.children[0]])]
+                    return
+                if tree.children[2] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
                     self.unchanged = False
-                    return children[0]
-        if children[2].data == "fof_unary":
-            if children[2].children[0].data == "fof_formula":
-                if children[2].children[0].children[0].data == "fof_binary":
+                    tree.data = "fof_unary"
+                    tree.children = tree.children[0].children
+                    return
+        if tree.children[2].data == "fof_unary":
+            if tree.children[2].children[0].data == "fof_formula":
+                if tree.children[2].children[0].children[0].data == "fof_binary":
                     self.unchanged = False
-                    return Tree("fof_binary", [children[0], children[1], children[2].children[0].children[0]])
-        return Tree("fof_binary", children)
+                    tree.children = [tree.children[0], tree.children[1], tree.children[2].children[0].children[0]]
+                    return
 
-    def fof_unary(self, children):
-        if children[0].data == "fof_formula":
-            if children[0].children[0].data == "fof_unary":
+    def fof_unary(self, tree):
+        if tree.children[0].data == "fof_formula":
+            if tree.children[0].children[0].data == "fof_unary":
                 self.unchanged = False
-                return children[0].children[0]
-        return Tree("fof_unary", children)
+                tree.children = tree.children[0].children[0].children
 
 
 # Push negations inwards
 
 def nnf(tree):
-    transformer = NNF()
-    while not transformer.unchanged:
-        transformer.unchanged = True
-        transformer.transform(tree)
+    visitor = NNF()
+    while not visitor.unchanged:
+        visitor.unchanged = True
+        visitor.visit(tree)
     return tree
 
-class NNF(Transformer_InPlace):
+
+class NNF(Visitor):
     def __init__(self):
         self.unchanged = False
     
-    def fof_unary(self, children):
-        if children[0].data == "fof_negation":
-            if children[0].children[0].children[0].data == "fof_atom":
-                return Tree("fof_unary", children)
-            if children[0].children[0].children[0].data == "fof_negation":
+    def fof_unary(self, tree):
+        if tree.children[0].data == "fof_negation":
+            if tree.children[0].children[0].children[0].data == "fof_negation":
                 self.unchanged = False
-                return children[0].children[0].children[0].children[0]
-            if children[0].children[0].children[0].data == "fof_quantified_formula":
+                tree.data = tree.children[0].children[0].children[0].children[0].data
+                tree.children = tree.children[0].children[0].children[0].children[0].children
+            elif tree.children[0].children[0].children[0].data == "fof_quantified_formula":
                 self.unchanged = False
-                match children[0].children[0].children[0].children[0].value:
+                match tree.children[0].children[0].children[0].children[0].value:
                     case "!":
-                        return Tree("fof_unary", [Tree("fof_quantified_formula", [
+                        tree.children = [Tree("fof_quantified_formula", [
                             Token("QUANTIFIER", "?"),
-                            *children[0].children[0].children[0].children[1:-1],
-                            Tree("fof_unary", [Tree("fof_negation", [children[0].children[0].children[0].children[-1]])])
-                        ])])
+                            *tree.children[0].children[0].children[0].children[1:-1],
+                            Tree("fof_unary", [Tree("fof_negation", [tree.children[0].children[0].children[0].children[-1]])])
+                        ])]
                     case "?":
-                        return Tree("fof_unary", [Tree("fof_quantified_formula", [
+                        tree.children = [Tree("fof_quantified_formula", [
                             Token("QUANTIFIER", "!"),
-                            *children[0].children[0].children[0].children[1:-1],
-                            Tree("fof_unary", [Tree("fof_negation", [children[0].children[0].children[0].children[-1]])])
-                        ])])
-            if children[0].children[0].children[0].data == "fof_formula":
-                f = children[0].children[0].children[0].children[0]
-                if f.data == "fof_unary":
-                    unchanged = False
-                    return Tree("fof_unary", [Tree("fof_negation", [f])])
+                            *tree.children[0].children[0].children[0].children[1:-1],
+                            Tree("fof_unary", [Tree("fof_negation", [tree.children[0].children[0].children[0].children[-1]])])
+                        ])]
+            elif tree.children[0].children[0].children[0].data == "fof_formula":
+                f = tree.children[0].children[0].children[0].children[0]
                 if f.data == "fof_binary":
                     match f.children[1].value:
                         case "|":
                             self.unchanged = False
-                            return Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [Tree("fof_unary", [Tree("fof_negation", [f.children[0]])]), Token("BINARY_CONNECTIVE", "&"), Tree("fof_unary", [Tree("fof_negation", [f.children[2]])])])])])
+                            tree.children = [Tree("fof_formula", [Tree("fof_binary", [Tree("fof_unary", [Tree("fof_negation", [f.children[0]])]), Token("BINARY_CONNECTIVE", "&"), Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [f.children[2]])])])])])])]
                         case "&":
                             self.unchanged = False
-                            return Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [Tree("fof_unary", [Tree("fof_negation", [f.children[0]])]), Token("BINARY_CONNECTIVE", "|"), Tree("fof_unary", [Tree("fof_negation", [f.children[2]])])])])])
+                            tree.children = [Tree("fof_formula", [Tree("fof_binary", [Tree("fof_unary", [Tree("fof_negation", [f.children[0]])]), Token("BINARY_CONNECTIVE", "|"), Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_formula", [f.children[2]])])])])])])]
                         case "<=>":
                             self.unchanged = False
-                            return Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [f.children[0], Token("BINARY_CONNECTIVE", "<~>"), f.children[2]])])])
+                            tree.children = [Tree("fof_formula", [Tree("fof_binary", [f.children[0], Token("BINARY_CONNECTIVE", "<~>"), f.children[2]])])]
                         case "<~>":
                             self.unchanged = False
-                            return Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [f.children[0], Token("BINARY_CONNECTIVE", "<=>"), f.children[2]])])])
-        return Tree("fof_unary", children)
+                            tree.children = [Tree("fof_formula", [Tree("fof_binary", [f.children[0], Token("BINARY_CONNECTIVE", "<=>"), f.children[2]])])]
 
 
 class FreeVariables(Transformer):
@@ -234,7 +265,7 @@ class FreeVariables(Transformer):
 def eliminate_equivalences(tree):
     polarities = EquivPolarities().transform(tree)
     visitor = EliminateEquivalence()
-    visitor.transform(tree)
+    visitor.visit(tree)
     for i, (args, polarity) in enumerate(zip(visitor.equivs, polarities)):
         match polarity:
             case 1:
@@ -253,6 +284,9 @@ class EquivPolarities(Transformer):
             return children[2]
         else:
             return [-p for p in children[2]]
+
+    def cnf(self, children):
+        return []
     
     def fof_binary(self, children):
         if children[1] == Token("BINARY_CONNECTIVE", "<=>"):
@@ -274,141 +308,133 @@ class EquivPolarities(Transformer):
         return []
 
 
-class EliminateEquivalence(Transformer_InPlace):
+class EliminateEquivalence(Visitor):
     def __init__(self):
         self.counter = 0
         self.unchanged = False
         self.equivs = []
     
-    def fof_binary(self, children):
-        if children[1] == "<=>":
-            free_variables = FreeVariables().transform(children[0]).union(FreeVariables().transform(children[2]))
-            result = Tree("fof_unary", [Tree("fof_atom", [
+    def fof_binary(self, tree):
+        if tree.children[1] == "<=>":
+            self.unchanged = False
+            free_variables = FreeVariables().transform(tree)
+            self.equivs.append([tree.children[0], tree.children[2], free_variables])
+            tree.data = "fof_unary"
+            tree.children = [Tree("fof_atom", [
                 Token("FUNCTOR", f"equiv_{self.counter}"),
                 *[
-                    Tree("fof_term", [Tree("fof_variable", [Token("VARIABLE", var)])])
+                    Tree("fof_term", [Token("VARIABLE", var)])
                     for var in free_variables
                 ]
-            ])])
-            self.unchanged = False
+            ])]
             self.counter += 1
-            self.equivs.append([children[0], children[2], free_variables])
-            return result
-        if children[1] == "<~>":
-            free_variables = FreeVariables().transform(children[0]).union(FreeVariables().transform(children[2]))
-            result = Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_atom", [
+        elif tree.children[1] == "<~>":
+            self.unchanged = False
+            free_variables = FreeVariables().transform(tree)
+            self.equivs.append([tree.children[0], tree.children[2], free_variables])
+            tree.data = "fof_unary"
+            tree.children = [Tree("fof_negation", [Tree("fof_unary", [Tree("fof_atom", [
                 Token("FUNCTOR", f"equiv_{self.counter}"),
                 *[
-                    Tree("fof_term", [Tree("fof_variable", [Token("VARIABLE", var)])])
+                    Tree("fof_term", [Token("VARIABLE", var)])
                     for var in free_variables
                 ]
-            ])])])
-            ])
-            self.unchanged = False
+            ])])])]
             self.counter += 1
-            self.equivs.append([children[0], children[2], free_variables])
-            return result
-        return Tree("fof_binary", children)
 
 
 def _positive_equiv_axioms(counter, left, right, variables):
     return [
-        OpSimplify().transform(Tree("tptp_input", [
-            Tree("formula", [
-                Tree("fof", [
-                    Token("NAME", f"equivalence_{counter}_0_0"),
-                    Token("FORMULA_ROLE", "axiom"),
-                    Tree("fof_formula", [
-                        Tree("fof_binary", [
-                            Tree("fof_unary", [
-                                Tree("fof_atom", [
-                                    Token("FUNCTOR", f"equiv_{counter}"),
-                                    *[
-                                        Tree("fof_term", [Tree("fof_variable", [Token("VARIABLE", var)])])
-                                        for var in variables
-                                    ]
-                                ])
-                            ]),
-                            Token("BINARY_CONNECTIVE", "=>"),
-                            Tree("fof_binary", [
-                                left,
-                                Token("BINARY_CONNECTIVE", "=>"),
-                                right
+        simplify(nnf(opsimp(Tree("formula", [
+            Tree("fof", [
+                Token("NAME", f"equivalence_{counter}_0_0"),
+                Token("FORMULA_ROLE", "axiom"),
+                Tree("fof_formula", [
+                    Tree("fof_binary", [
+                        Tree("fof_unary", [
+                            Tree("fof_atom", [
+                                Token("FUNCTOR", f"equiv_{counter}"),
+                                *[
+                                    Tree("fof_term", [Token("VARIABLE", var)])
+                                    for var in variables
+                                ]
                             ])
+                        ]),
+                        Token("BINARY_CONNECTIVE", "=>"),
+                        Tree("fof_binary", [
+                            left,
+                            Token("BINARY_CONNECTIVE", "=>"),
+                            right
                         ])
                     ])
                 ])
             ])
-        ])),
-        OpSimplify().transform(Tree("tptp_input", [
-            Tree("formula", [
-                Tree("fof", [
-                    Token("NAME", f"equivalence_{counter}_0_1"),
-                    Token("FORMULA_ROLE", "axiom"),
-                    Tree("fof_formula", [
-                        Tree("fof_binary", [
-                            Tree("fof_unary", [
-                                Tree("fof_atom", [
-                                    Token("FUNCTOR", f"equiv_{counter}"),
-                                    *[
-                                        Tree("fof_term", [Tree("fof_variable", [Token("VARIABLE", var)])])
-                                        for var in variables
-                                    ]
-                                ])
-                            ]),
-                            Token("BINARY_CONNECTIVE", "=>"),
-                            Tree("fof_binary", [
-                                left,
-                                Token("BINARY_CONNECTIVE", "<="),
-                                right
+        ])))),
+        simplify(nnf(opsimp(Tree("formula", [
+            Tree("fof", [
+                Token("NAME", f"equivalence_{counter}_0_1"),
+                Token("FORMULA_ROLE", "axiom"),
+                Tree("fof_formula", [
+                    Tree("fof_binary", [
+                        Tree("fof_unary", [
+                            Tree("fof_atom", [
+                                Token("FUNCTOR", f"equiv_{counter}"),
+                                *[
+                                    Tree("fof_term", [Token("VARIABLE", var)])
+                                    for var in variables
+                                ]
                             ])
+                        ]),
+                        Token("BINARY_CONNECTIVE", "=>"),
+                        Tree("fof_binary", [
+                            left,
+                            Token("BINARY_CONNECTIVE", "<="),
+                            right
                         ])
                     ])
                 ])
             ])
-        ]))
+        ]))))
     ]
 
 
 def _negative_equiv_axioms(counter, left, right, variables):
     return [
-        OpSimplify().transform(Tree("tptp_input", [
-            Tree("formula", [
-                Tree("fof", [
-                    Token("NAME", f"equivalence_{counter}_1"),
-                    Token("FORMULA_ROLE", "axiom"),
-                    Tree("fof_formula", [
-                        Tree("fof_binary", [
-                            Tree("fof_unary", [
-                                    Tree("fof_atom", [
-                                        Token("FUNCTOR", f"equiv_{counter}"),
-                                        *[
-                                            Tree("fof_term", [Tree("fof_variable", [Token("VARIABLE", var)])])
-                                            for var in variables
-                                        ]
-                                    ])
-                                ]),
-                            Token("BINARY_CONNECTIVE", "<="),
-                            Tree("fof_binary", [
-                                Tree("fof_unary", [Tree("fof_formula", [
-                                    Tree("fof_binary", [
-                                        left,
-                                        Token("BINARY_CONNECTIVE", "=>"),
-                                        right
-                                    ])
-                                ])]),
-                                Token("BINARY_CONNECTIVE", "&"),
-                                Tree("fof_binary", [
-                                    left,
-                                    Token("BINARY_CONNECTIVE", "<="),
-                                    right
+        simplify(nnf(opsimp(Tree("formula", [
+            Tree("fof", [
+                Token("NAME", f"equivalence_{counter}_1"),
+                Token("FORMULA_ROLE", "axiom"),
+                Tree("fof_formula", [
+                    Tree("fof_binary", [
+                        Tree("fof_unary", [
+                                Tree("fof_atom", [
+                                    Token("FUNCTOR", f"equiv_{counter}"),
+                                    *[
+                                        Tree("fof_term", [Token("VARIABLE", var)])
+                                        for var in variables
+                                    ]
                                 ])
                             ]),
-                        ])
+                        Token("BINARY_CONNECTIVE", "<="),
+                        Tree("fof_binary", [
+                            Tree("fof_unary", [Tree("fof_formula", [
+                                Tree("fof_binary", [
+                                    left,
+                                    Token("BINARY_CONNECTIVE", "=>"),
+                                    right
+                                ])
+                            ])]),
+                            Token("BINARY_CONNECTIVE", "&"),
+                            Tree("fof_binary", [
+                                left,
+                                Token("BINARY_CONNECTIVE", "<="),
+                                right
+                            ])
+                        ]),
                     ])
                 ])
             ])
-        ]))
+        ]))))
     ]
 
 
@@ -480,129 +506,153 @@ class Skolemize(Visitor):
 
 
 def cnf(tree):
-    transformer = PushDisjunctionsInward()
-    while not transformer.unchanged:
-        transformer.unchanged = True
-        tree = simplify(transformer.transform(tree))
-    return CNF().transform(tree)
+    tree = CDA().visit(tree)
+    visitor = CDAReduce()
+    while not visitor.unchanged:
+        visitor.unchanged = True
+        visitor.visit(tree)
+    return tree
+
+class CDA(Visitor):
+    def fof_unary(self, tree):
+        tree.data = tree.children[0].data
+        tree.children = tree.children[0].children
+
+    def fof_negation(self, tree):
+        tree.data = "fof_negated_atom"
+
+    def fof_binary(self, tree):
+        if tree.children[1] == Token("BINARY_CONNECTIVE", "|"):
+            match tree.children[0].data:
+                case "fof_atom" | "fof_negated_atom" | "conjunction":
+                    disjuncts1 = [tree.children[0]]
+                case "disjunction":
+                    disjuncts1 = tree.children[0].children
+            match tree.children[2].data:
+                case "fof_atom" | "fof_negated_atom" | "conjunction":
+                    disjuncts2 = [tree.children[2]]
+                case "disjunction":
+                    disjuncts2 = tree.children[2].children
+            tree.data = "disjunction"
+            tree.children = disjuncts1 + disjuncts2
+        elif tree.children[1] == Token("BINARY_CONNECTIVE", "&"):
+            match tree.children[0].data:
+                case "fof_atom" | "fof_negated_atom" | "disjunction":
+                    conjuncts1 = [tree.children[0]]
+                case "conjunction":
+                    conjuncts1 = tree.children[0].children
+            match tree.children[2].data:
+                case "fof_atom" | "fof_negated_atom" | "disjunction":
+                    conjuncts2 = [tree.children[2]]
+                case "conjunction":
+                    conjuncts2 = tree.children[2].children
+            tree.data = "conjunction"
+            tree.children = conjuncts1 + conjuncts2
+    
+    def fof_formula(self, tree):
+        tree.data = tree.children[0].data
+        tree.children = tree.children[0].children
+
+    def fof(self, tree):
+        tree.data = "cda"
+        tree.dependencies = []
 
 
-class PushDisjunctionsInward(Transformer_InPlace):
+def negated(tree):
+    match tree.data:
+        case "conjunction":
+            return Tree("disjunction", [negated(child) for child in tree.children])
+        case "diction":
+            return Tree("conjunction", [negated(child) for child in tree.children])
+        case "fof_atom":
+            return Tree("fof_negated_atom", [tree])
+        case "fof_negated_atom":
+            return tree.children[0]
+
+
+class CDAReduce(Visitor):
     def __init__(self):
-        self.unchanged = False    
-    
-    def fof_binary(self, children):
-        if children[1] == Token("BINARY_CONNECTIVE", "|"):
-            if children[0].children[0].data == "fof_formula":
-                if children[0].children[0].children[0].data == "fof_binary":
-                    if children[0].children[0].children[0].children[1] == Token("BINARY_CONNECTIVE", "&"):
-                        self.unchanged = False
-                        return Tree("fof_binary", [
-                            Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [
-                                children[0].children[0].children[0].children[0],
-                                Token("BINARY_CONNECTIVE", "|"),
-                                children[2]
-                            ])])]),
-                            Token("BINARY_CONNECTIVE", "&"),
-                            Tree("fof_binary", [
-                                Tree("fof_unary", [Tree("fof_formula", [children[0].children[0].children[0].children[2]])]),
-                                Token("BINARY_CONNECTIVE", "|"),
-                                children[2]
+        self.unchanged = False
+        self.new = []
+
+    def cda(self, tree):
+        self.unchanged = False
+        index = 0
+        match tree.children[2].data:
+            case "fof_atom" | "fof_negated_atom":
+                tree.data = "cnf"
+                tree.children = [tree.children[0], tree.children[1], Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [tree.children[2]])])])]
+            case "disjunction":
+                disjuncts = [Tree("literal", [f]) for f in tree.dependencies]
+                for disjunct in tree.children[2].children:
+                    match disjunct.data:
+                        case "fof_atom" | "fof_negated_atom":
+                            disjuncts.append(Tree("literal", [disjunct]))
+                        case "conjunction":
+                            variables = FreeVariables().transform(disjunct)
+                            atom = Tree("fof_atom", [
+                                Token("FUNCTOR", f"{tree.children[0].value}_{index}"),
+                                *[
+                                    Tree("fof_term", [Token("VARIABLE", var)])
+                                    for var in variables
+                                ]
                             ])
-                        ])
-            if children[2].data == "fof_binary":
-                if children[2].children[1] == Token("BINARY_CONNECTIVE", "&"):
-                    self.unchaged = False
-                    return Tree("fof_binary", [
-                        Tree("fof_unary", [Tree("fof_formula", [Tree("fof_binary", [
-                            children[0],
-                            Token("BINARY_CONNECTIVE", "|"),
-                            children[2].children[0]
-                        ])])]),
-                        Token("BINARY_CONNECTIVE", "&"),
-                        Tree("fof_binary", [
-                            children[0],
-                            Token("BINARY_CONNECTIVE", "|"),
-                            children[2].children[2]
-                        ])
-                    ])
-        
-        return Tree("fof_binary", children)
-
-
-class CNF(Transformer_InPlace):
-    def fof_unary(self, children):
-        match children[0].data:
-            case "fof_atom":
-                return children[0]
-            case "fof_negation":
-                return Tree("fof_negated_atom", children[0].children)
-            case "disjunction":
-                return children[0]
+                            disjuncts.append(Tree("literal", [atom]))
+                            new = Tree("cda", [
+                                Token("NAME", f"{tree.children[0].value}_{index}"),
+                                Token("FORMULA_ROLE", "axiom"),
+                                disjunct
+                            ])
+                            match tree.children[1].value:
+                                case "axiom" | "hypothesis" | "definition" | "assumption" | "lemma" | "negated_conjecture":
+                                    new.dependencies = tree.dependencies + [negated(atom)]
+                                case "theorem" | "corollary" | "conjecture":
+                                    new.dependencies = [negated(f) for f in tree.dependencies] + [atom]
+                            self.new.append(Tree("formula", [new]))
+                            index += 1
+                tree.data = "cnf"
+                tree.children = [tree.children[0], tree.children[1], Tree("cnf_formula", [Tree("disjunction", disjuncts)])]
             case "conjunction":
-                return children[0]
-    
-    def fof_binary(self, children):
-        if children[1] == Token("BINARY_CONNECTIVE", "|"):
-            match children[0].data:
-                case "fof_atom" | "fof_negated_atom":
-                    disjunts1 = [children[0]]
-                case "disjunction":
-                    disjunts1 = children[0].children
-            match children[2].data:
-                case "fof_atom" | "fof_negated_atom":
-                    disjunts2 = [children[2]]
-                case "disjunction":
-                    disjunts2 = children[2].children
-            return Tree("disjunction", disjunts1 + disjunts2)
-        if children[1] == Token("BINARY_CONNECTIVE", "&"):
-            match children[0].data:
-                case "fof_atom" | "fof_negated_atom":
-                    conjuncts1 = [Tree("disjunction", [children[0]])]
-                case "disjunction":
-                    conjuncts1 = [children[0]]
-                case "conjunction":
-                    conjuncts1 = children[0].children
-            match children[2].data:
-                case "fof_atom" | "fof_negated_atom":
-                    conjuncts2 = [Tree("disjunction", [children[2]])]
-                case "disjunction":
-                    conjuncts2 = [children[2]]
-                case "conjunction":
-                    conjuncts2 = children[2].children
-            return Tree("conjunction", conjuncts1 + conjuncts2)
-    
-    def fof_formula(self, children):
-        return children[0]
+                formulas = []
+                for conjunct in tree.children[2].children:
+                    match conjunct.data:
+                        case "fof_atom" | "fof_negated_atom":
+                            formulas.append(Tree("formula", [Tree("cnf", [
+                                Token("NAME", f"{tree.children[0].value}_{index}"),
+                                tree.children[1],
+                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [f]) for f in tree.dependencies] + [Tree("literal", [conjunct])])])
+                            ])]))
+                            index += 1
+                        case "disjunction":
+                            variables = FreeVariables().transform(conjunct)
+                            atom = Tree("fof_atom", [
+                                Token("FUNCTOR", f"{tree.children[0].value}_{index}"),
+                                *[
+                                    Tree("fof_term", [Token("VARIABLE", var)])
+                                    for var in variables
+                                ]
+                            ])
+                            formulas.append(Tree("formula", [Tree("cnf", [
+                                Token("NAME", f"{tree.children[0].value}_{index}"),
+                                tree.children[1],
+                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [f]) for f in tree.dependencies] + [Tree("literal", [atom])])])
+                            ])]))
+                            new = Tree("cda", [
+                                Token("NAME", f"{tree.children[1].value}_{index}"),
+                                Token("FORMULA_ROLE", "axiom"),
+                                conjunct
+                            ])
+                            match tree.children[1].value:
+                                case "axiom" | "hypothesis" | "definition" | "assumption" | "lemma" | "negated_conjecture":
+                                    new.dependencies = tree.dependencies + [negated(atom)]
+                                case "theorem" | "corollary" | "conjecture":
+                                    new.dependencies = [negated(f) for f in tree.dependencies] + [atom]
+                            self.new.append(Tree("formula", [new]))
+                            index += 1
+                self.new += formulas
+                tree.data = "delete"
 
-    def fof(self, children):
-        match children[2].data:
-            case "fof_atom":
-                children[2] = [Tree("disjunction", [children[2]])]
-            case "fof_negated_atom":
-                children[2] = [Tree("disjunction", [children[2]])]
-            case "disjunction":
-                children[2] = [children[2]]
-            case "conjunction":
-                children[2] = children[2].children
-        return Tree("cnf_collection", [
-            Tree("cnf", [Token("NAME", children[0] + f"_{i}"), children[1], Tree("cnf_formula", [disjunction])])
-            for i, disjunction in enumerate(children[2])
-        ])
-    
-    def cnf(self, children):
-        return Tree("cnf_collection", [Tree("cnf", children)])
-
-    def tptp_file(self, children):
-        cnfs = [
-            Tree("formula", [cnf])
-            for cnf in list(chain(
-                *[child.children[0].children
-                  for child in children
-                  if child.data == "formula"]
-                ))
-        ]
-        includes = [child for child in children if child.data == "include"]
-        return Tree("tptp_file", includes + cnfs)
-    
-    
+    def tptp_file(self, tree):
+        tree.children = [child for child in tree.children if child.children[0].data != "delete"]
+        tree.children += self.new
+        self.new = []
