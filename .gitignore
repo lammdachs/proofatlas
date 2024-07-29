@@ -2,6 +2,7 @@
 wandb/
 checkpoints/
 *.ckpt
+proofs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -56,6 +57,7 @@ cover/
 # Translations
 *.mo
 *.pot
+
 
 # Jupyter Notebook
 .ipynb_checkpoints

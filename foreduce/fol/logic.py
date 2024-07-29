@@ -153,6 +153,12 @@ class Term:
             return t2
         return self.symbol(*[arg.substitute(t1, t2) for arg in self.args])
 
+    def tokenize(self, mapping):
+        result = [mapping[self.symbol]]
+        for arg in self.args:
+            result += arg.tokenize(mapping)
+        return result
+
 
 class Constant(Function, Term):
     def __init__(self, name):

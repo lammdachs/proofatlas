@@ -1,11 +1,39 @@
 from itertools import chain
 from lark import Transformer, Tree, Token, Visitor
+import os
 
+from foreduce.fol.logic import *
 from foreduce.tptp.lexer import tptplexer
 
 
-def normalform(tree, include_path='/'):
-    tree = include(tree, include_path)
+class _Maxsize:
+    def __init__(self, max_size):
+        if max_size is not None and max_size < 0:
+            raise ValueError("max_size reached")
+        self.max_size = max_size
+
+    def use(self, size):
+        if self.max_size is not None:
+            self.max_size -= size
+            if self.max_size < 0:
+                raise Exception("File is too large")
+
+
+def read_file(file, include_path='/', max_size=None):
+    _max_size = _Maxsize(max_size)
+    _max_size.use(os.path.getsize(file))
+    with open(file, "r") as f:
+        data = f.read()
+    return read_string(data, include_path, _max_size=_max_size)
+
+
+def read_string(string, include_path='/', _max_size=None):
+    tree = tptplexer.parse(string)
+    return read_tree(tree, include_path, _max_size=_max_size)
+
+
+def read_tree(tree, include_path='/', _max_size=_Maxsize(None)):
+    tree = include(tree, include_path, _max_size=_max_size)
     tree = opsimp(tree)
     tree = simplify(tree)
     tree = nnf(tree)
@@ -15,24 +43,31 @@ def normalform(tree, include_path='/'):
     tree = skolemize(tree)
     tree = simplify(tree)
     tree = cnf(tree)
-    return tree
+    counter = 0
+    for formula in tree.children:
+        renamer = VariableRenamer(counter)   
+        renamer.visit(formula)
+        counter = renamer.counter
+    return FOLConverter().transform(tree)
 
 
-def include(tree, include_path='/'):
-    visitor = Include(include_path=include_path)
+def include(tree, include_path='/', _max_size=_Maxsize(None)):
+    visitor = Include(include_path=include_path, _max_size=_max_size)
     visitor.visit(tree)
     return tree
 
 
 class Include(Visitor):
-    def __init__(self, include_path='/'):
+    def __init__(self, include_path='/', _max_size=_Maxsize(None)):
         self.include_path = include_path
+        self._max_size = _max_size
     
     def include(self, tree):
+        self._max_size.use(os.path.getsize(self.include_path + tree.children[0].value[1:-1]))
         with open(self.include_path + tree.children[0].value[1:-1], "r") as f:
             data = f.read()
         input = tptplexer.parse(data)
-        Include(include_path=self.include_path).visit(input)
+        Include(include_path=self.include_path, _max_size=self._max_size).visit(input)
         tree.children = [entry for entry in input.children if entry.data == "formula"]
     
     def tptp_file(self, tree):
@@ -66,7 +101,7 @@ class OpSimplify(Visitor):
         match tree.children[1].value:
             case "conjecture" | "theorem" | "lemma" | "corollary":
                 tree.children[1] = Token("FORMULA_ROLE", "negated_conjecture")
-                tree.children[2] = Tree("fof_formula", [Tree("fof_unary", [Tree("fof_negation", [tree.children[2]])])])
+                tree.children[2] = Tree("fof_formula", [Tree("fof_unary", [Tree("fof_negation", [Tree("fof_unary", [tree.children[2]])])])])
                 
 
 # Simplify occurences of $true, $false and redundant parentheses
@@ -570,6 +605,14 @@ def negated(tree):
             return tree.children[0]
 
 
+class VariableCopy(Transformer):
+    def __init__(self):
+        super().__init__(visit_tokens=True)
+
+    def VARIABLE(self, tree):
+        return Token("VARIABLE", tree.value)
+
+
 class CDAReduce(Visitor):
     def __init__(self):
         self.unchanged = False
@@ -583,7 +626,7 @@ class CDAReduce(Visitor):
                 tree.data = "cnf"
                 tree.children = [tree.children[0], tree.children[1], Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [tree.children[2]])])])]
             case "disjunction":
-                disjuncts = [Tree("literal", [f]) for f in tree.dependencies]
+                disjuncts = [Tree("literal", [VariableCopy().transform(f)]) for f in tree.dependencies]
                 for disjunct in tree.children[2].children:
                     match disjunct.data:
                         case "fof_atom" | "fof_negated_atom":
@@ -620,7 +663,7 @@ class CDAReduce(Visitor):
                             formulas.append(Tree("formula", [Tree("cnf", [
                                 Token("NAME", f"{tree.children[0].value}_{index}"),
                                 tree.children[1],
-                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [f]) for f in tree.dependencies] + [Tree("literal", [conjunct])])])
+                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [VariableCopy().transform(f)]) for f in tree.dependencies] + [Tree("literal", [conjunct])])])
                             ])]))
                             index += 1
                         case "disjunction":
@@ -635,7 +678,7 @@ class CDAReduce(Visitor):
                             formulas.append(Tree("formula", [Tree("cnf", [
                                 Token("NAME", f"{tree.children[0].value}_{index}"),
                                 tree.children[1],
-                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [f]) for f in tree.dependencies] + [Tree("literal", [atom])])])
+                                Tree("cnf_formula", [Tree("disjunction", [Tree("literal", [VariableCopy().transform(f)]) for f in tree.dependencies] + [Tree("literal", [atom])])])
                             ])]))
                             new = Tree("cda", [
                                 Token("NAME", f"{tree.children[1].value}_{index}"),
@@ -656,3 +699,62 @@ class CDAReduce(Visitor):
         tree.children = [child for child in tree.children if child.children[0].data != "delete"]
         tree.children += self.new
         self.new = []
+
+
+class VariableRenamer(Visitor):
+    def __init__(self, counter=0):
+        self.name = dict()
+        self.counter = counter
+
+    def fof_term(self, token):
+        if token.children[0].type == "VARIABLE":
+            if token.children[0].value not in self.name:
+                self.name[token.children[0].value] = f"X{self.counter}"
+                self.counter += 1
+            token.children[0].value = self.name[token.children[0].value]
+
+
+class FOLConverter(Transformer):
+    def __init__(self):
+        self.n_goals = 0
+    
+    def fof_term(self, children):
+        if children[0].type == "FUNCTOR":
+            return Function(children[0].value, len(children) - 1)(*children[1:])
+        if children[0].type == "VARIABLE":
+            return Variable(children[0].value)
+    
+    def fof_atom(self, children):
+        if len(children) == 3 and type(children[1]) == Token:
+            return Literal(eq(children[0], children[2]), True)
+        else:
+            return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]))
+
+    def fof_negated_atom(self, children):
+        children[0].polarity = False
+        return children[0]
+
+    def literal(self, children):
+        return children[0]
+
+    def disjunction(self, children):
+        return Clause(*children)
+
+    def cnf_formula(self, children):
+        return children[0]
+
+    def cnf(self, children):
+        if children[1] == Token("FORMULA_ROLE", "negated_conjecture"):
+            children[2].literals += (Literal(Predicate(f"goal_{self.n_goals}", 0)(), True),)
+            self.n_goals += 1
+        return children[2]
+
+    def formula(self, children):
+        return children[0]
+
+    def tptp_file(self, children):
+        return Problem(*children, *[
+            Clause(Literal(Predicate(f"goal_{i}", 0)(), False))
+            for i in range(self.n_goals)
+        ])
+

@@ -21,7 +21,7 @@ fof_unary : fof_quantified_formula | fof_negation | fof_atom | "(" fof_logic_for
 
 fof_quantified_formula : FOF_QUANTIFIER "[" VARIABLE ("," VARIABLE)* "] :" fof_unary
 fof_negation : "~" fof_unary
-fof_atom : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | DEFINED_UNARY_PREDICATE | fof_term DEFINED_BINARY_PREDICATE fof_term
+fof_atom : fof_term DEFINED_BINARY_PREDICATE fof_term | DEFINED_UNARY_PREDICATE | FUNCTOR "(" fof_term ("," fof_term)* ")" | FUNCTOR
 fof_term : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | VARIABLE
 
 fof_sequent : fof_formula_tuple "-->" fof_formula_tuple | "(" fof_sequent ")"
