@@ -1,23 +1,15 @@
 from dataclasses import dataclass, field
+import random
 from typing import List
 import torch
 from torch import nn
 from torchtune.modules import RotaryPositionalEmbeddings
 
-
-from foreduce.fol.logic import Problem
-
-
-@dataclass
-class EmbeddingConfig:
-    RESERVED_TOKENS: int = 8 # padding, start, end, |, ~, $true, $false, equality
-    num_variables: int = 8
-    num_functions: List[int] = field(default_factory=lambda: [8, 8, 4, 2, 1])
-    embed_dim: int = 128
+from foreduce.transformer.tokenizer import TokenConfig
 
 
 class FormulaEmbedding(nn.Module):
-    def __init__(self, config : EmbeddingConfig = EmbeddingConfig()):
+    def __init__(self, config : TokenConfig = TokenConfig()):
         super().__init__()
 
         self.config = config

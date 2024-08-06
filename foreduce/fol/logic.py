@@ -1,7 +1,4 @@
-from itertools import groupby
-from operator import attrgetter
-
-from foreduce.fol.exception import *
+from foreduce.transformer.tokenizer import TokenConfig
 
 
 class _Context:
@@ -75,6 +72,7 @@ class Predicate(_Symbol):
     def __hash__(self):
         return hash((self.name, self.arity))
 
+eq = Predicate('eq', 2)
 
 class Term:
     @staticmethod
@@ -113,7 +111,12 @@ class Term:
             self.args == other.args
 
     def __repr__(self):
-        return f"{self.symbol.name}({', '.join(map(str, self.args))})"
+        if self.symbol.arity == 0:
+            return self.symbol.name
+        elif self.symbol == eq:
+            return f"{self.args[0]} = {self.args[1]}"
+        else:
+            return f"{self.symbol.name}({', '.join(map(str, self.args))})"
 
     def function_symbols(self):
         if isinstance(self.symbol, Function):
@@ -154,7 +157,7 @@ class Term:
         return self.symbol(*[arg.substitute(t1, t2) for arg in self.args])
 
     def tokenize(self, mapping):
-        result = [mapping[self.symbol]]
+        result = [mapping[self.symbol.name]]
         for arg in self.args:
             result += arg.tokenize(mapping)
         return result
@@ -180,7 +183,6 @@ class Variable(_Symbol, Term):
         return self.name
 
 
-eq = Predicate('eq', 2)
 
 
 class Literal(Term):
@@ -199,7 +201,7 @@ class Literal(Term):
         self.args = predicate.args
 
     def __repr__(self):
-        return f"{'¬' if not self.polarity else ''}{self.predicate}"
+        return f"{'~' if not self.polarity else ''}{self.predicate}"
 
     def __eq__(self, other):
         if not isinstance(other, Literal):
@@ -212,6 +214,11 @@ class Literal(Term):
 
     def substitute(self, t1, t2):
         return Literal(self.predicate.substitute(t1, t2), self.polarity)
+
+    def tokenize(self, mapping):
+        result = [mapping["~"]] if not self.polarity else []
+        result += self.predicate.tokenize(mapping)
+        return result
 
 
 class Clause:
@@ -265,13 +272,18 @@ class Clause:
     def substitute(self, t1, t2):
         return Clause(*[literal.substitute(t1, t2) for literal in self.literals])
 
-    def encode(self, mapping):
-        result = []
+    def to_tptp(self):
+        return f"fof({hash(self)}, axiom, {self})."
+
+    def tokenize(self, mapping, config):
+        mapping = mapping | config.random_variable_mapping([var.name for var in self.variables()])
+        result = [config.reserved_token_mapping["<START>"]]
         for literal in self.literals:
-            result.append(mapping["+"] if literal.polarity else mapping["-"])
-            result += literal.predicate.encode(mapping)
+            result += literal.tokenize(mapping)
             result.append(mapping["|"])
+        result[-1] = config.reserved_token_mapping["<END>"]
         return result
+    
 
 
 class Problem:
@@ -312,9 +324,18 @@ class Problem:
             terms |= clause.terms()
         return terms
 
-    def encode(self, mapping):
+    def to_tptp(self):
         result = []
         for clause in self.clauses:
-            result += clause.encode(mapping)
-            result.append(mapping["&"])
-        return tuple(result)
+            result.append(clause.to_tptp())
+        return '\n'.join(result)
+
+    def tokenize(self, config=TokenConfig()):
+        function_symbols = [[] for _ in config.num_functions]
+        for function in self.function_symbols() | self.predicate_symbols():
+            function_symbols[function.arity].append(function.name)
+        mapping = config.reserved_token_mapping | config.random_function_mapping(function_symbols)
+        result = []
+        for clause in self.clauses:
+            result.append(clause.tokenize(mapping, config))
+        return result

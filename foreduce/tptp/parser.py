@@ -116,12 +116,11 @@ class Simplify(Visitor):
         self.unchanged = False
 
     def fof_negation(self, tree):
+        self.unchanged = False
         if tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$false")])]):
-            self.unchanged = False
             tree.data = "fof_atom"
             tree.children = [Token("DEFINED_UNARY_PREDICATE", "$true")]
         elif tree.children[0] == Tree("fof_unary", [Tree("fof_atom", [Token("DEFINED_UNARY_PREDICATE", "$true")])]):
-            self.unchanged = False
             tree.data = "fof_atom"
             tree.children = [Token("DEFINED_UNARY_PREDICATE", "$false")]
 

@@ -1,6 +1,6 @@
 import unittest
 import torch
-from foreduce.transformer.embedding import EmbeddingConfig, FormulaEmbedding
+from foreduce.transformer.embedding import TokenConfig, FormulaEmbedding
 
 
 class UpdateConfig(unittest.TestCase):
@@ -21,7 +21,7 @@ class UpdateConfig(unittest.TestCase):
     new_num_funtions_4 = [1, 1]
 
     def init_embedding(self):
-        return FormulaEmbedding(EmbeddingConfig(
+        return FormulaEmbedding(TokenConfig(
             self.RESERVED_TOKENS,
             self.num_variables,
             [i for i in self.num_functions],

@@ -6,15 +6,15 @@ vampire_lexer = Lark(r"""
     %ignore COMMENT_LINE
 
     start : step+
-    step : "[SA] new:" NUMBER "." disjunction rule "\n"
-    rule : "[" name premises "]"
+    step : "[SA] new:" NUMBER "." disjunction rule
+    rule : "[" name premises? "]"
     name : LOWER_WORD+
     premises : NUMBER ("," NUMBER)*
 
     disjunction : literal ("|" literal)*
     literal : fof_atom | fof_negated_atom
     fof_negated_atom : "~" fof_atom
-    fof_atom : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | DEFINED_UNARY_PREDICATE | fof_term DEFINED_BINARY_PREDICATE fof_term
+    fof_atom : fof_term DEFINED_BINARY_PREDICATE fof_term | FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | DEFINED_UNARY_PREDICATE
     fof_term : FUNCTOR | FUNCTOR "(" fof_term ("," fof_term)* ")" | VARIABLE
 
     DEFINED_UNARY_PREDICATE :  "$true" | "$false"
@@ -37,4 +37,4 @@ vampire_lexer = Lark(r"""
 
     COMMENT_LINE : "%" PRINTABLE_CHAR* "\n"
     PRINTABLE_CHAR : " ".."~"
-""", start="start")
+""", start="start", parser="lalr")
