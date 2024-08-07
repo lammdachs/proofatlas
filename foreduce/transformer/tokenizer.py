@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
 import random
+import torch
 from typing import List
 
 @dataclass
 class TokenConfig:
-    RESERVED_TOKENS: int = 8 # padding, start, end, |, ~, $true, $false, equality
+    RESERVED_TOKENS: int = 9 # padding, start, end, |, ~, $true, $false, equality
     reserved_token_mapping: dict = field(default_factory=lambda: {
-        '<PAD>' : 0, '<START>' : 1, '<END>' : 2, '|' : 3, '~' : 4, '$true' : 5, '$false' : 6, '=' : 7})
+        '<PAD>' : 0, '<START>' : 1, '<END>' : 2, '|' : 3, '~' : 4, '$true' : 5, '$false' : 6, 'eq' : 7})
     num_variables: int = 8
     num_functions: List[int] = field(default_factory=lambda: [16, 16, 8, 4, 2, 1])
     embed_dim: int = 128
@@ -33,3 +34,51 @@ class TokenConfig:
                 mapping[symbol] = offset + configuration[i]
             offset += self.num_functions[arity]
         return mapping
+
+
+class ProofTokenizer:
+    def __init__(self, config, max_steps=1024, max_tokens=128, seed=42):
+        self.config = config
+        self.max_steps = max_steps
+        self.max_tokens = max_tokens
+        self.generator = random.Random(seed)
+
+    def __call__(self, problem, tree, mapping=None, goal='random'):        
+        if goal == 'random':  
+            goal = self.generator.choice(range(len(tree) // 2, len(tree)))
+        elif goal == 'last':
+            goal = len(tree) - 1
+        
+        tokens, mapping = problem.tokenize(self.config, limit=self.max_steps, mapping=mapping)
+        x = torch.zeros(self.max_steps, self.max_tokens)
+        y = torch.zeros(self.max_steps)
+        target = torch.zeros(self.max_tokens)
+        for i, clause in enumerate(tokens):
+            for j, token in enumerate(clause[:self.max_tokens]):
+                x[i, j] = token
+        queue = [goal]
+        while queue:
+            i = queue.pop()
+            if i < self.max_steps:
+                y[i] = 1
+            queue += tree[i]
+        for i, token in enumerate(problem.clauses[goal].tokenize(self.config, mapping=mapping)[:self.max_tokens]):
+            target[i] = token
+        return x, y, target, mapping
+
+
+class ProblemTokenizer:
+    def __init__(self, config, max_clauses=1024, max_tokens=128):
+        self.config = config
+        self.max_clauses = max_clauses
+        self.max_tokens = max_tokens
+
+    def __call__(self, problem, mapping=None):
+        tokens, mapping = problem.tokenize(self.config, mapping=mapping, limit=self.max_clauses)
+        x = torch.zeros(self.max_clauses, self.max_tokens)
+        for i, clause in enumerate(tokens[:self.max_clauses]):
+            for j, token in enumerate(clause[:self.max_tokens]):
+                x[i, j] = token
+        return x, mapping
+
+ 

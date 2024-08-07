@@ -1,7 +1,7 @@
 from lark import Transformer, Token
 from itertools import chain
 
-from foreduce.fol.logic import *
+from foreduce.fol.logic import _EQ, _TRUE, _FALSE, Function, Literal, Predicate, Variable, Clause, Problem
 from foreduce.vampire.lexer import vampire_lexer
 
 
@@ -23,8 +23,12 @@ class Formulas(Transformer):
     
     def fof_atom(self, children):
         if len(children) == 3 and type(children[1]) == Token:
-            return Literal(eq(children[0], children[2]), True)
+            return Literal(_EQ(children[0], children[2]), True)
         else:
+            if children[0].value == "$true":
+                return Literal(_TRUE(), True)
+            if children[0].value == "$false":
+                return Literal(_FALSE(), True)
             return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]))
 
     def fof_negated_atom(self, children):

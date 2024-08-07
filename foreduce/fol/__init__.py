@@ -1,1 +1,1 @@
-from .logic import Constant, Function, Predicate, Term, Variable, Clause, eq, Problem, Literal
+from .logic import Constant, Function, Predicate, Term, Variable, Clause, Problem, Literal

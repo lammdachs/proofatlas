@@ -1,5 +1,5 @@
 from foreduce.transformer.tokenizer import TokenConfig
-
+from bidict import bidict
 
 class _Context:
     def __init__(self):
@@ -72,7 +72,10 @@ class Predicate(_Symbol):
     def __hash__(self):
         return hash((self.name, self.arity))
 
-eq = Predicate('eq', 2)
+_EQ = Predicate('eq', 2)
+_TRUE = Predicate('$true', 0)
+_FALSE = Predicate('$false', 0)
+_PREDEFINED = {_EQ, _TRUE, _FALSE}
 
 class Term:
     @staticmethod
@@ -113,7 +116,7 @@ class Term:
     def __repr__(self):
         if self.symbol.arity == 0:
             return self.symbol.name
-        elif self.symbol == eq:
+        elif self.symbol == _EQ:
             return f"{self.args[0]} = {self.args[1]}"
         else:
             return f"{self.symbol.name}({', '.join(map(str, self.args))})"
@@ -162,7 +165,6 @@ class Term:
             result += arg.tokenize(mapping)
         return result
 
-
 class Constant(Function, Term):
     def __init__(self, name):
         Function.__init__(self, name, 0)
@@ -181,8 +183,6 @@ class Variable(_Symbol, Term):
 
     def __repr__(self):
         return self.name
-
-
 
 
 class Literal(Term):
@@ -244,10 +244,12 @@ class Clause:
         return hash(tuple(self.literals))
 
     def predicate_symbols(self):
-        predicates = set()
+        symbols = set()
         for literal in self.literals:
-            predicates.add(literal.predicate.symbol)
-        return predicates
+            symbols.add(literal.predicate.symbol)
+        for predicate in _PREDEFINED:
+            symbols.discard(predicate)
+        return symbols
 
     def function_symbols(self):
         functions = set()
@@ -275,7 +277,7 @@ class Clause:
     def to_tptp(self):
         return f"fof({hash(self)}, axiom, {self})."
 
-    def tokenize(self, mapping, config):
+    def tokenize(self, config, mapping):
         mapping = mapping | config.random_variable_mapping([var.name for var in self.variables()])
         result = [config.reserved_token_mapping["<START>"]]
         for literal in self.literals:
@@ -283,7 +285,6 @@ class Clause:
             result.append(mapping["|"])
         result[-1] = config.reserved_token_mapping["<END>"]
         return result
-    
 
 
 class Problem:
@@ -330,12 +331,18 @@ class Problem:
             result.append(clause.to_tptp())
         return '\n'.join(result)
 
-    def tokenize(self, config=TokenConfig()):
-        function_symbols = [[] for _ in config.num_functions]
+
+    def random_mapping(self, config=TokenConfig()):
+        symbols = [[] for _ in config.num_functions]
         for function in self.function_symbols() | self.predicate_symbols():
-            function_symbols[function.arity].append(function.name)
-        mapping = config.reserved_token_mapping | config.random_function_mapping(function_symbols)
+            symbols[function.arity].append(function.name)
+        return dict(config.reserved_token_mapping) | dict(config.random_function_mapping(symbols))  
+
+
+    def tokenize(self, config=TokenConfig(), mapping=None, limit=-1):
+        if mapping is None:
+            mapping = self.random_mapping(config)
         result = []
-        for clause in self.clauses:
-            result.append(clause.tokenize(mapping, config))
-        return result
+        for clause in self.clauses[:limit]:
+            result.append(clause.tokenize(config, mapping))
+        return result, mapping
