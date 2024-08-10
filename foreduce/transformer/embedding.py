@@ -15,7 +15,7 @@ class FormulaEmbedding(nn.Module):
         self.config = config
 
         self.embeddings = nn.Embedding(
-            config.RESERVED_TOKENS + config.num_variables + sum(config.num_functions),
+            config.RESERVED_TOKENS + sum(config.num_functions) + config.num_variables,
             config.embed_dim
         )
         self.positional = RotaryPositionalEmbeddings(config.embed_dim)
@@ -26,15 +26,6 @@ class FormulaEmbedding(nn.Module):
             return
         slices = [self.embeddings.weight.data[:self.config.RESERVED_TOKENS]]
         index = self.config.RESERVED_TOKENS
-        if num_variables > self.config.num_variables:
-            slices.append(torch.cat([
-                self.embeddings.weight.data[index:index + self.config.num_variables],
-                self.embeddings.weight.data[index].repeat(num_variables - self.config.num_variables, 1)
-            ], dim=0))
-            index += self.config.num_variables
-        else:
-            slices.append(self.embeddings.weight.data[index:index + num_variables])
-            index += num_variables
         for i, (n, m) in enumerate(zip(num_functions, self.config.num_functions)):
             if n > m:
                 slices.append(torch.cat([
@@ -45,7 +36,16 @@ class FormulaEmbedding(nn.Module):
                 slices.append(self.embeddings.weight.data[index:index + n])
             index += m
         for i in num_functions[len(self.config.num_functions):]:
-            slices.append(self.embeddings.weight.data[-1].repeat(i, 1))
+            slices.append(self.embeddings.weight.data[-self.config.num_variables-1].repeat(i, 1))
+        if num_variables > self.config.num_variables:
+            slices.append(torch.cat([
+                self.embeddings.weight.data[index:index + self.config.num_variables],
+                self.embeddings.weight.data[index].repeat(num_variables - self.config.num_variables, 1)
+            ], dim=0))
+            index += self.config.num_variables
+        else:
+            slices.append(self.embeddings.weight.data[index:index + num_variables])
+            index += num_variables
         self.embeddings.weight.data = torch.cat(slices, dim=0)
         self.config.num_variables = num_variables
         self.config.num_functions = num_functions

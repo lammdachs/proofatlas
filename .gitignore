@@ -2,6 +2,7 @@
 wandb/
 checkpoints/
 *.ckpt
+problems/
 proofs/
 
 # Byte-compiled / optimized / DLL files

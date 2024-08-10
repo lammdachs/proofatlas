@@ -47,9 +47,12 @@ class Formulas(Transformer):
     def start(self, children):
         clauses = []
         tree = []
+        children = sorted(children, key=lambda x: x[0])
+        mapping = {}
         for child in children:
             clauses.append(Clause(*child[1].literals))
-            tree.append([i-1 for i in child[2][1]])
+            tree.append([mapping[i] for i in child[2][1] if i in mapping])
+            mapping[child[0]] = len(clauses) - 1
         return Problem(*clauses), tree
     
     def NUMBER(self, token):

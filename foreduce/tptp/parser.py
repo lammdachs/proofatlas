@@ -2,7 +2,7 @@ from itertools import chain
 from lark import Transformer, Tree, Token, Visitor
 import os
 
-from foreduce.fol.logic import *
+from foreduce.fol.logic import _EQ, Function, Literal, Predicate, Variable, Clause, Problem
 from foreduce.tptp.lexer import tptplexer
 
 
@@ -725,7 +725,7 @@ class FOLConverter(Transformer):
     
     def fof_atom(self, children):
         if len(children) == 3 and type(children[1]) == Token:
-            return Literal(eq(children[0], children[2]), True)
+            return Literal(_EQ(children[0], children[2]), True)
         else:
             return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]))
 

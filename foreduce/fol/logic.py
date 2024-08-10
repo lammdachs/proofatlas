@@ -274,11 +274,11 @@ class Clause:
     def substitute(self, t1, t2):
         return Clause(*[literal.substitute(t1, t2) for literal in self.literals])
 
-    def to_tptp(self):
-        return f"fof({hash(self)}, axiom, {self})."
+    def to_tptp(self, i=0):
+        return f"cnf({i}, axiom, {self})."
 
     def tokenize(self, config, mapping):
-        mapping = mapping | config.random_variable_mapping([var.name for var in self.variables()])
+        mapping = mapping | config.variable_mapping([var.name for var in self.variables()])
         result = [config.reserved_token_mapping["<START>"]]
         for literal in self.literals:
             result += literal.tokenize(mapping)
@@ -327,17 +327,15 @@ class Problem:
 
     def to_tptp(self):
         result = []
-        for clause in self.clauses:
-            result.append(clause.to_tptp())
+        for i, clause in enumerate(self.clauses):
+            result.append(clause.to_tptp(i))
         return '\n'.join(result)
-
 
     def random_mapping(self, config=TokenConfig()):
         symbols = [[] for _ in config.num_functions]
         for function in self.function_symbols() | self.predicate_symbols():
             symbols[function.arity].append(function.name)
         return dict(config.reserved_token_mapping) | dict(config.random_function_mapping(symbols))  
-
 
     def tokenize(self, config=TokenConfig(), mapping=None, limit=-1):
         if mapping is None:
