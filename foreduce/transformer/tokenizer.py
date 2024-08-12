@@ -12,7 +12,6 @@ class TokenConfig:
         '<PAD>' : 0, '<START>' : 1, '<END>' : 2, '|' : 3, '~' : 4, '$true' : 5, '$false' : 6, 'eq' : 7})
     num_functions: List[int] = field(default_factory=lambda: [16, 16, 8, 4, 2, 1])
     num_variables: int = 8
-    embed_dim: int = 128
     
     def random_function_mapping(self, function_symbols : list[list[str]]):
         mapping = {}
@@ -51,9 +50,9 @@ class ProofTokenizer:
             goal = len(tree) - 1
         
         tokens, mapping = problem.tokenize(self.config, limit=self.max_steps, mapping=mapping)
-        x = torch.zeros(self.max_steps, self.max_tokens)
-        y = torch.zeros(self.max_steps)
-        target = torch.zeros(self.max_tokens)
+        x = torch.zeros(self.max_steps, self.max_tokens, dtype=torch.int)
+        y = torch.zeros(self.max_steps, dtype=torch.int)
+        target = torch.zeros(self.max_tokens, dtype=torch.int)
         for i, clause in enumerate(tokens):
             for j, token in enumerate(clause[:self.max_tokens]):
                 x[i, j] = token

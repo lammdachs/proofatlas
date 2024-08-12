@@ -1,24 +1,19 @@
-from dataclasses import dataclass, field
-import random
-from typing import List
 import torch
 from torch import nn
-from torchtune.modules import RotaryPositionalEmbeddings
 
 from foreduce.transformer.tokenizer import TokenConfig
 
 
 class FormulaEmbedding(nn.Module):
-    def __init__(self, config : TokenConfig = TokenConfig()):
+    def __init__(self, config : TokenConfig, args):
         super().__init__()
 
         self.config = config
 
         self.embeddings = nn.Embedding(
             config.RESERVED_TOKENS + sum(config.num_functions) + config.num_variables,
-            config.embed_dim
+            args["embed_dim"]
         )
-        self.positional = RotaryPositionalEmbeddings(config.embed_dim)
 
     def update_config(self, num_variables, num_functions):
         if num_variables <= self.config.num_variables and len(num_functions) <= len(self.config.num_functions) \
@@ -52,9 +47,9 @@ class FormulaEmbedding(nn.Module):
             
     def forward(self, x):
         """
-        Expects formulas as a BxL tensor, where B is the batch size, i.e. number of formulas,
-        and L is the length of the longest formula in the batch.
+        Expects formulas as a BxPxL tensor, where B is the batch size, i.e. number of problems,
+        P is the size of each problem andand L is the length of each formula.
         """
+        B, P, L = x.size()
         x = self.embeddings(x)
-        x = self.positional(x.view(x.size(0), x.size(1), 1, -1)).view(x.size(0), x.size(1), -1)
         return x

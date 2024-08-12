@@ -12,9 +12,9 @@ class VampireProofs(Dataset):
         
         self.tokenizer = ProofTokenizer(config, max_steps, max_tokens, seed)
         
-        self.x = torch.zeros(0, max_steps, max_tokens)
-        self.y = torch.zeros(0, max_steps)
-        self.target = torch.zeros(0, max_tokens)
+        self.x = torch.zeros(0, max_steps, max_tokens, dtype=torch.int)
+        self.y = torch.zeros(0, max_steps, dtype=torch.int)
+        self.target = torch.zeros(0, max_tokens, dtype=torch.int)
 
     def add_proof(self, problem, tree, mapping=None, goal='random'):
         x, y, target, _ = self.tokenizer(problem, tree, mapping, goal)
