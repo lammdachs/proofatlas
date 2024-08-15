@@ -50,10 +50,19 @@ if __name__ == "__main__":
 
     logger = WandbLogger(project="vampire_select", group="test")
     
+    train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset) - len(dataset) // 10, len(dataset) // 10])
+    
     train_loader = torch.utils.data.DataLoader(
-        dataset,
+        train_set,
         batch_size=args.batch_size,
         shuffle=True,
+        num_workers=4
+    )
+    
+    val_loader = torch.utils.data.DataLoader(
+        val_set,
+        batch_size=args.batch_size,
+        shuffle=False,
         num_workers=4
     )
 
@@ -63,9 +72,10 @@ if __name__ == "__main__":
         accumulate_grad_batches=64,
         log_every_n_steps=1,
         gradient_clip_algorithm='value',
-        callbacks=[ModelCheckpoint(every_n_train_steps=8)],
+        val_check_interval=1024,
+        callbacks=[ModelCheckpoint(every_n_train_steps=8)],        
         gradient_clip_val=1.0,
     )
-    trainer.fit(model, train_loader)
+    trainer.fit(model, train_loader, val_loader)
     wandb.finish()
 

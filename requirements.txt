@@ -1,5 +1,0 @@
-z3-solver
-numpy
-torch
-lightning
-bidict

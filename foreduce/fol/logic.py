@@ -1,5 +1,5 @@
 from foreduce.transformer.tokenizer import TokenConfig
-from bidict import bidict
+
 
 class _Context:
     def __init__(self):

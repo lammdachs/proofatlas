@@ -61,13 +61,13 @@ for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./prob
 total, success
 
 config = TokenConfig(num_functions=num_functions)
-dataset = VampireProofs(config=config, max_steps=1024, max_tokens=128)
+dataset = VampireProofs(config=config, proofs=success*datapoints_per_proof, max_steps=1024, max_tokens=128)
 
 for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./proofs')) for file in sorted(os.listdir('./proofs/' + dir))])):
     pbar.set_description(f'Parsing proof {dir}/{file}')
     problem, tree = read_vampire('./proofs/' + dir + '/' + file)
     for i in range(datapoints_per_proof):
         pbar.set_description(f'Converting proof of {dir}/{file} to {i+1}/{datapoints_per_proof} datapoints')
-        dataset.add_proof(problem, tree, goal='random')
+        dataset.add_proof(problem, tree, goal='last')
 
-torch.save(dataset, './proofs.pt')
+dataset.to_file('./proofs_last_test.pt')

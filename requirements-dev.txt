@@ -1,6 +1,0 @@
-z3-solver
-ipykernel
-numpy
-torch
-lightning
-bidict

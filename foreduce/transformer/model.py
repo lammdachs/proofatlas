@@ -80,13 +80,10 @@ class Model(LightningModule):
         return torch.einsum("bd,bld->bl", query, key)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters())
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-6)
         return {
             "optimizer": optimizer,
-            "lr_scheduler": torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=1.0,
-                end_factor=0.1, total_iters=16*1000
-            )
+            "lr_scheduler": torch.optim.lr_scheduler.ConstantLR(optimizer),
         }
 
     def training_step(self, batch, batch_idx):

@@ -11,6 +11,10 @@ dynamic = [
 ]
 requires-python = ">=3.11"
 
+[tool.setuptools.packages.find]
+include = ["foreduce*"]
+namespaces = false
+
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"]}
 optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}

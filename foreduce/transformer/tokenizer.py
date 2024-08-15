@@ -36,6 +36,9 @@ class TokenConfig:
         return mapping
 
 
+torch.serialization.add_safe_globals([TokenConfig])
+
+
 class ProofTokenizer:
     def __init__(self, config, max_steps=1024, max_tokens=128, seed=42):
         self.config = config
