@@ -10,11 +10,16 @@ def read_file(file):
         return Formulas().transform(vampire_lexer.parse(f.read()))
 
 
-def read_string(str):
-    return Formulas().transform(vampire_lexer.parse(str))
+def read_string(str, problem=Problem(), tree=[], mapping={}):
+    return Formulas(problem=problem, tree=tree, mapping=mapping).transform(vampire_lexer.parse(str))
 
 
 class Formulas(Transformer):
+    def __init__(self, problem=Problem(), tree=[], mapping={}):
+        self.problem = problem
+        self.tree = tree
+        self.mapping = mapping
+    
     def fof_term(self, children):
         if children[0].type == "FUNCTOR":
             return Function(children[0].value, len(children) - 1)(*children[1:])
@@ -45,15 +50,13 @@ class Formulas(Transformer):
         return children
 
     def start(self, children):
-        clauses = []
-        tree = []
         children = sorted(children, key=lambda x: x[0])
-        mapping = {}
-        for child in children:
-            clauses.append(Clause(*child[1].literals))
-            tree.append([mapping[i] for i in child[2][1] if i in mapping])
-            mapping[child[0]] = len(clauses) - 1
-        return Problem(*clauses), tree
+        offset = len(self.problem.clauses)
+        self.problem.clauses += tuple(Clause(*child[1].literals) for child in children)
+        for i, child in enumerate(children):
+            self.tree.append([self.mapping[i] for i in child[2][1] if i in self.mapping])
+            self.mapping[child[0]] = offset + i
+        return self.problem, self.tree, self.mapping
     
     def NUMBER(self, token):
         return int(token.value)
