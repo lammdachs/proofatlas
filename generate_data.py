@@ -4,7 +4,7 @@ import subprocess
 import torch
 from tqdm import tqdm
 
-from foreduce.data.data import VampireProofs
+from foreduce.data.data import ProofEmbeddings
 from foreduce.transformer.tokenizer import TokenConfig
 from foreduce.tptp.parser import read_file as read_tptp
 from foreduce.vampire.parser import read_file as read_vampire
@@ -61,7 +61,7 @@ for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./prob
 total, success
 
 config = TokenConfig(num_functions=num_functions)
-dataset = VampireProofs(config=config, proofs=success*datapoints_per_proof, max_steps=1024, max_tokens=128)
+dataset = ProofEmbeddings(config=config, proofs=success*datapoints_per_proof, max_steps=1024, max_tokens=128)
 
 for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./proofs')) for file in sorted(os.listdir('./proofs/' + dir))])):
     pbar.set_description(f'Parsing proof {dir}/{file}')
@@ -70,4 +70,4 @@ for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./proo
         pbar.set_description(f'Converting proof of {dir}/{file} to {i+1}/{datapoints_per_proof} datapoints')
         dataset.add_proof(problem, tree, goal='last')
 
-dataset.to_file('./proofs_last_test.pt')
+dataset.to_file('./proofs_last.pt')

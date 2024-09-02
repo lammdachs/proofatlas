@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from lightning import LightningModule
 
-from foreduce.transformer.attention import MultiHeadAttention
 from foreduce.transformer.embedding import FormulaEmbedding
-from foreduce.transformer.decoder import DecoderLayer, RMSNorm
+from foreduce.transformer.transformer import DecoderLayer, RMSNorm, MultiHeadAttention
 
 class Model(LightningModule):
     default_args = {
@@ -43,7 +42,6 @@ class Model(LightningModule):
             },
             outdim=args["problem_embed_dim"]
         )
-        self.pool = nn.AdaptiveAvgPool2d((1, args["problem_embed_dim"]))
         self.problem_transformer = nn.ModuleList([
             DecoderLayer(
             {
@@ -64,23 +62,30 @@ class Model(LightningModule):
         B, P, L = x.size()
         if t is None:
             # if no target is given, we use $false as the target
-            t = torch.zeros(B, L, dtype=torch.int)
+            t = torch.zeros(B, L, dtype=torch.int).to(x.device)
             t[:, 0] = 1; t[:, 1] = 6; t[:, 2] = 2
         x = torch.cat((t.unsqueeze(1), x), dim=1)
         P += 1
-        x = self.formula_embedding(x).view(B * P, L, -1)
-        for layer in self.clause_transformer:
-            x = layer(x)
-        x = self.pool_attention(self.norm(x))
-        x = self.pool(x).view(B, P, -1)
+        x = self.clause_embeddings(x)
         for layer in self.problem_transformer:
             x = layer(x)
         query = self.out_query(x[:, 0])
         key = self.out_key(x[:, 1:])
         return torch.einsum("bd,bld->bl", query, key)
 
+
+    def clause_embeddings(self, x):
+        B, P, L = x.size()
+        x = self.formula_embedding(x).view(B * P, L, -1)
+        for layer in self.clause_transformer:
+            x = layer(x)
+        x = self.pool_attention(self.norm(x))
+        x = torch.sum(x, dim=1)/torch.count_nonzero(x, dim=1)
+        return x.view(B, P, -1)
+
+
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-6)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
         return {
             "optimizer": optimizer,
             "lr_scheduler": torch.optim.lr_scheduler.ConstantLR(optimizer),

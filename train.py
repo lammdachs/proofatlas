@@ -8,7 +8,7 @@ import torch
 import wandb
 
 from foreduce.transformer.model import Model
-from foreduce.data.data import VampireProofs
+from foreduce.data.data import ProofEmbeddings
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -19,7 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("--clause_embed_dim", type=int, default=64)
     parser.add_argument("--problem_embed_layers", type=int, default=16)
     parser.add_argument("--problem_num_heads", type=int, default=16)
-    parser.add_argument("--problem_embed_dim", type=int, default=1024)
+    parser.add_argument("--problem_embed_dim", type=int, default=512)
     parser.add_argument("--from_checkpoint", type=str, default=None)
     args = parser.parse_args()
     
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     
     torch.set_float32_matmul_precision('medium')
     
-    dataset = VampireProofs.from_file("./proofs_random.pt")
+    dataset = ProofEmbeddings.from_file("./proofs_last.pt")
     
     if args.from_checkpoint is not None:
         model = Model.load_from_checkpoint(args.from_checkpoint)
@@ -60,10 +60,10 @@ if __name__ == "__main__":
     trainer = Trainer(
         max_epochs=args.epochs,
         logger=logger,
-        accumulate_grad_batches=64,
+        accumulate_grad_batches=1024,
         log_every_n_steps=1,
         gradient_clip_algorithm='value',
-        callbacks=[ModelCheckpoint(every_n_train_steps=8)],
+        callbacks=[ModelCheckpoint(every_n_train_steps=1)],
         gradient_clip_val=1.0,
     )
     trainer.fit(model, train_loader)

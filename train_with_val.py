@@ -8,7 +8,7 @@ import torch
 import wandb
 
 from foreduce.transformer.model import Model
-from foreduce.data.data import VampireProofs
+from foreduce.data.data import ProofEmbeddings
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     
     torch.set_float32_matmul_precision('medium')
     
-    dataset = VampireProofs.from_file("./proofs_random.pt")
+    dataset = ProofEmbeddings.from_file("./proofs_random.pt")
     
     if args.from_checkpoint is not None:
         model = Model.load_from_checkpoint(args.from_checkpoint)

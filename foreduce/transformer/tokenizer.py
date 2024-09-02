@@ -1,5 +1,6 @@
 from collections import deque
 from dataclasses import dataclass, field
+from itertools import combinations
 import random
 import torch
 from typing import List
@@ -40,6 +41,31 @@ torch.serialization.add_safe_globals([TokenConfig])
 
 
 class ProofTokenizer:
+    def __init__(self, config, max_tokens=128, seed=42):
+        self.config = config
+        self.max_tokens = max_tokens
+
+    def __call__(self, problem, tree, mapping=None):
+        tokens, mapping = problem.tokenize(self.config, mapping=mapping)
+        x = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, self.max_tokens, dtype=torch.int)
+        y = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, self.max_tokens, dtype=torch.int)
+        target = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, dtype=torch.float)
+        dependencies = [set() for _ in range(len(tokens))]
+        for idx in range(len(tokens)):
+            if tree[idx]:
+                dependencies[idx] = {idx} | set.union(*[dependencies[j] for j in tree[idx]])
+            else:
+                dependencies[idx] = {idx}
+        for i, (idx, idy) in enumerate(combinations(range(len(tokens)), 2)): 
+            for j in range(min(self.max_tokens, len(tokens[idx]))):
+                x[i, j] = tokens[idx][j]
+            for j in range(min(self.max_tokens, len(tokens[idy]))):
+                y[i, j] = tokens[idy][j]
+            target[i] = len(dependencies[idx] & dependencies[idy]) / (len(dependencies[idx]) * len(dependencies[idy]))**0.5
+        return x, y, target, mapping
+    
+                
+class ProofEmbedder:
     def __init__(self, config, max_steps=1024, max_tokens=128, seed=42):
         self.config = config
         self.max_steps = max_steps
@@ -74,7 +100,7 @@ class ProofTokenizer:
         return x, y, target, mapping
 
 
-class ProblemTokenizer:
+class ProblemEmbedder:
     def __init__(self, config, max_clauses=1024, max_tokens=128):
         self.config = config
         self.max_clauses = max_clauses
@@ -87,5 +113,4 @@ class ProblemTokenizer:
             for j, token in enumerate(clause[:self.max_tokens]):
                 x[i, j] = token
         return x, mapping
-
  

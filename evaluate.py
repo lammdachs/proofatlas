@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 
 from foreduce.fol.logic import Problem
-from foreduce.transformer.tokenizer import ProblemTokenizer
+from foreduce.transformer.tokenizer import ProblemEmbedder
 from foreduce.transformer.model import Model
 from foreduce.vampire.parser import read_string as read_vampire
 
@@ -16,18 +16,27 @@ if __name__ == '__main__':
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--select_from", type=int, default=1024)
     parser.add_argument("--topk", type=int, default=128)
-    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--timeout", type=int, default=10)
+    args = parser.parse_args()
     
-    if parser.model is not None:
-        model = Model.load_from_checkpoint('./models/' + parser.model)
+    if args.model is not None:
+        model = Model.load_from_checkpoint('./models/' + args.model)
         
-    for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./problems')) for file in sorted(os.listdir('./problems/' + dir))])):
-        if os.path.exists('./proofs/' + dir + '/' + file):
-            continue
+    for dir, file in (pbar := tqdm([
+        (dir, file)
+        for dir in sorted(os.listdir('./problems'))
+        for file in sorted(os.listdir('./problems/' + dir))
+        if not os.path.exists('./proofs/' + dir + '/' + file)
+    ])):
         os.makedirs('./results/' + dir, exist_ok=True)
-        if model is None:
-            result = subprocess.run([VAMPIRE_PATH, './problems/' + dir + '/' + file,  '--show_new', 'on',\
-                '-t', str(parser.timeout), '--avatar', 'off', '--proof', 'off'], capture_output=True, text=True, timeout=parser.timeout)
+        if args.model is None:
+            try:
+                result = subprocess.run([VAMPIRE_PATH, './problems/' + dir + '/' + file,  '--show_new', 'on',\
+                '-t', str(args.timeout), '--avatar', 'off', '--proof', 'off'], capture_output=True, text=True, timeout=args.timeout+4)
+            except subprocess.TimeoutExpired:
+                with open('./results/' + dir + '/' + file, 'a') as f:
+                    f.write(f"Vampire: X" + '\n')
+                continue
             if result.returncode == 0 and 'Refutation found.' in result.stdout:
                 with open('./results/' + dir + '/' + file, 'a') as f:
                     lines = len(result.stdout.split('\n'))
@@ -45,14 +54,14 @@ if __name__ == '__main__':
             else:
                 problem, _ = read_vampire('./problems/' + dir + '/' + file)
                 mapping = problem.random_mapping(model.config)
-                x, mapping = ProblemTokenizer(model.config, parser.select_from, parser.topk, 42)(problem, mapping)
+                x, mapping = ProblemEmbedder(model.config, args.select_from, args.topk, 42)(problem, mapping)
                 model.formula_embedding.update_config(model.config)
                 logits = model(x.unsqueeze(0)).squeeze(0)
-                _, indices = torch.topk(logits, parser.topk)
+                _, indices = torch.topk(logits, args.topk)
                 with open('./tmp.p/', 'w') as f:
                     f.write(Problem(*[problem.clauses[i] for i in indices]).to_tptp())
                 result = subprocess.run([VAMPIRE_PATH, './tmp.p',  '--show_new', 'on',\
-                    '-t', str(parser.timeout), '--avatar', 'off', '--proof', 'off'], capture_output=True, text=True, timeout=parser.timeout)
+                    '-t', str(args.timeout), '--avatar', 'off', '--proof', 'off'], capture_output=True, text=True)
                 if result.returncode == 0 and 'Refutation found.' in result.stdout:
                     with open('./results/' + dir + '/' + file, 'a') as f:
                         lines = len(result.stdout.split('\n'))

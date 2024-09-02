@@ -4,6 +4,8 @@ checkpoints/
 *.ckpt
 problems/
 proofs/
+results/
+vampire_select/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
