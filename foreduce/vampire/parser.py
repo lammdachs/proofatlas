@@ -1,5 +1,6 @@
 from lark import Transformer, Token
 from itertools import chain
+from sortedcontainers import SortedDict
 
 from foreduce.fol.logic import _EQ, _TRUE, _FALSE, Function, Literal, Predicate, Variable, Clause, Problem
 from foreduce.vampire.lexer import vampire_lexer
@@ -10,12 +11,12 @@ def read_file(file):
         return Formulas().transform(vampire_lexer.parse(f.read()))
 
 
-def read_string(str, problem=Problem(), tree=[], mapping={}):
+def read_string(str, problem=Problem(), tree=[], mapping=SortedDict({})):
     return Formulas(problem=problem, tree=tree, mapping=mapping).transform(vampire_lexer.parse(str))
 
 
 class Formulas(Transformer):
-    def __init__(self, problem=Problem(), tree=[], mapping={}):
+    def __init__(self, problem=Problem(), tree=[], mapping=SortedDict({})):
         self.problem = problem
         self.tree = tree
         self.mapping = mapping

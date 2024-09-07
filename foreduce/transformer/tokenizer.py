@@ -4,6 +4,7 @@ from itertools import combinations
 import random
 import torch
 from typing import List
+from einops import rearrange
 
 
 @dataclass
@@ -47,22 +48,25 @@ class ProofTokenizer:
 
     def __call__(self, problem, tree, mapping=None):
         tokens, mapping = problem.tokenize(self.config, mapping=mapping)
-        x = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, self.max_tokens, dtype=torch.int)
-        y = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, self.max_tokens, dtype=torch.int)
-        target = torch.zeros(len(tokens) * (len(tokens) - 1) // 2, dtype=torch.float)
+        _tokens = torch.zeros(len(tokens), self.max_tokens, dtype=torch.int)
+        for i, clause in enumerate(tokens):
+            for j, token in enumerate(clause[:self.max_tokens]):
+                _tokens[i, j] = token
+        x = torch.combinations(torch.arange(len(tokens)), 2, with_replacement=True)
+        target = torch.zeros(len(x), dtype=torch.float)
+        weight = torch.zeros(len(x), dtype=torch.float)
         dependencies = [set() for _ in range(len(tokens))]
         for idx in range(len(tokens)):
             if tree[idx]:
                 dependencies[idx] = {idx} | set.union(*[dependencies[j] for j in tree[idx]])
             else:
                 dependencies[idx] = {idx}
-        for i, (idx, idy) in enumerate(combinations(range(len(tokens)), 2)): 
-            for j in range(min(self.max_tokens, len(tokens[idx]))):
-                x[i, j] = tokens[idx][j]
-            for j in range(min(self.max_tokens, len(tokens[idy]))):
-                y[i, j] = tokens[idy][j]
-            target[i] = len(dependencies[idx] & dependencies[idy]) / (len(dependencies[idx]) * len(dependencies[idy]))**0.5
-        return x, y, target, mapping
+        for i, p in enumerate(x):
+            intersection = len(dependencies[p[0]] & dependencies[p[1]])
+            union = len(dependencies[p[0]] | dependencies[p[1]])
+            target[i] = len(dependencies[p[0]] & dependencies[p[1]]) / (len(dependencies[p[0]]) * len(dependencies[p[1]]))**0.5
+            weight[i] = 1 - intersection / union if target[i] != 0 else union / len(x)
+        return _tokens, x, target, weight, mapping
     
                 
 class ProofEmbedder:

@@ -71,14 +71,16 @@ class FormulaEmbedding(LightningModule):
         x = self.embeddings(x)
         for layer in self.layers:
             x = layer(x)
-        return self.out(x).mean(dim=1)
+        return self.out(x).sum(dim=1)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+        return [optimizer], []
     
     def training_step(self, batch, batch_idx):
-        x, y, target = batch
+        x, y, target, weight = batch
         prediction = torch.nn.functional.cosine_similarity(self(x), self(y), dim=-1)
-        loss = torch.nn.functional.mse_loss(prediction, target)
-        self.log("train_loss", loss)
+        loss = ((prediction - target)**2 * weight).mean()
+        self.log("train_loss", loss, on_step=True, 
+                 on_epoch=True, logger=True, sync_dist=True, prog_bar=True)
         return loss

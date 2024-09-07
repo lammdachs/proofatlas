@@ -725,7 +725,10 @@ class FOLConverter(Transformer):
     
     def fof_atom(self, children):
         if len(children) == 3 and type(children[1]) == Token:
-            return Literal(_EQ(children[0], children[2]), True)
+            if children[1].value == "=":
+                return Literal(_EQ(children[0], children[2]), True)
+            elif children[1].value == "!=":
+                return Literal(_EQ(children[0], children[2]), False)
         else:
             return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]))
 

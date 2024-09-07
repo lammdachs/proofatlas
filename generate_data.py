@@ -65,7 +65,7 @@ dataset = ProofEmbeddings(config=config, proofs=success*datapoints_per_proof, ma
 
 for dir, file in (pbar := tqdm([(dir, file) for dir in sorted(os.listdir('./proofs')) for file in sorted(os.listdir('./proofs/' + dir))])):
     pbar.set_description(f'Parsing proof {dir}/{file}')
-    problem, tree = read_vampire('./proofs/' + dir + '/' + file)
+    problem, tree, _ = read_vampire('./proofs/' + dir + '/' + file)
     for i in range(datapoints_per_proof):
         pbar.set_description(f'Converting proof of {dir}/{file} to {i+1}/{datapoints_per_proof} datapoints')
         dataset.add_proof(problem, tree, goal='last')

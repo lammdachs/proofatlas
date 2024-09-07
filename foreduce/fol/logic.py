@@ -337,9 +337,11 @@ class Problem:
             symbols[function.arity].append(function.name)
         return dict(config.reserved_token_mapping) | dict(config.random_function_mapping(symbols))  
 
-    def tokenize(self, config=TokenConfig(), mapping=None, limit=-1):
+    def tokenize(self, config=TokenConfig(), mapping=None, limit=None):
         if mapping is None:
             mapping = self.random_mapping(config)
+        if limit is None:
+            limit = len(self.clauses)
         result = []
         for clause in self.clauses[:limit]:
             result.append(clause.tokenize(config, mapping))
