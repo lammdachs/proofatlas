@@ -17,7 +17,7 @@ class FormulaEmbedding(LightningModule):
         self.n_heads = n_heads
 
         self.embeddings = nn.Embedding(
-            config.RESERVED_TOKENS + sum(config.num_functions) + config.num_variables,
+            config.RESERVED_TOKENS + sum(config.num_functions) + 1,
             dim,
             padding_idx=0
         )
@@ -65,22 +65,51 @@ class FormulaEmbedding(LightningModule):
             
     def forward(self, x):
         """
-        Expects formulas as a BxPxL tensor, where B is the batch size, i.e. number of problems,
-        P is the size of each problem andand L is the length of each formula.
+        Expects formulas as a BxL tensor, where B is the batch size, i.e. number of clauses,
+        L is the length of each clause.
         """
+        offset = self.config.RESERVED_TOKENS + sum(self.config.num_functions)
+        vars = x >= offset
+        attn_mask = torch.zeros(x.size(0), x.size(1), x.size(1)).to(x.device)
+        attn_mask = attn_mask.masked_fill(vars.unsqueeze(1) | vars.unsqueeze(2), -10e9)
+        for var in range(offset, offset + self.config.num_variables):
+            _vars = x == var
+            attn_mask = attn_mask.masked_fill(_vars.unsqueeze(1) & _vars.unsqueeze(2), 0)
+        x = x.masked_fill(vars, self.config.RESERVED_TOKENS + sum(self.config.num_functions))
         x = self.embeddings(x)
-        for layer in self.layers:
+        x = self.layers[0](x, attn_mask)
+        for layer in self.layers[1:]:
             x = layer(x)
         return self.out(x).sum(dim=1)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=2.5*1e-4)
         return [optimizer], []
     
     def training_step(self, batch, batch_idx):
         x, y, target, weight = batch
-        prediction = torch.nn.functional.cosine_similarity(self(x), self(y), dim=-1)
-        loss = ((prediction - target)**2 * weight).mean()
+        similarities = torch.cosine_similarity(self(x), self(y), dim=-1)
+        _fill = torch.full(target.size(), 1e-2).to(target)
+        loss = torch.where(
+            similarities >= target,
+            (similarities - target) * torch.min(similarities, _fill),
+            (target - similarities) * torch.min(1 - similarities, _fill)
+        ) *  torch.max(torch.ones_like(weight).to(weight), weight)
+        loss = loss.mean()
         self.log("train_loss", loss, on_step=True, 
+                 on_epoch=True, logger=True, sync_dist=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y, target, weight = batch
+        similarities = torch.cosine_similarity(self(x), self(y), dim=-1)
+        _fill = torch.full(target.size(), 1e-2).to(target)
+        loss = torch.where(
+            similarities >= target,
+            (similarities - target) * torch.min(similarities, _fill),
+            (target - similarities) * torch.min(1 - similarities, _fill)
+        ) * torch.max(torch.ones_like(weight).to(weight), weight)
+        loss = loss.mean()
+        self.log("val_loss", loss, on_step=True, 
                  on_epoch=True, logger=True, sync_dist=True, prog_bar=True)
         return loss

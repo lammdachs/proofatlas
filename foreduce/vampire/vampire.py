@@ -15,6 +15,7 @@ class VampireInteractive:
             '--proof', 'off',
             '--manual_cs', 'on',
             '--time_limit', '0',
+            '--saturation_algorithm', 'discount',
             problem_path
         ]
         self.problem, self.tree, self.mapping = Problem(), [], SortedDict({})
@@ -33,6 +34,10 @@ class VampireInteractive:
             self.finished = True
         string = str(self.process.before, encoding='utf-8')
         string = string[string.find('\n')+1:].replace('\r\n', '\n')
+        if 'Refutation found.' in string:
+            self.finished = True
+            self.proof += string
+            return
         if string and not 'User error' in string:
             self.problem, self.tree, self.mapping = \
                 read_string(string, self.problem, self.tree, self.mapping)
@@ -42,7 +47,7 @@ class VampireInteractive:
     def step(self, i: int):
         if self.finished:
             raise EOFError('Vampire finished.')
-        self.process.sendline(str(i))
+        self.process.sendline(str(i+1))
         self.active[i] = True
         self.read()
         self.step_count += 1
@@ -93,6 +98,7 @@ class VampireAutomatic:
             '--proof', 'off',
             '--manual_cs', 'off',
             '--time_limit', '0',
+            '--saturation_algorithm', 'discount',
             '--activation_limit', str(self.activation_limit),
             '--age_weight_ratio', f'{self.age_weight_ratio[0]}:{self.age_weight_ratio[1]}',
             '--selection', self.selection

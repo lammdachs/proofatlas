@@ -13,7 +13,7 @@ class TokenConfig:
     reserved_token_mapping: dict = field(default_factory=lambda: {
         '<PAD>' : 0, '<START>' : 1, '<END>' : 2, '|' : 3, '~' : 4, '$true' : 5, '$false' : 6, 'eq' : 7})
     num_functions: List[int] = field(default_factory=lambda: [16, 16, 8, 4, 2, 1])
-    num_variables: int = 8
+    num_variables: int = 0
     
     def random_function_mapping(self, function_symbols : list[list[str]]):
         mapping = {}
@@ -48,24 +48,32 @@ class ProofTokenizer:
 
     def __call__(self, problem, tree, mapping=None):
         tokens, mapping = problem.tokenize(self.config, mapping=mapping)
-        _tokens = torch.zeros(len(tokens), self.max_tokens, dtype=torch.int)
-        for i, clause in enumerate(tokens):
-            for j, token in enumerate(clause[:self.max_tokens]):
-                _tokens[i, j] = token
-        x = torch.combinations(torch.arange(len(tokens)), 2, with_replacement=True)
-        target = torch.zeros(len(x), dtype=torch.float)
-        weight = torch.zeros(len(x), dtype=torch.float)
         dependencies = [set() for _ in range(len(tokens))]
         for idx in range(len(tokens)):
             if tree[idx]:
                 dependencies[idx] = {idx} | set.union(*[dependencies[j] for j in tree[idx]])
             else:
                 dependencies[idx] = {idx}
+        _tokens = torch.zeros(len(tokens), self.max_tokens, dtype=torch.int)
+        for i, clause in enumerate(tokens):
+            for j, token in enumerate(clause[:self.max_tokens]):
+                _tokens[i, j] = token
+        _tokens, indices = torch.unique(_tokens, return_inverse=True, dim=0)
+        index_mapping = {idx : [] for idx in range(len(_tokens))}
+        for i, token in enumerate(indices):
+            index_mapping[token.item()].append(i)
+        x = torch.combinations(torch.arange(len(_tokens)), 2, with_replacement=False)
+        target = torch.zeros(len(x), dtype=torch.float)
+        weight = torch.zeros(len(x), dtype=torch.float)
         for i, p in enumerate(x):
-            intersection = len(dependencies[p[0]] & dependencies[p[1]])
-            union = len(dependencies[p[0]] | dependencies[p[1]])
-            target[i] = len(dependencies[p[0]] & dependencies[p[1]]) / (len(dependencies[p[0]]) * len(dependencies[p[1]]))**0.5
-            weight[i] = 1 - intersection / union if target[i] != 0 else union / len(x)
+            idx, idy, _ = min((
+                (idx, idy, len(dependencies[idx] | dependencies[idy]) + 1 / (1 + len(dependencies[idx] & dependencies[idy])))
+                for idx in index_mapping[p[0].item()] for idy in index_mapping[p[1].item()]),
+                key=lambda x: x[2]
+            )
+            target[i] = len(dependencies[idx] & dependencies[idy]) / (len(dependencies[idx]) * len(dependencies[idy]))**0.5
+            weight[i] = len(index_mapping[p[0].item()]) * len(index_mapping[p[1].item()]) * (
+                1/target[i] if target[i] > 0 else 1)
         return _tokens, x, target, weight, mapping
     
                 

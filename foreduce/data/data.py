@@ -32,21 +32,30 @@ class ProofTokens(Dataset):
         self._tokens = torch.cat([self._tokens, _tokens], dim=0)
         
     def to_file(self, path):
-        torch.save((self._tokens, self.x, self.target, self.config), path)
+        torch.save((
+            self._tokens,
+            self.x[:self.index],
+            self.target[:self.index],
+            self.weight[:self.index],
+            self.config,
+            self.index
+        ), path)
         
     def from_file(path):
         torch.serialization.add_safe_globals([TokenConfig])
-        _tokens, x, target, config = torch.load(path, weights_only=True)
+        _tokens, x, target, weight, config, index = torch.load(path, weights_only=True)
         tokens = ProofTokens(config, len(_tokens[0]))
         tokens._tokens = _tokens
         tokens.x = x
         tokens.target = target
+        tokens.weight = weight
+        tokens.index = index
         return tokens
     
     def __len__(self):
         return self.index
     
-    def __getitem__(self, idx):
+    def __getitem__(self, idx):   
         return self._tokens[self.x[idx, 0]], self._tokens[self.x[idx, 1]], self.target[idx], self.weight[idx]
 
 
@@ -67,11 +76,11 @@ class ProofEmbeddings(Dataset):
 
     def add_proof(self, problem, tree, mapping=None, goal='random'):
         assert self.index < len(self.x)
-        x, y, target, weights, _ = self.tokenizer(problem, tree, mapping, goal)
+        x, y, target, weight, _ = self.tokenizer(problem, tree, mapping, goal)
         self.x[self.index] = x
         self.y[self.index] = y
         self.target[self.index] = target
-        self.weight[self.index] = weights
+        self.weight[self.index] = weight
         self.index += 1
 
     def to_file(self, path):
@@ -91,4 +100,4 @@ class ProofEmbeddings(Dataset):
         return len(self.x)
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx], self.target[idx]
+        return self.x[idx], self.y[idx], self.target[idx], self.weight[idx]

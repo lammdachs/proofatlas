@@ -9,11 +9,11 @@ class TransformerLayer(nn.Module):
         super().__init__()
         self.attn = MultiHeadAttention(dim, n_heads, rope=rope, seq_len=seq_len)
         self.pos_ff = PositionwiseFeedForward(dim)
-        self.n1 = RMSNorm(dim)
-        self.n2 = RMSNorm(dim)
+        self.n1 = nn.LayerNorm(dim)
+        self.n2 = nn.LayerNorm(dim)
     
-    def forward(self, x):
-        x = x + self.attn(self.n1(x))
+    def forward(self, x, mask=None):
+        x = x + self.attn(self.n1(x), mask)
         x = x + self.pos_ff(self.n2(x))
         return x
 
@@ -28,7 +28,7 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(dim, dim, bias=False)
         if rope:
             self.rope = RotaryPositionalEmbeddings(dim // n_heads, max_seq_len=seq_len)
-        self.norm = RMSNorm(dim)
+        self.norm = nn.LayerNorm(dim)
         
         self._init()
 
@@ -38,7 +38,7 @@ class MultiHeadAttention(nn.Module):
         nn.init.xavier_uniform_(self.wv.weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, mask=None):
         q = rearrange(self.wq(x), "b n (h d) -> b n h d", h=self.n_heads)
         k = rearrange(self.wk(x), "b n (h d) -> b n h d", h=self.n_heads)
         if hasattr(self, "rope"):
@@ -50,7 +50,10 @@ class MultiHeadAttention(nn.Module):
         v = rearrange(self.wv(x), "b n (h d) -> b h n d", h=self.n_heads)
         
         similarity = einsum(q, k, "b h n d, b h s d -> b h n s")
-        attention = nn.functional.softmax(similarity, dim=-1) / (k.size(-1) ** 0.5)
+        if mask is not None:
+            attention =  nn.functional.softmax(similarity + mask.unsqueeze(1), dim=-1) / (k.size(-1) ** 0.5)
+        else:
+            attention = nn.functional.softmax(similarity, dim=-1) / (k.size(-1) ** 0.5)
         x = einsum(attention, v, "b h n s, b h s d -> b h n d")
         x = rearrange(x, "b h n d -> b n (h d)")
         x = self.out_proj(self.norm(x))
@@ -65,18 +68,18 @@ class PositionwiseFeedForward(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(dim, 2*dim),
             nn.SiLU(),
+            nn.LayerNorm(2*dim),
             nn.Linear(2*dim, dim),
         )
-        self.norm = RMSNorm(dim)
         
         self._init()
         
     def _init(self):
         nn.init.xavier_uniform_(self.net[0].weight)
-        nn.init.xavier_uniform_(self.net[2].weight)
+        nn.init.xavier_uniform_(self.net[3].weight)
         
     def forward(self, x):
-        return self.norm(self.net(x) + x)
+        return self.net(x) + x
 
 
 class RMSNorm(nn.Module):
