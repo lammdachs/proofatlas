@@ -37,6 +37,18 @@ class TokenConfig:
             mapping[symbol] = offset + i
         return mapping
 
+    def to_dict(self):
+        return {
+            'RESERVED_TOKENS' : self.RESERVED_TOKENS,
+            'reserved_token_mapping' : self.reserved_token_mapping,
+            'num_functions' : self.num_functions,
+            'num_variables' : self.num_variables
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
 
 torch.serialization.add_safe_globals([TokenConfig])
 
@@ -46,7 +58,7 @@ class ProofTokenizer:
         self.config = config
         self.max_tokens = max_tokens
 
-    def __call__(self, problem, tree, mapping=None):
+    def __call__(self, problem, tree, mapping=None, theta=50):
         tokens, mapping = problem.tokenize(self.config, mapping=mapping)
         dependencies = [set() for _ in range(len(tokens))]
         for idx in range(len(tokens)):
@@ -73,7 +85,7 @@ class ProofTokenizer:
             )
             target[i] = len(dependencies[idx] & dependencies[idy]) / (len(dependencies[idx]) * len(dependencies[idy]))**0.5
             weight[i] = len(index_mapping[p[0].item()]) * len(index_mapping[p[1].item()]) * (
-                1/target[i] if target[i] > 0 else 1)
+                    1/target[i] if target[i] > 0 else 1)
         return _tokens, x, target, weight, mapping
     
                 

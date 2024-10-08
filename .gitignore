@@ -6,6 +6,7 @@ problems/
 proofs/
 results/
 vampire_select/
+overfit/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
