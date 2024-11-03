@@ -2,6 +2,8 @@
 wandb/
 checkpoints/
 *.ckpt
+*.p
+*.json
 problems/
 proofs/
 results/
