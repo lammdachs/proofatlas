@@ -3,9 +3,9 @@ TPTP_PATH = '/home/apluska/TPTP-v8.2.0/'
 
 
 train_problems = [
-    'GRP/GRP001-1.p',
     'GRP/GRP002-1.p',
     'GRP/GRP003-1.p',
+    'GRP/GRP004-1.p',
     'GRP/GRP005-1.p',
     'GRP/GRP006-1.p',
     'GRP/GRP008-1.p',
@@ -18,11 +18,11 @@ train_problems = [
     'GRP/GRP019-1.p',
     'GRP/GRP020-1.p',
     'GRP/GRP021-1.p',
-    'GRP/GRP023-1.p',
+    'GRP/GRP023-1.p'
 ]
 
 test_problems = [
-    'GRP/GRP004-1.p',
+    'GRP/GRP001-1.p',
     'GRP/GRP007-1.p',
     'GRP/GRP012-1.p',
     'GRP/GRP022-1.p'
@@ -32,18 +32,16 @@ import argparse
 import os
 from collections import defaultdict
 import json
-from subprocess import Popen, PIPE, CalledProcessError, STDOUT
+from subprocess import Popen, PIPE, STDOUT
 import torch
 from sortedcontainers import SortedList
 
-from foreduce.vampire.vampire import VampireInteractive
-from foreduce.vampire.vampire import VampireAutomatic
+from foreduce.vampire.vampire import VampireInteractive, VampireAutomatic
 from foreduce.data.data import ProofTokens
 from foreduce.transformer.tokenizer import TokenConfig
 from foreduce.tptp.parser import read_file as read_tptp
 from foreduce.vampire.parser import read_file as read_vampire
 from foreduce.transformer.embedding import FormulaEmbedding
-from torch.utils.data import DataLoader
 
 
 if __name__ == '__main__':
@@ -55,10 +53,10 @@ if __name__ == '__main__':
     parser.add_argument("--dim", type=int, default=1024)
     parser.add_argument("--n_layers", type=int, default=96)
     parser.add_argument("--n_heads", type=int, default=16)
-    parser.add_argument("--max_steps", type=int, default=64)
+    parser.add_argument("--max_steps", type=int, default=256)
     parser.add_argument("--clause_selection", type=str, default='10')
+    parser.add_argument("--cont", type=bool, default=False)
     args = parser.parse_args()
-
     
     if not os.path.exists('generalization/config.json') or not os.path.exists('generalization/mapping.json'):
         os.makedirs('generalization/problems/GRP/', exist_ok=True)
@@ -91,27 +89,36 @@ if __name__ == '__main__':
         with open('generalization/mapping.json') as f:
             mapping = json.load(f)
 
-    if not os.path.exists('generalization/dataset.pt'):
-        dataset = ProofTokens(config, seq_len=args.seq_len)
+    if not os.path.exists('generalization/proofs/'):
+        train_dataset = ProofTokens(config, seq_len=args.seq_len)
+        test_dataset = ProofTokens(config, seq_len=args.seq_len)
         os.makedirs('generalization/proofs/GRP/', exist_ok=True)
         for problem in train_problems + test_problems:
             if not os.path.exists('generalization/proofs/' + problem):
-                vampire = VampireAutomatic(VAMPIRE_PATH, 'generalization/problems/' + problem, selection=args.clause_selection)
+                vampire = VampireAutomatic(
+                    VAMPIRE_PATH,
+                    'generalization/problems/' + problem,
+                    selection=args.clause_selection,
+                    activation_limit=64,
+                )
                 vampire.run() 
                 with open('generalization/proofs/' + problem, 'w') as f:
                     f.write(vampire.proof)
-                if problem in train_problems:
-                    dataset.add_proof(vampire.problem, vampire.tree, mapping)
-        dataset.to_file('generalization/dataset.pt')
+            if problem in train_problems:
+                train_dataset.add_proof(vampire.problem, vampire.tree, mapping)
+            elif problem in test_problems:
+                test_dataset.add_proof(vampire.problem, vampire.tree, mapping)
+        train_dataset.to_file('generalization/train_dataset.pt')
+        test_dataset.to_file('generalization/test_dataset.pt')
         
-    if not os.path.exists('generalization/model.ckpt'):
+    if not os.path.exists('generalization/model.ckpt') or args.cont:
         with Popen(
             [
                 'python', '-u', 'train_generalization.py',
                 '--epochs', str(args.epochs),
                 '--batch_size', str(args.batch_size), '--accumulate_grad_batches', str(args.accumulate_grad_batches),
                 '--seq_len', str(args.seq_len),
-                '--dim', str(args.dim), '--n_layers', str(args.n_layers), '--n_heads', str(args.n_heads)
+                '--dim', str(args.dim), '--n_layers', str(args.n_layers), '--n_heads', str(args.n_heads),
             ],
             bufsize=1, universal_newlines=True, stdout=PIPE, stderr=STDOUT
         ) as proc:
@@ -125,7 +132,7 @@ if __name__ == '__main__':
     goal = torch.tensor([mapping['<START>'], mapping['$false'], mapping['<END>']] + [mapping['<PAD>']] * (args.seq_len - 3), dtype=torch.long)
     goal_embedding = embedding(goal.unsqueeze(0))
 
-    for problem in test_problems:
+    for problem in train_problems + test_problems:
         with VampireInteractive(VAMPIRE_PATH, 'generalization/problems/' + problem) as interactive:
             seen = 0
             similarities = SortedList()

@@ -24,7 +24,7 @@ class Model(LightningModule):
         self.formula_embedding = FormulaEmbedding(
             token_config, {"embed_dim": args["clause_embed_dim"]}
         )
-        self.clause_transformer =nn.ModuleList([
+        self.clause_transformer = nn.ModuleList([
             DecoderLayer(
                 {
                     "seq_len": args["clause_length"],
@@ -73,7 +73,6 @@ class Model(LightningModule):
         key = self.out_key(x[:, 1:])
         return torch.einsum("bd,bld->bl", query, key)
 
-
     def clause_embeddings(self, x):
         B, P, L = x.size()
         x = self.formula_embedding(x).view(B * P, L, -1)
@@ -82,7 +81,6 @@ class Model(LightningModule):
         x = self.pool_attention(self.norm(x))
         x = torch.sum(x, dim=1)/torch.count_nonzero(x, dim=1)
         return x.view(B, P, -1)
-
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
@@ -110,3 +108,4 @@ class Model(LightningModule):
         self.log("val_loss", loss,
             on_step=False, logger=True, sync_dist=True)
         return loss
+    
