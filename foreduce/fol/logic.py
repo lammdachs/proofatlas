@@ -1,3 +1,5 @@
+import networkx as nx
+
 from foreduce.transformer.tokenizer import TokenConfig
 
 
@@ -72,10 +74,12 @@ class Predicate(_Symbol):
     def __hash__(self):
         return hash((self.name, self.arity))
 
+
 _EQ = Predicate('eq', 2)
 _TRUE = Predicate('$true', 0)
 _FALSE = Predicate('$false', 0)
-_PREDEFINED = {_EQ, _TRUE, _FALSE}
+_PREDEFINED = {_EQ, _FALSE}
+
 
 class Term:
     @staticmethod
@@ -165,6 +169,19 @@ class Term:
             result += arg.tokenize(mapping)
         return result
 
+    def to_graph(self, graph, mapping, pos, clause):
+        if repr(self.symbol) not in mapping:
+            mapping[repr(self.symbol)] = len(graph.nodes)
+            graph.add_node(mapping[repr(self.symbol)], type='symbol', arity=self.symbol.arity, pos=None)
+        mapping[repr(self) + repr(clause)] = len(graph.nodes)
+        graph.add_node(len(graph.nodes), type='term', arity=None, pos=None)
+        graph.add_edge(len(graph.nodes) - 1, mapping[repr(self.symbol)])
+        for i, arg in enumerate(self.args):
+            mapping = arg.to_graph(graph, mapping, pos=i, clause=clause)
+            graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(arg) + repr(clause)])
+        return mapping
+
+
 class Constant(Function, Term):
     def __init__(self, name):
         Function.__init__(self, name, 0)
@@ -183,6 +200,12 @@ class Variable(_Symbol, Term):
 
     def __repr__(self):
         return self.name
+    
+    def to_graph(self, graph, mapping, pos, clause):
+        if repr(self) + repr(clause) not in mapping:
+            mapping[repr(self) + repr(clause)] = len(graph.nodes)
+        graph.add_node(len(graph.nodes), type='variable', arity=None, pos=pos)
+        return mapping
 
 
 class Literal(Term):
@@ -219,6 +242,13 @@ class Literal(Term):
         result = [mapping["~"]] if not self.polarity else []
         result += self.predicate.tokenize(mapping)
         return result
+
+    def to_graph(self, graph, mapping, clause):
+        mapping[repr(self) + repr(clause)] = len(graph.nodes)
+        graph.add_node(len(graph.nodes), type='literal' if self.polarity else 'negated_literal', arity=None, pos=None)
+        mapping = self.predicate.to_graph(graph, mapping, pos=None, clause=clause)
+        graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(self.predicate) + repr(clause)])
+        return mapping
 
 
 class Clause:
@@ -286,6 +316,18 @@ class Clause:
         result[-1] = config.reserved_token_mapping["<END>"]
         return result
 
+    def to_graph(self, graph, mapping):
+        if repr(self) in mapping:
+            return mapping
+        mapping[repr(self)] = len(graph.nodes)
+        graph.add_node(len(graph.nodes), type='clause', arity=None, pos=None)
+        if not self.literals:
+            graph.add_edge(mapping[repr(self)], mapping[repr(_FALSE)])
+        for literal in self.literals:
+            mapping = literal.to_graph(graph, mapping, self)
+            graph.add_edge(mapping[repr(self)], mapping[repr(literal) + repr(self)])
+        return mapping
+
 
 class Problem:
     @staticmethod
@@ -346,3 +388,32 @@ class Problem:
         for clause in self.clauses[:limit]:
             result.append(clause.tokenize(config, mapping))
         return result, mapping
+    
+    def to_graph(self, limit=None):
+        graph = nx.Graph()
+        mapping = {}
+        for predefined in _PREDEFINED:
+            mapping[repr(predefined)] = len(graph.nodes)
+            graph.add_node(len(graph.nodes), type=f'{predefined.name}', arity=predefined.arity, pos=None)
+        if limit is None:
+            limit = len(self.clauses)
+        for idx, clause in enumerate(self.clauses[:limit]):
+            mapping = clause.to_graph(graph, mapping)
+        return graph, mapping
+    
+    def to_graph_data(self, tree, limit=None):
+        if limit is None:
+            limit = len(self.clauses)
+        graph, mapping = self.to_graph(limit)
+        dependencies = [set() for _ in self.clauses]
+        for idx in range(len(self.clauses)):
+            if tree[idx]:
+                dependencies[idx] = {idx} | set.union(*[dependencies[j] for j in tree[idx]])
+            else:
+                dependencies[idx] = {idx}
+        labels =  {repr(clause): False for clause in self.clauses[:limit]}
+        for idx in range(limit):
+            if idx in dependencies[-1]:
+                labels[repr(self.clauses[idx])] = True
+        clauses, labels = zip(*[(mapping[r], labels[r]) for r in labels.keys()])
+        return graph, mapping, list(clauses), list(labels)

@@ -3,7 +3,49 @@ import torch.nn as nn
 from lightning import LightningModule
 
 from foreduce.transformer.embedding import FormulaEmbedding
-from foreduce.transformer.transformer import DecoderLayer, RMSNorm, MultiHeadAttention
+from foreduce.transformer.transformer import TransformerLayer, MultiHeadAttention
+from foreduce.transformer.gnn import GNN
+
+
+class GraphModel(LightningModule):
+    def __init__(self, num_types, max_arity, layers, dim, conv="GCN", activation="ReLU", lr=1e-4):
+        super().__init__()
+        self.num_types = num_types
+        self.max_arity = max_arity
+        self.layers = layers
+        self.dim = dim
+        self.conv = conv
+        self.activation = activation
+        self.gnn = GNN(num_types, max_arity, layers, dim, conv, activation)
+        self.out = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Linear(dim, 1)
+        )
+        self.lr = lr
+        
+        self.save_hyperparameters("num_types", "max_arity", "layers", "dim", "conv", "activation", "lr")
+        
+    def forward(self, batch):
+        x = self.gnn(batch)[batch.clauses]
+        return self.out(x).squeeze(-1)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": torch.optim.lr_scheduler.ConstantLR(optimizer),
+        }
+    
+    def training_step(self, batch, batch_idx):
+        preds = self(batch)
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            preds, batch.labels.to(torch.float)
+        )
+        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
+        return loss
+
+
 
 class Model(LightningModule):
     default_args = {
@@ -33,7 +75,7 @@ class Model(LightningModule):
                 }
             ) for _ in range(args["clause_embed_layers"])
         ])
-        self.norm = RMSNorm(args["clause_embed_dim"])
+        self.norm = nn.LayerNorm(args["clause_embed_dim"])
         self.pool_attention = MultiHeadAttention(
             {
                 "seq_len": args["clause_length"],

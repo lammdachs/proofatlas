@@ -80,15 +80,3 @@ class PositionwiseFeedForward(nn.Module):
         
     def forward(self, x):
         return self.net(x) + x
-
-
-class RMSNorm(nn.Module):
-    def __init__(self, dim, eps=1e-6):
-        super().__init__()
-        self.scale = nn.Parameter(torch.ones(dim))
-        self.register_buffer("eps", torch.tensor(eps))
-
-    def forward(self, x):
-        return x * torch.rsqrt(
-            torch.mean(x**2, dim=-1, keepdim=True) + self.eps
-        ) * self.scale

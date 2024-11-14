@@ -1,7 +1,57 @@
 import torch
 from torch.utils.data import Dataset
+from torch_geometric.data import Data, InMemoryDataset
+from torch_geometric.utils import index_to_mask
+from torch_geometric.utils.convert import from_networkx
 
 from foreduce.transformer.tokenizer import TokenConfig, ProofEmbedder, ProofTokenizer
+
+
+_type_mapping = {
+    'symbol': 0,
+    'term': 1,
+    'variable': 2,
+    'literal': 3,
+    'negated_literal': 4,
+    'clause': 5,
+    '$false': 6,
+    'eq': 7
+}
+
+class GraphDataset(InMemoryDataset):
+    def __init__(self, max_arity=8):
+        super().__init__()
+        self.max_arity = max_arity
+        self._data = []
+
+    def add_proof(self, problem, tree, limit=None):
+        graph, _, clauses, labels = problem.to_graph_data(tree, limit)
+        data = from_networkx(graph)
+        data.type = torch.tensor([_type_mapping[t] for t in data.type], dtype=torch.int)
+        data.arity = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
+        data.pos = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
+        data.clauses = index_to_mask(torch.tensor(clauses), size=data.num_nodes)
+        data.labels = torch.tensor(labels, dtype=torch.bool)
+        self._data.append(data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def get(self, idx):
+        return self._data[idx]
+
+    def __getitem__(self, idx):
+        return self._data[idx]
+    
+    def save(self, path):
+        torch.save((self.max_arity, self._data), path)
+        
+    def load(path):
+        max_arity, data = torch.load(path)
+        dataset = GraphDataset(max_arity)
+        dataset._data = data
+        return dataset
+
 
 class ProofTokens(Dataset):
     def __init__(self, config, seq_len=128, seed=42):
@@ -28,9 +78,9 @@ class ProofTokens(Dataset):
         self.target[self.index:self.index+len(x)] = target
         self.weight[self.index:self.index+len(x)] = weight
         self.index += len(x)
-        
+
         self._tokens = torch.cat([self._tokens, _tokens], dim=0)
-        
+    
     def to_file(self, path):
         torch.save((
             self._tokens,
