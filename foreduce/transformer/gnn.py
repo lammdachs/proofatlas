@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding, Module
 from torch_geometric.nn import GINConv, GCNConv, global_add_pool, global_mean_pool, GraphNorm
+from lightning import LightningModule
 
 
 def gin_conv(in_channels, out_channels):
@@ -10,7 +11,7 @@ def gin_conv(in_channels, out_channels):
     return GINConv(nn)
 
 
-class GNN(Module):
+class GNN(LightningModule):
     def __init__(self, num_types, max_arity, layers, dim, conv="GCN", activation="ReLU"):
         super().__init__()
         self.num_types = num_types
@@ -21,8 +22,8 @@ class GNN(Module):
         self.conv_name = conv
 
         self.type_embedding = Embedding(num_types, dim)
-        self.arity_embedding = Embedding(max_arity + 1, dim, padding_idx=0)
-        self.position_embedding = Embedding(max_arity + 1, dim, padding_idx=0)
+        self.arity_embedding = Embedding(max_arity + 2, dim, padding_idx=0)
+        self.position_embedding = Embedding(max_arity + 2, dim, padding_idx=0)
         match activation:
             case "ReLU": self.act = ReLU()
             case "Tanh": self.act = Tanh()
