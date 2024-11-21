@@ -399,12 +399,19 @@ class Problem:
             limit = len(self.clauses)
         for idx, clause in enumerate(self.clauses[:limit]):
             mapping = clause.to_graph(graph, mapping)
-        return graph, mapping
+        return graph, mapping, sorted(mapping[r] for r in set(repr(clause) for clause in self.clauses[:limit]))
+    
+    def extend_graph(self, graph, mapping, prev_limit, limit=None):
+        if limit is None:
+            limit = len(self.clauses)
+        for idx, clause in enumerate(self.clauses[prev_limit:limit]):
+            mapping = clause.to_graph(graph, mapping)
+        return graph, mapping, sorted(mapping[r] for r in set(repr(clause) for clause in self.clauses[:limit]))
     
     def to_graph_data(self, tree, limit=None):
         if limit is None:
             limit = len(self.clauses)
-        graph, mapping = self.to_graph(limit)
+        graph, mapping, _ = self.to_graph(limit)
         dependencies = [set() for _ in self.clauses]
         for idx in range(len(self.clauses)):
             if tree[idx]:
@@ -415,5 +422,5 @@ class Problem:
         for idx in range(limit):
             if idx in dependencies[-1]:
                 labels[repr(self.clauses[idx])] = True
-        clauses, labels = zip(*[(mapping[r], labels[r]) for r in labels.keys()])
+        clauses, labels = zip(*[(mapping[r], labels[r]) for r in sorted(labels).keys()])
         return graph, mapping, list(clauses), list(labels)

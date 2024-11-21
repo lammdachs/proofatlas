@@ -28,9 +28,9 @@ if __name__ == "__main__":
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
     
     
-    logger = WandbLogger(project='vampire_select', group='generalization')
+    logger = WandbLogger(project='vampire_select', group='gnn')
     trainer = Trainer(max_epochs=args.epochs, logger=logger, accumulate_grad_batches=args.accumulate_grad_batches, log_every_n_steps=1, devices=4, enable_progress_bar=False)
     trainer.fit(model, loader)
     wandb.finish()
     
-    trainer.save_checkpoint('generalization/model.ckpt')
+    trainer.save_checkpoint('gnn/model.ckpt')
