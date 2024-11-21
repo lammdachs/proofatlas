@@ -422,5 +422,5 @@ class Problem:
         for idx in range(limit):
             if idx in dependencies[-1]:
                 labels[repr(self.clauses[idx])] = True
-        clauses, labels = zip(*[(mapping[r], labels[r]) for r in sorted(labels).keys()])
+        clauses, labels = zip(*[(mapping[r], labels[r]) for r in sorted(labels.keys())])
         return graph, mapping, list(clauses), list(labels)

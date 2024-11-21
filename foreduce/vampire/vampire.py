@@ -47,7 +47,16 @@ class VampireInteractive:
     def step(self, i: int):
         if self.finished:
             raise EOFError('Vampire finished.')
-        self.process.sendline(str(i+1))
+        for k, v in self.mapping.items():
+            if v == i:
+                """ print(self.problem.clauses[i])
+                for l in self.proof.split('\n'):
+                    if f'new: {k}. ' in l:
+                        print(l) """
+                self.process.sendline(str(k))
+                break
+        else:
+            raise ValueError(f'Clause {i} not found.')
         self.active[i] = True
         self.read()
         self.step_count += 1
