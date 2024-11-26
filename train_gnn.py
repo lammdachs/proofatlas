@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from lightning import Trainer
 from lightning.pytorch.loggers import WandbLogger
 import wandb
-from torch_geometric.loader import DataLoader, DynamicBatchSampler
+from torch_geometric.loader import DataLoader
 
 from foreduce.data.data import GraphDataset
 from foreduce.transformer.model import GraphModel

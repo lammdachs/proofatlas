@@ -34,15 +34,18 @@ class VampireInteractive:
             self.finished = True
         string = str(self.process.before, encoding='utf-8')
         string = string[string.find('\n')+1:].replace('\r\n', '\n')
-        if 'Refutation found.' in string:
+        if 'Refutation found.' in string or 'Satisfiable' in string:
             self.finished = True
             self.proof += string
             return
         if string and not 'User error' in string:
-            self.problem, self.tree, self.mapping = \
-                read_string(string, self.problem, self.tree, self.mapping)
-            self.proof += string
-            self.active += [False for _ in range(len(self.problem.clauses) - len(self.active))]
+            try:
+                self.problem, self.tree, self.mapping = \
+                    read_string(string, self.problem, self.tree, self.mapping)
+                self.proof += string
+                self.active += [False for _ in range(len(self.problem.clauses) - len(self.active))]
+            except:
+                self.finished = True
 
     def step(self, i: int):
         if self.finished:

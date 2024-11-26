@@ -9,6 +9,7 @@ proofs/
 results/
 vampire_select/
 overfit/
+gnn/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
