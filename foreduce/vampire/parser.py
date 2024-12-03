@@ -6,12 +6,13 @@ from foreduce.fol.logic import _EQ, _TRUE, _FALSE, Function, Literal, Predicate,
 from foreduce.vampire.lexer import vampire_lexer
 
 
-def read_file(file):
+def read_file(file, problem, tree, mapping):
     with open(file) as f:
-        return Formulas().transform(vampire_lexer.parse(f.read()))
+        p, t, m = read_string(f.read(), problem, tree, mapping)
+    return p, t, m
 
 
-def read_string(str, problem=Problem(), tree=[], mapping=SortedDict({})):
+def read_string(str, problem, tree, mapping):
     return Formulas(problem=problem, tree=tree, mapping=mapping).transform(vampire_lexer.parse(str))
 
 

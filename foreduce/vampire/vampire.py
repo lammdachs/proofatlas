@@ -67,6 +67,7 @@ class VampireInteractive:
     def __enter__(self):
         self._entered = True
         self.process = spawn(" ".join(self.args))
+        self.process.timeout = None
         self.read()
         return self
 

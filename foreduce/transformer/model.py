@@ -45,6 +45,14 @@ class GraphModel(LightningModule):
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        preds = self(batch)
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            preds, batch.labels.to(torch.float)
+        )
+        self.log("val_loss", loss, on_step=False, logger=True, sync_dist=True)
+        return loss
+
 
 
 class Model(LightningModule):

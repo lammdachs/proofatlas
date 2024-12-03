@@ -1,59 +1,51 @@
 import argparse
-from dotenv import load_dotenv
 import os
 from random import choices
 
-from foreduce.vampire.vampire import VampireAutomatic
-from foreduce.data.data import GraphDataset, _type_mapping
-from foreduce.transformer.model import GraphModel
+from sortedcontainers import SortedDict
+from torch import randperm
+from tqdm import tqdm
 
+from foreduce.data.data import GraphDataset
+from foreduce.fol.logic import Problem
+from foreduce.vampire.parser import read_file as read_vampire
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=512)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--accumulate_grad_batches", type=int, default=8)
-    parser.add_argument("--dim", type=int, default=512)
-    parser.add_argument("--n_layers", type=int, default=8)
-    parser.add_argument("--max_steps", type=int, default=32)
-    parser.add_argument("--clause_selection", type=str, default='666')
-    parser.add_argument("--cont", type=bool, default=False)
+    parser.add_argument("--strategy", type=str, default='666')
+    parser.add_argument("--data_per_proof", type=int, default=8)
     parser.add_argument("--max_arity", type=int, default=8)
-    parser.add_argument("--graphs_per_problem", type=int, default=8)
-    parser.add_argument("--max_nodes_problem", type=int, default=2**10)
-    parser.add_argument("--max_nodes_proof", type=int, default=2**12)
+    parser.add_argument("--max_size", type=int, default=2**12)
+    parser.add_argument("--train_val_split", type=float, default=0.8)
     args = parser.parse_args()
     
-    dataset = GraphDataset(max_arity=args.max_arity)
-    for dir in os.listdir('gnn/problems/'):
-        os.makedirs('gnn/proofs/' + dir, exist_ok=True)
-        for problem in os.listdir('gnn/problems/' + dir):
-            print(f"Proving {problem}...", end='')
-            if not os.path.exists('gnn/proofs/' + dir + '/' + problem):
-                vampire = VampireAutomatic(
-                    VAMPIRE_PATH,
-                    'gnn/problems/' + dir + '/' + problem,
-                    selection=args.clause_selection,
-                    activation_limit=args.max_steps
-                )
-                try:
-                    vampire.run() 
-                except:
-                    print('Failed to parse')
-                    continue
-                if 'Refutation found' not in vampire.proof:
-                    print('Failed')
-                    continue
-                with open('gnn/proofs/' + dir + '/' + problem, 'w') as f:
-                    f.write(vampire.proof)
-                graph, _, _ = vampire.problem.to_graph()
-                if graph.number_of_nodes() > args.max_nodes_proof:
-                    print('Proof too large')
-                    continue
-                print('Success')
-                minimum = [d == [] for d in vampire.tree].index(False)
-                limits = choices(range(minimum, len(vampire.tree)), k=args.graphs_per_problem)
-                for limit in limits:
-                    dataset.add_proof(vampire.problem, vampire.tree, limit)
+    trainset = GraphDataset(max_arity=args.max_arity)
+    valset = GraphDataset(max_arity=args.max_arity)
     
-    dataset.save('gnn/dataset.pt')
+    size = len([_ for d in os.listdir(f'./proofs/{args.strategy}') for _ in os.listdir(f'./proofs/{args.strategy}/{d}')])
+    perm = randperm(size)
+    
+    for i, (dir, problem) in enumerate(pbar := tqdm(
+        [
+            (d, p)
+            for d in os.listdir(f'./proofs/{args.strategy}')
+            for p in os.listdir(f'./proofs/{args.strategy}/{d}')
+        ],
+        desc='Creating Dataset'
+    )):
+        problem, tree, mapping = read_vampire(
+            f'./proofs/{args.strategy}/{dir}/{problem}',
+            Problem(), [], SortedDict({}
+        ))
+        minimum = [d == [] for d in tree].index(False)
+        limits = choices(range(minimum, len(tree)), k=args.data_per_proof)
+        for limit in limits:
+            if perm[i] < size * args.train_val_split:
+                trainset.add_proof(problem, tree, limit)
+            else:
+                valset.add_proof(problem, tree, limit)
+
+
+    os.makedirs('data', exist_ok=True)
+    trainset.save(f'data/{args.strategy}_train.pt')
+    valset.save(f'data/{args.strategy}_val.pt')

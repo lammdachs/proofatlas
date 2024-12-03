@@ -125,6 +125,11 @@ class Term:
         else:
             return f"{self.symbol.name}({', '.join(map(str, self.args))})"
 
+    def depth(self):
+        if self.args:
+            return 1 + max(arg.depth() for arg in self.args)
+        return 0
+    
     def function_symbols(self):
         if isinstance(self.symbol, Function):
             symbols = {self.symbol}
@@ -169,16 +174,17 @@ class Term:
             result += arg.tokenize(mapping)
         return result
 
-    def to_graph(self, graph, mapping, pos, clause):
+    def to_graph(self, graph, mapping, pos, clause, depth=None):
         if repr(self.symbol) not in mapping:
             mapping[repr(self.symbol)] = len(graph.nodes)
             graph.add_node(mapping[repr(self.symbol)], type='symbol', arity=self.symbol.arity, pos=None)
         mapping[repr(self) + repr(clause)] = len(graph.nodes)
-        graph.add_node(len(graph.nodes), type='term', arity=None, pos=None)
-        graph.add_edge(len(graph.nodes) - 1, mapping[repr(self.symbol)])
-        for i, arg in enumerate(self.args):
-            mapping = arg.to_graph(graph, mapping, pos=i, clause=clause)
-            graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(arg) + repr(clause)])
+        graph.add_node(mapping[repr(self) + repr(clause)], type='term', arity=None, pos=pos)
+        graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(self.symbol)])
+        if depth is None or depth > 0:
+            for i, arg in enumerate(self.args):
+                mapping = arg.to_graph(graph, mapping, pos=i, clause=clause, depth=None if depth is None else depth-1)
+                graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(arg) + repr(clause)])
         return mapping
 
 
@@ -201,10 +207,10 @@ class Variable(_Symbol, Term):
     def __repr__(self):
         return self.name
     
-    def to_graph(self, graph, mapping, pos, clause):
+    def to_graph(self, graph, mapping, pos, clause, depth=None):
         if repr(self) + repr(clause) not in mapping:
             mapping[repr(self) + repr(clause)] = len(graph.nodes)
-        graph.add_node(len(graph.nodes), type='variable', arity=None, pos=pos)
+            graph.add_node(mapping[repr(self) + repr(clause)], type='variable', arity=None, pos=pos)
         return mapping
 
 
@@ -235,6 +241,9 @@ class Literal(Term):
     def __hash__(self):
         return hash((self.predicate, self.polarity))
 
+    def depth(self):
+        return self.predicate.depth()
+
     def substitute(self, t1, t2):
         return Literal(self.predicate.substitute(t1, t2), self.polarity)
 
@@ -243,10 +252,10 @@ class Literal(Term):
         result += self.predicate.tokenize(mapping)
         return result
 
-    def to_graph(self, graph, mapping, clause):
+    def to_graph(self, graph, mapping, clause, depth=None):
         mapping[repr(self) + repr(clause)] = len(graph.nodes)
         graph.add_node(len(graph.nodes), type='literal' if self.polarity else 'negated_literal', arity=None, pos=None)
-        mapping = self.predicate.to_graph(graph, mapping, pos=None, clause=clause)
+        mapping = self.predicate.to_graph(graph, mapping, pos=None, clause=clause, depth=depth)
         graph.add_edge(mapping[repr(self) + repr(clause)], mapping[repr(self.predicate) + repr(clause)])
         return mapping
 
@@ -272,6 +281,9 @@ class Clause:
 
     def __hash__(self):
         return hash(tuple(self.literals))
+
+    def depth(self):
+        return max(literal.predicate.depth() for literal in self.literals)
 
     def predicate_symbols(self):
         symbols = set()
@@ -316,7 +328,7 @@ class Clause:
         result[-1] = config.reserved_token_mapping["<END>"]
         return result
 
-    def to_graph(self, graph, mapping):
+    def to_graph(self, graph, mapping, depth=None):
         if repr(self) in mapping:
             return mapping
         mapping[repr(self)] = len(graph.nodes)
@@ -324,7 +336,7 @@ class Clause:
         if not self.literals:
             graph.add_edge(mapping[repr(self)], mapping[repr(_FALSE)])
         for literal in self.literals:
-            mapping = literal.to_graph(graph, mapping, self)
+            mapping = literal.to_graph(graph, mapping, self, depth=depth)
             graph.add_edge(mapping[repr(self)], mapping[repr(literal) + repr(self)])
         return mapping
 
@@ -342,6 +354,9 @@ class Problem:
 
     def __repr__(self):
         return '\n'.join(map(str, self.clauses))
+
+    def depth(self):
+        return max((clause.depth() for clause in self.clauses), default=0)
 
     def predicate_symbols(self):
         predicates = set()
@@ -389,7 +404,7 @@ class Problem:
             result.append(clause.tokenize(config, mapping))
         return result, mapping
     
-    def to_graph(self, limit=None):
+    def to_graph(self, limit=None, depth=None):
         graph = nx.Graph()
         mapping = {}
         for predefined in _PREDEFINED:
@@ -398,20 +413,20 @@ class Problem:
         if limit is None:
             limit = len(self.clauses)
         for idx, clause in enumerate(self.clauses[:limit]):
-            mapping = clause.to_graph(graph, mapping)
+            mapping = clause.to_graph(graph, mapping, depth=depth)
         return graph, mapping, sorted(mapping[r] for r in set(repr(clause) for clause in self.clauses[:limit]))
     
-    def extend_graph(self, graph, mapping, prev_limit, limit=None):
+    def extend_graph(self, graph, mapping, prev_limit, limit=None, depth=8):
         if limit is None:
             limit = len(self.clauses)
         for idx, clause in enumerate(self.clauses[prev_limit:limit]):
-            mapping = clause.to_graph(graph, mapping)
+            mapping = clause.to_graph(graph, mapping, depth=depth)
         return graph, mapping, sorted(mapping[r] for r in set(repr(clause) for clause in self.clauses[:limit]))
     
-    def to_graph_data(self, tree, limit=None):
+    def to_graph_data(self, tree, limit=None, depth=8):
         if limit is None:
             limit = len(self.clauses)
-        graph, mapping, _ = self.to_graph(limit)
+        graph, mapping, _ = self.to_graph(limit, depth=8)
         dependencies = [set() for _ in self.clauses]
         for idx in range(len(self.clauses)):
             if tree[idx]:
