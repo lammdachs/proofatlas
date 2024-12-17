@@ -13,9 +13,9 @@ from foreduce.vampire.parser import read_file as read_vampire
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--strategy", type=str, default='666')
-    parser.add_argument("--data_per_proof", type=int, default=8)
+    parser.add_argument("--data_per_proof", type=int, default=64)
     parser.add_argument("--max_arity", type=int, default=8)
-    parser.add_argument("--max_size", type=int, default=2**12)
+    parser.add_argument("--max_depth", type=int, default=4)
     parser.add_argument("--train_val_split", type=float, default=0.8)
     args = parser.parse_args()
     
@@ -41,9 +41,9 @@ if __name__ == '__main__':
         limits = choices(range(minimum, len(tree)), k=args.data_per_proof)
         for limit in limits:
             if perm[i] < size * args.train_val_split:
-                trainset.add_proof(problem, tree, limit)
+                trainset.add_proof(problem, tree, limit, depth=args.max_depth)
             else:
-                valset.add_proof(problem, tree, limit)
+                valset.add_proof(problem, tree, limit, depth=args.max_depth)
 
 
     os.makedirs('data', exist_ok=True)

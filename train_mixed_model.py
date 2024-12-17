@@ -7,7 +7,7 @@ import wandb
 from torch_geometric.loader import DataLoader
 
 from foreduce.data.data import GraphDataset
-from foreduce.transformer.model import GraphModel
+from foreduce.transformer.model import Model
 from foreduce.data.data import _type_mapping
 
 
@@ -17,8 +17,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int)
     parser.add_argument("--accumulate_grad_batches", type=int)
     parser.add_argument("--dim", type=int)
-    parser.add_argument("--layers", type=int)
-    parser.add_argument("--lr", type=float)
+    parser.add_argument("--gnn_layers", type=int)
+    parser.add_argument("--transformer_layers", type=int)
+    parser.add_argument("--n_heads", type=int)
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--name", type=str)
     args = parser.parse_args()
@@ -27,7 +28,7 @@ if __name__ == "__main__":
 
     trainset = GraphDataset.load(f'./data/{args.dataset}_train.pt')
     valset = GraphDataset.load(f'./data/{args.dataset}_val.pt')
-    model = GraphModel(len(_type_mapping), trainset.max_arity, args.layers, args.dim)
+    model = Model(len(_type_mapping), trainset.max_arity, args.gnn_layers, args.transformer_layers, args.dim, n_heads=args.n_heads)
     trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
     valloader = DataLoader(valset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
     

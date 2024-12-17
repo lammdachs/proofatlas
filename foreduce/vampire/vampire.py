@@ -1,4 +1,4 @@
-from pexpect import spawn, EOF
+from pexpect import TIMEOUT, spawn, EOF
 from sortedcontainers import SortedDict
 
 from foreduce.fol.logic import Problem
@@ -29,8 +29,8 @@ class VampireInteractive:
         if not self._entered:
             raise ValueError('Vampire not entered. Use **with** statement.')
         try:
-            self.process.expect('Pick a clause:\r\n')
-        except EOF:
+            self.process.expect_exact('Pick a clause:\r\n', timeout=5)
+        except (EOF, TIMEOUT):
             self.finished = True
         string = str(self.process.before, encoding='utf-8')
         string = string[string.find('\n')+1:].replace('\r\n', '\n')

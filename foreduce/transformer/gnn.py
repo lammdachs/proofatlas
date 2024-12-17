@@ -5,6 +5,7 @@ from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding, Module
 from torch_geometric.nn import GINConv, GCNConv, global_add_pool, global_mean_pool, GraphNorm
 from lightning import LightningModule
 
+from foreduce.transformer.spherical_code import SphericalCode
 
 def gin_conv(in_channels, out_channels):
     nn = Sequential(Linear(in_channels, 2 * in_channels), GraphNorm(2 * in_channels), ReLU(), Linear(2 * in_channels, out_channels))
@@ -22,6 +23,7 @@ class GNN(LightningModule):
         self.conv_name = conv
 
         self.type_embedding = Embedding(num_types, dim)
+        self.spherical_code = SphericalCode(dim, requires_grad=False)
         self.arity_embedding = Embedding(max_arity + 2, dim, padding_idx=0)
         self.position_embedding = Embedding(max_arity + 2, dim, padding_idx=0)
         match activation:
@@ -40,8 +42,8 @@ class GNN(LightningModule):
             [self.conv(dim, dim) for _ in range(layers)])
 
     def forward(self, data):
-        t, ar, pos, edge_index, batch = data.type, data.arity, data.pos, data.edge_index, data.batch
-        x = self.type_embedding(t) + self.arity_embedding(ar) + self.position_embedding(pos)
+        typ, name, arity, pos, edge_index, batch = data.type, data.name, data.arity, data.pos, data.edge_index, data.batch
+        x = self.type_embedding(typ) + self.spherical_code(name) + self.arity_embedding(arity) + self.position_embedding(pos)
         for conv, norm in zip(self.conv_layers, self.norms):
             x = x + norm(conv(x, edge_index))
             x = self.act(x)

@@ -1,19 +1,18 @@
-import torch
 from torch import nn
 from torchtune.modules import RotaryPositionalEmbeddings
 from einops import einsum, rearrange
 
 
 class TransformerLayer(nn.Module):
-    def __init__(self, dim, n_heads, rope=False, seq_len=None):
+    def __init__(self, dim, n_heads, rope=True, seq_len=4096):
         super().__init__()
         self.attn = MultiHeadAttention(dim, n_heads, rope=rope, seq_len=seq_len)
         self.pos_ff = PositionwiseFeedForward(dim)
         self.n1 = nn.LayerNorm(dim)
         self.n2 = nn.LayerNorm(dim)
     
-    def forward(self, x, mask=None):
-        x = x + self.attn(self.n1(x), mask)
+    def forward(self, x, mask=None, input_pos=None):
+        x = x + self.attn(self.n1(x), mask, input_pos)
         x = x + self.pos_ff(self.n2(x))
         return x
 
@@ -38,12 +37,12 @@ class MultiHeadAttention(nn.Module):
         nn.init.xavier_uniform_(self.wv.weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, input_pos=None):
         q = rearrange(self.wq(x), "b n (h d) -> b n h d", h=self.n_heads)
         k = rearrange(self.wk(x), "b n (h d) -> b n h d", h=self.n_heads)
         if hasattr(self, "rope"):
-            q = self.rope(q)
-            k = self.rope(k)
+            q = self.rope(q, input_pos=input_pos)
+            k = self.rope(k, input_pos=input_pos)
         q = rearrange(q, "b n h d -> b h n d")
         k = rearrange(k, "b n h d -> b h n d")
         

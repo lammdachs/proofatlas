@@ -5,7 +5,7 @@ from torch_geometric.utils import index_to_mask
 from torch_geometric.utils.convert import from_networkx
 
 from foreduce.transformer.tokenizer import TokenConfig, ProofEmbedder, ProofTokenizer
-
+from foreduce.fol.logic import _PREDEFINED
 
 _type_mapping = {
     'symbol': 0,
@@ -14,9 +14,8 @@ _type_mapping = {
     'literal': 3,
     'negated_literal': 4,
     'clause': 5,
-    '$false': 6,
-    'eq': 7
-}
+    'placeholder': 6,
+} | {t: i + 7 for i, t in enumerate(_PREDEFINED)}
 
 class GraphDataset(InMemoryDataset):
     def __init__(self, max_arity=8):
@@ -24,10 +23,14 @@ class GraphDataset(InMemoryDataset):
         self.max_arity = max_arity
         self._data = []
 
-    def add_proof(self, problem, tree, limit=None):
-        graph, _, clauses, labels = problem.to_graph_data(tree, limit)
+    def add_proof(self, problem, tree, limit=None, depth=None):
+        symbols = problem.function_symbols() | problem.predicate_symbols()
+        permutation = torch.randperm(32)
+        name = {s: permutation[i] + 1 for i, s in enumerate(symbols)}
+        graph, _, clauses, labels = problem.to_graph_data(tree, limit, depth)
         data = from_networkx(graph)
         data.type = torch.tensor([_type_mapping[t] for t in data.type], dtype=torch.int)
+        data.name = torch.tensor([name[s] if s is not None else 0 for s in data.name], dtype=torch.int)
         data.arity = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
         data.pos = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
         data.clauses = index_to_mask(torch.tensor(clauses), size=data.num_nodes)
