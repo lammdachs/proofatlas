@@ -37,8 +37,11 @@ if __name__ == '__main__':
             f'./proofs/{args.strategy}/{dir}/{problem}',
             Problem(), [], SortedDict({}
         ))
-        minimum = [d == [] for d in tree].index(False)
-        limits = choices(range(minimum, len(tree)), k=args.data_per_proof)
+        try:
+            minimum = [d == [] for d in tree].index(False)
+            limits = choices(range(minimum, len(tree)), k=args.data_per_proof)
+        except ValueError:
+            limits = [None for _ in range(args.data_per_proof)]
         for limit in limits:
             if perm[i] < size * args.train_val_split:
                 trainset.add_proof(problem, tree, limit, depth=args.max_depth)

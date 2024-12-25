@@ -65,7 +65,7 @@ if __name__ == '__main__':
         )):
             os.makedirs(f'./proofs/{args.strategy}/{dir}', exist_ok=True)
             graph = None
-            pbar.set_postfix({ 'Problem': problem, 'Success': success, 'Max Steps': reached_max_steps, 'Recursion Error': recursion_error, 'Node Limit': node_limit, 'Other': other })
+            pbar.set_postfix({ 'Problem': problem, 'Success': success, 'Max Steps': reached_max_steps, 'Node Limit': node_limit, 'Recursion Error': recursion_error, 'Other': other })
             with VampireInteractive(VAMPIRE, f'./problems/{dir}/{problem}') as interactive:
                 symbols = interactive.problem.function_symbols() | interactive.problem.predicate_symbols()
                 permutation = torch.randperm(32)
@@ -87,13 +87,13 @@ if __name__ == '__main__':
                     data.arity = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
                     data.pos = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
                     data.clauses = index_to_mask(torch.tensor(clauses), size=data.num_nodes)
-                    score, topk = model.predict(data)
+                    score = model(data)
                     deduped = []
                     for clause in interactive.problem.clauses:
                         if clause not in deduped:
                             deduped.append(clause)
                     _mapping = {i: deduped.index(clause) for i, clause in enumerate(interactive.problem.clauses)}
-                    vals = [(score[topk.index(_mapping[i])].item(), i) for i in range(len(interactive.problem.clauses)) if (not interactive.active[i] and _mapping[i] in topk)]
+                    vals = [(score[_mapping[i]].item(), i) for i in range(len(interactive.problem.clauses)) if not interactive.active[i]]
                     _, next_clause = max(vals)
                     interactive.step(next_clause)
                 if 'Refutation found.' in interactive.proof or 'Satisfiable' in interactive.proof:
@@ -108,7 +108,7 @@ if __name__ == '__main__':
                     other += 1
                     others.append(problem)
                     
-            pbar.set_postfix({"Success" : success, "Max Steps" : reached_max_steps, "Recursion Error" : recursion_error, "Node Limit" : node_limit, "Other" : other})
+            pbar.set_postfix({"Success" : success, "Max Steps" : reached_max_steps, "Node Limit" : node_limit, "Recursion Error" : recursion_error, "Other" : other})
         print("Uncategorized failure:")
         for o in others:
             print(o)

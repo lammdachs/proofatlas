@@ -28,7 +28,7 @@ if __name__ == '__main__':
     if args.strategy.isdigit():
         for dir, problem in (pbar := tqdm(
             [(d, p) for d in os.listdir('./problems/') for p in os.listdir('./problems/' + d)],
-            desc=f'Proving with {args.strategy}'
+            desc=f'Proving with Vampire/{args.strategy}'
         )):
             pbar.set_postfix({'Success': success})
             os.makedirs(f'./proofs/{args.strategy}/{dir}', exist_ok=True)

@@ -6,6 +6,11 @@ from foreduce.fol.logic import _EQ, Function, Literal, Predicate, Variable, Clau
 from foreduce.tptp.lexer import tptplexer
 
 
+class TooLargeError(Exception):
+    def __init__(self, message):
+        self.message = message
+
+
 class _Maxsize:
     def __init__(self, max_size):
         if max_size is not None and max_size < 0:
@@ -16,7 +21,7 @@ class _Maxsize:
         if self.max_size is not None:
             self.max_size -= size
             if self.max_size < 0:
-                raise Exception("File is too large")
+                raise TooLargeError("max_size reached")
 
 
 def read_file(file, include_path='/', max_size=None):
