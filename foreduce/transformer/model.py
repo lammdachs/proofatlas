@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 from lightning import LightningModule
-from torch_geometric.data import Batch
 from torchtune.modules import RotaryPositionalEmbeddings
 
-from foreduce.transformer.embedding import FormulaEmbedding
-from foreduce.transformer.transformer import TransformerLayer, MultiHeadAttention
+from foreduce.transformer.transformer import TransformerLayer
 from foreduce.transformer.gnn import GNN
 
 
@@ -28,8 +26,8 @@ class GraphModel(LightningModule):
         
         self.save_hyperparameters("num_types", "max_arity", "layers", "dim", "conv", "activation", "lr")
         
-    def forward(self, batch):
-        x = self.gnn(batch)[batch.clauses]
+    def forward(self, data):
+        x = self.gnn(data)
         return self.out(x).squeeze(-1)
 
     def configure_optimizers(self):
@@ -40,19 +38,23 @@ class GraphModel(LightningModule):
         }
     
     def training_step(self, batch, batch_idx):
-        preds = self(batch)
-        loss = nn.functional.binary_cross_entropy_with_logits(
-            preds, batch.labels.to(torch.float), reduction='mean'
+        data, labels = batch
+        preds = self(data)
+        y = labels.to(torch.float).view(-1) / torch.sum(labels)
+        loss = nn.functional.cross_entropy(
+            preds, y, reduction='none', label_smoothing=self.current_epoch / self.trainer.max_epochs
         )
-        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True, batch_size=batch.ptr.size(0) - 1)
+        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True, batch_size=len(data))
         return loss
 
     def validation_step(self, batch, batch_idx):
-        preds = self(batch)
-        loss = nn.functional.binary_cross_entropy_with_logits(
-            preds, batch.labels.to(torch.float), reduction='mean'
+        data, labels = batch
+        preds = self(data)
+        y = labels.to(torch.float).view(-1) / torch.sum(labels)
+        loss = nn.functional.cross_entropy(
+            preds, y, reduction='none', label_smoothing=self.current_epoch / self.trainer.max_epochs
         )
-        self.log("val_loss", loss, on_step=False, logger=True, sync_dist=True, batch_size=batch.ptr.size(0) - 1)
+        self.log("val_loss", loss, on_step=False, logger=True, sync_dist=True, batch_size=len(data))
         return loss
 
 
@@ -82,8 +84,8 @@ class Model(LightningModule):
         
         self.save_hyperparameters("num_types", "max_arity", "gnn_layers", "transformer_layers", "dim", "conv", "activation", "n_heads", "lr")
 
-    def forward(self, batch, input_pos=None):
-        x = self.gnn(batch)[batch.clauses].reshape(1, -1, self.dim)
+    def forward(self, data, input_pos=None):
+        x = self.gnn(data).unsqueeze(0)
         for layer in self.transformer:
             x = layer(x, input_pos=input_pos)
         x = self.out(x)
@@ -97,20 +99,24 @@ class Model(LightningModule):
         }
         
     def training_step(self, batch, batch_idx):
-        x = self(batch)
-        loss = nn.functional.binary_cross_entropy_with_logits(
-            x, batch.labels.to(torch.float), reduction='mean'
-        )
-        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True, batch_size=batch.ptr.size(0) - 1)
+        data, labels = batch
+        preds = self(data)
+        y = labels.to(torch.float).view(-1) / torch.sum(labels)
+        loss = nn.functional.cross_entropy(
+            preds, y, label_smoothing = 1 - self.current_epoch / self.trainer.max_epochs
+        ) / len(y)
+        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True, batch_size=len(data))
         return loss
         
     
     def validation_step(self, batch, batch_idx):
-        x = self(batch)
-        loss = nn.functional.binary_cross_entropy_with_logits(
-            x, batch.labels.to(torch.float), reduction='mean'
-        )
-        self.log("val_loss", loss, on_step=False, logger=True, sync_dist=True, batch_size=batch.ptr.size(0) - 1)
+        data, labels = batch
+        preds = self(data)
+        y = labels.to(torch.float).view(-1) / torch.sum(labels)
+        loss = nn.functional.cross_entropy(
+            preds, y, label_smoothing = 1 - self.current_epoch / self.trainer.max_epochs
+        ) / len(y)
+        self.log("val_loss", loss, on_step=False, logger=True, sync_dist=True, batch_size=len(data))
         return loss
         
 

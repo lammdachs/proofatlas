@@ -48,7 +48,6 @@ if __name__ == '__main__':
             else:
                 valset.add_proof(problem, tree, limit, depth=args.max_depth)
 
-
     os.makedirs('data', exist_ok=True)
     trainset.save(f'data/{args.strategy}_train.pt')
     valset.save(f'data/{args.strategy}_val.pt')

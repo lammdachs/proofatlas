@@ -2,8 +2,9 @@ import argparse
 from dotenv import load_dotenv
 import os
 import sys
+from numpy.random import choice
 import torch
-from torch_geometric.utils import index_to_mask
+from torch_geometric.data import Batch
 from torch_geometric.utils.convert import from_networkx
 from tqdm import tqdm
 
@@ -14,7 +15,7 @@ from foreduce.transformer.model import GraphModel
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max_steps", type=int, default=32)
+    parser.add_argument("--max_steps", type=int, default=64)
     parser.add_argument("--strategy", type=str, default='666')
     parser.add_argument("--max_arity", type=int, default=8)
     parser.add_argument("--max_depth", type=int, default=4)
@@ -56,37 +57,29 @@ if __name__ == '__main__':
             desc='Proving'
         )):
             os.makedirs(f'./proofs/{args.strategy}/{dir}', exist_ok=True)
-            graph = None
+            graphs = []
+            datalist = []
+            active = torch.zeros(1024, dtype=torch.bool)
             pbar.set_postfix({'Success': success, 'Problem': problem})
-            with VampireInteractive(VAMPIRE, f'./problems/{dir}/{problem}') as interactive:
+            with VampireInteractive(VAMPIRE, f'./problems/{dir}/{problem}') as interactive:                
+                symbols = interactive.problem.function_symbols() | interactive.problem.predicate_symbols()
+                permutation = torch.randperm(32)
+                name = {s: permutation[i] + 1 for i, s in enumerate(symbols)}
                 while not interactive.finished and interactive.step_count < args.max_steps and (
-                    graph is None or len(graph) < args.max_nodes
-                ):
-                    if graph is None:
-                        graph, mapping, clauses = interactive.problem.to_graph(depth=args.max_depth)
-                    else:
-                        try:
-                            graph, mapping, clauses = interactive.problem.extend_graph(graph, mapping, len(clauses), depth=args.max_depth)
-                        except RecursionError:
-                            break
-                    symbols = problem.function_symbols() | problem.predicate_symbols()
-                    permutation = torch.randperm(32)
-                    name = {s: permutation[i] + 1 for i, s in enumerate(symbols)}
-                    data = from_networkx(graph)
-                    data.type = torch.tensor([_type_mapping[t] for t in data.type], dtype=torch.int)
-                    data.name = torch.tensor([name[s] if s is not None else 0 for s in data.name], dtype=torch.int)
-                    data.arity = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
-                    data.pos = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
-                    data.clauses = index_to_mask(torch.tensor(clauses), size=data.num_nodes)
-                    score = model(data)
-                    deduped = []
-                    for clause in interactive.problem.clauses:
-                        if clause not in deduped:
-                            deduped.append(clause)
-                    _mapping = {i: deduped.index(clause) for i, clause in enumerate(interactive.problem.clauses)}
-                    vals = [(score[_mapping[i]].item(), i) for i in range(len(interactive.problem.clauses)) if not interactive.active[i]]
-                    _, next_clause = max(vals)
-                    interactive.step(next_clause)
+                    sum(len(g) for g in graphs) < args.max_nodes
+                ) and (len(graphs) == 0 or not active[:len(graphs)].all()):
+                    graphs = interactive.problem.extend(graphs, len(graphs), depth=args.max_depth)
+                    for graph in graphs[len(datalist):]:
+                        data = from_networkx(graph)
+                        data.type = torch.tensor([_type_mapping[t] for t in data.type], dtype=torch.int)
+                        data.name = torch.tensor([name[s] if s is not None else 0 for s in data.name], dtype=torch.int)
+                        data.arity = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
+                        data.pos = torch.tensor([min(args.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
+                        datalist.append(data)
+                    score = model(Batch.from_data_list(datalist))
+                    given = choice(len(graphs), p=score.softmax(dim=0).detach().numpy())
+                    active[given] = True
+                    interactive.step(given)
                 if 'Refutation found.' in interactive.proof:
                     success += 1
                     with open(f'./proofs/{args.strategy}/{dir}/{problem}', 'w') as f:

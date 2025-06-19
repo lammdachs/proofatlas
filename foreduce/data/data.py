@@ -1,7 +1,6 @@
 import torch
 from torch.utils.data import Dataset
-from torch_geometric.data import Data, InMemoryDataset
-from torch_geometric.utils import index_to_mask
+from torch_geometric.data import InMemoryDataset, Batch
 from torch_geometric.utils.convert import from_networkx
 
 from foreduce.transformer.tokenizer import TokenConfig, ProofEmbedder, ProofTokenizer
@@ -17,42 +16,55 @@ _type_mapping = {
     'placeholder': 6,
 } | {t: i + 7 for i, t in enumerate(_PREDEFINED)}
 
+
 class GraphDataset(InMemoryDataset):
     def __init__(self, max_arity=8):
         super().__init__()
         self.max_arity = max_arity
         self._data = []
+        self._labels = []
 
     def add_proof(self, problem, tree, limit=None, depth=None):
         symbols = problem.function_symbols() | problem.predicate_symbols()
         permutation = torch.randperm(32)
         name = {s: permutation[i] + 1 for i, s in enumerate(symbols)}
-        graph, _, clauses, labels = problem.to_graph_data(tree, limit, depth)
-        data = from_networkx(graph)
-        data.type = torch.tensor([_type_mapping[t] for t in data.type], dtype=torch.int)
-        data.name = torch.tensor([name[s] if s is not None else 0 for s in data.name], dtype=torch.int)
-        data.arity = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.arity], dtype=torch.int)
-        data.pos = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in data.pos], dtype=torch.int)
-        data.clauses = index_to_mask(torch.tensor(clauses), size=data.num_nodes)
-        data.labels = torch.tensor(labels, dtype=torch.bool)
+        graphs, labels = problem.to_graph_data(tree, limit, depth)
+        data = []
+        if len(graphs) != len(labels):
+            print(problem)
+        for graph in graphs:
+            g = from_networkx(graph)
+            if g.edge_index.size(1) > 0:
+                g.type = torch.tensor([_type_mapping[t] for t in g.type], dtype=torch.int)
+                g.name = torch.tensor([name[s] if s is not None else 0 for s in g.name], dtype=torch.int)
+                g.arity = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in g.arity], dtype=torch.int)
+                g.pos = torch.tensor([min(self.max_arity + 1, a + 1) if a is not None else 0 for a in g.pos], dtype=torch.int)
+            else:
+                print(problem)
+                raise ValueError('Empty graph')
+            data.append(g)
+        data = Batch.from_data_list(data)
         self._data.append(data)
+        self._labels.append(torch.tensor(labels, dtype=torch.bool))
+        
 
     def __len__(self):
         return len(self._data)
 
     def get(self, idx):
-        return self._data[idx]
+        return self._data[idx], self._labels[idx]
 
     def __getitem__(self, idx):
-        return self._data[idx]
+        return self._data[idx], self._labels[idx]
     
     def save(self, path):
-        torch.save((self.max_arity, self._data), path)
+        torch.save((self.max_arity, self._data, self._labels), path)
         
     def load(path):
-        max_arity, data = torch.load(path)
+        max_arity, data, labels = torch.load(path)
         dataset = GraphDataset(max_arity)
         dataset._data = data
+        dataset._labels = labels
         return dataset
 
 

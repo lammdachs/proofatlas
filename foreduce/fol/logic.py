@@ -35,9 +35,9 @@ class _Symbol:
         self.arity = arity
 
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash((self.name, self.arity))
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash((self.name, self.arity))
+        return self.hash
 
     def __repr__(self):
         return f"{self.name}/{self.arity}"
@@ -61,9 +61,9 @@ class Function(_Symbol):
             self.arity == other.arity
 
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash((self.name, self.arity))
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash((self.name, self.arity))
+        return self.hash
 
 
 class Predicate(_Symbol):
@@ -77,9 +77,9 @@ class Predicate(_Symbol):
             self.arity == other.arity
             
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash((self.name, self.arity))
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash((self.name, self.arity))
+        return self.hash
 
 
 _EQ = Predicate('eq', 2)
@@ -106,9 +106,9 @@ class Term:
         self.args = args
 
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash((self.symbol, *self.args))
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash((self.symbol, *self.args))
+        return self.hash
 
     def __eq__(self, other):
         if not isinstance(other, Term):
@@ -256,9 +256,9 @@ class Literal(Term):
             self.polarity == other.polarity
 
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash((self.predicate, self.polarity))
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash((self.predicate, self.polarity))
+        return self.hash
 
     def depth(self):
         return self.predicate.depth()
@@ -299,9 +299,9 @@ class Clause:
         return self.literals == other.literals
 
     def __hash__(self):
-        if not hasattr(self, '_hash'):
-            self._hash = hash(self.literals)
-        return self._hash
+        if not hasattr(self, 'hash'):
+            self.hash = hash(self.literals)
+        return self.hash
 
     def depth(self):
         return max(literal.predicate.depth() for literal in self.literals)
@@ -349,17 +349,16 @@ class Clause:
         result[-1] = config.reserved_token_mapping["<END>"]
         return result
 
-    def to_graph(self, graph, mapping, depth=None):
-        if self in mapping:
-            return mapping
-        mapping[self] = len(graph.nodes)
+    def to_graph(self, depth=None):
+        mapping = {self: 0}
+        graph = nx.Graph()
         graph.add_node(len(graph.nodes), type='clause', name=None, arity=None, pos=None)
         if not self.literals:
             graph.add_edge(mapping[self], mapping[_FALSE])
         for literal in self.literals:
             mapping = literal.to_graph(graph, mapping, self, depth=depth)
             graph.add_edge(mapping[self], mapping[(literal, self)])
-        return mapping
+        return graph
 
 
 class Problem:
@@ -425,35 +424,35 @@ class Problem:
             result.append(clause.tokenize(config, mapping))
         return result, mapping
     
-    def to_graph(self, limit=None, depth=None):
-        graph = nx.Graph()
-        mapping = {}
+    def to_graphs(self, limit=None, depth=None):
+        graphs = []
         if limit is None:
             limit = len(self.clauses)
         for idx, clause in enumerate(self.clauses[:limit]):
-            mapping = clause.to_graph(graph, mapping, depth=depth)
-        return graph, mapping, sorted(mapping[r] for r in set(self.clauses[:limit]))
+            graph = clause.to_graph(depth=depth)
+            graphs.append(graph)
+        return graphs
     
-    def extend_graph(self, graph, mapping, prev_limit, limit=None, depth=8):
+    def extend(self, graphs, prev_limit, limit=None, depth=8):
         if limit is None:
             limit = len(self.clauses)
         for idx, clause in enumerate(self.clauses[prev_limit:limit]):
-            mapping = clause.to_graph(graph, mapping, depth=depth)
-        return graph, mapping, sorted(mapping[r] for r in set(self.clauses[:limit]))
+            graph = clause.to_graph(depth=depth)
+            graphs.append(graph)
+        return graphs
     
     def to_graph_data(self, tree, limit=None, depth=8):
         if limit is None:
             limit = len(self.clauses)
-        graph, mapping, _ = self.to_graph(limit, depth=8)
+        graphs = self.to_graphs(limit, depth=8)
         dependencies = [set() for _ in self.clauses]
         for idx in range(len(self.clauses)):
             if tree[idx]:
                 dependencies[idx] = {idx} | set.union(*[dependencies[j] for j in tree[idx]])
             else:
                 dependencies[idx] = {idx}
-        labels =  {clause: False for clause in self.clauses[:limit]}
+        labels =  [False for _ in range(limit)]
         for idx in range(limit):
             if idx in dependencies[-1]:
-                labels[self.clauses[idx]] = True
-        clauses, labels = zip(*sorted([(mapping[r], labels[r]) for r in set(self.clauses[:limit])]))
-        return graph, mapping, list(clauses), list(labels)
+                labels[idx] = True
+        return graphs, labels

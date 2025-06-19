@@ -1,8 +1,8 @@
 from itertools import islice
 import torch
 import torch.nn.functional as F
-from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding, Module
-from torch_geometric.nn import GINConv, GCNConv, global_add_pool, global_mean_pool, GraphNorm
+from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding
+from torch_geometric.nn import GINConv, GCNConv, global_add_pool, GraphNorm
 from lightning import LightningModule
 
 from foreduce.transformer.spherical_code import SphericalCode
@@ -40,6 +40,7 @@ class GNN(LightningModule):
             [GraphNorm(dim) for _ in range(layers)])
         self.conv_layers = torch.nn.ModuleList(
             [self.conv(dim, dim) for _ in range(layers)])
+        self.out = Sequential(Linear(dim, dim), self.act, Linear(dim, dim))
 
     def forward(self, data):
         typ, name, arity, pos, edge_index, batch = data.type, data.name, data.arity, data.pos, data.edge_index, data.batch
@@ -47,5 +48,5 @@ class GNN(LightningModule):
         for conv, norm in zip(self.conv_layers, self.norms):
             x = x + norm(conv(x, edge_index))
             x = self.act(x)
-        return x
+        return self.out(global_add_pool(x, batch))
 
