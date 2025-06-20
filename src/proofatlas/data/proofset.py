@@ -12,7 +12,6 @@ from proofatlas.loops.base import Loop
 from proofatlas.loops.registry import get_loop
 from proofatlas.selectors.base import Selector
 from proofatlas.selectors.registry import get_selector
-from proofatlas.dataformats import get_data_format
 from .problemset import Problemset
 
 
@@ -24,7 +23,6 @@ class Proofset(Dataset):
                  problemset: Optional[Problemset] = None,
                  loop: Optional[Loop] = None,
                  selector: Optional[Selector] = None,
-                 data_format: str = 'graph',
                  max_steps: int = 100,
                  cache_dir: Optional[Path] = None):
         """
@@ -35,7 +33,6 @@ class Proofset(Dataset):
             problemset: ProblemSet to generate proofs from
             loop: Loop to use for proof generation
             selector: Selector to use for clause selection
-            data_format: Format for encoding proof states
             max_steps: Maximum steps per proof attempt
             cache_dir: Directory to cache generated proofs
         """
@@ -46,15 +43,10 @@ class Proofset(Dataset):
         self.max_steps = max_steps
         self.cache_dir = cache_dir
         
-        # Data format for encoding
-        self.data_format = get_data_format(data_format)
-        
         # Storage for proofs
         self.proofs: List[Proof] = []
         self.problem_indices: List[int] = []
         
-        # Cache for encoded data
-        self._encoded_cache: Dict[int, Any] = {}
     
     def create(self, problemset: Problemset, loop: Loop, selector: Selector, 
                steps: Optional[int] = None):
@@ -76,7 +68,6 @@ class Proofset(Dataset):
         # Clear existing data
         self.proofs.clear()
         self.problem_indices.clear()
-        self._encoded_cache.clear()
         
         # Generate proofs for each problem
         for prob_idx in range(len(problemset)):
@@ -109,48 +100,26 @@ class Proofset(Dataset):
         """Number of proofs in the dataset."""
         return len(self.proofs)
     
-    def __getitem__(self, idx: int) -> Tuple[List[Any], List[int], Dict[str, Any]]:
+    def __getitem__(self, idx: int) -> Tuple[Proof, Dict[str, Any]]:
         """
-        Get encoded proof data for training.
+        Get proof and metadata.
         
         Returns:
             Tuple of:
-                - List of encoded states
-                - List of selected clause indices
+                - Proof object
                 - Metadata dict
         """
-        if idx in self._encoded_cache:
-            return self._encoded_cache[idx]
-        
         proof = self.proofs[idx]
-        
-        # Encode each state in the proof
-        encoded_states = []
-        selected_clauses = []
-        
-        for i, step in enumerate(proof.steps[:-1]):  # Exclude last step
-            # Encode the state
-            encoded = self.data_format.encode_state(step.state)
-            encoded_states.append(encoded)
-            
-            # Get the selected clause from next step
-            next_step = proof.steps[i + 1]
-            if next_step.selected_clause is not None:
-                selected_clauses.append(next_step.selected_clause)
-            else:
-                selected_clauses.append(-1)  # No selection
+        problem_idx = self.problem_indices[idx]
         
         metadata = {
             'proof_length': proof.length,
-            'problem_idx': self.problem_indices[idx],
+            'problem_idx': problem_idx,
             'is_complete': proof.is_complete,
-            'problem_name': self.problemset.problem_files[self.problem_indices[idx]].stem
+            'problem_name': self.problemset.problem_files[problem_idx].stem if self.problemset else f"problem_{problem_idx}"
         }
         
-        result = (encoded_states, selected_clauses, metadata)
-        self._encoded_cache[idx] = result
-        
-        return result
+        return proof, metadata
     
     def save(self, path: Path):
         """Save the proof set to disk."""

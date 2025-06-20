@@ -10,6 +10,8 @@ The data module provides:
 - **DatasetConfig**: Configuration management for datasets
 - **DatasetManager**: Central registry for multiple datasets
 
+Importantly, the data module is independent of how data is formatted for models. It returns raw Problem, ProofState, and Proof objects. The dataformats module handles encoding these objects for machine learning models.
+
 ## Module Structure
 
 ### config.py
@@ -42,7 +44,7 @@ class Problemset(Dataset):
     def __init__(self, config: DatasetConfig, split_name: str = 'train')
     
     def __len__(self) -> int
-    def __getitem__(self, idx) -> Tuple[encoded_data, metadata]
+    def __getitem__(self, idx) -> Tuple[ProofState, metadata]
     
     def get_problem(self, idx: int) -> Problem
     def get_proof_state(self, idx: int) -> ProofState
@@ -65,7 +67,7 @@ class Proofset(Dataset):
                selector: Selector, steps: int)
     
     def __len__(self) -> int
-    def __getitem__(self, idx) -> Tuple[states, selections, metadata]
+    def __getitem__(self, idx) -> Tuple[Proof, metadata]
     
     def save(self, path: Path)
     def load(self, path: Path)
@@ -74,7 +76,7 @@ class Proofset(Dataset):
 Features:
 - Generate proofs by running selectors on problems
 - Store proof trajectories for training
-- Support for different data encodings
+- Returns raw Proof objects (encoding happens elsewhere)
 - Serialization for offline training
 
 ### manager.py
@@ -119,9 +121,8 @@ dataset = Problemset(config, split_name='train')
 
 # Access problems
 for i in range(len(dataset)):
-    encoded, metadata = dataset[i]
-    problem = dataset.get_problem(i)
-    state = dataset.get_proof_state(i)
+    state, metadata = dataset[i]
+    problem = dataset.get_problem(i)  # Or use metadata['problem']
 ```
 
 ### Generating Proofs
@@ -173,7 +174,7 @@ config = manager.create_dataset_from_files(
 
 The data module integrates with:
 - **FileFormats**: For parsing problem files
-- **DataFormats**: For encoding states for ML models
+- **DataFormats**: Can be used separately to encode the returned data for Selectors
 - **Loops**: For proof generation
 - **Selectors**: For clause selection during proof generation
 - **Core**: Uses Problem, Clause, ProofState types

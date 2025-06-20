@@ -50,11 +50,9 @@ class TestProblemset:
     
     def test_init(self, mock_config):
         """Test initialization of Problemset."""
-        with patch('proofatlas.data.problemset.get_format_handler') as mock_handler, \
-             patch('proofatlas.data.problemset.get_data_format') as mock_format:
+        with patch('proofatlas.data.problemset.get_format_handler') as mock_handler:
             
             mock_handler.return_value = Mock()
-            mock_format.return_value = Mock()
             
             dataset = Problemset(mock_config, 'train')
             
@@ -63,12 +61,10 @@ class TestProblemset:
             assert dataset.split.name == 'train'
             
             mock_handler.assert_called_once_with('tptp')
-            mock_format.assert_called_once_with('graph')
     
     def test_init_invalid_split(self, mock_config):
         """Test initialization with invalid split name."""
-        with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'):
+        with patch('proofatlas.data.problemset.get_format_handler'):
             
             with pytest.raises(ValueError, match="Split 'invalid' not found"):
                 Problemset(mock_config, 'invalid')
@@ -76,7 +72,6 @@ class TestProblemset:
     def test_collect_problem_files(self, mock_config):
         """Test collecting problem files."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch('proofatlas.data.problemset.glob.glob') as mock_glob, \
              patch('pathlib.Path.exists') as mock_exists:
             
@@ -96,7 +91,6 @@ class TestProblemset:
     def test_len(self, mock_config):
         """Test dataset length."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch.object(Problemset, '_collect_problem_files') as mock_collect:
             
             mock_collect.return_value = [Path('1.p'), Path('2.p'), Path('3.p')]
@@ -107,7 +101,6 @@ class TestProblemset:
     def test_get_problem(self, mock_config, mock_problem):
         """Test getting a problem by index."""
         with patch('proofatlas.data.problemset.get_format_handler') as mock_handler, \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch.object(Problemset, '_collect_problem_files') as mock_collect:
             
             mock_file_handler = Mock()
@@ -131,7 +124,6 @@ class TestProblemset:
     def test_get_proof_state(self, mock_config, mock_problem):
         """Test getting initial proof state."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch.object(Problemset, '_collect_problem_files') as mock_collect, \
              patch.object(Problemset, 'get_problem') as mock_get_problem:
             
@@ -150,7 +142,6 @@ class TestProblemset:
     def test_get_clauses(self, mock_config, mock_problem):
         """Test getting clauses for a problem."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch.object(Problemset, '_collect_problem_files') as mock_collect, \
              patch.object(Problemset, 'get_problem') as mock_get_problem:
             
@@ -169,16 +160,11 @@ class TestProblemset:
     def test_getitem(self, mock_config, mock_problem):
         """Test getting an item for training."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format') as mock_format_getter, \
              patch.object(Problemset, '_collect_problem_files') as mock_collect, \
              patch.object(Problemset, 'get_problem') as mock_get_problem, \
              patch.object(Problemset, 'get_proof_state') as mock_get_state:
             
             # Setup mocks
-            mock_data_format = Mock()
-            mock_data_format.encode_state.return_value = {'encoded': 'data'}
-            mock_format_getter.return_value = mock_data_format
-            
             mock_collect.return_value = [Path('/tmp/test/problem1.p')]
             mock_get_problem.return_value = mock_problem
             
@@ -187,21 +173,19 @@ class TestProblemset:
             
             dataset = Problemset(mock_config, 'train')
             
-            encoded, metadata = dataset[0]
+            state, metadata = dataset[0]
             
-            assert encoded == {'encoded': 'data'}
+            assert state == mock_state
             assert metadata['problem_file'] == '/tmp/test/problem1.p'
             assert metadata['problem_name'] == 'problem1'
+            assert metadata['problem'] == mock_problem
             assert metadata['num_clauses'] == 3
             assert metadata['num_processed'] == 0
             assert metadata['num_unprocessed'] == 3
-            
-            mock_data_format.encode_state.assert_called_once_with(mock_state)
     
     def test_clear_cache(self, mock_config):
         """Test clearing the cache."""
         with patch('proofatlas.data.problemset.get_format_handler'), \
-             patch('proofatlas.data.problemset.get_data_format'), \
              patch.object(Problemset, '_collect_problem_files') as mock_collect:
             
             mock_collect.return_value = [Path('1.p')]

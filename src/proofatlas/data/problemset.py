@@ -1,12 +1,11 @@
 """Dataset class for theorem proving problems."""
 
 from pathlib import Path
-from typing import List, Optional, Any, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 import glob
 from torch.utils.data import Dataset
 
 from proofatlas.fileformats import get_format_handler
-from proofatlas.dataformats import get_data_format
 from proofatlas.core.logic import Problem, Clause
 from proofatlas.core.state import ProofState
 from .config import DatasetConfig, DatasetSplit
@@ -22,9 +21,8 @@ class Problemset(Dataset):
         if not self.split:
             raise ValueError(f"Split '{split_name}' not found in dataset config")
         
-        # Initialize format handlers
+        # Initialize file format handler
         self.file_handler = get_format_handler(config.file_format)
-        self.data_format = get_data_format(config.data_format)
         
         # Collect problem files
         self.problem_files = self._collect_problem_files()
@@ -62,21 +60,21 @@ class Problemset(Dataset):
     def __len__(self) -> int:
         return len(self.problem_files)
     
-    def __getitem__(self, idx: int) -> Tuple[Any, Dict[str, Any]]:
-        """Get a problem and its encoded representation."""
+    def __getitem__(self, idx: int) -> Tuple[ProofState, Dict[str, Any]]:
+        """Get a proof state and metadata for a problem."""
         problem = self.get_problem(idx)
         state = self.get_proof_state(idx)
-        encoded = self.data_format.encode_state(state)
         
         metadata = {
             'problem_file': str(self.problem_files[idx]),
             'problem_name': self.problem_files[idx].stem,
+            'problem': problem,
             'num_clauses': len(problem.clauses),
             'num_processed': len(state.processed),
             'num_unprocessed': len(state.unprocessed)
         }
         
-        return encoded, metadata
+        return state, metadata
     
     def get_problem(self, idx: int) -> Problem:
         """Get a problem by index."""
