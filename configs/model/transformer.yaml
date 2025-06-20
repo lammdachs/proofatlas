@@ -1,0 +1,26 @@
+# Pure Transformer model configuration
+
+_target_: proofatlas.models.transformer.transformer.TransformerModel
+
+# Architecture
+num_layers: 12
+num_heads: 12
+hidden_dim: 768
+feedforward_dim: 3072
+max_sequence_length: 2048
+vocab_size: 32000
+
+# Regularization
+dropout: 0.1
+attention_dropout: 0.1
+activation_dropout: 0.1
+
+# Positional encoding
+positional_encoding: "rotary"  # Options: sinusoidal, learned, rotary
+
+# Layer normalization
+layer_norm_eps: 1e-5
+pre_norm: true
+
+# Output
+output_dim: null  # Set based on task

@@ -1,0 +1,44 @@
+# Default data configuration
+
+# Dataset settings
+dataset:
+  name: "tptp_proofs"
+  version: "v1"
+  
+# Data loading
+batch_size: 32
+shuffle: true
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+
+# Data splits
+splits:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+  
+# Preprocessing
+preprocessing:
+  normalize_formulas: true
+  max_formula_depth: 50
+  max_proof_length: 1000
+  tokenizer: "sentencepiece"
+  vocab_size: 32000
+  
+# Graph construction
+graph:
+  include_edge_features: true
+  directed: true
+  add_self_loops: false
+  
+# Augmentation
+augmentation:
+  enabled: false
+  variable_renaming: true
+  clause_reordering: true
+  
+# Caching
+cache:
+  enabled: true
+  directory: "${paths.cache_dir}/processed_data"

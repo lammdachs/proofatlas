@@ -1,0 +1,34 @@
+# Default configuration for foreduce
+
+# Paths
+paths:
+  vampire: ${VAMPIRE_PATH:/usr/local/bin/vampire}
+  tptp: ${TPTP_PATH:./.problems/tptp}
+  data: ${DATA_DIR:./.problems}
+  models: ${MODEL_DIR:./.models}
+  outputs: ${LOG_DIR:./logs}
+
+# Model configuration
+model:
+  hidden_dim: 768
+  num_layers: 6
+  num_heads: 12
+  dropout: 0.1
+  gnn_type: gcn
+  use_positional_encoding: true
+
+# Training configuration
+training:
+  batch_size: 32
+  learning_rate: 0.0001
+  num_epochs: 100
+  gradient_clip: 1.0
+  warmup_steps: 1000
+  validation_split: 0.1
+  
+# Solver configuration
+solver:
+  timeout: 300
+  max_clauses: 10000
+  selection_ratio: 0.1
+  interactive_mode: true

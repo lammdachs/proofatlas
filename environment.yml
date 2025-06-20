@@ -1,0 +1,57 @@
+name: proofatlas
+channels:
+  - pytorch
+  - nvidia
+  - pyg
+  - conda-forge
+  - defaults
+dependencies:
+  # Python
+  - python=3.11
+  
+  # PyTorch ecosystem
+  - pytorch
+  - pytorch-cuda=12.1
+  - pyg
+  - pytorch-lightning
+  - torchmetrics
+  
+  # Scientific computing
+  - numpy
+  - matplotlib
+  - scikit-learn
+  - scipy
+  - networkx
+  - plotly
+  
+  # Jupyter ecosystem
+  - jupyter
+  - ipython
+  - ipykernel
+  - notebook
+  
+  # Configuration and CLI
+  - omegaconf
+  - click
+  - pyyaml
+  
+  # Parsing
+  - lark-parser
+  
+  # Utilities
+  - tqdm
+  - gitpython
+  - python-dotenv
+  - rich
+  - textual
+  - pip
+  - setuptools
+  - wheel
+  
+  # Development tools
+  - pytest
+  - pytest-cov
+  - black
+  - isort
+  - flake8
+  - ruff
