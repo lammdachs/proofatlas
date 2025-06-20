@@ -2,7 +2,7 @@
 
 from typing import Dict, Type, Any, Optional
 
-from .base import ClauseSelector
+from .base import Selector
 from .random import FIFOSelector
 from .gnn import GNNSelector
 
@@ -11,7 +11,7 @@ class SelectorRegistry:
     """Registry for managing clause selectors."""
     
     def __init__(self):
-        self._selectors: Dict[str, Type[ClauseSelector]] = {}
+        self._selectors: Dict[str, Type[Selector]] = {}
         self._register_default_selectors()
     
     def _register_default_selectors(self):
@@ -20,11 +20,11 @@ class SelectorRegistry:
         self.register('random', FIFOSelector)  # Preferred name
         self.register('gnn', GNNSelector)
     
-    def register(self, name: str, selector_class: Type[ClauseSelector]):
+    def register(self, name: str, selector_class: Type[Selector]):
         """Register a new selector type."""
         self._selectors[name.lower()] = selector_class
     
-    def create_selector(self, name: str, **kwargs: Any) -> ClauseSelector:
+    def create_selector(self, name: str, **kwargs: Any) -> Selector:
         """Create a selector instance."""
         name = name.lower()
         
@@ -41,6 +41,6 @@ class SelectorRegistry:
 _registry = SelectorRegistry()
 
 
-def get_selector(name: str, **kwargs: Any) -> ClauseSelector:
+def get_selector(name: str, **kwargs: Any) -> Selector:
     """Get a clause selector instance."""
     return _registry.create_selector(name, **kwargs)

@@ -3,8 +3,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from proofatlas.core.proof import Proof, ProofState
-from proofatlas.core.fol.logic import Clause, Literal
+from proofatlas.core.proof import Proof
+from proofatlas.core.state import ProofState
+from proofatlas.core.logic import Clause, Literal
 
 
 class Loop(ABC):
@@ -39,8 +40,8 @@ class Loop(ABC):
     
     def _are_complementary(self, lit1: Literal, lit2: Literal) -> bool:
         """Check if two literals are complementary."""
-        if lit1.negated != lit2.negated:
-            return lit1.atom == lit2.atom
+        if lit1.polarity != lit2.polarity:
+            return lit1.predicate == lit2.predicate
         return False
     
     def subsumes(self, clause1: Clause, clause2: Clause) -> bool:

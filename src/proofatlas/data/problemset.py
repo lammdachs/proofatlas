@@ -6,12 +6,13 @@ import glob
 from torch.utils.data import Dataset
 
 from proofatlas.fileformats import get_format_handler
-from proofatlas.dataformats import get_data_format, ProofState
+from proofatlas.dataformats import get_data_format
 from proofatlas.core.logic import Problem, Clause
+from proofatlas.core.state import ProofState
 from .config import DatasetConfig, DatasetSplit
 
 
-class Proofset(Dataset):
+class Problemset(Dataset):
     """Dataset for theorem proving problems."""
     
     def __init__(self, config: DatasetConfig, split_name: str = 'train'):
@@ -89,16 +90,15 @@ class Proofset(Dataset):
         """Get initial proof state for a problem."""
         if idx not in self._state_cache:
             problem = self.get_problem(idx)
-            clauses = self.file_handler.to_cnf(problem)
             # Initial state: all clauses are unprocessed
-            state = ProofState(processed=[], unprocessed=clauses)
+            state = ProofState(processed=[], unprocessed=list(problem.clauses))
             self._state_cache[idx] = state
         return self._state_cache[idx]
     
     def get_clauses(self, idx: int) -> List[Clause]:
         """Get CNF clauses for a problem."""
         problem = self.get_problem(idx)
-        return self.file_handler.to_cnf(problem)
+        return list(problem.clauses)
     
     def clear_cache(self):
         """Clear the problem and state caches."""

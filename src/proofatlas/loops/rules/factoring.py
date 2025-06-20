@@ -2,8 +2,9 @@
 
 from typing import List, Optional, Dict
 
-from proofatlas.core.proof import Rule, Proof, ProofState
-from proofatlas.core.fol.logic import Clause, Literal
+from proofatlas.core.proof import Rule, Proof
+from proofatlas.core.state import ProofState
+from proofatlas.core.logic import Clause, Literal
 
 
 class FactoringRule(Rule):
@@ -56,8 +57,8 @@ class FactoringRule(Rule):
                 lit1 = clause.literals[i]
                 lit2 = clause.literals[j]
                 
-                if lit1.negated == lit2.negated:
-                    mgu = self._unify(lit1.atom, lit2.atom)
+                if lit1.polarity == lit2.polarity:
+                    mgu = self._unify(lit1.predicate, lit2.predicate)
                     if mgu is not None:
                         # Create factor
                         new_literals = []

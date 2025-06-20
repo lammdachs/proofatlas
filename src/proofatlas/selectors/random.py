@@ -2,11 +2,11 @@
 
 from typing import List, Optional
 
-from proofatlas.dataformats.base import ProofState
-from .base import ClauseSelector
+from proofatlas.core.state import ProofState
+from .base import Selector
 
 
-class FIFOSelector(ClauseSelector):
+class FIFOSelector(Selector):
     """Select clauses in the order they were generated (FIFO)."""
     
     def select(self, proof_state: ProofState) -> Optional[int]:

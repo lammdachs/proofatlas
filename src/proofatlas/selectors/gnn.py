@@ -7,9 +7,9 @@ from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding
 from torch_geometric.nn import GINConv, GCNConv, global_add_pool, GraphNorm
 from pytorch_lightning import LightningModule
 
-from proofatlas.dataformats.base import ProofState
+from proofatlas.core.state import ProofState
 from proofatlas.dataformats import get_data_format
-from .base import ClauseSelector
+from .base import Selector
 
 
 class SphericalCode(torch.nn.Module):
@@ -122,7 +122,7 @@ class GNNModel(LightningModule):
         return self.out(global_add_pool(x, batch))
 
 
-class GNNSelector(ClauseSelector):
+class GNNSelector(Selector):
     """Select clauses using a Graph Neural Network model."""
     
     def __init__(self, model: Optional[GNNModel] = None, 

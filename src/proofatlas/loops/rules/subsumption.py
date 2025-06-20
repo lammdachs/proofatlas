@@ -2,8 +2,9 @@
 
 from typing import List
 
-from proofatlas.core.proof import Rule, Proof, ProofState
-from proofatlas.core.fol.logic import Clause, Literal
+from proofatlas.core.proof import Rule, Proof
+from proofatlas.core.state import ProofState
+from proofatlas.core.logic import Clause, Literal
 
 
 class SubsumptionRule(Rule):

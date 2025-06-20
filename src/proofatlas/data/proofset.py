@@ -5,10 +5,13 @@ from typing import List, Optional, Dict, Any, Tuple
 import torch
 from torch.utils.data import Dataset
 
-from proofatlas.core.proof import Proof, ProofState
+from proofatlas.core.proof import Proof
+from proofatlas.core.state import ProofState
 from proofatlas.core.logic import Problem, Clause
-from proofatlas.loops import Loop, get_loop
-from proofatlas.selectors import Selector, get_selector
+from proofatlas.loops.base import Loop
+from proofatlas.loops.registry import get_loop
+from proofatlas.selectors.base import Selector
+from proofatlas.selectors.registry import get_selector
 from proofatlas.dataformats import get_data_format
 from .problemset import Problemset
 
@@ -89,7 +92,7 @@ class Proofset(Dataset):
         # Initialize proof with problem clauses
         initial_state = ProofState(
             processed=[],
-            unprocessed=problem.clauses
+            unprocessed=list(problem.clauses)
         )
         proof = Proof(initial_state)
         

@@ -2,8 +2,9 @@
 
 from typing import List, Optional, Dict, Tuple
 
-from proofatlas.core.proof import Rule, Proof, ProofState
-from proofatlas.core.fol.logic import Clause, Literal
+from proofatlas.core.proof import Rule, Proof
+from proofatlas.core.state import ProofState
+from proofatlas.core.logic import Clause, Literal
 
 
 class ResolutionRule(Rule):
@@ -55,9 +56,9 @@ class ResolutionRule(Rule):
         
         for i, lit1 in enumerate(clause1.literals):
             for j, lit2 in enumerate(clause2.literals):
-                if lit1.negated != lit2.negated:
-                    # Try to unify the atoms
-                    mgu = self._unify(lit1.atom, lit2.atom)
+                if lit1.polarity != lit2.polarity:
+                    # Try to unify the predicates
+                    mgu = self._unify(lit1.predicate, lit2.predicate)
                     if mgu is not None:
                         # Create resolvent
                         new_literals = []

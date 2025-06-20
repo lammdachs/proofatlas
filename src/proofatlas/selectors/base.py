@@ -3,10 +3,10 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
-from proofatlas.dataformats.base import ProofState
+from proofatlas.core.state import ProofState
 
 
-class ClauseSelector(ABC):
+class Selector(ABC):
     """Abstract base class for clause selection strategies."""
     
     def __init__(self):

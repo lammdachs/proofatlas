@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import yaml
 
 from .config import DatasetConfig
-from .dataset import ProofDataset
+from .problemset import Problemset
 
 
 class DatasetManager:
@@ -14,7 +14,7 @@ class DatasetManager:
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or Path("configs/datasets")
         self.datasets: Dict[str, DatasetConfig] = {}
-        self._loaded_datasets: Dict[str, ProofDataset] = {}
+        self._loaded_datasets: Dict[str, Problemset] = {}
         
         if self.config_dir.exists():
             self._load_configs()
@@ -32,7 +32,7 @@ class DatasetManager:
         """Add a dataset configuration."""
         self.datasets[config.name] = config
     
-    def get_dataset(self, name: str, split: str = 'train') -> ProofDataset:
+    def get_dataset(self, name: str, split: str = 'train') -> Problemset:
         """Get a dataset by name and split."""
         cache_key = f"{name}_{split}"
         
@@ -41,7 +41,7 @@ class DatasetManager:
                 raise ValueError(f"Dataset '{name}' not found")
             
             config = self.datasets[name]
-            dataset = ProofDataset(config, split)
+            dataset = Problemset(config, split)
             self._loaded_datasets[cache_key] = dataset
         
         return self._loaded_datasets[cache_key]
