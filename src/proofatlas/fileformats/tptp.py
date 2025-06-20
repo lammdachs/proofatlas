@@ -20,15 +20,17 @@ class TPTPFormat(FileFormat):
         """Parse a TPTP string and return a Problem object."""
         return read_string(content)
     
-    def to_cnf(self, problem: Problem) -> List[Clause]:
-        """Convert a Problem to CNF clauses."""
-        return problem.clauses
+    def write_file(self, problem: Problem, file_path: Path, **kwargs) -> None:
+        """Write a Problem to a file in TPTP format."""
+        with open(file_path, 'w') as f:
+            f.write(self.format_problem(problem, **kwargs))
     
-    def write_cnf(self, clauses: List[Clause], output_path: Path) -> None:
-        """Write CNF clauses to a file in TPTP format."""
-        with open(output_path, 'w') as f:
-            for i, clause in enumerate(clauses):
-                f.write(f"cnf(clause_{i}, plain, {self._clause_to_tptp(clause)}).\n")
+    def format_problem(self, problem: Problem, **kwargs) -> str:
+        """Format a Problem as a TPTP string."""
+        lines = []
+        for i, clause in enumerate(problem.clauses):
+            lines.append(f"cnf(clause_{i}, plain, {self._clause_to_tptp(clause)}).")
+        return '\n'.join(lines)
     
     def _clause_to_tptp(self, clause: Clause) -> str:
         """Convert a clause to TPTP format string."""
@@ -46,30 +48,33 @@ class TPTPFormat(FileFormat):
     
     def _literal_to_tptp(self, literal) -> str:
         """Convert a literal to TPTP format string."""
-        if literal.negated:
-            return f"~{self._atom_to_tptp(literal.atom)}"
-        return self._atom_to_tptp(literal.atom)
+        if not literal.polarity:
+            return f"~{self._atom_to_tptp(literal.predicate)}"
+        return self._atom_to_tptp(literal.predicate)
     
     def _atom_to_tptp(self, atom) -> str:
-        """Convert an atom to TPTP format string."""
-        if atom.predicate.name == 'eq':
+        """Convert an atom (Term) to TPTP format string."""
+        # Check if it's an equality predicate
+        if hasattr(atom.symbol, 'name') and atom.symbol.name == '=':
             return f"{self._term_to_tptp(atom.args[0])} = {self._term_to_tptp(atom.args[1])}"
         
-        if atom.predicate.arity == 0:
-            return atom.predicate.name
+        # Propositional (0-ary predicate)
+        if atom.symbol.arity == 0:
+            return atom.symbol.name
         
+        # Predicate with arguments
         args = ', '.join(self._term_to_tptp(arg) for arg in atom.args)
-        return f"{atom.predicate.name}({args})"
+        return f"{atom.symbol.name}({args})"
     
     def _term_to_tptp(self, term) -> str:
         """Convert a term to TPTP format string."""
-        if hasattr(term, 'name') and hasattr(term, 'arity'):
-            if term.arity == 0:
-                return term.name
+        # Check if it's a Variable or Constant (has name attribute directly)
+        if hasattr(term, 'name') and not hasattr(term, 'args'):
             return term.name
         
+        # It's a compound term with symbol and args
         if hasattr(term, 'symbol') and hasattr(term, 'args'):
-            if term.symbol.arity == 0:
+            if term.symbol.arity == 0 or not term.args:
                 return term.symbol.name
             args = ', '.join(self._term_to_tptp(arg) for arg in term.args)
             return f"{term.symbol.name}({args})"
@@ -77,6 +82,11 @@ class TPTPFormat(FileFormat):
         return str(term)
     
     @property
-    def supported_extensions(self) -> List[str]:
-        """Return list of supported file extensions."""
+    def name(self) -> str:
+        """Return the name of this file format."""
+        return 'tptp'
+    
+    @property
+    def extensions(self) -> List[str]:
+        """Return list of file extensions this format handles."""
         return ['.p', '.tptp', '.ax']

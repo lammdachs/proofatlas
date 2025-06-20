@@ -2,8 +2,8 @@ from itertools import chain
 from lark import Transformer, Tree, Token, Visitor
 import os
 
-from proofatlas.core.fol.logic import _EQ, Function, Literal, Predicate, Variable, Clause, Problem
-from proofatlas.parsers.tptp.lexer import tptplexer
+from proofatlas.core.logic import Function, Literal, Predicate, Variable, Clause, Problem
+from proofatlas.fileformats.tptp_parser.lexer import tptplexer
 
 
 class TooLargeError(Exception):
@@ -731,11 +731,11 @@ class FOLConverter(Transformer):
     def fof_atom(self, children):
         if len(children) == 3 and type(children[1]) == Token:
             if children[1].value == "=":
-                return Literal(_EQ(children[0], children[2]), True)
+                return Literal(Predicate("=", 2)(children[0], children[2]), True)
             elif children[1].value == "!=":
-                return Literal(_EQ(children[0], children[2]), False)
+                return Literal(Predicate("=", 2)(children[0], children[2]), False)
         else:
-            return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]))
+            return Literal(Predicate(children[0].value, len(children) - 1)(*children[1:]), True)
 
     def fof_negated_atom(self, children):
         children[0].polarity = False

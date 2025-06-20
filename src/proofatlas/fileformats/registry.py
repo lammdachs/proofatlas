@@ -33,7 +33,7 @@ class FileFormatRegistry:
         """Get appropriate handler based on file extension."""
         for format_name, format_class in self._formats.items():
             handler = format_class()
-            if file_path.suffix in handler.supported_extensions:
+            if file_path.suffix in handler.extensions:
                 return handler
         
         raise ValueError(f"No handler found for file extension: {file_path.suffix}")
