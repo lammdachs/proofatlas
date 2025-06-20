@@ -29,11 +29,11 @@ src/proofatlas/
 │   ├── __init__.py
 │   ├── base.py
 │   └── tptp.py           # TPTPFormat implementation
-├── dataformats/           # Data representation formats
+├── dataformats/          # Data representation formats
 │   ├── __init__.py
 │   ├── base.py           # DataFormat interface
 │   └── graph.py          # GraphFormat for GNNs
-├── data/           # Problem and proof set management
+├── data/                 # Problem and proof set management
 │   ├── __init__.py
 │   ├── problemset.py     # ProblemSet class
 │   ├── proofset.py       # ProofSet class

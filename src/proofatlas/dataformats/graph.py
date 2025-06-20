@@ -6,7 +6,7 @@ import networkx as nx
 from torch_geometric.data import Data, Batch
 from torch_geometric.utils import from_networkx
 
-from proofatlas.core.fol.logic import Clause, Literal, Term, _PREDEFINED
+from proofatlas.core.logic import Clause, Literal, Term, _PREDEFINED
 from .base import DataFormat, ProofState
 
 

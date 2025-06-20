@@ -1,12 +1,10 @@
 """Registry for clause selectors."""
 
 from typing import Dict, Type, Any, Optional
-import torch.nn as nn
 
 from .base import ClauseSelector
-from .fifo import FIFOSelector
-from .age_weight import AgeWeightSelector
-from .neural import NeuralSelector
+from .random import FIFOSelector
+from .gnn import GNNSelector
 
 
 class SelectorRegistry:
@@ -18,9 +16,9 @@ class SelectorRegistry:
     
     def _register_default_selectors(self):
         """Register default selectors."""
-        self.register('fifo', FIFOSelector)
-        self.register('age_weight', AgeWeightSelector)
-        self.register('neural', NeuralSelector)
+        self.register('fifo', FIFOSelector)  # Legacy name
+        self.register('random', FIFOSelector)  # Preferred name
+        self.register('gnn', GNNSelector)
     
     def register(self, name: str, selector_class: Type[ClauseSelector]):
         """Register a new selector type."""
@@ -29,12 +27,6 @@ class SelectorRegistry:
     def create_selector(self, name: str, **kwargs: Any) -> ClauseSelector:
         """Create a selector instance."""
         name = name.lower()
-        
-        # Handle neural selector specially
-        if name == 'neural':
-            if 'model' not in kwargs:
-                raise ValueError("Neural selector requires 'model' parameter")
-            return NeuralSelector(**kwargs)
         
         if name not in self._selectors:
             raise ValueError(f"Unknown selector: {name}")

@@ -7,11 +7,11 @@ from torch.utils.data import Dataset
 
 from proofatlas.fileformats import get_format_handler
 from proofatlas.dataformats import get_data_format, ProofState
-from proofatlas.core.fol.logic import Problem, Clause
+from proofatlas.core.logic import Problem, Clause
 from .config import DatasetConfig, DatasetSplit
 
 
-class ProofDataset(Dataset):
+class Proofset(Dataset):
     """Dataset for theorem proving problems."""
     
     def __init__(self, config: DatasetConfig, split_name: str = 'train'):

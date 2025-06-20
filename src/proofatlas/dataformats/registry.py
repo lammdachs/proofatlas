@@ -4,7 +4,6 @@ from typing import Dict, Optional, Type, Any
 
 from .base import DataFormat
 from .graph import GraphFormat
-from .token import TokenFormat
 
 
 class DataFormatRegistry:
@@ -17,7 +16,6 @@ class DataFormatRegistry:
     def _register_default_formats(self):
         """Register default data format handlers."""
         self.register('graph', GraphFormat)
-        self.register('token', TokenFormat)
     
     def register(self, name: str, format_class: Type[DataFormat]):
         """Register a new data format handler."""

@@ -1,8 +1,6 @@
 from functools import cache
 import networkx as nx
 
-from proofatlas.models.transformer.tokenizer import TokenConfig
-
 
 class _Context:
     def __init__(self):
@@ -340,14 +338,6 @@ class Clause:
     def to_tptp(self, i=0):
         return f"cnf({i}, axiom, {self})."
 
-    def tokenize(self, config, mapping):
-        mapping = mapping | config.variable_mapping([var.name for var in self.variables()])
-        result = [config.reserved_token_mapping["<START>"]]
-        for literal in self.literals:
-            result += literal.tokenize(mapping)
-            result.append(mapping["|"])
-        result[-1] = config.reserved_token_mapping["<END>"]
-        return result
 
     def to_graph(self, depth=None):
         mapping = {self: 0}
@@ -407,22 +397,6 @@ class Problem:
         for i, clause in enumerate(self.clauses):
             result.append(clause.to_tptp(i))
         return '\n'.join(result)
-
-    def random_mapping(self, config=TokenConfig()):
-        symbols = [[] for _ in config.num_functions]
-        for function in self.function_symbols() | self.predicate_symbols():
-            symbols[function.arity].append(function.name)
-        return dict(config.reserved_token_mapping) | dict(config.random_function_mapping(symbols))  
-
-    def tokenize(self, config=TokenConfig(), mapping=None, limit=None):
-        if mapping is None:
-            mapping = self.random_mapping(config)
-        if limit is None:
-            limit = len(self.clauses)
-        result = []
-        for clause in self.clauses[:limit]:
-            result.append(clause.tokenize(config, mapping))
-        return result, mapping
     
     def to_graphs(self, limit=None, depth=None):
         graphs = []

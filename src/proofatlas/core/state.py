@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import List
 
-from proofatlas.core.fol.logic import Clause
+from proofatlas.core.logic import Clause
 
 
 @dataclass

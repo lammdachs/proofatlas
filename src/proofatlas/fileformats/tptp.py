@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import List, Optional
 
-from proofatlas.core.fol.logic import Clause, Problem
-from proofatlas.parsers.tptp.parser import read_file, read_string
+from proofatlas.core.logic import Clause, Problem
+from .tptp_parser.parser import read_file, read_string
 from .base import FileFormat
 
 
