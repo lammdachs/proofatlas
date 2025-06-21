@@ -36,9 +36,11 @@ tests/
 ├── core/           # Tests for core.logic, core.state
 ├── proofs/         # Tests for proofs module
 ├── rules/          # Tests for rules module
+├── loops/          # Tests for saturation loops
 ├── data/           # Tests for data module
 ├── fileformats/    # Tests for file format parsers
 ├── navigator/      # Tests for proof navigator
+├── test_data/      # Test data and generated proofs for inspection
 └── test_serialized_data.py  # Integration tests
 ```
 
@@ -108,6 +110,13 @@ src/proofatlas/
 ├── selectors/      # Clause selection strategies (base, random, gnn)
 ├── navigator/      # Terminal-based proof visualization
 └── utils/
+
+scripts/
+├── print_proof.py  # Non-interactive proof printer (CLI starts at step 0)
+└── inspect_proof.py # Interactive proof navigator
+
+docs/
+└── saturation_loop_design.md  # Design and implementation details for BasicLoop
 ```
 
 ### Navigator Module (`src/proofatlas/navigator/`)
@@ -118,6 +127,17 @@ Interactive terminal-based proof visualization:
   - Highlights the given clause with an arrow (→)
   - Shows rule applications and metadata
   - Keyboard controls: n/p (next/prev), q (quit), h (help)
+
+### Loops Module (`src/proofatlas/loops/`)
+Implements the given clause algorithm:
+- **base.py**: Abstract `Loop` class with helper methods (tautology/subsumption checking)
+- **basic.py**: `BasicLoop` - complete implementation with:
+  - Resolution and factoring inference rules
+  - Forward simplification (tautology deletion, subsumption checking)
+  - Redundancy filtering (duplicate removal)
+  - Clause size limits
+  - Full proof tracking with rule applications
+  - **Note**: Backward simplification is TODO
 
 ### Key Implementation Notes
 
@@ -130,16 +150,24 @@ Interactive terminal-based proof visualization:
    - Loops are responsible for applying RuleApplications to create new states
    - **Important**: Import ProofState from `proofatlas.proofs.state`, not from `proofatlas.proofs` to avoid circular imports
 
-3. **Selector Architecture**: 
+3. **Loop Architecture**:
+   - BasicLoop records the state BEFORE processing each given clause
+   - Rule applications are filtered to only show those producing non-redundant clauses
+   - Parent indices in rule applications show only the processed clause (given clause is implicit)
+   - Steps are 0-indexed in both JSON and CLI display
+
+4. **Selector Architecture**: 
    - Base class in `selectors/base.py`
    - GNN selector includes the model implementation directly
    - Selectors have `select()`, `run()`, and `train()` methods
 
-4. **Parser Integration**: Parsers moved to `fileformats/tptp_parser/` and `fileformats/vampire_parser/`
+5. **Parser Integration**: Parsers moved to `fileformats/tptp_parser/` and `fileformats/vampire_parser/`
 
-5. **No Models Directory**: GNN and other models are integrated into their usage points (e.g., GNN in selectors/gnn.py)
+6. **No Models Directory**: GNN and other models are integrated into their usage points (e.g., GNN in selectors/gnn.py)
 
-6. **Testing Pattern**: Tests mirror source structure under `tests/` directory
+7. **Testing Pattern**: Tests mirror source structure under `tests/` directory
+
+8. **Proof Inspection**: Use scripts/print_proof.py or scripts/inspect_proof.py to examine generated proofs
 
 ### Working with the Refactored Codebase
 

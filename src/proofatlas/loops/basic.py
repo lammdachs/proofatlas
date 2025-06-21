@@ -1,8 +1,15 @@
-"""Basic given clause loop implementation."""
+
+"""Basic given clause loop implementation.
+
+This module implements a complete saturation loop for theorem proving using
+the given clause algorithm. The loop applies resolution and factoring rules,
+performs redundancy elimination, and maintains a complete proof history.
+"""
 
 from typing import List, Tuple
 
 from proofatlas.proofs import Proof
+from proofatlas.proofs.proof import ProofStep
 from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause
 from proofatlas.rules import ResolutionRule, FactoringRule, RuleApplication
@@ -10,7 +17,18 @@ from .base import Loop
 
 
 class BasicLoop(Loop):
-    """Basic implementation of the given clause algorithm."""
+    """Basic implementation of the given clause algorithm.
+    
+    This loop implements a single step of saturation-based theorem proving:
+    1. Moves the given clause from unprocessed to processed
+    2. Applies resolution between given clause and all processed clauses
+    3. Applies factoring to the given clause
+    4. Filters redundant clauses (tautologies, subsumed, duplicates)
+    5. Adds non-redundant clauses to unprocessed
+    
+    The loop tracks all rule applications but only records those that
+    produce non-redundant clauses in the final proof.
+    """
     
     def __init__(self,
                  max_clause_size: int = 100,
@@ -53,7 +71,8 @@ class BasicLoop(Loop):
         new_unprocessed = [c for i, c in enumerate(current_state.unprocessed) if i != given_clause]
         
         # Generate new clauses and track rule applications
-        new_clauses, rule_applications = self._generate_clauses_with_rules(selected, new_processed[:-1])
+        # Pass the NEW processed list (which includes the given clause)
+        new_clauses, rule_applications = self._generate_clauses_with_rules(selected, new_processed)
         
         # Apply simplification
         if self.forward_simplify:
@@ -71,22 +90,37 @@ class BasicLoop(Loop):
                 new_unprocessed.append(clause)
                 kept_clauses.append(clause)
         
+        # Update rule applications to only include kept clauses
+        final_rule_applications = []
+        for app in rule_applications:
+            # Filter generated clauses to only those that were kept
+            kept_from_app = [c for c in app.generated_clauses if c in kept_clauses]
+            
+            # Only include the rule application if it contributed kept clauses
+            if kept_from_app:
+                final_app = RuleApplication(
+                    rule_name=app.rule_name,
+                    parents=app.parents,
+                    generated_clauses=kept_from_app,
+                    deleted_clause_indices=app.deleted_clause_indices,
+                    metadata=app.metadata
+                )
+                final_rule_applications.append(final_app)
+        
         # Create new state
         new_state = ProofState(processed=new_processed, unprocessed=new_unprocessed)
         
-        # Add step to proof with applied rules
-        metadata = {
-            'rule': 'given_clause',
-            'selected_clause': selected,
-            'new_clauses': kept_clauses,
-            'num_generated': len(new_clauses),
-            'num_kept': len(kept_clauses)
-        }
+        # Add step with current state BEFORE processing, the selected clause,
+        # and the rules that WILL BE applied
+        proof.add_step(current_state, selected_clause=given_clause, 
+                      applied_rules=final_rule_applications)
         
-        proof.add_step(new_state, selected_clause=given_clause, 
-                      applied_rules=rule_applications, **metadata)
+        # The Proof class will have added an extra step with the same state and no selection
+        # We need to update that last step to have the NEW state
+        proof.steps[-1] = ProofStep(new_state, selected_clause=None, applied_rules=[])
         
         return proof
+    
     
     def _generate_clauses(self, given_clause: Clause, processed: List[Clause]) -> List[Clause]:
         """Generate new clauses from the given clause."""
@@ -94,30 +128,53 @@ class BasicLoop(Loop):
         return new_clauses
     
     def _generate_clauses_with_rules(self, given_clause: Clause, processed: List[Clause]) -> Tuple[List[Clause], List[RuleApplication]]:
-        """Generate new clauses from the given clause and track rule applications."""
+        """Generate new clauses from the given clause and track rule applications.
+        
+        Args:
+            given_clause: The clause being processed (already at end of processed list)
+            processed: List of ALL processed clauses (including given clause at the end)
+        """
         new_clauses = []
         rule_applications = []
         
-        # Create a temporary state with given_clause in processed for rule application
-        temp_processed = processed + [given_clause]
-        temp_state = ProofState(processed=temp_processed, unprocessed=[])
+        # The state for rule application is just the processed list
+        # (given clause is already at the end)
+        temp_state = ProofState(processed=processed, unprocessed=[])
         
-        # Apply resolution between given clause and each processed clause
+        # Apply resolution between given clause and each OTHER processed clause
         resolution = ResolutionRule()
-        given_idx = len(processed)  # Index of given clause in temp_processed
+        given_idx = len(processed) - 1  # Index of given clause (last in processed)
         
-        for i, proc_clause in enumerate(processed):
+        # Only resolve with clauses BEFORE the given clause
+        for i in range(len(processed) - 1):
             result = resolution.apply(temp_state, [i, given_idx])
             if result:
                 new_clauses.extend(result.generated_clauses)
-                rule_applications.append(result)
+                # Modify the rule application to only show the processed clause index
+                # The given clause is implicit (it's the one being processed)
+                modified_result = RuleApplication(
+                    rule_name=result.rule_name,
+                    parents=[i],  # Only the index of the already-processed clause
+                    generated_clauses=result.generated_clauses,
+                    deleted_clause_indices=result.deleted_clause_indices,
+                    metadata={**result.metadata, 'with_given_clause': True}
+                )
+                rule_applications.append(modified_result)
         
         # Apply factoring to the given clause
         factoring = FactoringRule()
         result = factoring.apply(temp_state, [given_idx])
         if result:
             new_clauses.extend(result.generated_clauses)
-            rule_applications.append(result)
+            # For factoring, no parent index needed since it only applies to given clause
+            modified_result = RuleApplication(
+                rule_name=result.rule_name,
+                parents=[],  # Empty - factoring only uses the given clause
+                generated_clauses=result.generated_clauses,
+                deleted_clause_indices=result.deleted_clause_indices,
+                metadata={**result.metadata, 'on_given_clause': True}
+            )
+            rule_applications.append(modified_result)
         
         # Filter by size
         filtered_clauses = []
@@ -148,7 +205,20 @@ class BasicLoop(Loop):
     def _forward_simplify(self, clauses: List[Clause], 
                          processed: List[Clause],
                          unprocessed: List[Clause]) -> List[Clause]:
-        """Apply forward simplification."""
+        """Apply forward simplification to remove redundant new clauses.
+        
+        Filters out:
+        - Tautologies (clauses with complementary literals)
+        - Clauses subsumed by existing clauses
+        
+        Args:
+            clauses: New clauses to simplify
+            processed: Currently processed clauses
+            unprocessed: Currently unprocessed clauses
+            
+        Returns:
+            List of clauses that passed all redundancy checks
+        """
         simplified = []
         all_existing = processed + unprocessed
         
@@ -168,7 +238,22 @@ class BasicLoop(Loop):
     def _backward_simplify(self, new_clauses: List[Clause],
                           processed: List[Clause], 
                           unprocessed: List[Clause]) -> tuple:
-        """Apply backward simplification."""
+        """Apply backward simplification (NOT IMPLEMENTED).
+        
+        This would remove existing clauses that are subsumed by newly
+        generated clauses. For example, if we generate P(a) and we
+        already have P(a) ∨ Q(b), the latter would be removed.
+        
+        Currently returns the original lists unchanged.
+        
+        Args:
+            new_clauses: Newly generated clauses
+            processed: Currently processed clauses
+            unprocessed: Currently unprocessed clauses
+            
+        Returns:
+            Tuple of (processed, unprocessed) - currently unchanged
+        """
         # TODO: Remove clauses subsumed by new clauses
         # For now, just return the original lists
         # processed = remove_subsumed(processed, new_clauses)
@@ -179,7 +264,19 @@ class BasicLoop(Loop):
     def _is_redundant(self, clause: Clause, 
                      processed: List[Clause],
                      unprocessed: List[Clause]) -> bool:
-        """Check if a clause is redundant."""
+        """Check if a clause is redundant (exact duplicate).
+        
+        This only checks for exact duplicates. Subsumption and tautology
+        checking are done separately in _forward_simplify().
+        
+        Args:
+            clause: Clause to check
+            processed: Currently processed clauses
+            unprocessed: Currently unprocessed clauses
+            
+        Returns:
+            True if clause already exists in either set
+        """
         # Check for exact duplicates
         all_clauses = processed + unprocessed
         for existing in all_clauses:

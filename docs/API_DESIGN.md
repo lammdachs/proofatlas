@@ -64,19 +64,23 @@ class ProofSet(Dataset):
 
 ### 5. Loops (`proofatlas.loops`)
 
-**Purpose**: Given clause loops.
+**Purpose**: Implement the given clause algorithm for saturation-based theorem proving.
 
 **Key Interfaces**:
 ```python
-class Rule:
-    def apply(Proof, *args) -> Proof
-
 class Loop:
-    def step(Proof, given_clause: int) -> Proof
+    def step(proof: Proof, given_clause: int) -> Proof
+    """Execute one step of the saturation loop"""
 ```
 
 **Implementations**:
-- `BasicEnvironment`: Traditional given clause algorithm
+- `BasicLoop`: Complete implementation with:
+  - Resolution and factoring inference rules
+  - Forward simplification (tautology deletion, subsumption checking)
+  - Redundancy filtering (duplicate removal)
+  - Clause size limits
+  - Full proof tracking with rule applications
+  - Note: Backward simplification is TODO
 
 ### 6. Selectors (`proofatlas.selectors`)
 
@@ -100,27 +104,33 @@ class Selector:
 
 ### 1. Basic Problem Solving
 ```python
-from proofatlas.fileformats import TPTP
-from proofatlas.loops import BasicLoops
+from proofatlas.fileformats.tptp_parser import TPTPParser
+from proofatlas.loops.basic import BasicLoop
 from proofatlas.selectors import RandomSelector
+from proofatlas.proofs import Proof
+from proofatlas.proofs.state import ProofState
 
 # Load problem
-problem = TPTP.parse_file('problem.p')
+parser = TPTPParser()
+problem = parser.parse_file('problem.p')
 
-# Create loop
-loop = BasicLoop()
+# Create initial proof state
+initial_state = ProofState(processed=[], unprocessed=problem.clauses)
+proof = Proof(initial_state)
 
-# Create selector
+# Create loop and selector
+loop = BasicLoop(max_clause_size=50, forward_simplify=True)
 selector = RandomSelector()
 
-# Proof loop
-state = problem.to_proof()
-while not state.done:
+# Run proof search
+while proof.final_state.unprocessed and not proof.is_complete:
     # Select clause
-    idx = selector.select(state)
+    idx = selector.select(proof.final_state)
+    if idx is None:
+        break
     
     # Take step
-    state = loop.step(state, idx)
+    proof = loop.step(proof, idx)
 ```
 
 ### 2. ProblemSet Creation

@@ -7,10 +7,8 @@ ProofAtlas is a research framework for experimenting with neural guidance in aut
 This project provides a flexible platform for:
 - **Visual proof exploration**: Interactive visualization of proof structures, search spaces, and neural attention
 - **Neural proof guidance**: Learning to guide theorem provers using deep learning with visual feedback
-- **Hybrid architectures**: Combining GNNs for structural reasoning with transformers for sequential reasoning
-- **Multiple proof formats**: Supporting TPTP, Vampire, and other theorem prover formats
+- **Multiple proof formats**: Supporting TPTP and other file formats
 - **Real-time visualization**: Watch proof search strategies unfold in real-time
-- **Experiment tracking**: Integration with Weights & Biases for comprehensive experiment management
 
 ## Key Features
 
@@ -68,9 +66,9 @@ pip install -e .
 proofatlas/
 ├── src/proofatlas/
 │   ├── core/             # First-order logic representations
-│   ├── rules/            # Modular inference rules
+│   ├── rules/            # Modular inference rules (resolution, factoring)
 │   ├── proofs/           # Proof state and proof tracking
-│   ├── fileformats/      # File format parsers (TPTP)
+│   ├── fileformats/      # File format parsers (TPTP, Vampire)
 │   ├── dataformats/      # Data representations for selectors
 │   ├── data/             # Dataset management and splitting
 │   ├── loops/            # Given clause algorithm implementations
@@ -81,11 +79,16 @@ proofatlas/
 │   ├── core/
 │   ├── rules/
 │   ├── proofs/
+│   ├── loops/            # Tests for saturation loops
 │   ├── data/
 │   ├── fileformats/
-│   └── navigator/
+│   ├── navigator/
+│   └── test_data/        # Test data and example proofs
 ├── docs/                 # Documentation
+│   └── saturation_loop_design.md  # BasicLoop design and implementation
 ├── scripts/              # Utility scripts
+│   ├── print_proof.py    # Print proofs in readable format
+│   └── inspect_proof.py  # Interactive proof navigation
 └── configs/              # Configuration files
 ```
 
@@ -126,20 +129,43 @@ python scripts/solve/solve_problems.py \
     --timeout 300
 ```
 
-### Visualizing Proofs
+### Running the Saturation Loop
 ```bash
-# Navigate through a proof interactively
-python -m proofatlas.navigator proof.json
+# Example of using BasicLoop (see tests/loops/test_basic_loop_save_proofs.py for full examples)
+from proofatlas.loops.basic import BasicLoop
+from proofatlas.proofs import Proof
+from proofatlas.proofs.state import ProofState
 
-# Navigate with problem context
-python -m proofatlas.navigator proof.json --problem problem.json
+# Create initial state with clauses
+initial_state = ProofState(processed=[], unprocessed=[clause1, clause2, ...])
+proof = Proof(initial_state)
+
+# Run saturation steps
+loop = BasicLoop(max_clause_size=50, forward_simplify=True)
+proof = loop.step(proof, given_clause=0)  # Process first clause
 ```
 
-The proof navigator provides:
+### Visualizing Proofs
+```bash
+# Print a proof in readable format
+python scripts/print_proof.py path/to/proof.json
+
+# Print specific step only
+python scripts/print_proof.py path/to/proof.json --step 5
+
+# Navigate through a proof interactively
+python scripts/inspect_proof.py path/to/proof.json
+
+# Using the built-in navigator
+python -m proofatlas.navigator proof.json
+```
+
+The proof visualization tools provide:
 - Two-column layout showing PROCESSED and UNPROCESSED clauses
 - Given clause highlighting with arrow (→)
-- Rule application display
-- Simple keyboard navigation (n/next, p/prev, q/quit)
+- Rule application display with parent clause indices
+- Clause generation tracking
+- Simple keyboard navigation (n/next, p/prev, q/quit, h/help)
 
 ## Configuration
 
@@ -227,7 +253,7 @@ If you use Foreduce in your research, please cite:
 
 ## License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the BSD 0-Clause License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
