@@ -4,12 +4,12 @@ checkpoints/
 *.ckpt
 *.p
 *.json
-problems/
-proofs/
-results/
-vampire_select/
-overfit/
-gnn/
+/problems/
+/proofs/
+/results/
+/vampire_select/
+/overfit/
+/gnn/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
