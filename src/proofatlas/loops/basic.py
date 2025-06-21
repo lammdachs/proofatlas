@@ -1,10 +1,11 @@
 """Basic given clause loop implementation."""
 
-from typing import List
+from typing import List, Tuple
 
-from proofatlas.core.proof import Proof
-from proofatlas.core.state import ProofState
+from proofatlas.proofs import Proof
+from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause
+from proofatlas.rules import ResolutionRule, FactoringRule, RuleApplication
 from .base import Loop
 
 
@@ -51,8 +52,8 @@ class BasicLoop(Loop):
         new_processed = list(current_state.processed) + [selected]
         new_unprocessed = [c for i, c in enumerate(current_state.unprocessed) if i != given_clause]
         
-        # Generate new clauses
-        new_clauses = self._generate_clauses(selected, new_processed[:-1])  # Don't use selected with itself
+        # Generate new clauses and track rule applications
+        new_clauses, rule_applications = self._generate_clauses_with_rules(selected, new_processed[:-1])
         
         # Apply simplification
         if self.forward_simplify:
@@ -64,42 +65,85 @@ class BasicLoop(Loop):
             )
         
         # Add non-redundant new clauses
+        kept_clauses = []
         for clause in new_clauses:
             if not self._is_redundant(clause, new_processed, new_unprocessed):
                 new_unprocessed.append(clause)
+                kept_clauses.append(clause)
         
         # Create new state
         new_state = ProofState(processed=new_processed, unprocessed=new_unprocessed)
         
-        # Add step to proof
+        # Add step to proof with applied rules
         metadata = {
             'rule': 'given_clause',
             'selected_clause': selected,
-            'new_clauses': new_clauses,
-            'num_generated': len(new_clauses)
+            'new_clauses': kept_clauses,
+            'num_generated': len(new_clauses),
+            'num_kept': len(kept_clauses)
         }
         
-        proof.add_step(new_state, selected_clause=given_clause, **metadata)
+        proof.add_step(new_state, selected_clause=given_clause, 
+                      applied_rules=rule_applications, **metadata)
         
         return proof
     
     def _generate_clauses(self, given_clause: Clause, processed: List[Clause]) -> List[Clause]:
         """Generate new clauses from the given clause."""
+        new_clauses, _ = self._generate_clauses_with_rules(given_clause, processed)
+        return new_clauses
+    
+    def _generate_clauses_with_rules(self, given_clause: Clause, processed: List[Clause]) -> Tuple[List[Clause], List[RuleApplication]]:
+        """Generate new clauses from the given clause and track rule applications."""
         new_clauses = []
+        rule_applications = []
         
-        # TODO: Apply resolution with each processed clause
-        # for proc_clause in processed:
-        #     resolvents = apply_resolution(given_clause, proc_clause)
-        #     new_clauses.extend(resolvents)
+        # Create a temporary state with given_clause in processed for rule application
+        temp_processed = processed + [given_clause]
+        temp_state = ProofState(processed=temp_processed, unprocessed=[])
         
-        # TODO: Apply factoring
-        # factors = apply_factoring(given_clause)
-        # new_clauses.extend(factors)
+        # Apply resolution between given clause and each processed clause
+        resolution = ResolutionRule()
+        given_idx = len(processed)  # Index of given clause in temp_processed
+        
+        for i, proc_clause in enumerate(processed):
+            result = resolution.apply(temp_state, [i, given_idx])
+            if result:
+                new_clauses.extend(result.generated_clauses)
+                rule_applications.append(result)
+        
+        # Apply factoring to the given clause
+        factoring = FactoringRule()
+        result = factoring.apply(temp_state, [given_idx])
+        if result:
+            new_clauses.extend(result.generated_clauses)
+            rule_applications.append(result)
         
         # Filter by size
-        new_clauses = [c for c in new_clauses if len(c.literals) <= self.max_clause_size]
+        filtered_clauses = []
+        filtered_applications = []
+        clause_idx = 0
         
-        return new_clauses
+        for app in rule_applications:
+            app_clauses = []
+            for clause in app.generated_clauses:
+                if len(clause.literals) <= self.max_clause_size:
+                    filtered_clauses.append(clause)
+                    app_clauses.append(clause)
+            
+            # Only keep the rule application if it generated at least one kept clause
+            if app_clauses:
+                # Create a new RuleApplication with only the kept clauses
+                filtered_app = RuleApplication(
+                    rule_name=app.rule_name,
+                    parents=app.parents,
+                    generated_clauses=app_clauses,
+                    deleted_clause_indices=app.deleted_clause_indices,
+                    metadata=app.metadata
+                )
+                filtered_applications.append(filtered_app)
+        
+        return filtered_clauses, filtered_applications
     
     def _forward_simplify(self, clauses: List[Clause], 
                          processed: List[Clause],

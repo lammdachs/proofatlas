@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import List, Any
 
 from proofatlas.core.logic import Clause
-from proofatlas.core.proof import ProofState
+from proofatlas.proofs.state import ProofState
 
 
 class DataFormat(ABC):

@@ -4,17 +4,19 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 
 from .state import ProofState
+from proofatlas.rules import RuleApplication
 
 
 @dataclass
 class ProofStep:
     """A single step in a proof.
     
-    Records the state at this step and which clause was selected for processing.
-    Any additional information (rule applied, generated clauses, etc.) goes in metadata.
+    Records the state at this step, which clause was selected for processing,
+    and what inference rules were applied.
     """
     state: ProofState
     selected_clause: Optional[int] = None
+    applied_rules: List[RuleApplication] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -58,7 +60,8 @@ class Proof:
             return len(self.steps) - 1
         return len(self.steps)
     
-    def add_step(self, state: ProofState, selected_clause: Optional[int] = None, **metadata) -> 'Proof':
+    def add_step(self, state: ProofState, selected_clause: Optional[int] = None, 
+                 applied_rules: Optional[List[RuleApplication]] = None, **metadata) -> 'Proof':
         """Add a new step to the proof.
         
         If the last step has selected_clause = None, it will be replaced.
@@ -67,12 +70,18 @@ class Proof:
         Args:
             state: The proof state at this step
             selected_clause: Index of selected clause in previous state's unprocessed list
+            applied_rules: List of rules applied in this step
             **metadata: Additional information to store with this step
         
         Returns:
             self for method chaining
         """
-        new_step = ProofStep(state, selected_clause, metadata)
+        new_step = ProofStep(
+            state, 
+            selected_clause, 
+            applied_rules or [],
+            metadata
+        )
         
         # If last step has no selection, replace it
         if self.steps and self.steps[-1].selected_clause is None:

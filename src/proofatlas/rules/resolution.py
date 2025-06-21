@@ -2,8 +2,8 @@
 
 from typing import List, Optional, Dict, Tuple
 
-from proofatlas.core.proof import Rule, Proof
-from proofatlas.core.state import ProofState
+from .base import Rule, RuleApplication
+from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause, Literal
 
 
@@ -14,41 +14,40 @@ class ResolutionRule(Rule):
     def name(self) -> str:
         return "resolution"
     
-    def apply(self, proof: Proof, clause1_idx: int, clause2_idx: int) -> Proof:
+    def apply(self, state: ProofState, clause_indices: List[int]) -> Optional[RuleApplication]:
         """
         Apply binary resolution between two clauses.
         
         Args:
-            proof: Current proof
-            clause1_idx: Index of first clause in processed set
-            clause2_idx: Index of second clause in processed set
+            state: Current proof state
+            clause_indices: List of two indices [clause1_idx, clause2_idx] in processed set
             
         Returns:
-            Updated proof with resolvents added
+            RuleApplication if successful, None otherwise
         """
-        state = proof.current_state
+        if len(clause_indices) != 2:
+            return None
+            
+        clause1_idx, clause2_idx = clause_indices
+        
+        # Check indices are valid
+        if clause1_idx >= len(state.processed) or clause2_idx >= len(state.processed):
+            return None
+            
         clause1 = state.processed[clause1_idx]
         clause2 = state.processed[clause2_idx]
         
         # Generate resolvents
         resolvents = self._binary_resolution(clause1, clause2)
         
-        # Create new state with resolvents added to unprocessed
-        new_state = ProofState(
-            processed=list(state.processed),
-            unprocessed=list(state.unprocessed) + resolvents
+        if not resolvents:
+            return None
+            
+        return RuleApplication(
+            rule_name=self.name,
+            parents=[clause1_idx, clause2_idx],
+            generated_clauses=resolvents
         )
-        
-        # Add step to proof
-        proof.add_step(
-            state=new_state,
-            rule=self,
-            generated_clauses=resolvents,
-            clause1_idx=clause1_idx,
-            clause2_idx=clause2_idx
-        )
-        
-        return proof
     
     def _binary_resolution(self, clause1: Clause, clause2: Clause) -> List[Clause]:
         """Apply binary resolution between two clauses."""
@@ -85,7 +84,7 @@ class ResolutionRule(Rule):
                                 unique_literals.append(lit)
                         
                         if unique_literals or len(new_literals) == 0:  # Allow empty clause
-                            resolvent = Clause(unique_literals)
+                            resolvent = Clause(*unique_literals)
                             resolvents.append(resolvent)
         
         return resolvents
@@ -94,7 +93,7 @@ class ResolutionRule(Rule):
         """Simple unification algorithm (placeholder - needs proper implementation)."""
         # This is a simplified version - a real implementation would need
         # occurs check and proper term unification
-        if atom1.predicate != atom2.predicate:
+        if atom1.symbol != atom2.symbol:
             return None
         
         if len(atom1.args) != len(atom2.args):

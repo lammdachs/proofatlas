@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
-from proofatlas.core.state import ProofState
+from proofatlas.proofs.state import ProofState
 
 
 class Selector(ABC):

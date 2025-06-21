@@ -5,8 +5,8 @@ from typing import List, Optional, Dict, Any, Tuple
 import torch
 from torch.utils.data import Dataset
 
-from proofatlas.core.proof import Proof
-from proofatlas.core.state import ProofState
+from proofatlas.proofs import Proof
+from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Problem, Clause
 from proofatlas.loops.base import Loop
 from proofatlas.loops.registry import get_loop

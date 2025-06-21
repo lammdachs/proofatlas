@@ -1,9 +1,9 @@
-"""Tests for core.proof module."""
+"""Tests for proofs.proof module."""
 
 import unittest
 from proofatlas.core.logic import Predicate, Constant, Variable, Literal, Clause
-from proofatlas.core.state import ProofState
-from proofatlas.core.proof import Proof, ProofStep
+from proofatlas.proofs.state import ProofState
+from proofatlas.proofs import Proof, ProofStep
 
 
 class TestProofStep(unittest.TestCase):

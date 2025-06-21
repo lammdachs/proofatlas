@@ -1,7 +1,11 @@
 """Inference rules for theorem proving."""
 
+from .base import Rule, RuleApplication
 from .resolution import ResolutionRule
 from .factoring import FactoringRule
 from .subsumption import SubsumptionRule
 
-__all__ = ['ResolutionRule', 'FactoringRule', 'SubsumptionRule']
+__all__ = [
+    'Rule', 'RuleApplication',
+    'ResolutionRule', 'FactoringRule', 'SubsumptionRule'
+]

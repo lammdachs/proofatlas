@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from proofatlas.data.problemset import Problemset
 from proofatlas.data.config import DatasetConfig, DatasetSplit
 from proofatlas.core.logic import Problem, Clause, Literal, Predicate, Constant
-from proofatlas.core.state import ProofState
+from proofatlas.proofs.state import ProofState
 
 
 class TestProblemset:

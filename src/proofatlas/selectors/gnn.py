@@ -7,7 +7,7 @@ from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding
 from torch_geometric.nn import GINConv, GCNConv, global_add_pool, GraphNorm
 from pytorch_lightning import LightningModule
 
-from proofatlas.core.state import ProofState
+from proofatlas.proofs.state import ProofState
 from proofatlas.dataformats import get_data_format
 from .base import Selector
 

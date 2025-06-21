@@ -67,34 +67,26 @@ pip install -e .
 ```
 proofatlas/
 ├── src/proofatlas/
+│   ├── core/             # First-order logic representations
+│   ├── rules/            # Modular inference rules
+│   ├── proofs/           # Proof state and proof tracking
+│   ├── fileformats/      # File format parsers (TPTP)
+│   ├── dataformats/      # Data representations for selectors
+│   ├── data/             # Dataset management and splitting
+│   ├── loops/            # Given clause algorithm implementations
+│   ├── selectors/        # Clause selection strategies
+│   ├── navigator/        # Terminal-based proof visualization
+│   └── utils/            # Utility functions
+├── tests/                # Test suite (mirrors src structure)
 │   ├── core/
-│   │   ├── fol/          # First-order logic representations
-│   │   ├── problems/     # Problem definitions and handling
-│   │   └── proofs/       # Proof representation and manipulation
-│   ├── parsers/
-│   │   ├── tptp/         # TPTP format parser
-│   │   └── vampire/      # Vampire output parser
-│   ├── models/
-│   │   ├── gnn/          # Graph neural network models
-│   │   ├── transformer/  # Transformer models
-│   │   └── hybrid/       # Hybrid GNN-Transformer models
-│   ├── training/
-│   │   ├── datasets/     # Dataset loaders and preprocessing
-│   │   └── trainers/     # Training loops and strategies
-│   ├── inference/
-│   │   └── guided_search/ # Proof search with neural guidance
-│   └── visualization/
-│       ├── proof_graph/   # Interactive proof DAG visualization
-│       ├── attention/     # Neural attention visualizers
-│       ├── search_space/  # Search space exploration views
-│       └── dashboard/     # Real-time proving dashboard
-├── scripts/
-│   ├── data/             # Data preparation scripts
-│   ├── train/            # Training scripts
-│   └── solve/            # Problem solving scripts
-├── experiments/          # Experiment configurations
-├── configs/              # Default configurations
-└── tests/                # Unit tests
+│   ├── rules/
+│   ├── proofs/
+│   ├── data/
+│   ├── fileformats/
+│   └── navigator/
+├── docs/                 # Documentation
+├── scripts/              # Utility scripts
+└── configs/              # Configuration files
 ```
 
 ## Usage
@@ -134,6 +126,21 @@ python scripts/solve/solve_problems.py \
     --timeout 300
 ```
 
+### Visualizing Proofs
+```bash
+# Navigate through a proof interactively
+python -m proofatlas.navigator proof.json
+
+# Navigate with problem context
+python -m proofatlas.navigator proof.json --problem problem.json
+```
+
+The proof navigator provides:
+- Two-column layout showing PROCESSED and UNPROCESSED clauses
+- Given clause highlighting with arrow (→)
+- Rule application display
+- Simple keyboard navigation (n/next, p/prev, q/quit)
+
 ## Configuration
 
 The project uses Hydra for configuration management. Key configuration areas:
@@ -154,20 +161,45 @@ python scripts/train/train_model.py \
 
 ## Extending the Framework
 
-### Adding New Parsers
-1. Create a new parser module in `src/foreduce/parsers/`
-2. Implement the parser interface
-3. Register the parser in the configuration system
+### Adding New Inference Rules
+1. Create a new rule class in `src/proofatlas/rules/`
+2. Inherit from the `Rule` abstract base class
+3. Implement `name` property and `apply` method
+4. Return `RuleApplication` objects with generated clauses
 
-### Implementing New Models
-1. Add model implementation to `src/foreduce/models/`
-2. Create corresponding configuration in `configs/models/`
-3. Update the model factory in the training scripts
+Example:
+```python
+from proofatlas.rules.base import Rule, RuleApplication
+
+class MyRule(Rule):
+    @property
+    def name(self) -> str:
+        return "my_rule"
+    
+    def apply(self, state, clause_indices):
+        # Rule implementation
+        return RuleApplication(
+            rule_name=self.name,
+            parents=clause_indices,
+            generated_clauses=new_clauses
+        )
+```
+
+### Adding New File Format Parsers
+1. Create parser in `src/proofatlas/fileformats/`
+2. Implement the `FileFormat` interface
+3. Register in the format registry
+
+### Implementing New Selectors
+1. Add selector to `src/proofatlas/selectors/`
+2. Inherit from `Selector` base class
+3. Implement `select()` method for clause selection
 
 ### Custom Proof Strategies
-1. Implement strategy in `src/foreduce/inference/`
-2. Add configuration options
-3. Integrate with the solving pipeline
+1. Implement new loop in `src/proofatlas/loops/`
+2. Use the modular rule system for inferences
+3. Track rule applications in proof steps
+4. Integrate with the solving pipeline
 
 ## Research Applications
 

@@ -2,8 +2,8 @@
 
 from typing import List, Optional, Dict
 
-from proofatlas.core.proof import Rule, Proof
-from proofatlas.core.state import ProofState
+from .base import Rule, RuleApplication
+from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause, Literal
 
 
@@ -14,38 +14,39 @@ class FactoringRule(Rule):
     def name(self) -> str:
         return "factoring"
     
-    def apply(self, proof: Proof, clause_idx: int) -> Proof:
+    def apply(self, state: ProofState, clause_indices: List[int]) -> Optional[RuleApplication]:
         """
         Apply factoring to a clause.
         
         Args:
-            proof: Current proof
-            clause_idx: Index of clause in processed set
+            state: Current proof state
+            clause_indices: List containing one index [clause_idx] in processed set
             
         Returns:
-            Updated proof with factors added
+            RuleApplication if successful, None otherwise
         """
-        state = proof.current_state
+        if len(clause_indices) != 1:
+            return None
+            
+        clause_idx = clause_indices[0]
+        
+        # Check index is valid
+        if clause_idx >= len(state.processed):
+            return None
+            
         clause = state.processed[clause_idx]
         
         # Generate factors
         factors = self._factoring(clause)
         
-        # Create new state with factors added to unprocessed
-        new_state = ProofState(
-            processed=list(state.processed),
-            unprocessed=list(state.unprocessed) + factors
-        )
-        
-        # Add step to proof
-        proof.add_step(
-            state=new_state,
-            rule=self,
-            selected_clause=clause_idx,
+        if not factors:
+            return None
+            
+        return RuleApplication(
+            rule_name=self.name,
+            parents=[clause_idx],
             generated_clauses=factors
         )
-        
-        return proof
     
     def _factoring(self, clause: Clause) -> List[Clause]:
         """Apply factoring to a clause."""
@@ -67,7 +68,7 @@ class FactoringRule(Rule):
                                 new_lit = self._apply_substitution(lit, mgu)
                                 new_literals.append(new_lit)
                         
-                        factor = Clause(new_literals)
+                        factor = Clause(*new_literals)
                         factors.append(factor)
         
         return factors
@@ -75,7 +76,7 @@ class FactoringRule(Rule):
     def _unify(self, atom1, atom2) -> Optional[Dict]:
         """Simple unification algorithm (placeholder)."""
         # Same as in resolution - should be moved to a shared module
-        if atom1.predicate != atom2.predicate:
+        if atom1.symbol != atom2.symbol:
             return None
         
         if len(atom1.args) != len(atom2.args):

@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from proofatlas.core.state import ProofState
+from proofatlas.proofs.state import ProofState
 from .base import Selector
 
 

@@ -4,11 +4,12 @@ The `core` module provides the fundamental data structures for theorem proving i
 
 ## Overview
 
-The core module consists of three main components:
+The core module focuses exclusively on first-order logic representation:
 
 1. **logic.py** - First-order logic representation (terms, literals, clauses, problems)
-2. **state.py** - Proof state tracking (processed and unprocessed clauses)
-3. **proof.py** - Proof representation (sequence of states and clause selections)
+2. **serialization.py** - JSON serialization for logic objects
+
+Note: The `ProofState` class has been moved to the `proofs` module along with `Proof` and `ProofStep` to better organize proof-related functionality.
 
 ## Module Structure
 
@@ -33,7 +34,7 @@ This module implements the basic building blocks of first-order logic in CNF (Co
   - Example: `Literal(P(x), True)` for P(x), `Literal(P(x), False)` for ~P(x)
 
 - **Clause** - A disjunction of literals (CNF clause)
-  - `Clause(*literals)`
+  - `Clause(*literals)` - Note: takes unpacked literals, not a list
   - Empty clause represents contradiction
   - Example: `Clause(Literal(P(x), False), Literal(Q(x), True))` for ~P(x) | Q(x)
 
@@ -61,93 +62,46 @@ c3 = Clause(Literal(Q(a), False))  # ~Q(a)
 problem = Problem(c1, c2, c3)
 ```
 
-### state.py
+## Related Modules
 
-This module provides the `ProofState` class for tracking the state of a proof search.
+### proofs module
 
-#### ProofState
+The proof-related classes have been moved to a separate `proofs` module:
+- **ProofState** - Tracks processed/unprocessed clauses during proof search
+- **Proof** and **ProofStep** - Represent complete proofs with history
+See the proofs module documentation for details.
 
-Represents the state of the given clause algorithm with two sets of clauses:
-- **processed**: Clauses that have been selected and used for inference
-- **unprocessed**: Clauses available for selection
+### rules
 
-**Key Methods:**
-- `add_unprocessed(clause)` - Add a new clause to unprocessed
-- `move_to_processed(clause)` - Move clause from unprocessed to processed
-- `all_clauses` - Property returning all clauses (processed + unprocessed)
+The `rules` module provides modular inference rules that operate on proof states:
 
-#### Usage Example
+- **Rule** - Abstract base class for inference rules
+- **RuleApplication** - Dataclass containing rule application results
+- **ResolutionRule** - Binary resolution
+- **FactoringRule** - Factoring (unifying literals within a clause)
+- **SubsumptionRule** - Subsumption elimination
 
+Rules operate on ProofState objects and return RuleApplication objects containing:
+- `rule_name`: Name of the rule applied
+- `parents`: Indices of parent clauses used
+- `generated_clauses`: New clauses created
+- `deleted_clause_indices`: Clauses to be removed
+- `metadata`: Additional information about the application
+
+Example:
 ```python
+from proofatlas.rules import ResolutionRule
 from proofatlas.core.state import ProofState
 
-# Create initial state with axioms
-initial_state = ProofState([], [clause1, clause2, clause3])
+# Create a state with some clauses
+state = ProofState(processed=[clause1, clause2], unprocessed=[])
 
-# Move a clause to processed
-initial_state.move_to_processed(clause1)
+# Apply resolution
+rule = ResolutionRule()
+result = rule.apply(state, [0, 1])  # Resolve clauses at indices 0 and 1
 
-# Add a derived clause
-initial_state.add_unprocessed(derived_clause)
-```
-
-### proof.py
-
-This module provides classes for representing complete proofs.
-
-#### ProofStep
-
-A single step in a proof, storing:
-- `state`: The ProofState at this step
-- `selected_clause`: Index of the selected clause (optional)
-- `metadata`: Dictionary for additional information (rules, scores, etc.)
-
-#### Proof
-
-Represents a complete proof as a list of ProofStep objects where:
-- Each step contains a state, optional selected_clause, and metadata
-- The last step always has `selected_clause = None` (representing the final state)
-- `final_state` property returns the state from the last step
-
-**Key Methods:**
-- `add_step(state, selected_clause, **metadata)` - Add a new proof step
-  - If last step has no selection, it's replaced
-  - Automatically maintains the invariant that last step has no selection
-- `finalize(final_state)` - Ensure proof ends with a step with no selection
-- `get_selected_clauses()` - Get list of all selected clause indices
-- `get_metadata_history(key)` - Get history of a metadata value
-- `is_complete` - Check if proof found empty clause
-- `is_saturated` - Check if no unprocessed clauses remain
-- `length` - Number of inference steps (excluding final step if it has no selection)
-
-#### Usage Example
-
-```python
-from proofatlas.core.proof import Proof, ProofStep
-
-# Create proof with initial state
-proof = Proof(initial_state)
-
-# Add steps as proof progresses
-new_state = ProofState([clause1], [clause2, clause3])
-proof.add_step(
-    new_state, 
-    selected_clause=0,
-    rule="given_clause"
-)
-
-# Add resolution step with metadata
-proof.add_step(
-    next_state,
-    selected_clause=1, 
-    rule="resolution",
-    parent_clauses=[0, 1],
-    generated_clause=resolvent
-)
-
-# Check if proof is complete
-if proof.is_complete:
-    print("Found contradiction!")
+if result:
+    print(f"Generated {len(result.generated_clauses)} new clauses")
 ```
 
 ## Design Principles
@@ -157,10 +111,45 @@ if proof.is_complete:
 3. **Flexibility**: The metadata dictionary in ProofStep allows storing any additional information without changing the core structure
 4. **Simplicity**: Only essential fields are part of the core data structures
 
+## JSON Serialization
+
+The core module supports JSON serialization for all major objects:
+
+```python
+from proofatlas.core import (
+    save_problem, load_problem,
+    save_proof, load_proof,
+    problem_to_json, problem_from_json,
+    proof_to_json, proof_from_json
+)
+
+# Save/load problems
+save_problem(problem, "problem.json")
+loaded_problem = load_problem("problem.json")
+
+# Save/load proofs
+save_proof(proof, "proof.json")
+loaded_proof = load_proof("proof.json")
+
+# Convert to/from JSON strings
+json_str = problem_to_json(problem)
+problem = problem_from_json(json_str)
+```
+
+JSON files preserve:
+- Complete problem/proof structure
+- Variable and constant names
+- Metadata in proof steps
+- All clause and literal information
+
 ## Integration
 
 The core module serves as the foundation for:
-- **Loops**: Implement the given clause algorithm using ProofState
+- **Rules**: Apply inference rules to ProofState objects
+- **Proofs**: Track sequences of ProofSteps with rule applications
+- **Loops**: Implement the given clause algorithm using ProofState and Rules
 - **Selectors**: Choose which clause to process next from ProofState.unprocessed
-- **Rules**: Generate new clauses and update the proof state
+- **Navigator**: Visualize proof steps in terminal with clean UI
 - **Data formats**: Encode ProofState for machine learning models
+- **File formats**: Import/export problems in various formats
+- **Data storage**: Serialize problems and proofs for datasets

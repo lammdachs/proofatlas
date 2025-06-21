@@ -3,8 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from proofatlas.core.proof import Proof
-from proofatlas.core.state import ProofState
+from proofatlas.proofs import Proof
+from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause, Literal
 
 

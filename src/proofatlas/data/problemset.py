@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 
 from proofatlas.fileformats import get_format_handler
 from proofatlas.core.logic import Problem, Clause
-from proofatlas.core.state import ProofState
+from proofatlas.proofs.state import ProofState
 from .config import DatasetConfig, DatasetSplit
 
 
