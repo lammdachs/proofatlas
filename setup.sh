@@ -410,10 +410,10 @@ get_latest_tptp_version() {
     
     # The TPTP distribution directory structure follows a predictable pattern
     # We'll check for recent versions in descending order
-    local base_url="https://www.tptp.org/TPTP/Distribution"
+    local base_url="https://tptp.org/TPTP/Distribution"
     
-    # Try recent versions (as of 2024, latest is around 8.2.0)
-    for major in 9 8; do
+    # Try recent versions (starting from v10 down to v8)
+    for major in 10 9 8; do
         for minor in 9 8 7 6 5 4 3 2 1 0; do
             for patch in 9 8 7 6 5 4 3 2 1 0; do
                 local version="v${major}.${minor}.${patch}"
@@ -430,8 +430,8 @@ get_latest_tptp_version() {
     
     # If we can't find any version, use a known good fallback
     echo "Warning: Could not determine latest TPTP version automatically."
-    echo "Using fallback version v8.2.0"
-    echo "v8.2.0"
+    echo "Using fallback version v9.0.0"
+    echo "v9.0.0"
 }
 
 # Check for existing TPTP installation
@@ -507,27 +507,48 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
     
     # Download and install if needed
     if [ "$existing_version" = "none" ] || [ "$existing_version" = "unknown" ]; then
-        echo "Downloading TPTP library..."
+        echo "TPTP library not found."
         
         # Create TPTP directory
         mkdir -p "$TPTP_PATH_EXPANDED"
         
-        # Download TPTP archive
-        TPTP_URL="https://www.tptp.org/TPTP/Distribution/TPTP-${latest_version}.tgz"
         TPTP_ARCHIVE="$TPTP_PATH_EXPANDED/TPTP-${latest_version}.tgz"
         
+        # Check if archive already exists
         if [ -f "$TPTP_ARCHIVE" ]; then
-            echo "TPTP archive already exists. Using existing archive."
-        else
-            echo "Downloading from $TPTP_URL..."
-            if ! curl -L -o "$TPTP_ARCHIVE" "$TPTP_URL" && ! wget -O "$TPTP_ARCHIVE" "$TPTP_URL"; then
-                echo "Error: Failed to download TPTP archive."
-                echo "Please check your internet connection or download manually from:"
-                echo "  $TPTP_URL"
-                cd "$SCRIPT_DIR"
+            echo "Found TPTP archive at: $TPTP_ARCHIVE"
+            echo "Extracting TPTP archive..."
+            cd "$TPTP_PATH_EXPANDED"
+            tar -xzf "TPTP-${latest_version}.tgz"
+            
+            # Create symlink to Problems directory
+            if [ -d "TPTP-${latest_version}/Problems" ]; then
+                # Remove old symlink if exists
+                [ -L "Problems" ] && rm -f "Problems"
+                ln -sf "TPTP-${latest_version}/Problems" "Problems"
+                echo "TPTP library ${latest_version} extracted successfully!"
+                echo "Problems directory: $TPTP_PATH_EXPANDED/Problems"
             else
-                # Extract TPTP archive
-                echo "Extracting TPTP archive..."
+                echo "Warning: Problems directory not found in TPTP archive."
+            fi
+            
+            cd "$SCRIPT_DIR"
+            
+            # Optionally clean up archive
+            if ask_yes_no "Would you like to keep the downloaded archive?" "n"; then
+                echo "Keeping archive at: $TPTP_ARCHIVE"
+            else
+                rm -f "$TPTP_ARCHIVE"
+                echo "Archive removed."
+            fi
+        else
+            echo ""
+            echo "Downloading TPTP library..."
+            TPTP_URL="https://tptp.org/TPTP/Distribution/TPTP-${latest_version}.tgz"
+            
+            echo "Downloading from $TPTP_URL..."
+            if curl -L -o "$TPTP_ARCHIVE" "$TPTP_URL" || wget -O "$TPTP_ARCHIVE" "$TPTP_URL"; then
+                echo "Download complete. Extracting TPTP archive..."
                 cd "$TPTP_PATH_EXPANDED"
                 tar -xzf "TPTP-${latest_version}.tgz"
                 
@@ -551,12 +572,17 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
                     rm -f "$TPTP_ARCHIVE"
                     echo "Archive removed."
                 fi
+            else
+                echo "Error: Failed to download TPTP archive."
+                echo "Please download manually from: $TPTP_URL"
+                echo "and place it at: $TPTP_ARCHIVE"
+                echo "Then run this setup script again."
             fi
         fi
     fi
 else
     echo "Skipping TPTP library download."
-    echo "You can download it manually later from: https://www.tptp.org/"
+    echo "You can download it manually later from: https://tptp.org/"
 fi
 
 # Install pre-commit hooks if .pre-commit-config.yaml exists
