@@ -53,7 +53,7 @@ The setup script will:
 7. Create necessary directories and configuration files
 8. Optionally download the latest TPTP problem library
 
-See [Configuration Profiles](docs/configuration_profiles.md) for details on directory layout options.
+See [Directory Structure](docs/directory_structure.md) for details on the project's data organization.
 
 ### Installation Options
 
@@ -121,17 +121,25 @@ proofatlas/
 │   ├── core/
 │   ├── rules/
 │   ├── proofs/
-│   ├── loops/            # Tests for saturation loops
+│   ├── loops/
 │   ├── data/
 │   ├── fileformats/
 │   ├── navigator/
 │   └── test_data/        # Test data and example proofs
 ├── docs/                 # Documentation
-│   └── saturation_loop_design.md  # BasicLoop design and implementation
+│   ├── saturation_loop_design.md  # BasicLoop design and implementation
+│   ├── directory_structure.md     # Data directory organization
+│   └── optional_dependencies.md   # Guide to optional components
 ├── scripts/              # Utility scripts
 │   ├── print_proof.py    # Print proofs in readable format
 │   └── inspect_proof.py  # Interactive proof navigation
-└── configs/              # Configuration files
+├── .data/                # Data directory (created by setup)
+│   ├── problems/         # Theorem proving problems
+│   ├── proofs/          # Generated proofs
+│   ├── datasets/        # Prepared datasets
+│   └── cache/           # Temporary files
+├── .logs/               # Log files (created by setup)
+└── .selectors/          # ML resources (if PyTorch installed)
 ```
 
 ## Usage

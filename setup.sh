@@ -198,6 +198,7 @@ echo "   - Packages: pytorch, pytorch-cuda, pyg (PyTorch Geometric), pytorch-lig
 echo "   - Note: This requires a compatible NVIDIA GPU for CUDA support"
 echo ""
 
+PYTORCH_INSTALLED="no"
 if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
     echo "Installing PyTorch ecosystem..."
     conda install -y pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
@@ -209,6 +210,7 @@ if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
     conda install -y pytorch-lightning torchmetrics -c conda-forge
     
     echo "PyTorch and GNN packages installed successfully!"
+    PYTORCH_INSTALLED="yes"
 else
     echo "Skipping PyTorch installation."
     echo "Note: GNN-based clause selection will not be available."
@@ -261,145 +263,19 @@ echo ""
 echo "Configuring environment variables..."
 echo ""
 
-# Function to read input with a default value
-read_with_default() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-    
-    echo -n "$prompt [$default]: "
-    read -r input_value
-    
-    if [ -z "$input_value" ]; then
-        eval "$var_name='$default'"
-    else
-        eval "$var_name='$input_value'"
-    fi
-}
+# Set up simple module-mirroring directory structure
+DATA_DIR="./.data"
+PROBLEMS_DIR="./.data/problems"
+PROOFS_DIR="./.data/proofs"
+DATASETS_DIR="./.data/datasets"
+CACHE_DIR="./.data/cache"
+TPTP_PATH="./.data/problems/tptp"
+LOG_DIR="./.logs"
 
-# Function to detect HPC environment
-detect_hpc_environment() {
-    if [ -n "$SLURM_JOB_ID" ] || command -v sbatch &> /dev/null; then
-        echo "slurm"
-    elif [ -n "$PBS_JOBID" ] || command -v qsub &> /dev/null; then
-        echo "pbs"
-    elif [ -n "$LSB_JOBID" ] || command -v bsub &> /dev/null; then
-        echo "lsf"
-    else
-        echo "none"
-    fi
-}
-
-# Function to get configuration profile
-get_config_profile() {
-    echo ""
-    echo "=== Configuration Profile Selection ==="
-    echo ""
-    echo "ProofAtlas can be configured with different directory layouts:"
-    echo ""
-    echo "1. Local (default) - All data within the project directory"
-    echo "   Best for: Personal development, isolated projects"
-    echo ""
-    echo "2. Centralized - Shared data/models across multiple projects"
-    echo "   Best for: Multiple theorem proving projects, model reuse"
-    echo ""
-    echo "3. HPC/Cluster - Optimized for high-performance computing"
-    echo "   Best for: Large-scale experiments, cluster environments"
-    echo ""
-    echo "4. Custom - Manually specify all paths"
-    echo "   Best for: Specific requirements, existing setups"
-    echo ""
-    
-    local hpc_env=$(detect_hpc_environment)
-    if [ "$hpc_env" != "none" ]; then
-        echo "Note: Detected $hpc_env environment. Consider using HPC/Cluster profile."
-        echo ""
-    fi
-    
-    echo -n "Select configuration profile [1-4] (1): "
-    read -r profile_choice
-    
-    if [ -z "$profile_choice" ]; then
-        profile_choice="1"
-    fi
-    
-    case "$profile_choice" in
-        1) echo "local" ;;
-        2) echo "centralized" ;;
-        3) echo "hpc" ;;
-        4) echo "custom" ;;
-        *) echo "local" ;;  # Default to local for invalid input
-    esac
-}
-
-# Function to set paths based on profile
-set_profile_paths() {
-    local profile="$1"
-    
-    case "$profile" in
-        "local")
-            DATA_DIR="./.problems"
-            CACHE_DIR="./cache"
-            TPTP_PATH="./.problems/tptp"
-            MODEL_DIR="./.models"
-            CHECKPOINT_DIR="./checkpoints"
-            EXPERIMENT_DIR="./experiments"
-            LOG_DIR="./.logs"
-            ;;
-            
-        "centralized")
-            local base_dir="$HOME/theorem-proving"
-            echo ""
-            read_with_default "Enter base directory for shared resources" "$base_dir" base_dir
-            
-            DATA_DIR="$base_dir/data"
-            CACHE_DIR="$base_dir/cache"
-            TPTP_PATH="$base_dir/data/tptp"
-            MODEL_DIR="$base_dir/models/proofatlas"
-            CHECKPOINT_DIR="./checkpoints"
-            EXPERIMENT_DIR="./experiments"
-            LOG_DIR="./logs"
-            ;;
-            
-        "hpc")
-            # Try to use SCRATCH if available, otherwise fall back to tmp
-            local scratch_dir="${SCRATCH:-/scratch/$USER}"
-            local home_dir="$HOME"
-            
-            echo ""
-            echo "HPC Profile Configuration:"
-            read_with_default "Enter scratch/fast storage path" "$scratch_dir" scratch_dir
-            read_with_default "Enter persistent storage path" "$home_dir/proofatlas" home_dir
-            
-            DATA_DIR="$scratch_dir/theorem-proving/data"
-            CACHE_DIR="$scratch_dir/theorem-proving/cache"
-            TPTP_PATH="$scratch_dir/theorem-proving/data/tptp"
-            MODEL_DIR="$scratch_dir/proofatlas/models"
-            CHECKPOINT_DIR="$scratch_dir/proofatlas/checkpoints"
-            EXPERIMENT_DIR="$home_dir/experiments"
-            LOG_DIR="$home_dir/logs"
-            ;;
-            
-        "custom")
-            # Current behavior - ask for each path
-            echo ""
-            echo "=== Data Paths Configuration ==="
-            read_with_default "Enter data directory path" "./.problems" DATA_DIR
-            read_with_default "Enter cache directory path" "./cache" CACHE_DIR
-            read_with_default "Enter TPTP library path" "./.problems/tptp" TPTP_PATH
-            
-            echo ""
-            echo "=== Model Paths Configuration ==="
-            read_with_default "Enter models directory path" "./.models" MODEL_DIR
-            read_with_default "Enter checkpoints directory path" "./checkpoints" CHECKPOINT_DIR
-            
-            echo ""
-            echo "=== Experiment Configuration ==="
-            read_with_default "Enter experiments directory path" "./experiments" EXPERIMENT_DIR
-            read_with_default "Enter logs directory path" "./.logs" LOG_DIR
-            ;;
-    esac
-}
+# Only create selector directories if PyTorch is being installed
+SELECTORS_DIR="./.selectors"
+SELECTOR_MODELS_DIR="./.selectors/models"
+SELECTOR_CONFIGS_DIR="./.selectors/configs"
 
 # Check if .env exists and ask about overwriting
 if [ -f .env ]; then
@@ -409,49 +285,31 @@ if [ -f .env ]; then
         cp .env .env.backup
         echo "Backed up existing .env to .env.backup"
         
-        # Get configuration profile
-        profile=$(get_config_profile)
-        echo ""
-        echo "Using $profile configuration profile."
-        
-        # Set paths based on profile
-        set_profile_paths "$profile"
-        
-        # Display configuration for confirmation
-        echo ""
-        echo "=== Configured Paths ==="
-        echo "Data directory:        $DATA_DIR"
-        echo "Cache directory:       $CACHE_DIR"
-        echo "TPTP library:          $TPTP_PATH"
-        echo "Models directory:      $MODEL_DIR"
-        echo "Checkpoints directory: $CHECKPOINT_DIR"
-        echo "Experiments directory: $EXPERIMENT_DIR"
-        echo "Logs directory:        $LOG_DIR"
-        echo ""
-        
-        if ! ask_yes_no "Proceed with this configuration?" "y"; then
-            echo "Configuration cancelled. Please run setup again."
-            exit 0
-        fi
-        
-        # Write .env file
+        # Write .env file with new structure
         cat > .env << EOF
 # Environment variables for ProofAtlas
 # Generated on $(date)
-# Configuration profile: $profile
+# Module-mirroring directory structure
 
-# Data paths
+# Main data directory
 DATA_DIR=${DATA_DIR}
+
+# Data subdirectories
+PROBLEMS_DIR=${PROBLEMS_DIR}
+PROOFS_DIR=${PROOFS_DIR}
+DATASETS_DIR=${DATASETS_DIR}
 CACHE_DIR=${CACHE_DIR}
+
+# TPTP library location
 TPTP_PATH=${TPTP_PATH}
 
-# Model paths
-MODEL_DIR=${MODEL_DIR}
-CHECKPOINT_DIR=${CHECKPOINT_DIR}
-
-# Experiment configuration
-EXPERIMENT_DIR=${EXPERIMENT_DIR}
+# Logging
 LOG_DIR=${LOG_DIR}
+
+# Selector directories (for ML models)
+SELECTORS_DIR=${SELECTORS_DIR}
+SELECTOR_MODELS_DIR=${SELECTOR_MODELS_DIR}
+SELECTOR_CONFIGS_DIR=${SELECTOR_CONFIGS_DIR}
 
 # Additional environment variables can be added here
 EOF
@@ -465,49 +323,31 @@ else
     # Create new .env file
     echo "No .env file found. Creating new configuration..."
     
-    # Get configuration profile
-    profile=$(get_config_profile)
-    echo ""
-    echo "Using $profile configuration profile."
-    
-    # Set paths based on profile
-    set_profile_paths "$profile"
-    
-    # Display configuration for confirmation
-    echo ""
-    echo "=== Configured Paths ==="
-    echo "Data directory:        $DATA_DIR"
-    echo "Cache directory:       $CACHE_DIR"
-    echo "TPTP library:          $TPTP_PATH"
-    echo "Models directory:      $MODEL_DIR"
-    echo "Checkpoints directory: $CHECKPOINT_DIR"
-    echo "Experiments directory: $EXPERIMENT_DIR"
-    echo "Logs directory:        $LOG_DIR"
-    echo ""
-    
-    if ! ask_yes_no "Proceed with this configuration?" "y"; then
-        echo "Configuration cancelled. Please run setup again."
-        exit 0
-    fi
-    
-    # Write .env file
+    # Write .env file with new structure
     cat > .env << EOF
 # Environment variables for ProofAtlas
 # Generated on $(date)
-# Configuration profile: $profile
+# Module-mirroring directory structure
 
-# Data paths
+# Main data directory
 DATA_DIR=${DATA_DIR}
+
+# Data subdirectories
+PROBLEMS_DIR=${PROBLEMS_DIR}
+PROOFS_DIR=${PROOFS_DIR}
+DATASETS_DIR=${DATASETS_DIR}
 CACHE_DIR=${CACHE_DIR}
+
+# TPTP library location
 TPTP_PATH=${TPTP_PATH}
 
-# Model paths
-MODEL_DIR=${MODEL_DIR}
-CHECKPOINT_DIR=${CHECKPOINT_DIR}
-
-# Experiment configuration
-EXPERIMENT_DIR=${EXPERIMENT_DIR}
+# Logging
 LOG_DIR=${LOG_DIR}
+
+# Selector directories (for ML models)
+SELECTORS_DIR=${SELECTORS_DIR}
+SELECTOR_MODELS_DIR=${SELECTOR_MODELS_DIR}
+SELECTOR_CONFIGS_DIR=${SELECTOR_CONFIGS_DIR}
 
 # Additional environment variables can be added here
 EOF
@@ -520,14 +360,39 @@ fi
 chmod 600 .env
 
 # Create necessary directories based on configuration
+echo ""
 echo "Creating project directories..."
+
 # Source the .env file to get the directory paths
 if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-# Create directories, expanding ~ if present
-mkdir -p "${DATA_DIR/#\~/$HOME}" "${CACHE_DIR/#\~/$HOME}" "${MODEL_DIR/#\~/$HOME}" "${CHECKPOINT_DIR/#\~/$HOME}" "${EXPERIMENT_DIR/#\~/$HOME}" "${LOG_DIR/#\~/$HOME}"
+# Create main directories, expanding ~ if present
+mkdir -p "${DATA_DIR/#\~/$HOME}"
+mkdir -p "${PROBLEMS_DIR/#\~/$HOME}"
+mkdir -p "${PROOFS_DIR/#\~/$HOME}"
+mkdir -p "${DATASETS_DIR/#\~/$HOME}"
+mkdir -p "${CACHE_DIR/#\~/$HOME}"
+mkdir -p "${LOG_DIR/#\~/$HOME}/runs"
+
+echo "Created directory structure:"
+echo "  $DATA_DIR/"
+echo "  ├── problems/    # Theorem proving problems"
+echo "  ├── proofs/      # Generated proofs"
+echo "  ├── datasets/    # Prepared datasets"
+echo "  └── cache/       # Temporary files"
+echo "  $LOG_DIR/        # Execution logs"
+
+# Create selector directories if PyTorch is installed or was just installed
+if python -c "import torch" 2>/dev/null || [ "$PYTORCH_INSTALLED" = "yes" ]; then
+    mkdir -p "${SELECTORS_DIR/#\~/$HOME}"
+    mkdir -p "${SELECTOR_MODELS_DIR/#\~/$HOME}"
+    mkdir -p "${SELECTOR_CONFIGS_DIR/#\~/$HOME}"
+    echo "  $SELECTORS_DIR/  # ML selector resources"
+    echo "  ├── models/      # Trained models"
+    echo "  └── configs/     # Configurations"
+fi
 
 # Ask about TPTP library download
 echo ""
@@ -730,9 +595,17 @@ echo ""
 if [ -f .env ]; then
     echo "Current configuration (.env):"
     echo "============================="
-    grep -E "^[A-Z_]+=" .env | while IFS='=' read -r key value; do
-        echo "  $key: $value"
-    done
+    echo "Directory structure:"
+    echo "  Data:      $DATA_DIR"
+    echo "  Problems:  $PROBLEMS_DIR"
+    echo "  Proofs:    $PROOFS_DIR"
+    echo "  Datasets:  $DATASETS_DIR"
+    echo "  Cache:     $CACHE_DIR"
+    echo "  TPTP:      $TPTP_PATH"
+    echo "  Logs:      $LOG_DIR"
+    if [ -d "$SELECTORS_DIR" ]; then
+        echo "  Selectors: $SELECTORS_DIR"
+    fi
     echo ""
 fi
 

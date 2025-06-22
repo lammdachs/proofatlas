@@ -24,8 +24,8 @@ class TestBasicLoopSaveProofs(unittest.TestCase):
         self.a = Constant("a")
         self.b = Constant("b")
         
-        # Output directory
-        self.output_dir = Path(__file__).parent.parent / "test_data" / "proofs" / "basic_loop"
+        # Output directory - use new .data/proofs structure
+        self.output_dir = Path(__file__).parent.parent.parent / ".data" / "proofs" / "test_examples" / "basic_loop"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     def save_proof(self, proof: Proof, filename: str, description: str = ""):

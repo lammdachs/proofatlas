@@ -1,15 +1,36 @@
-*.pt
-wandb/
+# Data directories (new structure)
+.data/
+.logs/
+.selectors/
+
+# Old directories (for backward compatibility)
+.problems/
+.models/
 checkpoints/
-*.ckpt
-*.p
-*.json
+experiments/
+
+# Legacy directories
 /problems/
 /proofs/
 /results/
 /vampire_select/
 /overfit/
 /gnn/
+
+# Model and data files
+*.pt
+*.ckpt
+*.p
+
+# Logs and temporary files
+wandb/
+*.json
+!setup.json
+!environment.json
+
+# Environment files
+.env
+.env.backup
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -19,8 +19,8 @@ class TestBasicLoopRandomSelectorProofs(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Create test data directory."""
-        # Use absolute path to ensure correct location
-        cls.test_dir = Path(__file__).parent.parent / "test_data" / "proofs" / "random_selector"
+        # Use new .data/proofs structure
+        cls.test_dir = Path(__file__).parent.parent.parent / ".data" / "proofs" / "test_examples" / "random_selector"
         cls.test_dir.mkdir(parents=True, exist_ok=True)
     
     def save_proof(self, proof: Proof, filename: str, description: str):
