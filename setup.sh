@@ -197,6 +197,9 @@ echo "   - Required for: GNN-based clause selection, learned proof guidance"
 echo "   - Packages: pytorch, pytorch-cuda, pyg (PyTorch Geometric), pytorch-lightning"
 echo "   - Note: This requires a compatible NVIDIA GPU for CUDA support"
 echo ""
+echo "   IMPORTANT: Installing GPU components requires accepting the NVIDIA EULA:"
+echo "   https://docs.nvidia.com/deeplearning/cudnn/sla/index.html"
+echo ""
 
 PYTORCH_INSTALLED="no"
 if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
@@ -231,7 +234,7 @@ if ask_yes_no "Would you like to install Claude CLI?"; then
     
     echo "Installing Claude CLI in the conda environment..."
     # Install locally to the conda environment, not globally
-    npm install @anthropic-ai/claude-cli
+    npm install @anthropic-ai/claude-code
     
     # Add node_modules/.bin to PATH for this environment
     mkdir -p $CONDA_PREFIX/etc/conda/activate.d
