@@ -3,7 +3,7 @@
 from typing import Dict, Type, Any, Optional
 
 from .base import Selector
-from .random import FIFOSelector
+from .random import RandomSelector
 from .gnn import GNNSelector
 
 
@@ -16,8 +16,8 @@ class SelectorRegistry:
     
     def _register_default_selectors(self):
         """Register default selectors."""
-        self.register('fifo', FIFOSelector)  # Legacy name
-        self.register('random', FIFOSelector)  # Preferred name
+        self.register('fifo', RandomSelector)  # Legacy name
+        self.register('random', RandomSelector)  # Preferred name
         self.register('gnn', GNNSelector)
     
     def register(self, name: str, selector_class: Type[Selector]):

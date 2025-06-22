@@ -4,7 +4,8 @@ from typing import List, Optional, Dict, Tuple
 
 from .base import Rule, RuleApplication
 from proofatlas.proofs.state import ProofState
-from proofatlas.core.logic import Clause, Literal
+from proofatlas.core.logic import Clause, Literal, Variable
+from proofatlas.core.unification import unify_terms, Substitution, rename_variables
 
 
 class ResolutionRule(Rule):
@@ -53,8 +54,16 @@ class ResolutionRule(Rule):
         """Apply binary resolution between two clauses."""
         resolvents = []
         
+        # Rename variables in clause2 to avoid conflicts
+        # This ensures variables in different clauses are treated as different
+        renamed_literals = []
+        for lit in clause2.literals:
+            renamed_pred = rename_variables(lit.predicate, "_c2")
+            renamed_literals.append(Literal(renamed_pred, lit.polarity))
+        clause2_renamed = Clause(*renamed_literals)
+        
         for i, lit1 in enumerate(clause1.literals):
-            for j, lit2 in enumerate(clause2.literals):
+            for j, lit2 in enumerate(clause2_renamed.literals):
                 if lit1.polarity != lit2.polarity:
                     # Try to unify the predicates
                     mgu = self._unify(lit1.predicate, lit2.predicate)
@@ -68,8 +77,8 @@ class ResolutionRule(Rule):
                                 new_lit = self._apply_substitution(lit, mgu)
                                 new_literals.append(new_lit)
                         
-                        # Add literals from clause2 (except resolved)
-                        for k, lit in enumerate(clause2.literals):
+                        # Add literals from clause2_renamed (except resolved)
+                        for k, lit in enumerate(clause2_renamed.literals):
                             if k != j:
                                 new_lit = self._apply_substitution(lit, mgu)
                                 new_literals.append(new_lit)
@@ -89,24 +98,13 @@ class ResolutionRule(Rule):
         
         return resolvents
     
-    def _unify(self, atom1, atom2) -> Optional[Dict]:
-        """Simple unification algorithm (placeholder - needs proper implementation)."""
-        # This is a simplified version - a real implementation would need
-        # occurs check and proper term unification
-        if atom1.symbol != atom2.symbol:
-            return None
-        
-        if len(atom1.args) != len(atom2.args):
-            return None
-        
-        # For now, only unify if atoms are identical
-        # A proper implementation would compute MGU
-        if str(atom1) == str(atom2):
-            return {}
-        
-        return None
+    def _unify(self, atom1, atom2) -> Optional[Substitution]:
+        """Unify two atoms (predicate terms)."""
+        # Use the proper unification algorithm
+        return unify_terms(atom1, atom2)
     
-    def _apply_substitution(self, literal: Literal, substitution: Dict) -> Literal:
-        """Apply substitution to a literal (placeholder)."""
-        # This would need proper implementation
-        return literal
+    def _apply_substitution(self, literal: Literal, substitution: Substitution) -> Literal:
+        """Apply substitution to a literal."""
+        # Apply substitution to the predicate term
+        new_predicate = substitution.apply(literal.predicate)
+        return Literal(new_predicate, literal.polarity)

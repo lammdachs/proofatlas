@@ -5,6 +5,7 @@ from typing import List, Optional, Dict
 from .base import Rule, RuleApplication
 from proofatlas.proofs.state import ProofState
 from proofatlas.core.logic import Clause, Literal
+from proofatlas.core.unification import unify_terms, Substitution
 
 
 class FactoringRule(Rule):
@@ -73,20 +74,12 @@ class FactoringRule(Rule):
         
         return factors
     
-    def _unify(self, atom1, atom2) -> Optional[Dict]:
-        """Simple unification algorithm (placeholder)."""
-        # Same as in resolution - should be moved to a shared module
-        if atom1.symbol != atom2.symbol:
-            return None
-        
-        if len(atom1.args) != len(atom2.args):
-            return None
-        
-        if str(atom1) == str(atom2):
-            return {}
-        
-        return None
+    def _unify(self, atom1, atom2) -> Optional[Substitution]:
+        """Unify two atoms using proper unification algorithm."""
+        return unify_terms(atom1, atom2)
     
-    def _apply_substitution(self, literal: Literal, substitution: Dict) -> Literal:
-        """Apply substitution to a literal (placeholder)."""
-        return literal
+    def _apply_substitution(self, literal: Literal, substitution: Substitution) -> Literal:
+        """Apply substitution to a literal."""
+        # Apply substitution to the predicate term
+        new_predicate = substitution.apply(literal.predicate)
+        return Literal(new_predicate, literal.polarity)
