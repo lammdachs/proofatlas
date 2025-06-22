@@ -408,21 +408,30 @@ echo ""
 get_latest_tptp_version() {
     echo "Checking for latest TPTP version..."
     
-    # Try to fetch the TPTP distribution page and extract version numbers
-    local versions=$(curl -s "https://www.tptp.org/TPTP/Distribution/" | grep -oE 'TPTP-v[0-9]+\.[0-9]+\.[0-9]+\.tgz' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+    # The TPTP distribution directory structure follows a predictable pattern
+    # We'll check for recent versions in descending order
+    local base_url="https://www.tptp.org/TPTP/Distribution"
     
-    if [ -z "$versions" ]; then
-        # Fallback: try alternative URL or use a known recent version
-        versions=$(curl -s "http://www.tptp.org/TPTP/Distribution/" | grep -oE 'TPTP-v[0-9]+\.[0-9]+\.[0-9]+\.tgz' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
-    fi
+    # Try recent versions (as of 2024, latest is around 8.2.0)
+    for major in 9 8; do
+        for minor in 9 8 7 6 5 4 3 2 1 0; do
+            for patch in 9 8 7 6 5 4 3 2 1 0; do
+                local version="v${major}.${minor}.${patch}"
+                local test_url="${base_url}/TPTP-${version}.tgz"
+                
+                # Test if the URL exists (using HEAD request to avoid downloading)
+                if curl --head --silent --fail "$test_url" > /dev/null 2>&1; then
+                    echo "$version"
+                    return
+                fi
+            done
+        done
+    done
     
-    if [ -z "$versions" ]; then
-        echo "Warning: Could not determine latest TPTP version automatically."
-        echo "Using fallback version v8.2.0"
-        echo "v8.2.0"
-    else
-        echo "$versions"
-    fi
+    # If we can't find any version, use a known good fallback
+    echo "Warning: Could not determine latest TPTP version automatically."
+    echo "Using fallback version v8.2.0"
+    echo "v8.2.0"
 }
 
 # Check for existing TPTP installation
@@ -504,7 +513,7 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
         mkdir -p "$TPTP_PATH_EXPANDED"
         
         # Download TPTP archive
-        TPTP_URL="http://www.tptp.org/TPTP/Distribution/TPTP-${latest_version}.tgz"
+        TPTP_URL="https://www.tptp.org/TPTP/Distribution/TPTP-${latest_version}.tgz"
         TPTP_ARCHIVE="$TPTP_PATH_EXPANDED/TPTP-${latest_version}.tgz"
         
         if [ -f "$TPTP_ARCHIVE" ]; then
@@ -547,7 +556,7 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
     fi
 else
     echo "Skipping TPTP library download."
-    echo "You can download it manually later from: http://www.tptp.org/"
+    echo "You can download it manually later from: https://www.tptp.org/"
 fi
 
 # Install pre-commit hooks if .pre-commit-config.yaml exists
