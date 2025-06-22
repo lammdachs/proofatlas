@@ -5,16 +5,6 @@ set -e
 
 echo "Setting up ProofAtlas environment..."
 
-# Check if conda is available
-if ! command -v conda &> /dev/null; then
-    echo "Error: conda not found. Please install Anaconda or Miniconda first."
-    exit 1
-fi
-
-# Get the directory where the script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR"
-
 # Function to ask yes/no questions
 ask_yes_no() {
     local prompt="$1"
@@ -35,6 +25,139 @@ ask_yes_no() {
     
     [[ "$response" =~ ^[Yy]$ ]]
 }
+
+# Check if conda is available
+if ! command -v conda &> /dev/null; then
+    echo "Conda not found. Conda (Anaconda or Miniconda) is required for ProofAtlas."
+    echo ""
+    echo "Miniconda is a minimal conda installer that includes only conda, Python, and a few other packages."
+    echo "It's perfect for ProofAtlas and takes up less space than the full Anaconda distribution."
+    echo ""
+    
+    if ask_yes_no "Would you like to install Miniconda now?"; then
+        echo ""
+        echo "Installing Miniconda..."
+        
+        # Detect OS and architecture
+        OS_TYPE=$(uname -s)
+        ARCH_TYPE=$(uname -m)
+        
+        # Determine the appropriate Miniconda installer
+        if [ "$OS_TYPE" = "Linux" ]; then
+            if [ "$ARCH_TYPE" = "x86_64" ]; then
+                MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+            elif [ "$ARCH_TYPE" = "aarch64" ]; then
+                MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+            else
+                echo "Error: Unsupported Linux architecture: $ARCH_TYPE"
+                exit 1
+            fi
+        elif [ "$OS_TYPE" = "Darwin" ]; then
+            if [ "$ARCH_TYPE" = "x86_64" ]; then
+                MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
+            elif [ "$ARCH_TYPE" = "arm64" ]; then
+                MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh"
+            else
+                echo "Error: Unsupported macOS architecture: $ARCH_TYPE"
+                exit 1
+            fi
+        else
+            echo "Error: Unsupported operating system: $OS_TYPE"
+            echo "Please install Miniconda manually from: https://docs.conda.io/en/latest/miniconda.html"
+            exit 1
+        fi
+        
+        # Download Miniconda installer
+        MINICONDA_INSTALLER="/tmp/miniconda_installer.sh"
+        echo "Downloading Miniconda from: $MINICONDA_URL"
+        if curl -L -o "$MINICONDA_INSTALLER" "$MINICONDA_URL" || wget -O "$MINICONDA_INSTALLER" "$MINICONDA_URL"; then
+            # Make installer executable
+            chmod +x "$MINICONDA_INSTALLER"
+            
+            # Determine installation directory
+            echo ""
+            echo "Where would you like to install Miniconda?"
+            echo "Press Enter for default location ($HOME/miniconda3),"
+            echo "or enter a custom path:"
+            read -r CONDA_PREFIX_PATH
+            
+            if [ -z "$CONDA_PREFIX_PATH" ]; then
+                CONDA_PREFIX_PATH="$HOME/miniconda3"
+            fi
+            
+            # Run installer
+            echo "Installing to: $CONDA_PREFIX_PATH"
+            "$MINICONDA_INSTALLER" -b -p "$CONDA_PREFIX_PATH"
+            
+            # Clean up installer
+            rm -f "$MINICONDA_INSTALLER"
+            
+            # Initialize conda for current shell
+            echo ""
+            echo "Initializing conda..."
+            "$CONDA_PREFIX_PATH/bin/conda" init bash
+            
+            # Also init for zsh if it's installed
+            if command -v zsh &> /dev/null; then
+                "$CONDA_PREFIX_PATH/bin/conda" init zsh
+            fi
+            
+            echo ""
+            echo "Miniconda has been installed successfully!"
+            echo ""
+            echo "IMPORTANT: You need to restart your shell or run:"
+            echo "  source ~/.bashrc  (for bash)"
+            echo "  source ~/.zshrc   (for zsh)"
+            echo ""
+            echo "Then run this setup script again."
+            echo ""
+            
+            # Ask if user wants to continue with sourcing
+            if ask_yes_no "Would you like to source your shell config now and continue?" "y"; then
+                if [ -n "$BASH_VERSION" ]; then
+                    source ~/.bashrc
+                elif [ -n "$ZSH_VERSION" ]; then
+                    source ~/.zshrc
+                else
+                    echo "Please source your shell configuration manually and run setup again."
+                    exit 0
+                fi
+                
+                # Verify conda is now available
+                if ! command -v conda &> /dev/null; then
+                    echo "Error: conda still not found in PATH."
+                    echo "Please restart your terminal and run this setup script again."
+                    exit 1
+                fi
+            else
+                echo "Please restart your terminal and run this setup script again."
+                exit 0
+            fi
+        else
+            echo "Error: Failed to download Miniconda installer."
+            echo "Please install Miniconda manually from: https://docs.conda.io/en/latest/miniconda.html"
+            exit 1
+        fi
+    else
+        echo ""
+        echo "Please install Anaconda or Miniconda manually."
+        echo ""
+        echo "To install Miniconda:"
+        echo "  1. Visit: https://docs.conda.io/en/latest/miniconda.html"
+        echo "  2. Download the installer for your operating system"
+        echo "  3. Run the installer"
+        echo "  4. Restart your terminal"
+        echo "  5. Run this setup script again"
+        echo ""
+        echo "To install Anaconda (larger, includes many packages):"
+        echo "  Visit: https://www.anaconda.com/products/distribution"
+        exit 1
+    fi
+fi
+
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
 # Check if environment.yml exists
 if [ ! -f environment.yml ]; then

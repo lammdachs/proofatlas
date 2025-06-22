@@ -30,7 +30,7 @@ This project provides a flexible platform for:
 ## Installation
 
 ### Prerequisites
-- Conda (Anaconda or Miniconda)
+- Conda (Anaconda or Miniconda) - can be installed automatically by the setup script
 - CUDA-capable GPU (optional, for GNN-based clause selection)
 
 ### Quick Setup
@@ -44,11 +44,13 @@ cd proofatlas
 ```
 
 The setup script will:
-1. Create a conda environment with core dependencies from `environment.yml`
-2. Optionally install PyTorch and GNN packages (for neural clause selection)
-3. Optionally install Claude CLI (for AI assistance)
-4. Set up the project in development mode
-5. Create necessary directories and configuration files
+1. Install Miniconda if conda is not found (optional)
+2. Create a conda environment with core dependencies from `environment.yml`
+3. Optionally install PyTorch and GNN packages (for neural clause selection)
+4. Optionally install Claude CLI (for AI assistance)
+5. Set up the project in development mode
+6. Create necessary directories and configuration files
+7. Optionally download the latest TPTP problem library
 
 ### Installation Options
 
