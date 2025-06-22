@@ -80,7 +80,9 @@ For interactive AI assistance with theorem proving:
 
 To install: Answer "yes" when prompted during setup, or run:
 ```bash
-npm install -g @anthropic-ai/claude-cli
+conda activate proofatlas
+conda install -y nodejs -c conda-forge
+npm install @anthropic-ai/claude-cli
 export ANTHROPIC_API_KEY='your-api-key-here'
 ```
 

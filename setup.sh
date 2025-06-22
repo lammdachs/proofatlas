@@ -96,25 +96,34 @@ echo ""
 # Claude CLI
 echo "2. Claude CLI (AI Assistant)"
 echo "   - Required for: Interactive AI assistance with code and theorem proving"
-echo "   - Packages: npm, claude (via npm)"
-echo "   - Note: Requires Node.js/npm and a Claude API key"
+echo "   - Packages: nodejs (via conda), claude (via npm)"
+echo "   - Note: Requires a Claude API key"
 echo ""
 
 if ask_yes_no "Would you like to install Claude CLI?"; then
-    echo "Checking for npm..."
-    if ! command -v npm &> /dev/null; then
-        echo "npm not found. Installing Node.js..."
-        conda install -y nodejs -c conda-forge
-    fi
+    echo "Installing Node.js via conda..."
+    conda install -y nodejs -c conda-forge
     
-    echo "Installing Claude CLI globally..."
-    npm install -g @anthropic-ai/claude-cli
+    echo "Installing Claude CLI in the conda environment..."
+    # Install locally to the conda environment, not globally
+    npm install @anthropic-ai/claude-cli
+    
+    # Add node_modules/.bin to PATH for this environment
+    mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+    echo 'export PATH="$CONDA_PREFIX/node_modules/.bin:$PATH"' > $CONDA_PREFIX/etc/conda/activate.d/npm.sh
+    chmod +x $CONDA_PREFIX/etc/conda/activate.d/npm.sh
+    
+    # Also create deactivate script
+    mkdir -p $CONDA_PREFIX/etc/conda/deactivate.d
+    echo 'export PATH="${PATH//$CONDA_PREFIX\/node_modules\/.bin:/}"' > $CONDA_PREFIX/etc/conda/deactivate.d/npm.sh
+    chmod +x $CONDA_PREFIX/etc/conda/deactivate.d/npm.sh
     
     echo "Claude CLI installed successfully!"
     echo ""
-    echo "To use Claude CLI, you'll need to set up your API key:"
-    echo "  export ANTHROPIC_API_KEY='your-api-key-here'"
-    echo "Or run: claude login"
+    echo "To use Claude CLI, you'll need to:"
+    echo "  1. Reactivate the conda environment: conda deactivate && conda activate ${ENV_NAME}"
+    echo "  2. Set up your API key: export ANTHROPIC_API_KEY='your-api-key-here'"
+    echo "  3. Or run: claude login"
 else
     echo "Skipping Claude CLI installation."
 fi
@@ -341,7 +350,7 @@ else
     echo "  ✗ PyTorch and GNN support (not installed)"
 fi
 
-if command -v claude &> /dev/null; then
+if [ -f "$CONDA_PREFIX/node_modules/.bin/claude" ]; then
     echo "  ✓ Claude CLI"
 else
     echo "  ✗ Claude CLI (not installed)"

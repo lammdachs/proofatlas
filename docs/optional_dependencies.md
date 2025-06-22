@@ -73,16 +73,22 @@ Install Claude CLI if you want:
 During setup, answer "yes" when prompted, or install manually:
 
 ```bash
-# Install Node.js if not present
+# Activate the conda environment
+conda activate proofatlas
+
+# Install Node.js via conda
 conda install -y nodejs -c conda-forge
 
-# Install Claude CLI globally
-npm install -g @anthropic-ai/claude-cli
+# Install Claude CLI locally in the environment
+npm install @anthropic-ai/claude-cli
 
+# The CLI will be available when the environment is active
 # Set up API key
 export ANTHROPIC_API_KEY='your-api-key-here'
 # Or run: claude login
 ```
+
+Note: The setup script automatically configures the PATH so that locally installed npm packages are accessible when the conda environment is active.
 
 ### Usage Example
 
