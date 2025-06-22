@@ -200,7 +200,7 @@ echo ""
 
 if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
     echo "Installing PyTorch ecosystem..."
-    conda install -y pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+    conda install -y pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
     
     echo "Installing PyTorch Geometric..."
     conda install -y pyg -c pyg
@@ -277,6 +277,130 @@ read_with_default() {
     fi
 }
 
+# Function to detect HPC environment
+detect_hpc_environment() {
+    if [ -n "$SLURM_JOB_ID" ] || command -v sbatch &> /dev/null; then
+        echo "slurm"
+    elif [ -n "$PBS_JOBID" ] || command -v qsub &> /dev/null; then
+        echo "pbs"
+    elif [ -n "$LSB_JOBID" ] || command -v bsub &> /dev/null; then
+        echo "lsf"
+    else
+        echo "none"
+    fi
+}
+
+# Function to get configuration profile
+get_config_profile() {
+    echo ""
+    echo "=== Configuration Profile Selection ==="
+    echo ""
+    echo "ProofAtlas can be configured with different directory layouts:"
+    echo ""
+    echo "1. Local (default) - All data within the project directory"
+    echo "   Best for: Personal development, isolated projects"
+    echo ""
+    echo "2. Centralized - Shared data/models across multiple projects"
+    echo "   Best for: Multiple theorem proving projects, model reuse"
+    echo ""
+    echo "3. HPC/Cluster - Optimized for high-performance computing"
+    echo "   Best for: Large-scale experiments, cluster environments"
+    echo ""
+    echo "4. Custom - Manually specify all paths"
+    echo "   Best for: Specific requirements, existing setups"
+    echo ""
+    
+    local hpc_env=$(detect_hpc_environment)
+    if [ "$hpc_env" != "none" ]; then
+        echo "Note: Detected $hpc_env environment. Consider using HPC/Cluster profile."
+        echo ""
+    fi
+    
+    echo -n "Select configuration profile [1-4] (1): "
+    read -r profile_choice
+    
+    if [ -z "$profile_choice" ]; then
+        profile_choice="1"
+    fi
+    
+    case "$profile_choice" in
+        1) echo "local" ;;
+        2) echo "centralized" ;;
+        3) echo "hpc" ;;
+        4) echo "custom" ;;
+        *) echo "local" ;;  # Default to local for invalid input
+    esac
+}
+
+# Function to set paths based on profile
+set_profile_paths() {
+    local profile="$1"
+    
+    case "$profile" in
+        "local")
+            DATA_DIR="./.problems"
+            CACHE_DIR="./cache"
+            TPTP_PATH="./.problems/tptp"
+            MODEL_DIR="./.models"
+            CHECKPOINT_DIR="./checkpoints"
+            EXPERIMENT_DIR="./experiments"
+            LOG_DIR="./.logs"
+            ;;
+            
+        "centralized")
+            local base_dir="$HOME/theorem-proving"
+            echo ""
+            read_with_default "Enter base directory for shared resources" "$base_dir" base_dir
+            
+            DATA_DIR="$base_dir/data"
+            CACHE_DIR="$base_dir/cache"
+            TPTP_PATH="$base_dir/data/tptp"
+            MODEL_DIR="$base_dir/models/proofatlas"
+            CHECKPOINT_DIR="./checkpoints"
+            EXPERIMENT_DIR="./experiments"
+            LOG_DIR="./logs"
+            ;;
+            
+        "hpc")
+            # Try to use SCRATCH if available, otherwise fall back to tmp
+            local scratch_dir="${SCRATCH:-/scratch/$USER}"
+            local home_dir="$HOME"
+            
+            echo ""
+            echo "HPC Profile Configuration:"
+            read_with_default "Enter scratch/fast storage path" "$scratch_dir" scratch_dir
+            read_with_default "Enter persistent storage path" "$home_dir/proofatlas" home_dir
+            
+            DATA_DIR="$scratch_dir/theorem-proving/data"
+            CACHE_DIR="$scratch_dir/theorem-proving/cache"
+            TPTP_PATH="$scratch_dir/theorem-proving/data/tptp"
+            MODEL_DIR="$scratch_dir/proofatlas/models"
+            CHECKPOINT_DIR="$scratch_dir/proofatlas/checkpoints"
+            EXPERIMENT_DIR="$home_dir/experiments"
+            LOG_DIR="$home_dir/logs"
+            ;;
+            
+        "custom")
+            # Current behavior - ask for each path
+            echo ""
+            echo "=== Data Paths Configuration ==="
+            read_with_default "Enter data directory path" "./.problems" DATA_DIR
+            read_with_default "Enter cache directory path" "./cache" CACHE_DIR
+            read_with_default "Enter TPTP library path" "./.problems/tptp" TPTP_PATH
+            
+            echo ""
+            echo "=== Model Paths Configuration ==="
+            read_with_default "Enter models directory path" "./.models" MODEL_DIR
+            read_with_default "Enter checkpoints directory path" "./checkpoints" CHECKPOINT_DIR
+            
+            echo ""
+            echo "=== Experiment Configuration ==="
+            read_with_default "Enter experiments directory path" "./experiments" EXPERIMENT_DIR
+            read_with_default "Enter logs directory path" "./.logs" LOG_DIR
+            ;;
+    esac
+}
+
 # Check if .env exists and ask about overwriting
 if [ -f .env ]; then
     echo "An .env file already exists."
@@ -285,27 +409,36 @@ if [ -f .env ]; then
         cp .env .env.backup
         echo "Backed up existing .env to .env.backup"
         
-        # Read configuration values
+        # Get configuration profile
+        profile=$(get_config_profile)
         echo ""
-        echo "=== Data Paths Configuration ==="
-        read_with_default "Enter data directory path" "./.problems" DATA_DIR
-        read_with_default "Enter cache directory path" "./cache" CACHE_DIR
-        read_with_default "Enter TPTP library path" "./.problems/tptp" TPTP_PATH
+        echo "Using $profile configuration profile."
         
-        echo ""
-        echo "=== Model Paths Configuration ==="
-        read_with_default "Enter models directory path" "./.models" MODEL_DIR
-        read_with_default "Enter checkpoints directory path" "./checkpoints" CHECKPOINT_DIR
+        # Set paths based on profile
+        set_profile_paths "$profile"
         
+        # Display configuration for confirmation
         echo ""
-        echo "=== Experiment Configuration ==="
-        read_with_default "Enter experiments directory path" "./experiments" EXPERIMENT_DIR
-        read_with_default "Enter logs directory path" "./.logs" LOG_DIR
+        echo "=== Configured Paths ==="
+        echo "Data directory:        $DATA_DIR"
+        echo "Cache directory:       $CACHE_DIR"
+        echo "TPTP library:          $TPTP_PATH"
+        echo "Models directory:      $MODEL_DIR"
+        echo "Checkpoints directory: $CHECKPOINT_DIR"
+        echo "Experiments directory: $EXPERIMENT_DIR"
+        echo "Logs directory:        $LOG_DIR"
+        echo ""
+        
+        if ! ask_yes_no "Proceed with this configuration?" "y"; then
+            echo "Configuration cancelled. Please run setup again."
+            exit 0
+        fi
         
         # Write .env file
         cat > .env << EOF
 # Environment variables for ProofAtlas
 # Generated on $(date)
+# Configuration profile: $profile
 
 # Data paths
 DATA_DIR=${DATA_DIR}
@@ -332,27 +465,36 @@ else
     # Create new .env file
     echo "No .env file found. Creating new configuration..."
     
-    # Read configuration values
+    # Get configuration profile
+    profile=$(get_config_profile)
     echo ""
-    echo "=== Data Paths Configuration ==="
-    read_with_default "Enter data directory path" "./.problems" DATA_DIR
-    read_with_default "Enter cache directory path" "./cache" CACHE_DIR
-    read_with_default "Enter TPTP library path" "./.problems/tptp" TPTP_PATH
+    echo "Using $profile configuration profile."
     
-    echo ""
-    echo "=== Model Paths Configuration ==="
-    read_with_default "Enter models directory path" "./.models" MODEL_DIR
-    read_with_default "Enter checkpoints directory path" "./checkpoints" CHECKPOINT_DIR
+    # Set paths based on profile
+    set_profile_paths "$profile"
     
+    # Display configuration for confirmation
     echo ""
-    echo "=== Experiment Configuration ==="
-    read_with_default "Enter experiments directory path" "./experiments" EXPERIMENT_DIR
-    read_with_default "Enter logs directory path" "./.logs" LOG_DIR
+    echo "=== Configured Paths ==="
+    echo "Data directory:        $DATA_DIR"
+    echo "Cache directory:       $CACHE_DIR"
+    echo "TPTP library:          $TPTP_PATH"
+    echo "Models directory:      $MODEL_DIR"
+    echo "Checkpoints directory: $CHECKPOINT_DIR"
+    echo "Experiments directory: $EXPERIMENT_DIR"
+    echo "Logs directory:        $LOG_DIR"
+    echo ""
+    
+    if ! ask_yes_no "Proceed with this configuration?" "y"; then
+        echo "Configuration cancelled. Please run setup again."
+        exit 0
+    fi
     
     # Write .env file
     cat > .env << EOF
 # Environment variables for ProofAtlas
 # Generated on $(date)
+# Configuration profile: $profile
 
 # Data paths
 DATA_DIR=${DATA_DIR}

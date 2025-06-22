@@ -48,9 +48,12 @@ The setup script will:
 2. Create a conda environment with core dependencies from `environment.yml`
 3. Optionally install PyTorch and GNN packages (for neural clause selection)
 4. Optionally install Claude CLI (for AI assistance)
-5. Set up the project in development mode
-6. Create necessary directories and configuration files
-7. Optionally download the latest TPTP problem library
+5. Configure paths using predefined profiles (Local, Centralized, HPC, or Custom)
+6. Set up the project in development mode
+7. Create necessary directories and configuration files
+8. Optionally download the latest TPTP problem library
+
+See [Configuration Profiles](docs/configuration_profiles.md) for details on directory layout options.
 
 ### Installation Options
 
