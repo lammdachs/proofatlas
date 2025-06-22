@@ -271,49 +271,146 @@ echo "The TPTP (Thousands of Problems for Theorem Provers) library contains"
 echo "a comprehensive collection of theorem proving problems."
 echo ""
 
+# Function to get latest TPTP version
+get_latest_tptp_version() {
+    echo "Checking for latest TPTP version..."
+    
+    # Try to fetch the TPTP distribution page and extract version numbers
+    local versions=$(curl -s "https://www.tptp.org/TPTP/Distribution/" | grep -oE 'TPTP-v[0-9]+\.[0-9]+\.[0-9]+\.tgz' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+    
+    if [ -z "$versions" ]; then
+        # Fallback: try alternative URL or use a known recent version
+        versions=$(curl -s "http://www.tptp.org/TPTP/Distribution/" | grep -oE 'TPTP-v[0-9]+\.[0-9]+\.[0-9]+\.tgz' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+    fi
+    
+    if [ -z "$versions" ]; then
+        echo "Warning: Could not determine latest TPTP version automatically."
+        echo "Using fallback version v8.2.0"
+        echo "v8.2.0"
+    else
+        echo "$versions"
+    fi
+}
+
+# Check for existing TPTP installation
+check_existing_tptp() {
+    local tptp_path="$1"
+    
+    if [ -d "$tptp_path/Problems" ] || [ -L "$tptp_path/Problems" ]; then
+        # Check if it's a symlink and follow it
+        if [ -L "$tptp_path/Problems" ]; then
+            local target=$(readlink "$tptp_path/Problems")
+            if [[ "$target" =~ TPTP-v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                echo "${BASH_REMATCH[1]}"
+                return
+            fi
+        fi
+        
+        # Check for version file or directory names
+        for dir in "$tptp_path"/TPTP-v*; do
+            if [ -d "$dir" ]; then
+                local version=$(basename "$dir" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//')
+                if [ -n "$version" ]; then
+                    echo "$version"
+                    return
+                fi
+            fi
+        done
+        
+        echo "unknown"
+    else
+        echo "none"
+    fi
+}
+
 if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; then
     echo ""
-    echo "Downloading TPTP library..."
     
     # Expand TPTP_PATH if it contains ~
     TPTP_PATH_EXPANDED="${TPTP_PATH/#\~/$HOME}"
     
-    # Create TPTP directory
-    mkdir -p "$TPTP_PATH_EXPANDED"
+    # Check for existing installation
+    existing_version=$(check_existing_tptp "$TPTP_PATH_EXPANDED")
     
-    # Download TPTP archive
-    TPTP_URL="http://www.tptp.org/TPTP/Distribution/TPTP-v8.2.0.tgz"
-    TPTP_ARCHIVE="$TPTP_PATH_EXPANDED/TPTP-v8.2.0.tgz"
-    
-    if [ -f "$TPTP_ARCHIVE" ]; then
-        echo "TPTP archive already exists. Skipping download."
-    else
-        echo "Downloading from $TPTP_URL..."
-        curl -L -o "$TPTP_ARCHIVE" "$TPTP_URL" || wget -O "$TPTP_ARCHIVE" "$TPTP_URL"
+    if [ "$existing_version" != "none" ]; then
+        echo "Found existing TPTP installation: version $existing_version"
     fi
     
-    # Extract TPTP archive
-    echo "Extracting TPTP archive..."
-    cd "$TPTP_PATH_EXPANDED"
-    tar -xzf "TPTP-v8.2.0.tgz"
+    # Get latest version
+    latest_version=$(get_latest_tptp_version)
+    latest_version_num=$(echo "$latest_version" | sed 's/v//')
     
-    # Create symlink to Problems directory
-    if [ -d "TPTP-v8.2.0/Problems" ]; then
-        ln -sf "TPTP-v8.2.0/Problems" "Problems"
-        echo "TPTP library extracted successfully!"
-        echo "Problems directory: $TPTP_PATH_EXPANDED/Problems"
-    else
-        echo "Warning: Problems directory not found in TPTP archive."
+    echo "Latest TPTP version available: $latest_version"
+    
+    # Compare versions if existing installation found
+    if [ "$existing_version" != "none" ] && [ "$existing_version" != "unknown" ]; then
+        if [ "$existing_version" = "$latest_version_num" ]; then
+            echo "You already have the latest version installed."
+            if ! ask_yes_no "Would you like to reinstall?" "n"; then
+                echo "Keeping existing installation."
+                cd "$SCRIPT_DIR"
+            else
+                existing_version="none"  # Force reinstall
+            fi
+        else
+            echo "Your version ($existing_version) is older than the latest version ($latest_version_num)."
+            if ! ask_yes_no "Would you like to upgrade?" "y"; then
+                echo "Keeping existing installation."
+                cd "$SCRIPT_DIR"
+            else
+                existing_version="none"  # Force upgrade
+            fi
+        fi
     fi
     
-    cd "$SCRIPT_DIR"
-    
-    # Optionally clean up archive
-    if ask_yes_no "Would you like to keep the downloaded archive?" "n"; then
-        echo "Keeping archive at: $TPTP_ARCHIVE"
-    else
-        rm -f "$TPTP_ARCHIVE"
-        echo "Archive removed."
+    # Download and install if needed
+    if [ "$existing_version" = "none" ] || [ "$existing_version" = "unknown" ]; then
+        echo "Downloading TPTP library..."
+        
+        # Create TPTP directory
+        mkdir -p "$TPTP_PATH_EXPANDED"
+        
+        # Download TPTP archive
+        TPTP_URL="http://www.tptp.org/TPTP/Distribution/TPTP-${latest_version}.tgz"
+        TPTP_ARCHIVE="$TPTP_PATH_EXPANDED/TPTP-${latest_version}.tgz"
+        
+        if [ -f "$TPTP_ARCHIVE" ]; then
+            echo "TPTP archive already exists. Using existing archive."
+        else
+            echo "Downloading from $TPTP_URL..."
+            if ! curl -L -o "$TPTP_ARCHIVE" "$TPTP_URL" && ! wget -O "$TPTP_ARCHIVE" "$TPTP_URL"; then
+                echo "Error: Failed to download TPTP archive."
+                echo "Please check your internet connection or download manually from:"
+                echo "  $TPTP_URL"
+                cd "$SCRIPT_DIR"
+            else
+                # Extract TPTP archive
+                echo "Extracting TPTP archive..."
+                cd "$TPTP_PATH_EXPANDED"
+                tar -xzf "TPTP-${latest_version}.tgz"
+                
+                # Create symlink to Problems directory
+                if [ -d "TPTP-${latest_version}/Problems" ]; then
+                    # Remove old symlink if exists
+                    [ -L "Problems" ] && rm -f "Problems"
+                    ln -sf "TPTP-${latest_version}/Problems" "Problems"
+                    echo "TPTP library ${latest_version} extracted successfully!"
+                    echo "Problems directory: $TPTP_PATH_EXPANDED/Problems"
+                else
+                    echo "Warning: Problems directory not found in TPTP archive."
+                fi
+                
+                cd "$SCRIPT_DIR"
+                
+                # Optionally clean up archive
+                if ask_yes_no "Would you like to keep the downloaded archive?" "n"; then
+                    echo "Keeping archive at: $TPTP_ARCHIVE"
+                else
+                    rm -f "$TPTP_ARCHIVE"
+                    echo "Archive removed."
+                fi
+            fi
+        fi
     fi
 else
     echo "Skipping TPTP library download."

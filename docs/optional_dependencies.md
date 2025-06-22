@@ -128,6 +128,33 @@ If you're actively developing new features or need help understanding the codeba
 - **Network**: Internet connection for API calls
 - **API Key**: Anthropic API key required
 
+## TPTP Library
+
+The TPTP (Thousands of Problems for Theorem Provers) library is an optional but recommended resource containing thousands of theorem proving problems for testing and benchmarking.
+
+### Automatic Version Detection
+
+The setup script automatically:
+- Detects the latest TPTP version from the official distribution site
+- Checks if you have an existing TPTP installation and its version
+- Offers to upgrade if a newer version is available
+- Creates proper symlinks for easy access to the Problems directory
+
+### Manual Installation
+
+If you prefer to install TPTP manually:
+
+```bash
+# Download the latest version from
+# https://www.tptp.org/TPTP/Distribution/
+
+# Extract to your preferred location
+tar -xzf TPTP-vX.Y.Z.tgz
+
+# Update TPTP_PATH in your .env file
+echo "TPTP_PATH=/path/to/tptp" >> .env
+```
+
 ## Troubleshooting
 
 ### PyTorch Installation Issues
