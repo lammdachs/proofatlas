@@ -66,13 +66,41 @@ class BasicLoop(Loop):
         # Get the selected clause
         selected = current_state.unprocessed[given_clause]
         
+        # First, try to factor the selected clause
+        factoring = FactoringRule()
+        temp_state = ProofState(processed=[selected], unprocessed=[])
+        factor_result = factoring.apply(temp_state, [0])
+        
+        # Determine what to add to processed
+        # If factoring succeeded and produced a simpler clause, use it instead
+        clause_to_process = selected
+        factoring_app = None
+        
+        if factor_result and factor_result.generated_clauses:
+            # Check if any factor is simpler (fewer literals)
+            for factor in factor_result.generated_clauses:
+                if len(factor.literals) < len(selected.literals):
+                    clause_to_process = factor
+                    factoring_app = RuleApplication(
+                        rule_name="factoring",
+                        parents=[],  # No parents - applied to given clause
+                        generated_clauses=[factor],
+                        deleted_clause_indices=[],
+                        metadata={'simplified_given_clause': True}
+                    )
+                    break
+        
         # Create new state with clause moved to processed
-        new_processed = list(current_state.processed) + [selected]
+        new_processed = list(current_state.processed) + [clause_to_process]
         new_unprocessed = [c for i, c in enumerate(current_state.unprocessed) if i != given_clause]
         
-        # Generate new clauses and track rule applications
-        # Pass the NEW processed list (which includes the given clause)
-        new_clauses, rule_applications = self._generate_clauses_with_rules(selected, new_processed)
+        # Generate new clauses via resolution
+        # Pass the NEW processed list (which includes the clause we're adding)
+        new_clauses, rule_applications = self._generate_resolution_clauses(clause_to_process, new_processed)
+        
+        # Add factoring application if we factored
+        if factoring_app:
+            rule_applications.insert(0, factoring_app)
         
         # Apply simplification
         if self.forward_simplify:
@@ -93,19 +121,24 @@ class BasicLoop(Loop):
         # Update rule applications to only include kept clauses
         final_rule_applications = []
         for app in rule_applications:
-            # Filter generated clauses to only those that were kept
-            kept_from_app = [c for c in app.generated_clauses if c in kept_clauses]
-            
-            # Only include the rule application if it contributed kept clauses
-            if kept_from_app:
-                final_app = RuleApplication(
-                    rule_name=app.rule_name,
-                    parents=app.parents,
-                    generated_clauses=kept_from_app,
-                    deleted_clause_indices=app.deleted_clause_indices,
-                    metadata=app.metadata
-                )
-                final_rule_applications.append(final_app)
+            # Special handling for factoring which was already added to processed
+            if app.metadata.get('simplified_given_clause'):
+                # Factoring already applied, just keep the record
+                final_rule_applications.append(app)
+            else:
+                # Filter generated clauses to only those that were kept
+                kept_from_app = [c for c in app.generated_clauses if c in kept_clauses]
+                
+                # Only include the rule application if it contributed kept clauses
+                if kept_from_app:
+                    final_app = RuleApplication(
+                        rule_name=app.rule_name,
+                        parents=app.parents,
+                        generated_clauses=kept_from_app,
+                        deleted_clause_indices=app.deleted_clause_indices,
+                        metadata=app.metadata
+                    )
+                    final_rule_applications.append(final_app)
         
         # Create new state
         new_state = ProofState(processed=new_processed, unprocessed=new_unprocessed)
@@ -124,11 +157,11 @@ class BasicLoop(Loop):
     
     def _generate_clauses(self, given_clause: Clause, processed: List[Clause]) -> List[Clause]:
         """Generate new clauses from the given clause."""
-        new_clauses, _ = self._generate_clauses_with_rules(given_clause, processed)
+        new_clauses, _ = self._generate_resolution_clauses(given_clause, processed)
         return new_clauses
     
-    def _generate_clauses_with_rules(self, given_clause: Clause, processed: List[Clause]) -> Tuple[List[Clause], List[RuleApplication]]:
-        """Generate new clauses from the given clause and track rule applications.
+    def _generate_resolution_clauses(self, given_clause: Clause, processed: List[Clause]) -> Tuple[List[Clause], List[RuleApplication]]:
+        """Generate new clauses via resolution with previously processed clauses.
         
         Args:
             given_clause: The clause being processed (already at end of processed list)
@@ -160,21 +193,6 @@ class BasicLoop(Loop):
                     metadata={**result.metadata, 'with_given_clause': True}
                 )
                 rule_applications.append(modified_result)
-        
-        # Apply factoring to the given clause
-        factoring = FactoringRule()
-        result = factoring.apply(temp_state, [given_idx])
-        if result:
-            new_clauses.extend(result.generated_clauses)
-            # For factoring, no parent index needed since it only applies to given clause
-            modified_result = RuleApplication(
-                rule_name=result.rule_name,
-                parents=[],  # Empty - factoring only uses the given clause
-                generated_clauses=result.generated_clauses,
-                deleted_clause_indices=result.deleted_clause_indices,
-                metadata={**result.metadata, 'on_given_clause': True}
-            )
-            rule_applications.append(modified_result)
         
         # Filter by size
         filtered_clauses = []

@@ -42,18 +42,19 @@ The loop maintains complete proof history:
 
 Given a proof and a clause index, `step()` performs:
 
-1. **Move to Processed**: The selected clause is moved from unprocessed to processed
-2. **Generate Inferences**: 
-   - Resolution with each previously processed clause
-   - Factoring on the given clause itself
-3. **Filter Results**:
+1. **Factor the Selected Clause**: If the selected clause can be factored to a simpler form (fewer literals), the factored version is used instead
+2. **Move to Processed**: The (possibly factored) clause is added to the processed set
+3. **Generate Inferences**: 
+   - Resolution between the given clause and each previously processed clause
+4. **Filter Results**:
    - Apply size limits
    - Check for tautologies (if forward_simplify=True)
    - Check for subsumption (if forward_simplify=True)
    - Remove exact duplicates
-4. **Update Rule Applications**: Only keep rules that produced non-redundant clauses
-5. **Create New State**: Add kept clauses to unprocessed
-6. **Record Step**: Add step to proof with selected clause and applied rules
+5. **Update Rule Applications**: Only keep rules that produced non-redundant clauses
+   - Note: Factoring applications are always kept if factoring occurred
+6. **Create New State**: Add kept clauses from resolution to unprocessed
+7. **Record Step**: Add step to proof with selected clause and applied rules
 
 ### Constructor Parameters
 
@@ -71,6 +72,7 @@ BasicLoop(max_clause_size=100, forward_simplify=True, backward_simplify=True)
 2. **Redundancy Filtering**: If all clauses from a rule application are redundant, the entire rule application is omitted from the proof
 3. **State Immutability**: Each step creates new state objects rather than modifying existing ones
 4. **No Clause Selection**: The loop is completely independent of clause selection strategy
+5. **Immediate Factoring**: When a clause with duplicate literals is selected, it is immediately factored and the simpler version is added to processed instead of the original
 
 ### Usage Example
 
