@@ -81,3 +81,13 @@ proof = loop.step(proof, given_clause=0)  # Process first unprocessed clause
 ```
 
 The loop integrates seamlessly with any clause selection strategy, making it a flexible foundation for saturation-based theorem proving.
+
+### Known Limitations
+
+1. **No Backward Simplification**: The current implementation does not remove existing clauses that are subsumed by newly generated clauses. This could lead to redundant clauses remaining in the processed/unprocessed sets.
+
+2. **Basic Clause Selection**: The loop requires external clause selection strategy. More sophisticated selection heuristics could improve performance.
+
+### Implementation Notes
+
+- **Subsumption with Duplicate Literals**: The subsumption check properly handles clauses with duplicate literals by tracking which literals have been matched, ensuring that P(a) ∨ P(a) does not subsume P(a).

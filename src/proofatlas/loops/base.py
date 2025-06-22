@@ -45,16 +45,35 @@ class Loop(ABC):
         return False
     
     def subsumes(self, clause1: Clause, clause2: Clause) -> bool:
-        """Check if clause1 subsumes clause2."""
-        # Every literal in clause1 must be in clause2
+        """Check if clause1 subsumes clause2.
+        
+        Clause1 subsumes clause2 if clause2 is a logical consequence of clause1.
+        This means clause1 must have fewer or equal literals, and every literal
+        in clause1 must appear in clause2 (with proper multiplicity).
+        
+        Examples:
+        - P(a) subsumes P(a) ∨ Q(b)  ✓
+        - P(a) subsumes P(a) ∨ P(a)  ✓
+        - P(a) ∨ P(a) does NOT subsume P(a)  ✗
+        """
+        # Quick check: if clause1 has more literals, it cannot subsume clause2
+        if len(clause1.literals) > len(clause2.literals):
+            return False
+        
+        # Create a list of unused indices in clause2
+        unused_indices = list(range(len(clause2.literals)))
+        
+        # Try to match each literal in clause1 with a literal in clause2
         for lit1 in clause1.literals:
-            found = False
-            for lit2 in clause2.literals:
-                if lit1 == lit2:
-                    found = True
+            matched = False
+            for i in unused_indices:
+                if lit1 == clause2.literals[i]:
+                    unused_indices.remove(i)
+                    matched = True
                     break
-            if not found:
+            if not matched:
                 return False
+        
         return True
     
     def is_subsumed(self, clause: Clause, clause_set: List[Clause]) -> bool:
