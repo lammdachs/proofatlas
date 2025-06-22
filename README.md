@@ -18,7 +18,7 @@ This project provides a flexible platform for:
   - Attention heatmaps for neural guidance
   - Proof tree exploration interface
   - Search space topology mapping
-- **Parser Support**: Built-in parsers for TPTP and Vampire output formats
+- **Parser Support**: Built-in parser for TPTP problem format
 - **Graph Representations**: Convert logical formulas and proofs into graph structures
 - **Neural Architectures**: 
   - Graph Neural Networks for formula structure understanding
@@ -61,7 +61,7 @@ See [Directory Structure](docs/directory_structure.md) for details on the projec
 The basic installation includes all theorem proving functionality:
 - Saturation-based theorem prover with given clause algorithm
 - Resolution, factoring, and subsumption inference rules
-- TPTP and Vampire proof format parsers
+- TPTP problem format parser
 - Basic clause selection strategies (FIFO, Random)
 - Proof visualization and exploration tools
 
@@ -110,7 +110,7 @@ proofatlas/
 │   ├── core/             # First-order logic representations
 │   ├── rules/            # Modular inference rules (resolution, factoring)
 │   ├── proofs/           # Proof state and proof tracking
-│   ├── fileformats/      # File format parsers (TPTP, Vampire)
+│   ├── fileformats/      # File format parsers (TPTP)
 │   ├── dataformats/      # Data representations for selectors
 │   ├── data/             # Dataset management and splitting
 │   ├── loops/            # Given clause algorithm implementations
@@ -143,6 +143,41 @@ proofatlas/
 ```
 
 ## Usage
+
+### Quick Start
+
+```python
+from proofatlas import *
+
+# Create a simple problem
+P = Predicate("P", 0)
+Q = Predicate("Q", 0)
+
+# Create clauses: P, P→Q, ¬Q
+clause1 = Clause(Literal(P(), True))                    # P
+clause2 = Clause(Literal(P(), False), Literal(Q(), True))  # ¬P ∨ Q
+clause3 = Clause(Literal(Q(), False))                   # ¬Q
+
+problem = Problem(clause1, clause2, clause3)
+
+# Run saturation to find proof
+proof = prove(problem)
+print(f"Proof found: {proof.final_state.contains_empty_clause}")
+```
+
+### Examples
+
+The `examples/` directory contains several examples demonstrating core functionality:
+
+- **`basic_saturation.py`** - Basic saturation loop demonstration
+- **`custom_problem.py`** - Creating problems programmatically  
+- **`tptp_parsing.py`** - Parsing and working with TPTP files
+- **`selector_comparison.py`** - Comparing different clause selection strategies
+
+Run an example:
+```bash
+python examples/basic_saturation.py
+```
 
 ### Data Preparation
 ```bash
@@ -291,7 +326,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## Citation
 
-If you use Foreduce in your research, please cite:
+If you use ProofAtlas in your research, please cite:
 ```bibtex
 @software{proofatlas2024,
   title = {ProofAtlas: Visual Neural Guidance for First-Order Theorem Proving},

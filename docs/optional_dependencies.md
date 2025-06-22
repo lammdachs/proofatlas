@@ -10,7 +10,7 @@ The base installation provides a complete theorem proving system:
 - **Inference rules**: Resolution, factoring, subsumption checking
 - **Proof tracking**: Complete proof history with rule applications
 - **Basic clause selection**: FIFO and random selection strategies
-- **Parser support**: TPTP problem format and Vampire proof format
+- **Parser support**: TPTP problem format
 - **Proof visualization**: Terminal-based proof navigator and printer
 - **First-order logic**: Full support for variables, functions, and predicates
 

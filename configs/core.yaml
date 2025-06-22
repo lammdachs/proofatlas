@@ -1,0 +1,50 @@
+# Core configuration for ProofAtlas
+
+# Paths
+paths:
+  tptp: ${TPTP_PATH:./.data/problems/tptp}
+  data: ${DATA_DIR:./.data}
+  problems: ${PROBLEMS_DIR:./.data/problems}
+  proofs: ${PROOFS_DIR:./.data/proofs}
+  datasets: ${DATASETS_DIR:./.data/datasets}
+  cache: ${CACHE_DIR:./.data/cache}
+  logs: ${LOG_DIR:./.logs}
+
+# Theorem proving configuration
+proving:
+  # Maximum number of clauses to generate
+  max_clauses: 10000
+  
+  # Maximum size of individual clauses (number of literals)
+  max_clause_size: 50
+  
+  # Time limit for proof search (seconds)
+  timeout: 300
+  
+  # Enable forward simplification (tautology deletion, subsumption)
+  forward_simplify: true
+  
+  # Enable backward simplification (not yet implemented)
+  backward_simplify: false
+
+# Clause selection
+selection:
+  # Default selector to use (fifo, random, shortest)
+  default: fifo
+  
+  # Random selector seed (null for random seed)
+  random_seed: null
+
+# Logging configuration
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  level: INFO
+  
+  # Log format
+  format: "[%(asctime)s] %(levelname)s - %(message)s"
+  
+  # Save logs to file
+  to_file: true
+  
+  # Log file path (relative to logs directory)
+  file_path: proofatlas.log

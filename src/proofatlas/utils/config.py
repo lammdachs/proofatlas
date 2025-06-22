@@ -15,7 +15,7 @@ class Config:
         possible_paths = [
             Path.cwd() / "configs" / "default.yaml",
             Path(__file__).parent.parent.parent.parent / "configs" / "default.yaml",
-            Path.home() / ".foreduce" / "config.yaml",
+            Path.home() / ".proofatlas" / "config.yaml",
         ]
         
         for path in possible_paths:
@@ -25,9 +25,40 @@ class Config:
         raise FileNotFoundError("No configuration file found")
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+        """Load configuration from YAML file, handling includes."""
+        config_dir = Path(self.config_path).parent
+        
         with open(self.config_path, 'r') as f:
-            return yaml.safe_load(f)
+            config = yaml.safe_load(f) or {}
+        
+        # Handle includes
+        if 'include' in config:
+            includes = config.pop('include')
+            if isinstance(includes, str):
+                includes = [includes]
+            
+            base_config = {}
+            for include_file in includes:
+                include_path = config_dir / include_file
+                if include_path.exists():
+                    with open(include_path, 'r') as f:
+                        included = yaml.safe_load(f) or {}
+                        base_config = self._deep_merge(base_config, included)
+            
+            # Merge the main config on top of included configs
+            config = self._deep_merge(base_config, config)
+        
+        return config
+    
+    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep merge two dictionaries."""
+        result = base.copy()
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
     
     def _resolve_environment_variables(self):
         """Resolve environment variables in config values."""
@@ -64,15 +95,7 @@ class Config:
     
     def update(self, updates: Dict[str, Any]):
         """Update configuration with new values."""
-        def deep_update(d, u):
-            for k, v in u.items():
-                if isinstance(v, dict):
-                    d[k] = deep_update(d.get(k, {}), v)
-                else:
-                    d[k] = v
-            return d
-        
-        self.config = deep_update(self.config, updates)
+        self.config = self._deep_merge(self.config, updates)
 
 
 # Global config instance

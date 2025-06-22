@@ -34,3 +34,11 @@ class ProofState:
         if clause in self.unprocessed:
             self.unprocessed.remove(clause)
             self.processed.append(clause)
+    
+    @property
+    def contains_empty_clause(self) -> bool:
+        """Check if the state contains the empty clause (contradiction)."""
+        for clause in self.all_clauses:
+            if len(clause.literals) == 0:
+                return True
+        return False

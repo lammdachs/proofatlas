@@ -8,6 +8,10 @@ from .serialization import (
     problem_to_json, problem_from_json,
     save_problem, load_problem
 )
+from .unification import (
+    Substitution, unify, unify_terms, rename_variables,
+    occurs_check
+)
 
 __all__ = [
     # Logic
@@ -15,5 +19,8 @@ __all__ = [
     'Term', 'Literal', 'Clause', 'Problem',
     # Serialization
     'problem_to_json', 'problem_from_json',
-    'save_problem', 'load_problem'
+    'save_problem', 'load_problem',
+    # Unification
+    'Substitution', 'unify', 'unify_terms', 'rename_variables',
+    'occurs_check'
 ]

@@ -103,7 +103,7 @@ src/proofatlas/
 ├── core/           # FOL logic and proof state
 ├── rules/          # Modular inference rules (resolution, factoring, etc.)
 ├── proofs/         # Proof tracking and management
-├── fileformats/    # Contains tptp_parser/ and vampire_parser/ subdirs
+├── fileformats/    # File format parsers (TPTP)
 ├── dataformats/    # ML data representation
 ├── data/           # Problem and proof set management
 ├── loops/          # Given clause algorithm implementations
@@ -161,7 +161,7 @@ Implements the given clause algorithm:
    - GNN selector includes the model implementation directly
    - Selectors have `select()`, `run()`, and `train()` methods
 
-5. **Parser Integration**: Parsers moved to `fileformats/tptp_parser/` and `fileformats/vampire_parser/`
+5. **Parser Integration**: TPTP parser implemented in `fileformats/tptp.py`
 
 6. **No Models Directory**: GNN and other models are integrated into their usage points (e.g., GNN in selectors/gnn.py)
 
