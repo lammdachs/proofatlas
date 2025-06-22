@@ -70,7 +70,7 @@ Examples:
   python inspect_proof.py proof.json
   
   # Inspect a generated proof from tests
-  python inspect_proof.py ../tests/test_data/proofs/basic_loop/modus_ponens.json
+  python inspect_proof.py ../.data/proofs/test_examples/basic_loop/modus_ponens.json
 
 Navigation Controls:
   n/→     - Next step

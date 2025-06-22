@@ -125,7 +125,7 @@ proofatlas/
 │   ├── data/
 │   ├── fileformats/
 │   ├── navigator/
-│   └── test_data/        # Test data and example proofs
+│   └── .data/            # Static test fixtures and example data
 ├── docs/                 # Documentation
 │   ├── saturation_loop_design.md  # BasicLoop design and implementation
 │   ├── directory_structure.md     # Data directory organization

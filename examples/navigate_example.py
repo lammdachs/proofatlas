@@ -11,7 +11,7 @@ from proofatlas.navigator import navigate_proof
 
 def main():
     """Navigate the simple contradiction proof."""
-    test_data_dir = Path(__file__).parent.parent / "tests" / "test_data"
+    test_data_dir = Path(__file__).parent.parent / "tests" / ".data"
     
     proof_path = test_data_dir / "proofs" / "simple_contradiction_proof.json"
     problem_path = test_data_dir / "problems" / "simple_contradiction.json"

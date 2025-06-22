@@ -11,7 +11,7 @@ from proofatlas.proofs import (
 )
 
 
-TEST_DATA_DIR = Path(__file__).parent / "test_data"
+TEST_DATA_DIR = Path(__file__).parent / ".data"
 PROBLEMS_DIR = TEST_DATA_DIR / "problems"
 PROOFS_DIR = TEST_DATA_DIR / "proofs"
 

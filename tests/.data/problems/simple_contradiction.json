@@ -1,0 +1,51 @@
+{
+  "_type": "Problem",
+  "clauses": [
+    {
+      "_type": "Clause",
+      "literals": [
+        {
+          "_type": "Literal",
+          "predicate": {
+            "_type": "Term",
+            "symbol": {
+              "_type": "Predicate",
+              "name": "P",
+              "arity": 1
+            },
+            "args": [
+              {
+                "_type": "Constant",
+                "name": "a"
+              }
+            ]
+          },
+          "polarity": true
+        }
+      ]
+    },
+    {
+      "_type": "Clause",
+      "literals": [
+        {
+          "_type": "Literal",
+          "predicate": {
+            "_type": "Term",
+            "symbol": {
+              "_type": "Predicate",
+              "name": "P",
+              "arity": 1
+            },
+            "args": [
+              {
+                "_type": "Constant",
+                "name": "a"
+              }
+            ]
+          },
+          "polarity": false
+        }
+      ]
+    }
+  ]
+}

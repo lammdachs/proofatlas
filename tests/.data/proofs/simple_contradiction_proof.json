@@ -1,0 +1,193 @@
+{
+  "_type": "Proof",
+  "steps": [
+    {
+      "_type": "ProofStep",
+      "state": {
+        "_type": "ProofState",
+        "processed": [],
+        "unprocessed": [
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": true
+              }
+            ]
+          },
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": false
+              }
+            ]
+          }
+        ]
+      },
+      "selected_clause": 0,
+      "metadata": {
+        "rule": "given_clause"
+      }
+    },
+    {
+      "_type": "ProofStep",
+      "state": {
+        "_type": "ProofState",
+        "processed": [
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": true
+              }
+            ]
+          }
+        ],
+        "unprocessed": [
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": false
+              }
+            ]
+          }
+        ]
+      },
+      "selected_clause": 0,
+      "metadata": {
+        "rule": "given_clause",
+        "inferences": [
+          {
+            "rule": "resolution",
+            "parents": [0, "given"],
+            "result": "empty clause"
+          }
+        ]
+      }
+    },
+    {
+      "_type": "ProofStep",
+      "state": {
+        "_type": "ProofState",
+        "processed": [
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": true
+              }
+            ]
+          },
+          {
+            "_type": "Clause",
+            "literals": [
+              {
+                "_type": "Literal",
+                "predicate": {
+                  "_type": "Term",
+                  "symbol": {
+                    "_type": "Predicate",
+                    "name": "P",
+                    "arity": 1
+                  },
+                  "args": [
+                    {
+                      "_type": "Constant",
+                      "name": "a"
+                    }
+                  ]
+                },
+                "polarity": false
+              }
+            ]
+          }
+        ],
+        "unprocessed": [
+          {
+            "_type": "Clause",
+            "literals": []
+          }
+        ]
+      },
+      "selected_clause": null,
+      "metadata": {}
+    }
+  ]
+}

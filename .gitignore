@@ -1,7 +1,7 @@
 # Data directories (new structure)
-.data/
-.logs/
-.selectors/
+/.data/
+/.logs/
+/.selectors/
 
 # Old directories (for backward compatibility)
 .problems/
@@ -27,6 +27,7 @@ wandb/
 *.json
 !setup.json
 !environment.json
+!tests/.data/**/*.json
 
 # Environment files
 .env
