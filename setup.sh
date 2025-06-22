@@ -15,13 +15,45 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Create conda environment if it doesn't exist
+# Function to ask yes/no questions
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-n}"
+    
+    if [ "$default" = "y" ]; then
+        prompt="$prompt (Y/n): "
+    else
+        prompt="$prompt (y/N): "
+    fi
+    
+    echo -n "$prompt"
+    read -r response
+    
+    if [ -z "$response" ]; then
+        response="$default"
+    fi
+    
+    [[ "$response" =~ ^[Yy]$ ]]
+}
+
+# Check if environment.yml exists
+if [ ! -f environment.yml ]; then
+    echo "Error: environment.yml not found in the current directory."
+    echo "Please ensure you're running this script from the ProofAtlas root directory."
+    exit 1
+fi
+
+# Create or update conda environment from environment.yml
 ENV_NAME="proofatlas"
+echo ""
+echo "Creating/updating conda environment '${ENV_NAME}' from environment.yml..."
+
 if conda env list | grep -q "^${ENV_NAME} "; then
-    echo "Conda environment '${ENV_NAME}' already exists. Activating it..."
+    echo "Environment '${ENV_NAME}' already exists. Updating it..."
+    conda env update -n ${ENV_NAME} -f environment.yml --prune
 else
-    echo "Creating conda environment '${ENV_NAME}' with Python 3.11..."
-    conda create -n ${ENV_NAME} python=3.11 -y
+    echo "Creating new environment '${ENV_NAME}'..."
+    conda env create -f environment.yml
 fi
 
 # Activate the environment
@@ -29,113 +61,66 @@ echo "Activating conda environment..."
 eval "$(conda shell.bash hook)"
 conda activate ${ENV_NAME}
 
-# Install PyTorch and related packages via conda
-echo "Installing PyTorch and CUDA dependencies..."
-conda install -y pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+# Optional installations
+echo ""
+echo "=== Optional Components ==="
+echo ""
+echo "ProofAtlas can work with additional optional components:"
+echo ""
 
-# Install PyTorch Geometric
-echo "Installing PyTorch Geometric..."
-conda install -y pyg -c pyg
+# PyTorch and Machine Learning packages
+echo "1. PyTorch and Graph Neural Networks"
+echo "   - Required for: GNN-based clause selection, learned proof guidance"
+echo "   - Packages: pytorch, pytorch-cuda, pyg (PyTorch Geometric), pytorch-lightning"
+echo "   - Note: This requires a compatible NVIDIA GPU for CUDA support"
+echo ""
 
-# Install PyTorch Lightning and related
-echo "Installing PyTorch Lightning ecosystem..."
-conda install -y pytorch-lightning torchmetrics -c conda-forge
+if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
+    echo "Installing PyTorch ecosystem..."
+    conda install -y pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+    
+    echo "Installing PyTorch Geometric..."
+    conda install -y pyg -c pyg
+    
+    echo "Installing PyTorch Lightning..."
+    conda install -y pytorch-lightning torchmetrics -c conda-forge
+    
+    echo "PyTorch and GNN packages installed successfully!"
+else
+    echo "Skipping PyTorch installation."
+    echo "Note: GNN-based clause selection will not be available."
+fi
 
-# Install scientific computing packages
-echo "Installing scientific computing packages..."
-conda install -y numpy pandas matplotlib scikit-learn scipy sympy networkx -c conda-forge
+echo ""
 
-# Install Jupyter and IPython
-echo "Installing Jupyter and development tools..."
-conda install -y jupyter ipython ipykernel notebook jupyterlab -c conda-forge
+# Claude CLI
+echo "2. Claude CLI (AI Assistant)"
+echo "   - Required for: Interactive AI assistance with code and theorem proving"
+echo "   - Packages: npm, claude (via npm)"
+echo "   - Note: Requires Node.js/npm and a Claude API key"
+echo ""
 
-# Install configuration and CLI tools
-echo "Installing configuration and CLI tools..."
-conda install -y omegaconf click pyyaml -c conda-forge
-
-# Install parsing libraries
-echo "Installing parsing libraries..."
-conda install -y antlr-python-runtime lark-parser -c conda-forge
-
-# Install additional utilities
-echo "Installing additional utilities..."
-conda install -y tqdm gitpython python-dotenv rich pip setuptools wheel -c conda-forge
-
-# Install development tools
-echo "Installing development tools..."
-conda install -y pytest pytest-cov black isort flake8 mypy ruff ipdb -c conda-forge
-
-# Install visualization tools
-echo "Installing visualization tools..."
-conda install -y seaborn plotly -c conda-forge
-
-# Create environment.yml for easy environment recreation
-echo "Creating environment.yml file..."
-cat > environment.yml << 'EOF'
-name: proofatlas
-channels:
-  - pytorch
-  - nvidia
-  - pyg
-  - conda-forge
-  - defaults
-dependencies:
-  # Python
-  - python=3.11
-  
-  # PyTorch ecosystem
-  - pytorch
-  - pytorch-cuda=12.1
-  - pyg
-  - pytorch-lightning
-  - torchmetrics
-  
-  # Scientific computing
-  - numpy
-  - matplotlib
-  - scikit-learn
-  - scipy
-  - networkx
-  - plotly
-  
-  # Jupyter ecosystem
-  - jupyter
-  - ipython
-  - ipykernel
-  - notebook
-  
-  # Configuration and CLI
-  - omegaconf
-  - click
-  - pyyaml
-  
-  # Parsing
-  - lark-parser
-  
-  # Utilities
-  - tqdm
-  - gitpython
-  - python-dotenv
-  - rich
-  - textual
-  - pip
-  - setuptools
-  - wheel
-  
-  # Development tools
-  - pytest
-  - pytest-cov
-  - black
-  - isort
-  - flake8
-  - ruff
-EOF
-
-# Export current environment
-echo "Exporting current environment state..."
-conda env export --no-builds > environment.lock.yml
+if ask_yes_no "Would you like to install Claude CLI?"; then
+    echo "Checking for npm..."
+    if ! command -v npm &> /dev/null; then
+        echo "npm not found. Installing Node.js..."
+        conda install -y nodejs -c conda-forge
+    fi
+    
+    echo "Installing Claude CLI globally..."
+    npm install -g @anthropic-ai/claude-cli
+    
+    echo "Claude CLI installed successfully!"
+    echo ""
+    echo "To use Claude CLI, you'll need to set up your API key:"
+    echo "  export ANTHROPIC_API_KEY='your-api-key-here'"
+    echo "Or run: claude login"
+else
+    echo "Skipping Claude CLI installation."
+fi
 
 # Install the package in development mode
+echo ""
 echo "Installing ProofAtlas package in development mode..."
 pip install -e . --no-deps
 
@@ -160,27 +145,10 @@ read_with_default() {
     fi
 }
 
-# Function to read sensitive input (hidden)
-read_sensitive() {
-    local prompt="$1"
-    local var_name="$2"
-    
-    echo -n "$prompt: "
-    read -s -r input_value
-    echo ""
-    
-    eval "$var_name='$input_value'"
-}
-
 # Check if .env exists and ask about overwriting
 if [ -f .env ]; then
     echo "An .env file already exists."
-    echo -n "Do you want to update it? (y/N): "
-    read -r update_env
-    
-    if [ "$update_env" != "y" ] && [ "$update_env" != "Y" ]; then
-        echo "Keeping existing .env file."
-    else
+    if ask_yes_no "Do you want to update it?" "n"; then
         # Backup existing .env
         cp .env .env.backup
         echo "Backed up existing .env to .env.backup"
@@ -225,6 +193,8 @@ EOF
         
         echo ""
         echo ".env file updated successfully!"
+    else
+        echo "Keeping existing .env file."
     fi
 else
     # Create new .env file
@@ -291,10 +261,8 @@ echo "=== TPTP Library Setup ==="
 echo "The TPTP (Thousands of Problems for Theorem Provers) library contains"
 echo "a comprehensive collection of theorem proving problems."
 echo ""
-echo -n "Would you like to download and set up the TPTP library? (y/N): "
-read -r download_tptp
 
-if [ "$download_tptp" = "y" ] || [ "$download_tptp" = "Y" ]; then
+if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; then
     echo ""
     echo "Downloading TPTP library..."
     
@@ -332,9 +300,9 @@ if [ "$download_tptp" = "y" ] || [ "$download_tptp" = "Y" ]; then
     cd "$SCRIPT_DIR"
     
     # Optionally clean up archive
-    echo -n "Would you like to keep the downloaded archive? (y/N): "
-    read -r keep_archive
-    if [ "$keep_archive" != "y" ] && [ "$keep_archive" != "Y" ]; then
+    if ask_yes_no "Would you like to keep the downloaded archive?" "n"; then
+        echo "Keeping archive at: $TPTP_ARCHIVE"
+    else
         rm -f "$TPTP_ARCHIVE"
         echo "Archive removed."
     fi
@@ -345,21 +313,46 @@ fi
 
 # Install pre-commit hooks if .pre-commit-config.yaml exists
 if [ -f .pre-commit-config.yaml ]; then
+    echo ""
     echo "Installing pre-commit hooks..."
-    conda install -y pre-commit -c conda-forge
+    if ! command -v pre-commit &> /dev/null; then
+        conda install -y pre-commit -c conda-forge
+    fi
     pre-commit install
 fi
 
-echo "Setup complete!"
+echo ""
+echo "=== Setup Complete! ==="
+echo ""
+echo "Core ProofAtlas components have been installed."
+echo ""
+echo "Installed components:"
+echo "  ✓ Core theorem proving functionality"
+echo "  ✓ TPTP and Vampire parsers"
+echo "  ✓ Saturation loop and inference rules"
+echo "  ✓ Basic clause selection (FIFO, Random)"
+
+# Check what optional components were installed
+echo ""
+echo "Optional components:"
+if python -c "import torch" 2>/dev/null; then
+    echo "  ✓ PyTorch and GNN support"
+else
+    echo "  ✗ PyTorch and GNN support (not installed)"
+fi
+
+if command -v claude &> /dev/null; then
+    echo "  ✓ Claude CLI"
+else
+    echo "  ✗ Claude CLI (not installed)"
+fi
+
 echo ""
 echo "To activate the environment in the future, run:"
 echo "  conda activate ${ENV_NAME}"
 echo ""
-echo "To recreate this environment on another machine, run:"
-echo "  conda env create -f environment.yml"
-echo ""
 echo "To verify the installation, run:"
-echo '  python -c "import torch; import torch_geometric; print(f'\''PyTorch: {torch.__version__}'\''); print(f'\''PyG: {torch_geometric.__version__}'\''); print(f'\''CUDA available: {torch.cuda.is_available()}'\'')"'
+echo "  python -m pytest tests/core/test_logic.py -v"
 echo ""
 
 # Display current configuration
@@ -374,5 +367,6 @@ fi
 
 echo "Next steps:"
 echo "  1. Activate the environment: conda activate ${ENV_NAME}"
-echo "  2. Download any required datasets to the ${DATA_DIR} directory"
-echo "  3. Start developing with ProofAtlas!"
+echo "  2. Run tests: python -m pytest tests/ -v"
+echo "  3. Explore examples: python examples/basic_saturation.py"
+echo "  4. Start developing with ProofAtlas!"

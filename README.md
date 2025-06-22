@@ -31,7 +31,7 @@ This project provides a flexible platform for:
 
 ### Prerequisites
 - Conda (Anaconda or Miniconda)
-- CUDA-capable GPU (recommended)
+- CUDA-capable GPU (optional, for GNN-based clause selection)
 
 ### Quick Setup
 ```bash
@@ -44,10 +44,45 @@ cd proofatlas
 ```
 
 The setup script will:
-1. Create a conda environment with all dependencies
-2. Install PyTorch with CUDA support
-3. Set up the project in development mode
-4. Create necessary directories and configuration files
+1. Create a conda environment with core dependencies from `environment.yml`
+2. Optionally install PyTorch and GNN packages (for neural clause selection)
+3. Optionally install Claude CLI (for AI assistance)
+4. Set up the project in development mode
+5. Create necessary directories and configuration files
+
+### Installation Options
+
+#### Core Installation (Default)
+The basic installation includes all theorem proving functionality:
+- Saturation-based theorem prover with given clause algorithm
+- Resolution, factoring, and subsumption inference rules
+- TPTP and Vampire proof format parsers
+- Basic clause selection strategies (FIFO, Random)
+- Proof visualization and exploration tools
+
+#### Optional: PyTorch and Graph Neural Networks
+Required for advanced clause selection strategies:
+- GNN-based clause selection
+- Learned proof guidance
+- Neural premise selection
+
+To install: Answer "yes" when prompted during setup, or run:
+```bash
+conda activate proofatlas
+conda install -y pytorch pytorch-cuda=12.1 pyg pytorch-lightning -c pytorch -c nvidia -c pyg
+```
+
+#### Optional: Claude CLI
+For interactive AI assistance with theorem proving:
+- Code generation and explanation
+- Proof strategy suggestions
+- Interactive debugging help
+
+To install: Answer "yes" when prompted during setup, or run:
+```bash
+npm install -g @anthropic-ai/claude-cli
+export ANTHROPIC_API_KEY='your-api-key-here'
+```
 
 ### Manual Setup
 If you prefer manual installation:

@@ -1,11 +1,23 @@
 """GNN-based clause selector."""
 
 from typing import List, Optional, Dict, Any
-import torch
-import torch.nn as nn
-from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding
-from torch_geometric.nn import GINConv, GCNConv, global_add_pool, GraphNorm
-from pytorch_lightning import LightningModule
+
+try:
+    import torch
+    import torch.nn as nn
+    from torch.nn import ReLU, Linear, Sequential, Tanh, Sigmoid, Embedding
+    from torch_geometric.nn import GINConv, GCNConv, global_add_pool, GraphNorm
+    from pytorch_lightning import LightningModule
+    PYTORCH_AVAILABLE = True
+except ImportError:
+    PYTORCH_AVAILABLE = False
+    # Create dummy classes to prevent import errors
+    class LightningModule:
+        pass
+    class torch:
+        class nn:
+            class Module:
+                pass
 
 from proofatlas.proofs.state import ProofState
 from proofatlas.dataformats import get_data_format
@@ -125,12 +137,18 @@ class GNNModel(LightningModule):
 class GNNSelector(Selector):
     """Select clauses using a Graph Neural Network model."""
     
-    def __init__(self, model: Optional[GNNModel] = None, 
+    def __init__(self, model: Optional['GNNModel'] = None, 
                  data_format: str = 'graph', 
                  device: str = 'cpu', 
                  temperature: float = 1.0,
                  **model_kwargs):
         super().__init__()
+        
+        if not PYTORCH_AVAILABLE:
+            raise ImportError(
+                "PyTorch is required for GNN-based clause selection. "
+                "Please install it using: conda install pytorch pytorch-cuda=12.1 pyg -c pytorch -c nvidia -c pyg"
+            )
         
         # Create default model if none provided
         if model is None:

@@ -1,27 +1,18 @@
 name: proofatlas
 channels:
-  - pytorch
-  - nvidia
-  - pyg
   - conda-forge
   - defaults
 dependencies:
   # Python
   - python=3.11
   
-  # PyTorch ecosystem
-  - pytorch
-  - pytorch-cuda=12.1
-  - pyg
-  - pytorch-lightning
-  - torchmetrics
-  
-  # Scientific computing
+  # Scientific computing (core dependencies)
   - numpy
-  - matplotlib
-  - scikit-learn
   - scipy
   - networkx
+  
+  # Visualization
+  - matplotlib
   - plotly
   
   # Jupyter ecosystem
@@ -55,3 +46,6 @@ dependencies:
   - isort
   - flake8
   - ruff
+
+# Note: PyTorch, PyTorch Geometric, and PyTorch Lightning are optional
+# and can be installed separately using the setup.sh script
