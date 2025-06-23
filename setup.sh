@@ -184,77 +184,124 @@ echo "Activating conda environment..."
 eval "$(conda shell.bash hook)"
 conda activate ${ENV_NAME}
 
-# Optional installations
+# Install PyTorch and Machine Learning packages (required)
 echo ""
-echo "=== Optional Components ==="
+echo "=== Installing PyTorch and GNN Components ==="
 echo ""
-echo "ProofAtlas can work with additional optional components:"
-echo ""
-
-# PyTorch and Machine Learning packages
-echo "1. PyTorch and Graph Neural Networks"
-echo "   - Required for: GNN-based clause selection, learned proof guidance"
-echo "   - Packages: pytorch, pytorch-cuda, pyg (PyTorch Geometric), pytorch-lightning"
-echo "   - Note: This requires a compatible NVIDIA GPU for CUDA support"
-echo ""
-echo "   IMPORTANT: Installing GPU components requires accepting the NVIDIA EULA:"
-echo "   https://docs.nvidia.com/deeplearning/cudnn/sla/index.html"
+echo "PyTorch and Graph Neural Networks are required for ProofAtlas."
+echo "These packages enable:"
+echo "   - GNN-based clause selection"
+echo "   - Learned proof guidance"
+echo "   - Neural premise selection"
 echo ""
 
-PYTORCH_INSTALLED="no"
-if ask_yes_no "Would you like to install PyTorch and GNN packages?"; then
-    echo "Installing PyTorch ecosystem..."
-    conda install -y pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
+echo "PyTorch can be installed with or without GPU support:"
+echo "  1. CPU-only (smaller, works everywhere)"
+echo "  2. GPU with CUDA (requires NVIDIA GPU and CUDA drivers)"
+echo ""
+echo "   IMPORTANT: Installing GPU components requires accepting the CUDA EULA:"
+echo "   https://docs.nvidia.com/cuda/eula/index.html"
+echo ""
+
+GPU_SUPPORT="no"
+CUDA_VERSION=""
+CUDA_COMPILER_VERSION=""
+
+echo "PyTorch Installation Options:"
+echo "=============================="
+echo ""
+
+# Check if NVIDIA GPU is available and show driver info
+if command -v nvidia-smi &> /dev/null; then
+    echo "NVIDIA GPU detected. Current driver information:"
+    nvidia-smi | grep "Driver Version" || true
+    echo ""
+fi
+
+echo "Enter the CUDA version you want to install"
+echo "Or press Enter for CPU-only installation:"
+echo ""
+echo "WARNING: Choose a CUDA version compatible with your GPU and drivers!"
+echo "Note: Due to conda package resolution issues, you may need to specify"
+echo "      additional version constraints (e.g., for CUDA 12.*, you might"
+echo "      need cuda-compiler=12.4.1)"
+echo ""
+read -r -p "CUDA version (or press Enter for CPU-only): " cuda_input
+
+if [ -z "$cuda_input" ]; then
+    GPU_SUPPORT="no"
+    echo "Selected CPU-only installation."
+else
+    CUDA_VERSION="$cuda_input"
+    GPU_SUPPORT="yes"
+    echo "Selected CUDA $CUDA_VERSION"
+    
+    # Ask about cuda-compiler version if needed
+    echo ""
+    read -r -p "Specify cuda-compiler version (or press Enter to use default): " cuda_compiler_input
+    if [ -n "$cuda_compiler_input" ]; then
+        CUDA_COMPILER_VERSION="$cuda_compiler_input"
+        echo "Will install cuda-compiler=$CUDA_COMPILER_VERSION"
+    fi
+fi
+
+if [ "$GPU_SUPPORT" = "yes" ]; then
+    echo ""
+    echo "CUDA $CUDA_VERSION will be installed via conda."
+    echo "This includes the CUDA toolkit for the conda environment."
+    echo ""
+    
+    if ! command -v nvidia-smi &> /dev/null; then
+        echo "WARNING: No NVIDIA GPU detected with nvidia-smi."
+        echo "GPU acceleration requires an NVIDIA GPU with proper drivers."
+        echo ""
+    fi
+    
+    if ! ask_yes_no "Continue with CUDA $CUDA_VERSION installation?" "y"; then
+        GPU_SUPPORT="no"
+        echo "Switching to CPU-only installation."
+    fi
+fi
+
+echo ""
+echo "Installing PyTorch ecosystem..."
+
+if [ "$GPU_SUPPORT" = "yes" ]; then
+    echo "Installing CUDA toolkit $CUDA_VERSION..."
+    if [ -n "$CUDA_COMPILER_VERSION" ]; then
+        conda install -y cuda-toolkit=$CUDA_VERSION cuda-compiler=$CUDA_COMPILER_VERSION -c nvidia
+    else
+        conda install -y cuda-toolkit=$CUDA_VERSION -c nvidia
+    fi
+    
+    echo "Installing PyTorch with GPU support (CUDA $CUDA_VERSION)..."
+    # Convert CUDA version format (e.g., 12.1 -> cu121)
+    CUDA_VERSION_SHORT=$(echo $CUDA_VERSION | sed 's/\.//g')
+    pip install torch --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_SHORT}
     
     echo "Installing PyTorch Geometric..."
-    conda install -y pyg -c pyg
+    pip install torch-geometric
     
-    echo "Installing PyTorch Lightning..."
-    conda install -y pytorch-lightning torchmetrics -c conda-forge
-    
-    echo "PyTorch and GNN packages installed successfully!"
-    PYTORCH_INSTALLED="yes"
+    echo "Installing PyG dependencies for GPU..."
+    pip install pyg-lib -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])")+cu${CUDA_VERSION_SHORT}.html
 else
-    echo "Skipping PyTorch installation."
-    echo "Note: GNN-based clause selection will not be available."
+    echo "Installing PyTorch CPU-only version..."
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    
+    echo "Installing PyTorch Geometric..."
+    pip install torch-geometric
+    
+    echo "Installing PyG dependencies for CPU..."
+    pip install pyg-lib -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])")+cpu.html
 fi
 
-echo ""
+echo "Installing PyTorch Lightning..."
+pip install pytorch-lightning torchmetrics
 
-# Claude CLI
-echo "2. Claude CLI (AI Assistant)"
-echo "   - Required for: Interactive AI assistance with code and theorem proving"
-echo "   - Packages: nodejs (via conda), claude (via npm)"
-echo "   - Note: Requires a Claude API key"
-echo ""
+echo "PyTorch and GNN packages installed successfully!"
+PYTORCH_INSTALLED="yes"
 
-if ask_yes_no "Would you like to install Claude CLI?"; then
-    echo "Installing Node.js via conda..."
-    conda install -y nodejs -c conda-forge
-    
-    echo "Installing Claude CLI in the conda environment..."
-    # Install locally to the conda environment, not globally
-    npm install @anthropic-ai/claude-code
-    
-    # Add node_modules/.bin to PATH for this environment
-    mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-    echo 'export PATH="$CONDA_PREFIX/node_modules/.bin:$PATH"' > $CONDA_PREFIX/etc/conda/activate.d/npm.sh
-    chmod +x $CONDA_PREFIX/etc/conda/activate.d/npm.sh
-    
-    # Also create deactivate script
-    mkdir -p $CONDA_PREFIX/etc/conda/deactivate.d
-    echo 'export PATH="${PATH//$CONDA_PREFIX\/node_modules\/.bin:/}"' > $CONDA_PREFIX/etc/conda/deactivate.d/npm.sh
-    chmod +x $CONDA_PREFIX/etc/conda/deactivate.d/npm.sh
-    
-    echo "Claude CLI installed successfully!"
-    echo ""
-    echo "To use Claude CLI, you'll need to:"
-    echo "  1. Reactivate the conda environment: conda deactivate && conda activate ${ENV_NAME}"
-    echo "  2. Set up your API key: export ANTHROPIC_API_KEY='your-api-key-here'"
-    echo "  3. Or run: claude login"
-else
-    echo "Skipping Claude CLI installation."
-fi
+echo ""
 
 # Install the package in development mode
 echo ""
@@ -387,15 +434,13 @@ echo "  ├── datasets/    # Prepared datasets"
 echo "  └── cache/       # Temporary files"
 echo "  $LOG_DIR/        # Execution logs"
 
-# Create selector directories if PyTorch is installed or was just installed
-if python -c "import torch" 2>/dev/null || [ "$PYTORCH_INSTALLED" = "yes" ]; then
-    mkdir -p "${SELECTORS_DIR/#\~/$HOME}"
-    mkdir -p "${SELECTOR_MODELS_DIR/#\~/$HOME}"
-    mkdir -p "${SELECTOR_CONFIGS_DIR/#\~/$HOME}"
-    echo "  $SELECTORS_DIR/  # ML selector resources"
-    echo "  ├── models/      # Trained models"
-    echo "  └── configs/     # Configurations"
-fi
+# Create selector directories (PyTorch is now always installed)
+mkdir -p "${SELECTORS_DIR/#\~/$HOME}"
+mkdir -p "${SELECTOR_MODELS_DIR/#\~/$HOME}"
+mkdir -p "${SELECTOR_CONFIGS_DIR/#\~/$HOME}"
+echo "  $SELECTORS_DIR/  # ML selector resources"
+echo "  ├── models/      # Trained models"
+echo "  └── configs/     # Configurations"
 
 # Ask about TPTP library download
 echo ""
@@ -404,65 +449,41 @@ echo "The TPTP (Thousands of Problems for Theorem Provers) library contains"
 echo "a comprehensive collection of theorem proving problems."
 echo ""
 
-# Function to get latest TPTP version
-get_latest_tptp_version() {
-    echo "Checking for latest TPTP version..."
-    
-    # The TPTP distribution directory structure follows a predictable pattern
-    # We'll check for recent versions in descending order
+# Function to find available TPTP version
+find_tptp_version() {
     local base_url="https://tptp.org/TPTP/Distribution"
     
-    # Try recent versions (starting from v10 down to v8)
-    for major in 10 9 8; do
-        for minor in 9 8 7 6 5 4 3 2 1 0; do
-            for patch in 9 8 7 6 5 4 3 2 1 0; do
-                local version="v${major}.${minor}.${patch}"
-                local test_url="${base_url}/TPTP-${version}.tgz"
-                
-                # Test if the URL exists (using HEAD request to avoid downloading)
-                if curl --head --silent --fail "$test_url" > /dev/null 2>&1; then
-                    echo "$version"
-                    return
-                fi
-            done
-        done
-    done
+    # Fetch directory listing and extract TPTP versions
+    local version=$(curl -s "$base_url/" 2>/dev/null | \
+                   grep -o 'href="TPTP-v[0-9]\+\.[0-9]\+\.[0-9]\+\.tgz"' | \
+                   sed 's/href="TPTP-//;s/\.tgz"//' | \
+                   sort -V | \
+                   tail -1)
     
-    # If we can't find any version, use a known good fallback
-    echo "Warning: Could not determine latest TPTP version automatically."
-    echo "Using fallback version v9.0.0"
-    echo "v9.0.0"
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        # Fallback if parsing fails
+        echo "v9.0.0"
+    fi
 }
 
 # Check for existing TPTP installation
 check_existing_tptp() {
     local tptp_path="$1"
     
-    if [ -d "$tptp_path/Problems" ] || [ -L "$tptp_path/Problems" ]; then
-        # Check if it's a symlink and follow it
-        if [ -L "$tptp_path/Problems" ]; then
-            local target=$(readlink "$tptp_path/Problems")
-            if [[ "$target" =~ TPTP-v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-                echo "${BASH_REMATCH[1]}"
+    # Check for TPTP-v* directories
+    for dir in "$tptp_path"/TPTP-v*; do
+        if [ -d "$dir" ] && [ -d "$dir/Problems" ]; then
+            local version=$(basename "$dir" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
+            if [ -n "$version" ]; then
+                echo "$version"
                 return
             fi
         fi
-        
-        # Check for version file or directory names
-        for dir in "$tptp_path"/TPTP-v*; do
-            if [ -d "$dir" ]; then
-                local version=$(basename "$dir" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//')
-                if [ -n "$version" ]; then
-                    echo "$version"
-                    return
-                fi
-            fi
-        done
-        
-        echo "unknown"
-    else
-        echo "none"
-    fi
+    done
+    
+    echo "none"
 }
 
 if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; then
@@ -478,11 +499,12 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
         echo "Found existing TPTP installation: version $existing_version"
     fi
     
-    # Get latest version
-    latest_version=$(get_latest_tptp_version)
+    # Find available version
+    echo "Searching for available TPTP version..."
+    latest_version=$(find_tptp_version)
     latest_version_num=$(echo "$latest_version" | sed 's/v//')
     
-    echo "Latest TPTP version available: $latest_version"
+    echo "Found TPTP version: $latest_version"
     
     # Compare versions if existing installation found
     if [ "$existing_version" != "none" ] && [ "$existing_version" != "unknown" ]; then
@@ -495,8 +517,8 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
                 existing_version="none"  # Force reinstall
             fi
         else
-            echo "Your version ($existing_version) is older than the latest version ($latest_version_num)."
-            if ! ask_yes_no "Would you like to upgrade?" "y"; then
+            echo "Your version ($existing_version) differs from the available version ($latest_version_num)."
+            if ! ask_yes_no "Would you like to install version $latest_version_num?" "y"; then
                 echo "Keeping existing installation."
                 cd "$SCRIPT_DIR"
             else
@@ -521,13 +543,12 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
             cd "$TPTP_PATH_EXPANDED"
             tar -xzf "TPTP-${latest_version}.tgz"
             
-            # Create symlink to Problems directory
+            # Verify extraction
             if [ -d "TPTP-${latest_version}/Problems" ]; then
-                # Remove old symlink if exists
-                [ -L "Problems" ] && rm -f "Problems"
-                ln -sf "TPTP-${latest_version}/Problems" "Problems"
                 echo "TPTP library ${latest_version} extracted successfully!"
-                echo "Problems directory: $TPTP_PATH_EXPANDED/Problems"
+                echo "TPTP root: $TPTP_PATH_EXPANDED/TPTP-${latest_version}"
+                echo "Problems directory: $TPTP_PATH_EXPANDED/TPTP-${latest_version}/Problems"
+                echo "Axioms directory: $TPTP_PATH_EXPANDED/TPTP-${latest_version}/Axioms"
             else
                 echo "Warning: Problems directory not found in TPTP archive."
             fi
@@ -552,13 +573,12 @@ if ask_yes_no "Would you like to download and set up the TPTP library?" "n"; the
                 cd "$TPTP_PATH_EXPANDED"
                 tar -xzf "TPTP-${latest_version}.tgz"
                 
-                # Create symlink to Problems directory
+                # Verify extraction
                 if [ -d "TPTP-${latest_version}/Problems" ]; then
-                    # Remove old symlink if exists
-                    [ -L "Problems" ] && rm -f "Problems"
-                    ln -sf "TPTP-${latest_version}/Problems" "Problems"
                     echo "TPTP library ${latest_version} extracted successfully!"
-                    echo "Problems directory: $TPTP_PATH_EXPANDED/Problems"
+                    echo "TPTP root: $TPTP_PATH_EXPANDED/TPTP-${latest_version}"
+                    echo "Problems directory: $TPTP_PATH_EXPANDED/TPTP-${latest_version}/Problems"
+                    echo "Axioms directory: $TPTP_PATH_EXPANDED/TPTP-${latest_version}/Axioms"
                 else
                     echo "Warning: Problems directory not found in TPTP archive."
                 fi
@@ -598,29 +618,20 @@ fi
 echo ""
 echo "=== Setup Complete! ==="
 echo ""
-echo "Core ProofAtlas components have been installed."
+echo "ProofAtlas has been successfully installed!"
 echo ""
 echo "Installed components:"
 echo "  ✓ Core theorem proving functionality"
-echo "  ✓ TPTP and Vampire parsers"
-echo "  ✓ Saturation loop and inference rules"
-echo "  ✓ Basic clause selection (FIFO, Random)"
-
-# Check what optional components were installed
-echo ""
-echo "Optional components:"
-if python -c "import torch" 2>/dev/null; then
-    echo "  ✓ PyTorch and GNN support"
+echo "  ✓ TPTP parser and problem format support"
+echo "  ✓ Saturation loop with given clause algorithm"
+echo "  ✓ Inference rules (resolution, factoring, subsumption)"
+echo "  ✓ Clause selection strategies (FIFO, LIFO, Random, Shortest, GNN)"
+echo "  ✓ PyTorch and Graph Neural Network support"
+if [ "$GPU_SUPPORT" = "yes" ]; then
+    echo "  ✓ CUDA $CUDA_VERSION toolkit for GPU acceleration"
 else
-    echo "  ✗ PyTorch and GNN support (not installed)"
+    echo "  ✓ CPU-only PyTorch (no GPU acceleration)"
 fi
-
-if [ -f "$CONDA_PREFIX/node_modules/.bin/claude" ]; then
-    echo "  ✓ Claude CLI"
-else
-    echo "  ✗ Claude CLI (not installed)"
-fi
-
 echo ""
 echo "To activate the environment in the future, run:"
 echo "  conda activate ${ENV_NAME}"
