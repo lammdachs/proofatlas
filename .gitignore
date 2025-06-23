@@ -33,6 +33,13 @@ wandb/
 .env
 .env.backup
 
+# Node.js
+node_modules/
+
+# Test files
+test_tptp_download/
+test_tptp_setup.sh
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
