@@ -47,11 +47,10 @@ The setup script will:
 1. Install Miniconda if conda is not found (optional)
 2. Create a conda environment with core dependencies from `environment.yml`
 3. Install PyTorch and GNN packages with CPU or GPU support
-4. Optionally install Claude CLI (for AI assistance)
-5. Configure paths using simple module-mirroring directory structure
-6. Set up the project in development mode
-7. Create necessary directories and configuration files
-8. Optionally download the latest TPTP problem library
+4. Configure paths using simple module-mirroring directory structure
+5. Set up the project in development mode
+6. Create necessary directories and configuration files
+7. Optionally download the latest TPTP problem library
 
 See [Directory Structure](docs/directory_structure.md) for details on the project's data organization.
 
@@ -97,19 +96,6 @@ pip install torch-geometric pytorch-lightning torchmetrics
 nvidia-smi
 ```
 
-#### Optional: Claude CLI
-For interactive AI assistance with theorem proving:
-- Code generation and explanation
-- Proof strategy suggestions
-- Interactive debugging help
-
-To install: Answer "yes" when prompted during setup, or run:
-```bash
-conda activate proofatlas
-conda install -y nodejs -c conda-forge
-npm install @anthropic-ai/claude-cli
-export ANTHROPIC_API_KEY='your-api-key-here'
-```
 
 ### Manual Setup
 If you prefer manual installation:
