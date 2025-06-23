@@ -59,12 +59,13 @@ Given a proof and a clause index, `step()` performs:
 ### Constructor Parameters
 
 ```python
-BasicLoop(max_clause_size=100, forward_simplify=True, backward_simplify=True)
+BasicLoop(max_clause_size=100, forward_simplify=True, backward_simplify=True, use_indexing=True)
 ```
 
 - `max_clause_size`: Maximum number of literals in a kept clause
 - `forward_simplify`: Enable tautology and subsumption checking for new clauses
 - `backward_simplify`: Currently unused (placeholder for future implementation)
+- `use_indexing`: Enable clause indexing for efficient resolution partner finding (default: True)
 
 ### Design Decisions
 
@@ -84,12 +85,45 @@ proof = loop.step(proof, given_clause=0)  # Process first unprocessed clause
 
 The loop integrates seamlessly with any clause selection strategy, making it a flexible foundation for saturation-based theorem proving.
 
+### Performance Optimizations
+
+#### Clause Indexing (Optional)
+
+The BasicLoop includes an optional efficient clause indexing system to reduce the number of resolution attempts. This is controlled by the `use_indexing` parameter (default: True).
+
+1. **Predicate Index**: When enabled, maintains a mapping from `(predicate_symbol, polarity)` to sets of clause indices
+   - Built for all processed clauses before resolution
+   - Allows O(1) lookup of clauses containing specific predicates
+
+2. **Resolution Candidate Finding**: Before attempting resolution, the loop:
+   - Identifies clauses with complementary literals (same predicate, opposite polarity)
+   - Only attempts resolution with these candidate clauses
+   - Dramatically reduces failed resolution attempts
+
+**Example Impact**: With 1000 processed clauses where only 10 have complementary literals with the given clause:
+- **Without indexing** (`use_indexing=False`): 1000 resolution attempts (990 will fail immediately)
+- **With indexing** (`use_indexing=True`): ~10 resolution attempts (only with viable candidates)
+
+This optimization is particularly effective when:
+- The number of processed clauses is large
+- Predicates are diverse across clauses
+- Many clauses share no common predicates with the given clause
+
+You might disable indexing (`use_indexing=False`) for:
+- Small problems where the indexing overhead isn't worth it
+- Debugging to ensure the indexing doesn't affect correctness
+- Comparing performance with and without indexing
+
 ### Known Limitations
 
 1. **No Backward Simplification**: The current implementation does not remove existing clauses that are subsumed by newly generated clauses. This could lead to redundant clauses remaining in the processed/unprocessed sets.
 
-2. **Basic Clause Selection**: The loop requires external clause selection strategy. More sophisticated selection heuristics could improve performance.
+2. **Index Rebuilding**: The predicate index is rebuilt for each step rather than maintained incrementally. This could be optimized further for very large clause sets.
+
+3. **Basic Clause Selection**: The loop requires external clause selection strategy. More sophisticated selection heuristics could improve performance.
 
 ### Implementation Notes
 
 - **Subsumption with Duplicate Literals**: The subsumption check properly handles clauses with duplicate literals by tracking which literals have been matched, ensuring that P(a) ∨ P(a) does not subsume P(a).
+
+- **Index Structure**: The predicate index uses a `defaultdict(set)` for efficient addition and lookup operations.

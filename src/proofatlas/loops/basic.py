@@ -6,12 +6,13 @@ the given clause algorithm. The loop applies resolution and factoring rules,
 performs redundancy elimination, and maintains a complete proof history.
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Set
+from collections import defaultdict
 
 from proofatlas.proofs import Proof
 from proofatlas.proofs.proof import ProofStep
 from proofatlas.proofs.state import ProofState
-from proofatlas.core.logic import Clause
+from proofatlas.core.logic import Clause, Literal
 from proofatlas.rules import ResolutionRule, FactoringRule, RuleApplication
 from .base import Loop
 
@@ -28,12 +29,18 @@ class BasicLoop(Loop):
     
     The loop tracks all rule applications but only records those that
     produce non-redundant clauses in the final proof.
+    
+    Performance features (when use_indexing=True):
+    - Clause indexing by predicate symbols for efficient resolution partner finding
+    - Only attempts resolution with clauses containing complementary literals
+    - Dramatically reduces failed resolution attempts for large clause sets
     """
     
     def __init__(self,
                  max_clause_size: int = 100,
                  forward_simplify: bool = True,
-                 backward_simplify: bool = True):
+                 backward_simplify: bool = True,
+                 use_indexing: bool = True):
         """
         Initialize the basic loop.
         
@@ -41,10 +48,17 @@ class BasicLoop(Loop):
             max_clause_size: Maximum clause size to keep
             forward_simplify: Apply forward simplification
             backward_simplify: Apply backward simplification
+            use_indexing: Use clause indexing for efficient resolution partner finding
         """
         self.max_clause_size = max_clause_size
         self.forward_simplify = forward_simplify
         self.backward_simplify = backward_simplify
+        self.use_indexing = use_indexing
+        
+        # Clause indexing: map (predicate_symbol, polarity) -> set of clause indices
+        # This helps quickly find potential resolution partners
+        if self.use_indexing:
+            self._predicate_index: Dict[Tuple[str, bool], Set[int]] = defaultdict(set)
     
     def step(self, proof: Proof, given_clause: int) -> Proof:
         """
@@ -160,6 +174,49 @@ class BasicLoop(Loop):
         new_clauses, _ = self._generate_resolution_clauses(given_clause, processed)
         return new_clauses
     
+    def _build_predicate_index(self, clauses: List[Clause]) -> None:
+        """Build an index of clauses by their predicate symbols and polarities.
+        
+        Creates a mapping from (predicate_symbol, polarity) to sets of clause indices.
+        This allows O(1) lookup of clauses containing specific predicates, which
+        dramatically speeds up resolution partner finding.
+        
+        Args:
+            clauses: List of clauses to index
+        """
+        self._predicate_index.clear()
+        for idx, clause in enumerate(clauses):
+            for literal in clause.literals:
+                key = (literal.predicate.symbol, literal.polarity)
+                self._predicate_index[key].add(idx)
+    
+    def _find_resolution_candidates(self, clause: Clause, clause_idx: int) -> Set[int]:
+        """Find indices of clauses that could potentially resolve with the given clause.
+        
+        For resolution to be possible, we need clauses with complementary literals
+        (same predicate, opposite polarity). This method uses the predicate index
+        to efficiently find only those clauses that have at least one literal that
+        could resolve with a literal in the given clause.
+        
+        Args:
+            clause: The clause to find resolution partners for
+            clause_idx: Index of the clause (to avoid self-resolution)
+            
+        Returns:
+            Set of clause indices that could potentially resolve with the given clause
+        """
+        candidates = set()
+        for literal in clause.literals:
+            # Look for clauses with opposite polarity for the same predicate
+            complement_key = (literal.predicate.symbol, not literal.polarity)
+            if complement_key in self._predicate_index:
+                # Add all clause indices that have this complementary literal
+                candidates.update(self._predicate_index[complement_key])
+        
+        # Remove the clause itself if it's in the candidates
+        candidates.discard(clause_idx)
+        return candidates
+    
     def _generate_resolution_clauses(self, given_clause: Clause, processed: List[Clause]) -> Tuple[List[Clause], List[RuleApplication]]:
         """Generate new clauses via resolution with previously processed clauses.
         
@@ -178,21 +235,45 @@ class BasicLoop(Loop):
         resolution = ResolutionRule()
         given_idx = len(processed) - 1  # Index of given clause (last in processed)
         
-        # Only resolve with clauses BEFORE the given clause
-        for i in range(len(processed) - 1):
-            result = resolution.apply(temp_state, [i, given_idx])
-            if result:
-                new_clauses.extend(result.generated_clauses)
-                # Modify the rule application to only show the processed clause index
-                # The given clause is implicit (it's the one being processed)
-                modified_result = RuleApplication(
-                    rule_name=result.rule_name,
-                    parents=[i],  # Only the index of the already-processed clause
-                    generated_clauses=result.generated_clauses,
-                    deleted_clause_indices=result.deleted_clause_indices,
-                    metadata={**result.metadata, 'with_given_clause': True}
-                )
-                rule_applications.append(modified_result)
+        if self.use_indexing:
+            # Build index for all processed clauses
+            self._build_predicate_index(processed)
+            
+            # Find candidate clauses that could resolve with the given clause
+            candidates = self._find_resolution_candidates(given_clause, given_idx)
+            
+            # Only try resolution with candidate clauses
+            for i in candidates:
+                if i < given_idx:  # Only resolve with clauses BEFORE the given clause
+                    result = resolution.apply(temp_state, [i, given_idx])
+                    if result:
+                        new_clauses.extend(result.generated_clauses)
+                        # Modify the rule application to only show the processed clause index
+                        # The given clause is implicit (it's the one being processed)
+                        modified_result = RuleApplication(
+                            rule_name=result.rule_name,
+                            parents=[i],  # Only the index of the already-processed clause
+                            generated_clauses=result.generated_clauses,
+                            deleted_clause_indices=result.deleted_clause_indices,
+                            metadata={**result.metadata, 'with_given_clause': True}
+                        )
+                        rule_applications.append(modified_result)
+        else:
+            # Without indexing, try resolution with all clauses BEFORE the given clause
+            for i in range(len(processed) - 1):
+                result = resolution.apply(temp_state, [i, given_idx])
+                if result:
+                    new_clauses.extend(result.generated_clauses)
+                    # Modify the rule application to only show the processed clause index
+                    # The given clause is implicit (it's the one being processed)
+                    modified_result = RuleApplication(
+                        rule_name=result.rule_name,
+                        parents=[i],  # Only the index of the already-processed clause
+                        generated_clauses=result.generated_clauses,
+                        deleted_clause_indices=result.deleted_clause_indices,
+                        metadata={**result.metadata, 'with_given_clause': True}
+                    )
+                    rule_applications.append(modified_result)
         
         # Filter by size
         filtered_clauses = []

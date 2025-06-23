@@ -47,5 +47,10 @@ dependencies:
   - flake8
   - ruff
 
-# Note: PyTorch, PyTorch Geometric, and PyTorch Lightning are optional
-# and can be installed separately using the setup.sh script
+# Note: The following packages are installed via pip by setup.sh:
+# - torch (with specific CPU/GPU index URL)
+# - torch-geometric
+# - pytorch-lightning
+# - torchmetrics
+# - pyg-lib (with PyTorch version compatibility)
+# This ensures proper CPU/GPU support based on user selection

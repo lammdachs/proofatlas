@@ -46,35 +46,55 @@ cd proofatlas
 The setup script will:
 1. Install Miniconda if conda is not found (optional)
 2. Create a conda environment with core dependencies from `environment.yml`
-3. Optionally install PyTorch and GNN packages (for neural clause selection)
+3. Install PyTorch and GNN packages with CPU or GPU support
 4. Optionally install Claude CLI (for AI assistance)
-5. Configure paths using predefined profiles (Local, Centralized, HPC, or Custom)
+5. Configure paths using simple module-mirroring directory structure
 6. Set up the project in development mode
 7. Create necessary directories and configuration files
 8. Optionally download the latest TPTP problem library
 
 See [Directory Structure](docs/directory_structure.md) for details on the project's data organization.
 
-### Installation Options
+### Installation Details
 
-#### Core Installation (Default)
-The basic installation includes all theorem proving functionality:
+#### Core Features
+The installation includes all theorem proving and machine learning functionality:
 - Saturation-based theorem prover with given clause algorithm
 - Resolution, factoring, and subsumption inference rules
 - TPTP problem format parser
 - Basic clause selection strategies (FIFO, Random)
+- GNN-based clause selection and learned proof guidance
+- Neural premise selection
 - Proof visualization and exploration tools
 
-#### Optional: PyTorch and Graph Neural Networks
-Required for advanced clause selection strategies:
-- GNN-based clause selection
-- Learned proof guidance
-- Neural premise selection
+#### PyTorch Installation
+During setup, you'll be prompted to:
+- Enter a CUDA version for GPU support
+- Or press Enter for CPU-only installation
 
-To install: Answer "yes" when prompted during setup, or run:
+**Important**: 
+- The setup installs CUDA toolkit via conda, providing a self-contained CUDA environment
+- You must specify the exact CUDA version compatible with your GPU and drivers
+- The installer will show your current NVIDIA driver version if available
+
+**Manual Installation Commands**:
+
 ```bash
+# For CPU-only installation:
 conda activate proofatlas
-conda install -y pytorch pytorch-cuda=12.1 pyg pytorch-lightning -c pytorch -c nvidia -c pyg
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch-geometric pytorch-lightning torchmetrics
+
+# For GPU installation with specific CUDA version:
+conda activate proofatlas
+# First install CUDA toolkit (replace X.Y with your CUDA version):
+conda install -y cuda-toolkit=X.Y -c nvidia
+# Then install PyTorch (replace XY with version without dot, e.g., 12.1 -> 121):
+pip install torch --index-url https://download.pytorch.org/whl/cuXY
+pip install torch-geometric pytorch-lightning torchmetrics
+
+# Check your NVIDIA driver version:
+nvidia-smi
 ```
 
 #### Optional: Claude CLI
@@ -339,6 +359,32 @@ If you use ProofAtlas in your research, please cite:
 ## License
 
 This project is licensed under the BSD 0-Clause License - see [LICENSE](LICENSE) for details.
+
+## Troubleshooting
+
+### CUDA/GPU Errors
+If you encounter errors like `libcupti.so.11.8: cannot open shared object file`:
+- **Cause**: PyTorch was installed with GPU support but CUDA runtime libraries are missing
+- **Solution 1** (Recommended): Reinstall PyTorch with CPU-only support:
+  ```bash
+  conda activate proofatlas
+  conda remove pytorch pyg pytorch-lightning
+  conda install -y pytorch cpuonly pyg cpuonly pytorch-lightning -c pytorch -c pyg -c conda-forge
+  ```
+- **Solution 2**: Install CUDA drivers matching your PyTorch version (see [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads))
+
+### Import Errors
+If you get import errors when PyTorch is not installed:
+- The codebase is designed to work without PyTorch for core functionality
+- GNN-based selectors require PyTorch and will be unavailable without it
+- All other features (resolution, factoring, basic selectors) work without PyTorch
+
+### Test Failures
+Run tests from the `src` directory:
+```bash
+cd src
+python -m pytest ../tests/ -v
+```
 
 ## Acknowledgments
 
