@@ -33,6 +33,7 @@ test-rust:
 
 # Build Rust components with Python bindings
 build:
+	@command -v maturin >/dev/null 2>&1 || { echo "Error: maturin not found. Please install it with: pip install maturin"; exit 1; }
 	maturin develop
 
 # Build Rust components only

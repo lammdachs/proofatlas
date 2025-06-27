@@ -48,6 +48,7 @@ dependencies:
   - ruff
   
   # Rust build tools
+  - rust  # Rust compiler and cargo
   - maturin>=1.0  # For building Rust components with Python bindings
 
 # Note: The following packages are installed via pip by setup.sh:
