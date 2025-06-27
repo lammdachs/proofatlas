@@ -232,7 +232,7 @@ def main():
         
         output_file = output_path / f"tptp_problems_batch_{i:04d}.json"
         with open(output_file, 'w') as f:
-            json.dump(batch, f, indent=2)
+            json.dump(batch, f, separators=(',', ':'))
         print(f"Saved batch {i+1}/{num_batches}: {len(batch)} problems to {output_file}")
     
     # Save summary
@@ -252,14 +252,14 @@ def main():
     
     summary_file = output_path / "parsing_summary.json"
     with open(summary_file, 'w') as f:
-        json.dump(summary, f, indent=2)
+        json.dump(summary, f, separators=(',', ':'))
     print(f"\nSaved summary to {summary_file}")
     
     # Save failed files list
     if failed_files:
         failed_file = output_path / "failed_files.json"
         with open(failed_file, 'w') as f:
-            json.dump(failed_files, f, indent=2)
+            json.dump(failed_files, f, separators=(',', ':'))
         print(f"Saved failed files list to {failed_file}")
         
         # Print some example failures

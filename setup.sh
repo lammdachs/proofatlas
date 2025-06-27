@@ -306,7 +306,7 @@ echo ""
 # Install the package in development mode
 echo ""
 echo "Installing ProofAtlas package in development mode..."
-pip install -e . --no-deps
+cd python && pip install -e . --no-deps && cd ..
 
 # Create or update .env file
 echo ""
@@ -637,7 +637,7 @@ echo "To activate the environment in the future, run:"
 echo "  conda activate ${ENV_NAME}"
 echo ""
 echo "To verify the installation, run:"
-echo "  python -m pytest tests/core/test_logic.py -v"
+echo "  cd python && python -m pytest tests/core/test_logic.py -v"
 echo ""
 
 # Display current configuration
@@ -660,6 +660,6 @@ fi
 
 echo "Next steps:"
 echo "  1. Activate the environment: conda activate ${ENV_NAME}"
-echo "  2. Run tests: python -m pytest tests/ -v"
-echo "  3. Explore examples: python examples/basic_saturation.py"
+echo "  2. Run tests: cd python && python -m pytest tests/ -v"
+echo "  3. Build Rust components (optional): cd rust && maturin develop"
 echo "  4. Start developing with ProofAtlas!"

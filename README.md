@@ -27,11 +27,28 @@ This project provides a flexible platform for:
 - **Training Infrastructure**: PyTorch Lightning-based training with distributed support
 - **Flexible Configuration**: Hydra/OmegaConf-based configuration system
 
+## Project Structure
+
+ProofAtlas is organized into Python and Rust components:
+
+```
+proofatlas/
+├── python/         # Python implementation
+│   ├── src/        # Source code
+│   ├── tests/      # Test suite
+│   └── scripts/    # Utility scripts
+├── rust/           # Rust acceleration (optional)
+│   ├── src/        # Rust source code
+│   └── README.md   # Rust component docs
+└── setup.sh        # Setup script
+```
+
 ## Installation
 
 ### Prerequisites
 - Conda (Anaconda or Miniconda) - can be installed automatically by the setup script
 - CUDA-capable GPU (optional, for GNN-based clause selection)
+- Rust toolchain (optional, for Rust components)
 
 ### Quick Setup
 ```bash
@@ -48,6 +65,24 @@ The setup script will:
 2. Create a conda environment with core dependencies from `environment.yml`
 3. Install PyTorch and GNN packages with CPU or GPU support
 4. Configure paths using simple module-mirroring directory structure
+5. Install the Python package in development mode
+
+### Optional: Build Rust Components
+
+For high-performance TPTP parsing and future Rust components:
+
+```bash
+# Install Rust if not present
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install maturin
+pip install maturin
+
+# Build Rust components
+cd rust
+maturin develop
+cd ..
+```
 5. Set up the project in development mode
 6. Create necessary directories and configuration files
 7. Optionally download the latest TPTP problem library

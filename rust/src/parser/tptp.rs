@@ -1,0 +1,383 @@
+//! TPTP parser implementation using nom
+
+use nom::{
+    IResult,
+    branch::alt,
+    bytes::complete::{tag, take_until, take_while1, take_while, is_not},
+    character::complete::{char, multispace0, multispace1, alpha1, alphanumeric1, one_of},
+    combinator::{map, opt, recognize, value, eof},
+    multi::{separated_list0, separated_list1, many0, many1},
+    sequence::{tuple, delimited, preceded, terminated, pair},
+};
+use std::fs;
+use std::path::Path;
+use std::collections::{HashSet, HashMap};
+use crate::core::{logic::*, error::{ProofAtlasError, Result}};
+
+/// Parse a TPTP file
+pub fn parse_file(file_path: &str, include_path: Option<&str>) -> Result<Problem> {
+    let content = fs::read_to_string(file_path)?;
+    let mut parser_state = ParserState::new(include_path);
+    parser_state.parse_file_content(&content, Path::new(file_path))
+}
+
+/// Parse TPTP string content
+pub fn parse_string(content: &str) -> Result<Problem> {
+    let mut parser_state = ParserState::new(None);
+    parser_state.parse_string_content(content)
+}
+
+/// Parser state to handle includes and track parsed content
+struct ParserState {
+    include_path: Option<String>,
+    visited_files: HashSet<String>,
+    clauses: Vec<Clause>,
+    conjecture_indices: Vec<usize>,
+}
+
+impl ParserState {
+    fn new(include_path: Option<&str>) -> Self {
+        ParserState {
+            include_path: include_path.map(String::from),
+            visited_files: HashSet::new(),
+            clauses: Vec::new(),
+            conjecture_indices: Vec::new(),
+        }
+    }
+    
+    fn parse_file_content(&mut self, content: &str, file_path: &Path) -> Result<Problem> {
+        // Mark file as visited
+        if let Ok(canonical) = file_path.canonicalize() {
+            self.visited_files.insert(canonical.display().to_string());
+        }
+        
+        self.parse_string_content(content)?;
+        
+        Ok(Problem::with_conjectures(
+            self.clauses.clone(),
+            self.conjecture_indices.clone(),
+        ))
+    }
+    
+    fn parse_string_content(&mut self, content: &str) -> Result<Problem> {
+        let inputs = parse_tptp_inputs(content)
+            .map_err(|e| ProofAtlasError::ParseError(format!("Parse error: {:?}", e)))?;
+        
+        for input in inputs {
+            match input {
+                TPTPInput::Cnf { role, clause, .. } => {
+                    let clause_idx = self.clauses.len();
+                    if role == "negated_conjecture" {
+                        self.conjecture_indices.push(clause_idx);
+                    }
+                    self.clauses.push(clause);
+                }
+                TPTPInput::Include { file_name } => {
+                    // Handle include
+                    if let Some(inc_path) = &self.include_path {
+                        let full_path = Path::new(inc_path).join(&file_name);
+                        if full_path.exists() && !self.visited_files.contains(&full_path.display().to_string()) {
+                            let inc_content = fs::read_to_string(&full_path)?;
+                            self.parse_file_content(&inc_content, &full_path)?;
+                        }
+                    }
+                }
+                _ => {
+                    // FOF formulas would need CNF conversion
+                    // For now, we skip them
+                }
+            }
+        }
+        
+        Ok(Problem::with_conjectures(
+            self.clauses.clone(),
+            self.conjecture_indices.clone(),
+        ))
+    }
+}
+
+/// TPTP input types
+#[derive(Debug, Clone)]
+enum TPTPInput {
+    Cnf {
+        name: String,
+        role: String,
+        clause: Clause,
+    },
+    Fof {
+        name: String,
+        role: String,
+        formula: String, // Placeholder - would need full FOL parser
+    },
+    Include {
+        file_name: String,
+    },
+}
+
+/// Parse multiple TPTP inputs
+fn parse_tptp_inputs(input: &str) -> Result<Vec<TPTPInput>> {
+    let mut results = Vec::new();
+    let mut remaining = input;
+    
+    while !remaining.trim().is_empty() {
+        // Skip whitespace and comments
+        remaining = skip_whitespace_and_comments(remaining);
+        if remaining.is_empty() {
+            break;
+        }
+        
+        // Try to parse an input
+        match parse_tptp_input(remaining) {
+            Ok((rest, Some(input))) => {
+                results.push(input);
+                remaining = rest;
+            }
+            Ok((rest, None)) => {
+                // Skipped input (comment or empty)
+                remaining = rest;
+            }
+            Err(_) => {
+                // Skip to next line if we can't parse
+                if let Some(pos) = remaining.find('\n') {
+                    remaining = &remaining[pos + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    
+    Ok(results)
+}
+
+/// Skip whitespace and comments
+fn skip_whitespace_and_comments(input: &str) -> &str {
+    let mut remaining = input;
+    loop {
+        let before = remaining.len();
+        remaining = remaining.trim_start();
+        
+        // Skip line comments
+        if remaining.starts_with('%') {
+            if let Some(pos) = remaining.find('\n') {
+                remaining = &remaining[pos + 1..];
+            } else {
+                return "";
+            }
+        }
+        
+        // Skip block comments
+        if remaining.starts_with("/*") {
+            if let Some(pos) = remaining.find("*/") {
+                remaining = &remaining[pos + 2..];
+            } else {
+                return "";
+            }
+        }
+        
+        if remaining.len() == before {
+            break;
+        }
+    }
+    remaining
+}
+
+/// Parse a single TPTP input
+fn parse_tptp_input(input: &str) -> IResult<&str, Option<TPTPInput>> {
+    alt((
+        map(parse_cnf, Some),
+        map(parse_include, Some),
+        // Add FOF parser when needed
+    ))(input)
+}
+
+/// Parse CNF formula
+fn parse_cnf(input: &str) -> IResult<&str, TPTPInput> {
+    let (input, _) = tag("cnf")(input)?;
+    let (input, _) = ws(char('('))(input)?;
+    let (input, name) = ws(parse_name)(input)?;
+    let (input, _) = ws(char(','))(input)?;
+    let (input, role) = ws(parse_name)(input)?;
+    let (input, _) = ws(char(','))(input)?;
+    let (input, clause) = ws(parse_clause)(input)?;
+    let (input, _) = ws(char(')'))(input)?;
+    let (input, _) = ws(char('.'))(input)?;
+    
+    Ok((input, TPTPInput::Cnf { name, role, clause }))
+}
+
+/// Parse include directive
+fn parse_include(input: &str) -> IResult<&str, TPTPInput> {
+    let (input, _) = tag("include")(input)?;
+    let (input, _) = ws(char('('))(input)?;
+    let (input, file_name) = ws(parse_quoted_string)(input)?;
+    let (input, _) = ws(char(')'))(input)?;
+    let (input, _) = ws(char('.'))(input)?;
+    
+    Ok((input, TPTPInput::Include { file_name }))
+}
+
+/// Parse a clause (disjunction of literals)
+fn parse_clause(input: &str) -> IResult<&str, Clause> {
+    alt((
+        // Empty clause
+        map(tag("$false"), |_| Clause::new(vec![])),
+        // Parenthesized clause
+        delimited(
+            ws(char('(')),
+            map(
+                separated_list1(ws(char('|')), parse_literal),
+                Clause::new
+            ),
+            ws(char(')'))
+        ),
+        // Single literal
+        map(parse_literal, |lit| Clause::new(vec![lit])),
+    ))(input)
+}
+
+/// Parse a literal
+fn parse_literal(input: &str) -> IResult<&str, Literal> {
+    alt((
+        // Negative literal
+        map(
+            preceded(ws(char('~')), parse_atom),
+            |pred| Literal::negative(pred)
+        ),
+        // Positive literal (including equality)
+        map(parse_atom_or_equality, |pred| Literal::positive(pred)),
+    ))(input)
+}
+
+/// Parse atom or equality
+fn parse_atom_or_equality(input: &str) -> IResult<&str, Predicate> {
+    alt((
+        parse_equality,
+        parse_atom,
+    ))(input)
+}
+
+/// Parse equality
+fn parse_equality(input: &str) -> IResult<&str, Predicate> {
+    let (input, left) = parse_term(input)?;
+    let (input, _) = ws(char('='))(input)?;
+    let (input, right) = parse_term(input)?;
+    
+    Ok((input, Predicate::new("=".to_string(), vec![left, right])))
+}
+
+/// Parse atom (predicate)
+fn parse_atom(input: &str) -> IResult<&str, Predicate> {
+    let (input, name) = parse_name(input)?;
+    let (input, args) = opt(delimited(
+        ws(char('(')),
+        separated_list1(ws(char(',')), parse_term),
+        ws(char(')'))
+    ))(input)?;
+    
+    Ok((input, Predicate::new(name, args.unwrap_or_default())))
+}
+
+/// Parse term
+fn parse_term(input: &str) -> IResult<&str, Term> {
+    alt((
+        // Variable (uppercase)
+        map(parse_variable, |name| Term::Variable(name)),
+        // Function or constant
+        parse_function_or_constant,
+    ))(input)
+}
+
+/// Parse function or constant
+fn parse_function_or_constant(input: &str) -> IResult<&str, Term> {
+    let (input, name) = parse_name(input)?;
+    let (input, args) = opt(delimited(
+        ws(char('(')),
+        separated_list1(ws(char(',')), parse_term),
+        ws(char(')'))
+    ))(input)?;
+    
+    Ok((input, match args {
+        Some(args) => Term::Function { name, args },
+        None => Term::Constant(name),
+    }))
+}
+
+/// Parse variable (uppercase letter followed by alphanumerics)
+fn parse_variable(input: &str) -> IResult<&str, String> {
+    let (input, first) = one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")(input)?;
+    let (input, rest) = take_while(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    Ok((input, format!("{}{}", first, rest)))
+}
+
+/// Parse name (lowercase or quoted)
+fn parse_name(input: &str) -> IResult<&str, String> {
+    alt((
+        parse_quoted_string,
+        parse_unquoted_name,
+    ))(input)
+}
+
+/// Parse unquoted name
+fn parse_unquoted_name(input: &str) -> IResult<&str, String> {
+    let (input, first) = one_of("abcdefghijklmnopqrstuvwxyz$")(input)?;
+    let (input, rest) = take_while(|c: char| c.is_alphanumeric() || c == '_')(input)?;
+    Ok((input, format!("{}{}", first, rest)))
+}
+
+/// Parse quoted string
+fn parse_quoted_string(input: &str) -> IResult<&str, String> {
+    alt((
+        delimited(char('\''), take_until("'"), char('\'')),
+        delimited(char('"'), take_until("\""), char('"')),
+    ))(input)
+    .map(|(i, s)| (i, s.to_string()))
+}
+
+/// Whitespace wrapper
+fn ws<'a, F, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+where
+    F: FnMut(&'a str) -> IResult<&'a str, O>,
+{
+    delimited(multispace0, inner, multispace0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_parse_variable() {
+        assert_eq!(parse_variable("X"), Ok(("", "X".to_string())));
+        assert_eq!(parse_variable("X123"), Ok(("", "X123".to_string())));
+        assert_eq!(parse_variable("X_var"), Ok(("", "X_var".to_string())));
+        assert!(parse_variable("x").is_err());
+    }
+    
+    #[test]
+    fn test_parse_name() {
+        assert_eq!(parse_name("foo"), Ok(("", "foo".to_string())));
+        assert_eq!(parse_name("'quoted name'"), Ok(("", "quoted name".to_string())));
+        assert_eq!(parse_name("$true"), Ok(("", "$true".to_string())));
+    }
+    
+    #[test]
+    fn test_parse_literal() {
+        let (_, lit) = parse_literal("p(X)").unwrap();
+        assert!(lit.polarity);
+        assert_eq!(lit.predicate.name, "p");
+        
+        let (_, lit) = parse_literal("~q(a,b)").unwrap();
+        assert!(!lit.polarity);
+        assert_eq!(lit.predicate.name, "q");
+    }
+    
+    #[test]
+    fn test_parse_clause() {
+        let (_, clause) = parse_clause("(p(X) | ~q(Y))").unwrap();
+        assert_eq!(clause.literals.len(), 2);
+        
+        let (_, clause) = parse_clause("$false").unwrap();
+        assert!(clause.is_empty());
+    }
+}
