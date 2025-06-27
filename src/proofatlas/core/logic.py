@@ -358,12 +358,22 @@ class Problem:
             if not isinstance(clause, Clause):
                 raise TypeError(f"Expected Clause, got {clause}")
 
-    def __init__(self, *clauses):
+    def __init__(self, *clauses, conjecture_indices=None):
         Problem.check(clauses)
         self.clauses = clauses
+        # Track which clauses are from conjectures (default: empty set)
+        self.conjecture_indices = set(conjecture_indices) if conjecture_indices else set()
 
     def __repr__(self):
         return '\n'.join(map(str, self.clauses))
+    
+    def is_conjecture_clause(self, index):
+        """Check if the clause at the given index is from a conjecture."""
+        return index in self.conjecture_indices
+    
+    def get_conjecture_clauses(self):
+        """Get all clauses that came from conjectures."""
+        return [(i, self.clauses[i]) for i in self.conjecture_indices if i < len(self.clauses)]
 
     def depth(self):
         return max((clause.depth() for clause in self.clauses), default=0)

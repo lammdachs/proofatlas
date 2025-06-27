@@ -721,6 +721,7 @@ class VariableRenamer(Visitor):
 class FOLConverter(Transformer):
     def __init__(self):
         self.n_goals = 0
+        self.conjecture_indices = []  # Track indices of clauses from conjectures
     
     def fof_term(self, children):
         if children[0].type == "FUNCTOR":
@@ -760,8 +761,17 @@ class FOLConverter(Transformer):
         return children[0]
 
     def tptp_file(self, children):
-        return Problem(*children, *[
+        # First, collect all clauses
+        all_clauses = list(children)
+        
+        # Add the goal unit clauses (these represent the actual negated conjectures)
+        goal_clauses = [
             Clause(Literal(Predicate(f"goal_{i}", 0)(), False))
             for i in range(self.n_goals)
-        ])
+        ]
+        
+        # The conjecture indices are the indices of the goal unit clauses
+        conjecture_indices = list(range(len(all_clauses), len(all_clauses) + len(goal_clauses)))
+        
+        return Problem(*all_clauses, *goal_clauses, conjecture_indices=conjecture_indices)
 
