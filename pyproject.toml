@@ -7,7 +7,7 @@ name = "proofatlas"
 version = "0.1.0"
 description = "ProofAtlas: Automated theorem proving with Python and Rust"
 authors = [{name = "ProofAtlas Contributors"}]
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 keywords = ["theorem-proving", "automated-reasoning", "tptp", "first-order-logic"]
 classifiers = [
     "Development Status :: 3 - Alpha",

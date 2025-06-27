@@ -46,6 +46,9 @@ dependencies:
   - isort
   - flake8
   - ruff
+  
+  # Rust build tools
+  - maturin>=1.0  # For building Rust components with Python bindings
 
 # Note: The following packages are installed via pip by setup.sh:
 # - torch (with specific CPU/GPU index URL)

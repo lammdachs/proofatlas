@@ -165,9 +165,11 @@ Implements the given clause algorithm:
 
 6. **No Models Directory**: GNN and other models are integrated into their usage points (e.g., GNN in selectors/gnn.py)
 
-7. **Testing Pattern**: Tests mirror source structure under `tests/` directory
+7. **Testing Pattern**: Tests mirror source structure under `python/tests/` directory
 
-8. **Proof Inspection**: Use scripts/print_proof.py or scripts/inspect_proof.py to examine generated proofs
+8. **Proof Inspection**: Use python/scripts/print_proof.py or python/scripts/inspect_proof.py to examine generated proofs
+
+9. **Rust Components**: Optional high-performance components with Python bindings via PyO3 in `rust/` directory
 
 ### Working with the Refactored Codebase
 
