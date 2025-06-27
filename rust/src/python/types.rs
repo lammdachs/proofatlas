@@ -1,7 +1,7 @@
 //! Type conversion utilities between Rust and Python
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use crate::core::logic::*;
 
 /// Convert Rust Problem to Python dictionary matching the expected format
@@ -41,8 +41,8 @@ fn clause_to_python(py: Python, clause: &Clause) -> PyResult<PyObject> {
         py_literals.append(py_literal)?;
     }
     
-    // Create Clause(*literals)
-    let args = py_literals.iter().collect::<Vec<_>>();
+    // Create Clause(*literals) - need to convert list to tuple
+    let args = PyTuple::new(py, py_literals.iter());
     clause_class.call1(args).map(Into::into)
 }
 
@@ -74,7 +74,7 @@ fn predicate_to_python(py: Python, predicate: &Predicate) -> PyResult<PyObject> 
     let predicate_symbol = predicate_class.call1((&predicate.name, predicate.arity()))?;
     
     // Call the symbol with terms to create the predicate application
-    let args = py_terms.iter().collect::<Vec<_>>();
+    let args = PyTuple::new(py, py_terms.iter());
     predicate_symbol.call1(args).map(Into::into)
 }
 
@@ -105,14 +105,14 @@ fn term_to_python(py: Python, term: &Term) -> PyResult<PyObject> {
             let func_symbol = function_class.call1((name, args.len()))?;
             
             // Call the symbol with args to create the function application
-            let arg_vec = py_args.iter().collect::<Vec<_>>();
-            func_symbol.call1(arg_vec).map(Into::into)
+            let arg_tuple = PyTuple::new(py, py_args.iter());
+            func_symbol.call1(arg_tuple).map(Into::into)
         }
     }
 }
 
 /// Alternative: Convert to dictionary format for JSON serialization
-pub fn problem_to_dict(py: Python, problem: &Problem) -> PyResult<&PyDict> {
+pub fn problem_to_dict<'py>(py: Python<'py>, problem: &Problem) -> PyResult<&'py PyDict> {
     let dict = PyDict::new(py);
     
     dict.set_item("num_clauses", problem.clauses.len())?;
@@ -133,7 +133,7 @@ pub fn problem_to_dict(py: Python, problem: &Problem) -> PyResult<&PyDict> {
     Ok(dict)
 }
 
-fn clause_to_dict(py: Python, clause: &Clause) -> PyResult<&PyDict> {
+fn clause_to_dict<'py>(py: Python<'py>, clause: &Clause) -> PyResult<&'py PyDict> {
     let dict = PyDict::new(py);
     
     let literals_list = PyList::empty(py);
@@ -146,7 +146,7 @@ fn clause_to_dict(py: Python, clause: &Clause) -> PyResult<&PyDict> {
     Ok(dict)
 }
 
-fn literal_to_dict(py: Python, literal: &Literal) -> PyResult<&PyDict> {
+fn literal_to_dict<'py>(py: Python<'py>, literal: &Literal) -> PyResult<&'py PyDict> {
     let dict = PyDict::new(py);
     
     dict.set_item("polarity", literal.polarity)?;
@@ -168,7 +168,7 @@ fn literal_to_dict(py: Python, literal: &Literal) -> PyResult<&PyDict> {
     Ok(dict)
 }
 
-fn term_to_dict(py: Python, term: &Term) -> PyResult<&PyDict> {
+fn term_to_dict<'py>(py: Python<'py>, term: &Term) -> PyResult<&'py PyDict> {
     let dict = PyDict::new(py);
     
     match term {

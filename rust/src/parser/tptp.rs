@@ -3,15 +3,15 @@
 use nom::{
     IResult,
     branch::alt,
-    bytes::complete::{tag, take_until, take_while1, take_while, is_not},
-    character::complete::{char, multispace0, multispace1, alpha1, alphanumeric1, one_of},
-    combinator::{map, opt, recognize, value, eof},
-    multi::{separated_list0, separated_list1, many0, many1},
-    sequence::{tuple, delimited, preceded, terminated, pair},
+    bytes::complete::{tag, take_until, take_while},
+    character::complete::{char, multispace0, one_of},
+    combinator::{map, opt},
+    multi::separated_list1,
+    sequence::{delimited, preceded},
 };
 use std::fs;
 use std::path::Path;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use crate::core::{logic::*, error::{ProofAtlasError, Result}};
 
 /// Parse a TPTP file

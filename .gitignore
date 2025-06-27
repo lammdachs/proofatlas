@@ -45,6 +45,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Rust build artifacts
+rust/target/
+rust/Cargo.lock
+*.so
+*.dylib
+*.dll
+
 # Distribution / packaging
 .Python
 build/

@@ -14,28 +14,30 @@ crate-type = ["cdylib", "rlib"]  # Both Python extension and Rust library
 pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 
 # Core dependencies
-nom = "7"                        # Parser combinators
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"               # Error handling
-indexmap = "2.0"                # Ordered hashmaps
-rustc-hash = "1.1"              # Fast hashing
+nom = "7"                        # Parser combinators (used in parser/tptp.rs)
+thiserror = "1.0"               # Error handling (used in core/error.rs)
 
-# Optional dependencies for future components
-rayon = { version = "1.7", optional = true }      # Parallel processing
-dashmap = { version = "5.5", optional = true }    # Concurrent hashmaps
-petgraph = { version = "0.6", optional = true }   # Graph algorithms
+# Optional but currently used
+serde = { version = "1.0", features = ["derive"] }  # Used in core/logic.rs
+serde_json = "1.0"              # For JSON serialization (future use)
+indexmap = { version = "2.0", features = ["serde"] }  # Used in core/logic.rs for conjecture_indices
+
+# Future dependencies (commented out until needed)
+# rustc-hash = "1.1"            # Fast hashing (not used yet)
+# rayon = { version = "1.7", optional = true }      # Parallel processing
+# dashmap = { version = "5.5", optional = true }    # Concurrent hashmaps
+# petgraph = { version = "0.6", optional = true }   # Graph algorithms
 
 # Development dependencies
 [dev-dependencies]
-criterion = "0.5"               # Benchmarking
-proptest = "1.0"               # Property-based testing
+# criterion = "0.5"             # Benchmarking (uncomment when needed)
+# proptest = "1.0"             # Property-based testing (uncomment when needed)
 
 [features]
 default = ["python"]
 python = ["pyo3"]              # Python bindings
-parallel = ["rayon", "dashmap"] # Parallel saturation loops
-graph = ["petgraph"]           # Graph-based proof analysis
+# parallel = ["rayon", "dashmap"] # Parallel saturation loops (future)
+# graph = ["petgraph"]           # Graph-based proof analysis (future)
 
 # Optimization for release builds
 [profile.release]
