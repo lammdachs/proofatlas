@@ -2,7 +2,5 @@
 
 pub mod parser;
 pub mod types;
-
-// Future modules
-// pub mod core;
-// pub mod rules;
+pub mod core;
+pub mod proofs;

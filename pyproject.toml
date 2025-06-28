@@ -36,7 +36,7 @@ manifest-path = "rust/Cargo.toml"
 features = ["pyo3/extension-module"]
 
 [tool.setuptools.packages.find]
-where = ["python/src"]
+where = ["python"]
 include = ["proofatlas*"]
 namespaces = false
 

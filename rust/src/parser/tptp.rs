@@ -1,4 +1,13 @@
 //! TPTP parser implementation using nom
+//! 
+//! This parser supports:
+//! - CNF (Clause Normal Form) formulas
+//! - Include directives
+//! 
+//! Not supported:
+//! - FOF (First Order Form) - planned for future
+//! - TFF (Typed First-order Form) - not planned
+//! - THF (Typed Higher-order Form) - not planned
 
 use nom::{
     IResult,
@@ -137,11 +146,21 @@ fn parse_tptp_inputs(input: &str) -> Result<Vec<TPTPInput>> {
                 remaining = rest;
             }
             Err(_) => {
-                // Skip to next line if we can't parse
-                if let Some(pos) = remaining.find('\n') {
-                    remaining = &remaining[pos + 1..];
+                // Check if this is an unsupported format
+                if remaining.starts_with("tff(") || remaining.starts_with("thf(") {
+                    // Skip TFF/THF formulas - not supported
+                    if let Some(pos) = remaining.find('\n') {
+                        remaining = &remaining[pos + 1..];
+                    } else {
+                        break;
+                    }
                 } else {
-                    break;
+                    // Skip to next line if we can't parse
+                    if let Some(pos) = remaining.find('\n') {
+                        remaining = &remaining[pos + 1..];
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -184,6 +203,9 @@ fn skip_whitespace_and_comments(input: &str) -> &str {
 
 /// Parse a single TPTP input
 fn parse_tptp_input(input: &str) -> IResult<&str, Option<TPTPInput>> {
+    // Skip leading whitespace
+    let (input, _) = multispace0(input)?;
+    
     alt((
         map(parse_cnf, Some),
         map(parse_include, Some),
@@ -379,5 +401,23 @@ mod tests {
         
         let (_, clause) = parse_clause("$false").unwrap();
         assert!(clause.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_cnf() {
+        let input = "cnf(test, axiom, p(a)).";
+        let result = parse_cnf(input);
+        assert!(result.is_ok(), "Failed to parse CNF: {:?}", result);
+        
+        let (remaining, tptp_input) = result.unwrap();
+        assert_eq!(remaining, "");
+        match tptp_input {
+            TPTPInput::Cnf { name, role, clause } => {
+                assert_eq!(name, "test");
+                assert_eq!(role, "axiom");
+                assert_eq!(clause.literals.len(), 1);
+            }
+            _ => panic!("Expected CNF input"),
+        }
     }
 }

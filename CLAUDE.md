@@ -18,15 +18,15 @@ pip install -e .
 
 ### Running Tests
 ```bash
-# Run all tests from src directory (required for imports to work)
-cd src && python -m pytest ../tests/ -v
+# Run all tests from python directory
+cd python && python -m pytest tests/ -v
 
 # Run specific test category
-cd src && python -m pytest ../tests/core/ -v
-cd src && python -m pytest ../tests/rules/ -v
+cd python && python -m pytest tests/core/ -v
+cd python && python -m pytest tests/rules/ -v
 
 # Run with coverage
-cd src && python -m pytest ../tests/ --cov=proofatlas
+cd python && python -m pytest tests/ --cov=proofatlas
 ```
 
 ### Test Structure
@@ -141,7 +141,7 @@ Implements the given clause algorithm:
 
 ### Key Implementation Notes
 
-1. **Import Structure**: Tests run from `src/` directory, so imports use `proofatlas.module.submodule`
+1. **Import Structure**: Tests run from `python/` directory, so imports use `proofatlas.module.submodule`
 
 2. **Rule Architecture**:
    - All rules inherit from `Rule` abstract base class

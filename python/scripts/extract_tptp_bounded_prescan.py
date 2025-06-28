@@ -23,8 +23,8 @@ import re
 # Load environment variables
 load_dotenv()
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from proofatlas.fileformats.tptp import TPTPFormat
 from proofatlas.core.logic import Problem
