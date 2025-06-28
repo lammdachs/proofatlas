@@ -7,7 +7,12 @@ We welcome contributions to ProofAtlas! This document provides guidelines for co
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/yourusername/proofatlas.git`
 3. Create a new branch: `git checkout -b feature/your-feature-name`
-4. Set up the development environment: `./setup.sh`
+4. Set up the development environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -e ".[dev]"
+   ```
 
 ## Development Process
 

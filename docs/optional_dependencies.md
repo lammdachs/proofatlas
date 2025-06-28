@@ -33,13 +33,14 @@ Install PyTorch and related packages if you want to:
 
 ### Installation
 
-During setup, answer "yes" when prompted, or install manually:
+PyTorch is included in the base dependencies but will install CPU version by default. For GPU support:
 
 ```bash
-conda activate proofatlas
-conda install -y pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
-conda install -y pyg -c pyg
-conda install -y pytorch-lightning torchmetrics -c conda-forge
+# Install PyTorch with CUDA support (example for CUDA 12.1)
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# For CPU-only (if you need to reinstall)
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### Usage Example
@@ -53,52 +54,6 @@ loop = BasicLoop()
 # Use GNN for clause selection during proof search
 ```
 
-## Optional: Claude CLI
-
-### When You Need It
-
-Install Claude CLI if you want:
-- Interactive AI assistance while developing
-- Help understanding and modifying the codebase
-- Suggestions for proof strategies
-- Code generation for new features
-
-### What It Includes
-
-- **Claude CLI**: Command-line interface to Claude AI
-- **Node.js**: Required runtime for the CLI
-
-### Installation
-
-During setup, answer "yes" when prompted, or install manually:
-
-```bash
-# Activate the conda environment
-conda activate proofatlas
-
-# Install Node.js via conda
-conda install -y nodejs -c conda-forge
-
-# Install Claude CLI locally in the environment
-npm install @anthropic-ai/claude-cli
-
-# The CLI will be available when the environment is active
-# Set up API key
-export ANTHROPIC_API_KEY='your-api-key-here'
-# Or run: claude login
-```
-
-Note: The setup script automatically configures the PATH so that locally installed npm packages are accessible when the conda environment is active.
-
-### Usage Example
-
-```bash
-# Get help with theorem proving
-claude "How do I implement a new inference rule in ProofAtlas?"
-
-# Analyze a proof
-claude --file proof.json "Explain this proof structure"
-```
 
 ## Choosing What to Install
 
@@ -108,8 +63,8 @@ If you're researching classical automated theorem proving, inference rules, or p
 ### For Machine Learning Research (Core + PyTorch)
 If you're researching neural theorem proving, learning proof guidance, or combining symbolic and neural methods, install PyTorch and related packages.
 
-### For Development (Core + Claude)
-If you're actively developing new features or need help understanding the codebase, Claude CLI can be a valuable assistant.
+### For Development
+Install the development dependencies with `pip install -e ".[dev]"` to get testing and code quality tools.
 
 ## System Requirements
 
@@ -124,25 +79,26 @@ If you're actively developing new features or need help understanding the codeba
 - **GPU**: NVIDIA GPU with 4GB+ VRAM recommended
 - **CUDA**: Version 12.1 compatible drivers
 
-### With Claude CLI
-- **Network**: Internet connection for API calls
-- **API Key**: Anthropic API key required
 
 ## TPTP Library
 
 The TPTP (Thousands of Problems for Theorem Provers) library is an optional but recommended resource containing thousands of theorem proving problems for testing and benchmarking.
 
-### Automatic Version Detection
+### Installation
 
-The setup script automatically:
-- Detects the latest TPTP version from the official distribution site
-- Checks if you have an existing TPTP installation and its version
-- Offers to upgrade if a newer version is available
-- Creates proper symlinks for easy access to the Problems directory
+ProofAtlas includes a command to download TPTP:
+
+```bash
+# Download to default location (.data/problems/tptp)
+proofatlas-download-tptp
+
+# Download to custom location
+proofatlas-download-tptp --data-dir /path/to/tptp
+```
 
 ### Manual Installation
 
-If you prefer to install TPTP manually:
+Alternatively, you can install TPTP manually:
 
 ```bash
 # Download the latest version from
@@ -165,7 +121,7 @@ If CUDA version conflicts occur:
 nvidia-smi
 
 # Install CPU-only version if no GPU
-conda install pytorch cpuonly -c pytorch
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### Import Errors
@@ -174,9 +130,3 @@ If you see `ImportError: No module named torch`:
 - The code is trying to use GNN features without PyTorch installed
 - Either install PyTorch or use a non-GNN selector (FIFO, Random)
 
-### Claude CLI Issues
-
-If `claude: command not found`:
-- Ensure npm/Node.js is installed
-- Check that npm global bin is in your PATH
-- Try: `export PATH=$PATH:$(npm config get prefix)/bin`

@@ -6,14 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Initial Setup
 ```bash
-# Create and activate conda environment
-./setup.sh  # Creates 'proofatlas' conda environment with all dependencies
+# Create virtual environment and install
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Manual activation
-conda activate proofatlas
+# Install in development mode with all dependencies
+pip install -e ".[dev]"
 
-# Install in development mode
-pip install -e .
+# Optional: Download TPTP library
+proofatlas-download-tptp
 ```
 
 ### Running Tests

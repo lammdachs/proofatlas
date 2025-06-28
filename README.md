@@ -46,102 +46,82 @@ proofatlas/
 ## Installation
 
 ### Prerequisites
-- Conda (Anaconda or Miniconda) - can be installed automatically by the setup script
-- CUDA-capable GPU (optional, for GNN-based clause selection)
-- Rust toolchain (optional, for Rust components)
+- Python 3.11 or 3.12
+- Rust toolchain (for building the acceleration module)
 
-### Quick Setup
+### Install via pip
+
+ProofAtlas is distributed via pip. We recommend installing in a virtual environment:
+
+```bash
+# Create a virtual environment
+python -m venv proofatlas-env
+source proofatlas-env/bin/activate  # On Windows: proofatlas-env\Scripts\activate
+
+# Install ProofAtlas
+pip install proofatlas
+```
+
+#### PyTorch Setup
+
+ProofAtlas requires PyTorch. If you already have PyTorch installed in your environment, ProofAtlas will use it. Otherwise, we'll install PyTorch with CPU support by default.
+
+**For GPU support**, install PyTorch first with your CUDA version:
+```bash
+# Example for CUDA 12.1
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Example for CUDA 11.8
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
+**For CPU-only**, PyTorch will be installed automatically, or you can explicitly install:
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+Check your CUDA version:
+```bash
+nvidia-smi  # Shows your NVIDIA driver and CUDA version
+```
+
+### Development Installation
+
+For development or to access the latest features:
+
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/proofatlas.git
 cd proofatlas
 
-# Run the setup script
-./setup.sh
-```
-
-The setup script will:
-1. Install Miniconda if conda is not found (optional)
-2. Create a conda environment with core dependencies from `environment.yml`
-3. Install PyTorch and GNN packages with CPU or GPU support
-4. Configure paths using simple module-mirroring directory structure
-5. Install the Python package in development mode
-
-### Optional: Build Rust Components
-
-For high-performance TPTP parsing and future Rust components:
-
-```bash
-# Install Rust if not present
+# Install Rust (if not present)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install maturin
-pip install maturin
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Build Rust components
-cd rust
-maturin develop
-cd ..
+# Install in development mode with all optional dependencies
+pip install -e ".[dev]"
 ```
-5. Set up the project in development mode
-6. Create necessary directories and configuration files
-7. Optionally download the latest TPTP problem library
 
-See [Directory Structure](docs/directory_structure.md) for details on the project's data organization.
 
-### Installation Details
+### Downloading TPTP Library
 
-#### Core Features
-The installation includes all theorem proving and machine learning functionality:
-- Saturation-based theorem prover with given clause algorithm
-- Resolution, factoring, and subsumption inference rules
-- TPTP problem format parser
-- Basic clause selection strategies (FIFO, Random)
-- GNN-based clause selection and learned proof guidance
-- Neural premise selection
-- Proof visualization and exploration tools
-
-#### PyTorch Installation
-During setup, you'll be prompted to:
-- Enter a CUDA version for GPU support
-- Or press Enter for CPU-only installation
-
-**Important**: 
-- The setup installs CUDA toolkit via conda, providing a self-contained CUDA environment
-- You must specify the exact CUDA version compatible with your GPU and drivers
-- The installer will show your current NVIDIA driver version if available
-
-**Manual Installation Commands**:
+After installation, you can download the TPTP problem library:
 
 ```bash
-# For CPU-only installation:
-conda activate proofatlas
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install torch-geometric pytorch-lightning torchmetrics
+# Download TPTP to default location (.data/problems/tptp)
+proofatlas-download-tptp
 
-# For GPU installation with specific CUDA version:
-conda activate proofatlas
-# First install CUDA toolkit (replace X.Y with your CUDA version):
-conda install -y cuda-toolkit=X.Y -c nvidia
-# Then install PyTorch (replace XY with version without dot, e.g., 12.1 -> 121):
-pip install torch --index-url https://download.pytorch.org/whl/cuXY
-pip install torch-geometric pytorch-lightning torchmetrics
+# Download to custom location
+proofatlas-download-tptp --data-dir /path/to/tptp
 
-# Check your NVIDIA driver version:
-nvidia-smi
+# Force re-download
+proofatlas-download-tptp --force
 ```
 
-
-### Manual Setup
-If you prefer manual installation:
-```bash
-# Create and activate conda environment
-conda env create -f environment.yml
-conda activate proofatlas
-
-# Install the package
-pip install -e .
-```
+The TPTP library contains thousands of theorem proving problems and is useful for testing and benchmarking.
 
 ## Project Structure
 

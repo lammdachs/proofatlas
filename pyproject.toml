@@ -8,14 +8,27 @@ version = "0.1.0"
 description = "ProofAtlas: Automated theorem proving with Python and Rust"
 authors = [{name = "ProofAtlas Contributors"}]
 requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
 keywords = ["theorem-proving", "automated-reasoning", "tptp", "first-order-logic"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/proofatlas"
+Documentation = "https://github.com/yourusername/proofatlas/blob/main/README.md"
+Repository = "https://github.com/yourusername/proofatlas"
+Issues = "https://github.com/yourusername/proofatlas/issues"
+
+[project.scripts]
+proofatlas-download-tptp = "proofatlas.utils.download_tptp:main"
 
 dependencies = [
     "lark",
@@ -23,11 +36,31 @@ dependencies = [
     "numpy",
     "tqdm",
     "python-dotenv",
+    "pyyaml",
+    "torch>=2.0.0",  # Will install CPU version by default; see README for GPU setup
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-benchmark", "ruff", "black", "mypy"]
-ml = ["torch", "torch-geometric"]
+dev = [
+    "pytest",
+    "pytest-benchmark",
+    "ruff",
+    "black",
+    "mypy",
+    "torch",
+    "torch-geometric",
+    "pytorch-lightning",
+    "torchmetrics",
+    "scipy",
+    "matplotlib",
+    "plotly",
+    "click",
+    "rich",
+    "textual",
+    "sortedcontainers",
+    "gitpython",
+    "omegaconf",
+]
 
 [tool.maturin]
 python-source = "python"

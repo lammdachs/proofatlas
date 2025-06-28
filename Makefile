@@ -6,7 +6,7 @@
 help:
 	@echo "ProofAtlas Development Commands"
 	@echo "=============================="
-	@echo "  make setup        - Set up conda environment and install dependencies"
+	@echo "  make setup        - Set up development environment"
 	@echo "  make test         - Run all tests (Python + Rust)"
 	@echo "  make test-python  - Run Python tests only"
 	@echo "  make test-rust    - Run Rust tests only"
@@ -16,9 +16,13 @@ help:
 	@echo "  make format       - Format Python and Rust code"
 	@echo "  make lint         - Run linters on Python and Rust code"
 
-# Setup environment
+# Setup development environment
 setup:
-	./setup.sh
+	python -m venv venv
+	@echo "Virtual environment created. Activate it with:"
+	@echo "  source venv/bin/activate  # On Linux/Mac"
+	@echo "  venv\\Scripts\\activate     # On Windows"
+	@echo "Then run: pip install -e '.[dev]'"
 
 # Run all tests
 test: test-python test-rust
