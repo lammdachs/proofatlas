@@ -1,0 +1,10 @@
+%--------------------------------------------------------------------
+% File     : simple_problem.tptp
+% Domain   : Test problem for ProofAtlas
+% Problem  : Simple propositional logic problem  
+%--------------------------------------------------------------------
+
+cnf(axiom1, axiom, p | q).
+cnf(axiom2, axiom, ~p | r).
+cnf(axiom3, axiom, ~q | r).
+cnf(goal, negated_conjecture, ~r).

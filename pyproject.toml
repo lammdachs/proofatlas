@@ -20,16 +20,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/proofatlas"
-Documentation = "https://github.com/yourusername/proofatlas/blob/main/README.md"
-Repository = "https://github.com/yourusername/proofatlas"
-Issues = "https://github.com/yourusername/proofatlas/issues"
-
-[project.scripts]
-proofatlas-download-tptp = "proofatlas.utils.download_tptp:main"
-
 dependencies = [
     "lark",
     "networkx",
@@ -39,6 +29,15 @@ dependencies = [
     "pyyaml",
     "torch>=2.0.0",  # Will install CPU version by default; see README for GPU setup
 ]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/proofatlas"
+Documentation = "https://github.com/yourusername/proofatlas/blob/main/README.md"
+Repository = "https://github.com/yourusername/proofatlas"
+Issues = "https://github.com/yourusername/proofatlas/issues"
+
+[project.scripts]
+proofatlas-download-tptp = "proofatlas.utils.download_tptp:main"
 
 [project.optional-dependencies]
 dev = [
@@ -67,6 +66,8 @@ python-source = "python"
 module-name = "proofatlas_rust"
 manifest-path = "rust/Cargo.toml"
 features = ["pyo3/extension-module"]
+# Tell maturin to include the pure Python modules
+include = ["python/proofatlas/**/*"]
 
 [tool.setuptools.packages.find]
 where = ["python"]

@@ -3,4 +3,4 @@
 pub mod parser;
 pub mod types;
 pub mod core;
-pub mod proofs;
+pub mod array_bindings;

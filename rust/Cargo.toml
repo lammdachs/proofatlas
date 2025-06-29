@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]  # Both Python extension and Rust library
 [dependencies]
 # Python bindings
 pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+numpy = { version = "0.20", optional = true }  # For zero-copy array transfer to Python
 
 # Core dependencies
 nom = "7"                        # Parser combinators (used in parser/tptp.rs)
@@ -35,7 +36,7 @@ indexmap = { version = "2.0", features = ["serde"] }  # Used in core/logic.rs fo
 
 [features]
 default = ["python"]
-python = ["pyo3"]              # Python bindings
+python = ["pyo3", "numpy"]     # Python bindings with numpy support
 # parallel = ["rayon", "dashmap"] # Parallel saturation loops (future)
 # graph = ["petgraph"]           # Graph-based proof analysis (future)
 

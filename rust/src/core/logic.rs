@@ -236,6 +236,16 @@ impl Problem {
             })
             .collect()
     }
+    
+    /// Serialize the problem to JSON string
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+    
+    /// Deserialize a problem from JSON string
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
 }
 
 impl fmt::Display for Problem {

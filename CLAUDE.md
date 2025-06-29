@@ -31,18 +31,50 @@ cd python && python -m pytest tests/ --cov=proofatlas
 ```
 
 ### Test Structure
+
+#### Python Tests
 Tests are organized to mirror the source structure:
 ```
-tests/
-├── core/           # Tests for core.logic, core.state
-├── proofs/         # Tests for proofs module
-├── rules/          # Tests for rules module
-├── loops/          # Tests for saturation loops
-├── data/           # Tests for data module
-├── fileformats/    # Tests for file format parsers
-├── navigator/      # Tests for proof navigator
-├── test_data/      # Test data and generated proofs for inspection
-└── test_serialized_data.py  # Integration tests
+python/tests/
+├── core/                    # Tests for core.logic, core.state  
+├── proofs/                  # Tests for proofs module
+├── rules/                   # Tests for rules module
+├── loops/                   # Tests for saturation loops
+├── data/                    # Tests for data module
+├── fileformats/             # Tests for file format parsers
+├── navigator/               # Tests for proof navigator
+├── selectors/               # Tests for clause selectors
+├── integration/             # Integration tests
+├── test_data/               # Test fixtures, TPTP files, reference proofs
+├── test_serialization.py    # Comprehensive serialization tests
+└── test_rust_bindings.py    # Tests for Rust Python bindings
+```
+
+#### Rust Tests
+Rust tests follow a different pattern with tests distributed across the codebase:
+```
+rust/
+├── src/
+│   └── */                   # Each module contains:
+│       ├── mod.rs          # Module definition with inline unit tests (~110 tests total)
+│       └── *_tests.rs      # Comprehensive unit tests in separate files
+└── tests/                   # Integration tests ONLY (not all tests!)
+    ├── README.md           # Explains test organization
+    └── integration_test.rs # Cross-module integration tests
+```
+
+**Important**: The `tests/` directory contains only integration tests. Most tests are unit tests within the `src/` directory.
+
+To run Rust tests:
+```bash
+# Run all tests
+cargo test
+
+# Run only unit tests
+cargo test --lib
+
+# Run only integration tests  
+cargo test --test '*'
 ```
 
 ### Development Commands
@@ -113,8 +145,12 @@ src/proofatlas/
 └── utils/
 
 scripts/
-├── print_proof.py  # Non-interactive proof printer (CLI starts at step 0)
-└── inspect_proof.py # Interactive proof navigator
+├── benchmark_parser.py  # Compare Rust vs Vampire parser performance
+├── extract_tptp.py      # Unified TPTP extraction with filtering options
+├── inspect_proof.py     # Interactive proof navigator
+├── parse_tptp.py        # Simple TPTP parser for testing
+├── print_proof.py       # Non-interactive proof printer (CLI starts at step 0)
+└── tptp_to_json.py      # Convert TPTP files to JSON using Rust parser
 
 docs/
 └── saturation_loop_design.md  # Design and implementation details for BasicLoop

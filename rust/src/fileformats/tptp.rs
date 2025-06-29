@@ -3,7 +3,7 @@
 //! This module provides high-level APIs for working with TPTP files
 
 use crate::core::{logic::Problem, error::Result};
-use crate::parser;
+use crate::fileformats;
 use std::path::Path;
 
 /// TPTP format handler
@@ -27,17 +27,17 @@ impl TPTPFormat {
                 "Invalid file path".to_string()
             ))?;
         
-        parser::tptp::parse_file(path_str, self.include_path.as_deref())
+        fileformats::tptp_parser::parse_file(path_str, self.include_path.as_deref())
     }
     
     /// Parse TPTP content from string
     pub fn parse_string(&self, content: &str) -> Result<Problem> {
-        parser::tptp::parse_string(content)
+        fileformats::tptp_parser::parse_string(content)
     }
     
     /// Quick prescan to estimate complexity
     pub fn prescan_file(&self, file_path: &Path) -> Result<(usize, bool)> {
-        parser::prescan::prescan_file(file_path, 3, &mut std::collections::HashSet::new())
+        fileformats::prescan::prescan_file(file_path, 3, &mut std::collections::HashSet::new())
     }
 }
 

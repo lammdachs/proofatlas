@@ -1,43 +1,82 @@
-"""
-Python wrappers for Rust-based ProofState.
+"""ProofState implementation using Rust backend."""
 
-This module provides thin wrappers around the Rust implementations
-to maintain backward compatibility with existing Python code.
-"""
+from typing import List, Optional
+import proofatlas_rust
 
-try:
-    from proofatlas_rust.proofs import ProofState as _RustProofState
-except ImportError:
-    # Fall back to pure Python implementation if Rust module not available
-    from .state import ProofState as _RustProofState
+from proofatlas.core.logic import Clause
 
 
-class ProofState(_RustProofState):
+class ProofState:
     """
-    Python-friendly wrapper around Rust ProofState.
+    Python wrapper for Rust ProofState implementation.
     
-    Maintains compatibility with existing Python API while using
-    Rust implementation for performance.
+    This class provides a Python-friendly interface to the Rust ProofState
+    while maintaining compatibility with the existing Python API.
     """
     
-    def __init__(self, processed, unprocessed):
+    def __init__(self, processed: List[Clause], unprocessed: List[Clause]):
         """Initialize a ProofState with processed and unprocessed clauses."""
-        # Convert Python clauses to string representation for Rust
-        # In full implementation, would properly convert clause objects
-        processed_strs = [str(c) for c in processed]
-        unprocessed_strs = [str(c) for c in unprocessed]
-        super().__init__(processed_strs, unprocessed_strs)
+        # Store Python clauses
+        self._processed = list(processed)
+        self._unprocessed = list(unprocessed)
+        
+        # Create string representations for Rust
+        processed_strs = [str(clause) for clause in processed]
+        unprocessed_strs = [str(clause) for clause in unprocessed]
+        
+        # Create Rust ProofState
+        self._rust_state = proofatlas_rust.proofs.ProofState(processed_strs, unprocessed_strs)
     
-    def add_processed(self, clause):
+    @property
+    def processed(self) -> List[Clause]:
+        """Return processed clauses."""
+        return self._processed
+    
+    @property
+    def unprocessed(self) -> List[Clause]:
+        """Return unprocessed clauses."""
+        return self._unprocessed
+    
+    @property
+    def all_clauses(self) -> List[Clause]:
+        """Return all clauses (processed + unprocessed)."""
+        return self._processed + self._unprocessed
+    
+    @property
+    def contains_empty_clause(self) -> bool:
+        """Check if the state contains the empty clause."""
+        return any(len(clause.literals) == 0 for clause in self.all_clauses)
+    
+    def add_processed(self, clause: Clause):
         """Add a clause to the processed set."""
-        # Would need to implement this in Rust bindings
-        pass
+        self._processed.append(clause)
+        # Update Rust state
+        self._sync_to_rust()
     
-    def add_unprocessed(self, clause):
+    def add_unprocessed(self, clause: Clause):
         """Add a clause to the unprocessed set."""
-        # Would need to implement this in Rust bindings
-        pass
-
-
-# For backward compatibility
-__all__ = ['ProofState']
+        self._unprocessed.append(clause)
+        # Update Rust state
+        self._sync_to_rust()
+    
+    def move_to_processed(self, clause: Clause):
+        """Move a clause from unprocessed to processed."""
+        if clause in self._unprocessed:
+            self._unprocessed.remove(clause)
+            self._processed.append(clause)
+            # Update Rust state
+            self._sync_to_rust()
+    
+    def get_next_unprocessed_idx(self) -> Optional[int]:
+        """Get the index of the next unprocessed clause, or None if empty."""
+        return 0 if self._unprocessed else None
+    
+    def _sync_to_rust(self):
+        """Synchronize Python state to Rust state."""
+        processed_strs = [str(clause) for clause in self._processed]
+        unprocessed_strs = [str(clause) for clause in self._unprocessed]
+        self._rust_state = proofatlas_rust.proofs.ProofState(processed_strs, unprocessed_strs)
+    
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return f"ProofState(processed={len(self._processed)}, unprocessed={len(self._unprocessed)})"

@@ -5,17 +5,12 @@
 
 // Module declarations
 pub mod core;
-pub mod parser;
 pub mod fileformats;
-pub mod proofs;
-
-// Future modules (uncomment as implemented)
-// pub mod rules;
-// pub mod loops;
+pub mod array_repr;
 
 // Re-exports for convenient access
 pub use crate::core::{logic, error};
-pub use crate::parser::tptp;
+pub use crate::fileformats::tptp_parser as tptp;
 pub use crate::fileformats::tptp as tptp_format;
 
 // Python bindings module (only compiled with python feature)
@@ -39,10 +34,11 @@ fn proofatlas_rust(py: Python, m: &PyModule) -> PyResult<()> {
     python::core::register_core_module(py, core_module)?;
     m.add_submodule(core_module)?;
     
-    // Add proofs module
-    let proofs_module = PyModule::new(py, "proofs")?;
-    python::proofs::register_proofs_module(py, proofs_module)?;
-    m.add_submodule(proofs_module)?;
+    
+    // Add array module
+    let array_module = PyModule::new(py, "array_repr")?;
+    python::array_bindings::register_array_module(py, array_module)?;
+    m.add_submodule(array_module)?;
     
     Ok(())
 }

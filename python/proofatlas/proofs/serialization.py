@@ -1,21 +1,34 @@
 """JSON serialization for proof objects."""
 
 import json
+import os
 from pathlib import Path
 from typing import Union
 
 from proofatlas.core.serialization import CoreJSONEncoder, decode_core_object
 from proofatlas.rules import RuleApplication
-from .proof import Proof, ProofStep
-from .state import ProofState
+
+# Import the appropriate implementations based on USE_RUST
+USE_RUST = os.environ.get('PROOFATLAS_USE_RUST', 'false').lower() == 'true'
+
+if USE_RUST:
+    try:
+        from .proof_rust import Proof, ProofStep
+        from .state_rust import ProofState
+    except ImportError:
+        from .proof import Proof, ProofStep
+        from .state import ProofState
+else:
+    from .proof import Proof, ProofStep
+    from .state import ProofState
 
 
 class ProofJSONEncoder(CoreJSONEncoder):
     """JSON encoder for proof objects."""
     
     def default(self, obj):
-        # ProofState
-        if isinstance(obj, ProofState):
+        # ProofState - check by class name to support both Python and Rust implementations
+        if obj.__class__.__name__ == "ProofState":
             return {
                 "_type": "ProofState",
                 "processed": obj.processed,
@@ -33,8 +46,8 @@ class ProofJSONEncoder(CoreJSONEncoder):
                 "metadata": obj.metadata
             }
         
-        # ProofStep
-        elif isinstance(obj, ProofStep):
+        # ProofStep - check by class name
+        elif obj.__class__.__name__ == "ProofStep":
             return {
                 "_type": "ProofStep",
                 "state": obj.state,
@@ -43,8 +56,8 @@ class ProofJSONEncoder(CoreJSONEncoder):
                 "metadata": obj.metadata
             }
         
-        # Proof
-        elif isinstance(obj, Proof):
+        # Proof - check by class name
+        elif obj.__class__.__name__ == "Proof":
             return {
                 "_type": "Proof",
                 "steps": obj.steps

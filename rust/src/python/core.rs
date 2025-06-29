@@ -43,6 +43,37 @@ impl PyProblem {
         self.inner.clauses.len()
     }
     
+    /// Serialize the problem to JSON
+    fn to_json(&self) -> PyResult<String> {
+        self.inner.to_json()
+            .map_err(|e| PyValueError::new_err(format!("Failed to serialize to JSON: {}", e)))
+    }
+    
+    /// Save the problem to a JSON file
+    fn save_json(&self, filepath: &str) -> PyResult<()> {
+        let json = self.to_json()?;
+        std::fs::write(filepath, json)
+            .map_err(|e| PyValueError::new_err(format!("Failed to write file: {}", e)))
+    }
+    
+    /// Load a problem from a JSON file
+    #[staticmethod]
+    fn load_json(filepath: &str) -> PyResult<Self> {
+        let json = std::fs::read_to_string(filepath)
+            .map_err(|e| PyValueError::new_err(format!("Failed to read file: {}", e)))?;
+        let problem = Problem::from_json(&json)
+            .map_err(|e| PyValueError::new_err(format!("Failed to parse JSON: {}", e)))?;
+        Ok(PyProblem { inner: problem })
+    }
+    
+    /// Create a problem from JSON string
+    #[staticmethod]
+    fn from_json(json: &str) -> PyResult<Self> {
+        let problem = Problem::from_json(json)
+            .map_err(|e| PyValueError::new_err(format!("Failed to parse JSON: {}", e)))?;
+        Ok(PyProblem { inner: problem })
+    }
+    
     /// Get clauses as a list (returns JSON representation)
     #[getter]
     fn clauses(&self, py: Python) -> PyResult<PyObject> {

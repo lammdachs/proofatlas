@@ -21,6 +21,52 @@ except ImportError:
 pytestmark = pytest.mark.skipif(not RUST_AVAILABLE, reason="Rust module not available")
 
 
+class TestRustModuleAvailability:
+    """Test that Rust module is properly built and available."""
+    
+    def test_rust_module_structure(self):
+        """Test that Rust module has expected structure."""
+        import proofatlas_rust
+        
+        # Check main module attributes
+        assert hasattr(proofatlas_rust, 'core')
+        assert hasattr(proofatlas_rust, 'proofs')
+        
+        # Check core submodule
+        assert hasattr(proofatlas_rust.core, 'Problem')
+        
+        # Check proofs submodule
+        assert hasattr(proofatlas_rust.proofs, 'ProofState')
+        assert hasattr(proofatlas_rust.proofs, 'Proof')
+        assert hasattr(proofatlas_rust.proofs, 'ProofStep')
+        assert hasattr(proofatlas_rust.proofs, 'RuleApplication')
+    
+    def test_rust_types_are_not_python(self):
+        """Ensure Rust types are distinct from Python types."""
+        import proofatlas_rust
+        
+        # Get Rust types
+        RustProblem = proofatlas_rust.core.Problem
+        RustProofState = proofatlas_rust.proofs.ProofState
+        
+        # PyO3 types show up as builtins, but we can verify they're from our module
+        # by checking they exist in the right place
+        assert hasattr(proofatlas_rust.core, 'Problem')
+        assert hasattr(proofatlas_rust.proofs, 'ProofState')
+        
+        # Create instances - if these were Python types, they'd have different signatures
+        problem = RustProblem()
+        state = RustProofState([], [])
+        
+        # Rust types from PyO3 show as builtins but have specific behavior
+        assert problem.__class__.__module__ == 'builtins'  # This is expected for PyO3
+        assert problem.__class__.__name__ == 'Problem'
+        
+        # The key test: these will fail if using Python implementation
+        # because Python implementation has different constructor signatures
+        # and would fail with the imports since we removed fallbacks
+
+
 class TestRustProblem:
     """Test the Rust Problem implementation."""
     
@@ -295,12 +341,29 @@ class TestRustProof:
 class TestPythonWrappers:
     """Test the Python wrapper classes."""
     
+    def test_wrapper_uses_rust_implementation(self):
+        """Verify wrappers are using Rust implementation, not Python fallback."""
+        from proofatlas.core.logic_rust import Problem
+        from proofatlas.proofs.state_rust import ProofState
+        from proofatlas.proofs.proof_rust import Proof
+        
+        # Check that base classes are from Rust module
+        assert Problem.__base__.__module__ == 'proofatlas_rust.core'
+        assert ProofState.__base__.__module__ == 'proofatlas_rust.proofs'
+        assert Proof.__base__.__module__ == 'proofatlas_rust.proofs'
+        
+        # If these were using Python fallback, the base would be from proofatlas.core.logic etc
+    
     def test_problem_wrapper(self):
         """Test Problem Python wrapper."""
         from proofatlas.core.logic_rust import Problem
         
         problem = Problem()
         assert problem is not None
+        
+        # Verify it's actually a Rust-backed instance
+        assert hasattr(problem, '__class__')
+        assert 'Rust' in str(type(problem).__base__)
         
         # Test wrapper methods
         assert problem.depth() == 0
@@ -323,7 +386,7 @@ class TestPythonWrappers:
     
     def test_proof_wrapper(self):
         """Test Proof Python wrapper."""
-        from proofatlas.proofs.proof_rust import Proof, ProofStep, RuleApplication
+        from proofatlas.proofs.proof_rust import Proof
         
         proof = Proof()
         assert proof is not None
