@@ -1,102 +1,185 @@
-# ProofAtlas Rust Components
+# ProofAtlas Rust Implementation
 
-High-performance Rust implementations of ProofAtlas components with Python bindings.
+This directory contains the high-performance Rust implementation of the ProofAtlas theorem prover, featuring an efficient array-based representation for first-order logic formulas and modern superposition calculus inference rules.
 
-## Project Structure
+## Architecture Overview
 
-This project is designed to support gradual migration of ProofAtlas components from Python to Rust:
+The Rust implementation uses a Compressed Sparse Row (CSR) array representation for logical formulas, providing excellent cache locality and performance. The architecture is divided into three main components:
 
+### Core Module (`src/core/`)
+Foundation data structures and types:
+- **`problem.rs`** - `ArrayProblem` struct using CSR representation for formulas
+- **`symbol_table.rs`** - String interning for efficient symbol storage
+- **`builder.rs`** - `ArrayBuilder` for constructing array representations
+- **`proof.rs`** - Proof tracking types (`ProofStep`, `Proof`, `InferenceRule`)
+- **`parser_convert.rs`** - Conversion from parse types to array representation
+
+### Rules Module (`src/rules/`)
+Modular inference rules for superposition calculus:
+- **`common.rs`** - Shared types and utilities (`InferenceResult`)
+- **`resolution.rs`** - Binary resolution rule
+- **`factoring.rs`** - Factoring rule  
+- **`superposition.rs`** - Superposition rule (equality handling)
+- **`equality_resolution.rs`** - Equality resolution rule
+- **`equality_factoring.rs`** - Equality factoring rule
+
+### Saturation Module (`src/saturation/`)
+Given-clause saturation loop and supporting algorithms:
+- **`loop.rs`** - Main saturation algorithm implementation
+- **`literal_selection.rs`** - Strategies for constraining inference
+- **`clause_selection.rs`** - Clause selection for given-clause algorithm
+- **`subsumption.rs`** - Subsumption checking and indexing
+- **`unification.rs`** - Fast array-based unification
+
+## Array Representation
+
+The core uses a CSR (Compressed Sparse Row) format with **pre-allocated Box<[T]> arrays** for zero-copy Python interoperability:
+
+```rust
+pub struct ArrayProblem {
+    // Node data - stored as primitives for zero-copy Python interface
+    pub node_types: Box<[u8]>,         // NodeType as u8 (0=Variable, 1=Constant, etc.)
+    pub node_symbols: Box<[u32]>,      // Symbol table indices
+    pub node_polarities: Box<[i8]>,    // For literals: 1 (positive), -1 (negative), 0 (n/a)
+    pub node_arities: Box<[u32]>,      // Number of arguments/children
+    pub node_selected: Box<[bool]>,    // For literal selection
+    
+    // Edge data (CSR format)
+    pub edge_row_offsets: Box<[usize]>, // Start index for each node's edges
+    pub edge_col_indices: Box<[u32]>,   // Target node indices
+    
+    // Hierarchical structure
+    pub clause_boundaries: Box<[usize]>, // Start/end indices for clauses
+    pub clause_types: Box<[u8]>,        // ClauseType as u8
+    pub literal_boundaries: Box<[usize]>, // Start/end indices for literals
+    
+    // Symbol table (remains as SymbolTable for flexibility)
+    pub symbols: SymbolTable,
+    
+    // Metadata - tracks actual usage within pre-allocated arrays
+    pub num_nodes: usize,
+    pub num_clauses: usize,
+    pub num_literals: usize,
+    pub num_edges: usize,
+    
+    // Capacity tracking
+    pub max_nodes: usize,
+    pub max_clauses: usize,
+    pub max_edges: usize,
+}
 ```
-src/
-├── core/           # Core logic types (Term, Literal, Clause, Problem)
-├── parser/         # TPTP parser implementation
-├── fileformats/    # File format handlers
-├── python/         # PyO3 Python bindings
-└── lib.rs          # Main library entry point
 
-Future modules:
-├── rules/          # Inference rules (resolution, factoring, etc.)
-├── proofs/         # Proof state and tracking
-└── loops/          # Saturation loop implementations
-```
+### Key Design Decisions:
 
-## Building
+1. **Box<[T]> instead of Vec<T>**: Provides stable memory addresses, enabling future zero-copy access from Python
+2. **Pre-allocation**: Arrays are allocated upfront with capacity for saturation
+3. **Primitive types**: Enums stored as u8/u32 for numpy compatibility
+4. **Capacity tracking**: Prevents buffer overflows with CapacityError
+
+## Building and Testing
 
 ### Prerequisites
+- Rust 1.70 or later
+- Cargo
 
-1. Install Rust: https://rustup.rs/
-2. Install Maturin: `pip install maturin`
-
-### Development Build
-
+### Build
 ```bash
-cd rust_tptp_parser
-maturin develop
+cargo build --release
 ```
 
-### Release Build
-
+### Run Tests
 ```bash
-maturin build --release
+# Run all tests
+cargo test
+
+# Run only unit tests
+cargo test --lib
+
+# Run only integration tests  
+cargo test --test '*'
+
+# Run specific module tests
+cargo test core
+cargo test rules
+cargo test saturation
 ```
+
+### Test Organization
+- Unit tests are located within each module in `*_tests.rs` files
+- Integration tests are in the `tests/` directory
+- See `tests/README.md` for integration test details
 
 ## Usage
 
-The Rust parser returns Python `Problem` objects that are fully compatible with the existing Python codebase:
+### As a Library
+```rust
+use proofatlas_rust::core::{ArrayProblem, ArrayBuilder};
+use proofatlas_rust::saturation::{saturate, SaturationConfig};
+use proofatlas_rust::parsing::tptp::TPTPFormat;
 
-```python
-import proofatlas_rust
+// Parse a TPTP file
+let parser = TPTPFormat::new();
+let problem = parser.parse_file(Path::new("problem.p"))?;
 
-# Create parser with include path
-parser = proofatlas_rust.parser.RustTPTPParser(include_path="/path/to/tptp/")
+// Run saturation
+let config = SaturationConfig::default();
+let result = saturate(problem, config);
 
-# Parse file - returns a proofatlas.core.logic.Problem object
-problem = parser.parse_file("ALG001-1.p")
-print(f"Parsed {len(problem.clauses)} clauses")
-
-# Or use the functional API
-problem = proofatlas_rust.parser.parse_file("ALG001-1.p", include_path="/path/to/tptp/")
-
-# Pre-scan for performance (avoid parsing large files)
-literal_count, is_exact = proofatlas_rust.parser.prescan_file("ALG001-1.p")
-if literal_count <= 1000:  # Only parse if reasonable size
-    problem = parser.parse_file("ALG001-1.p")
-
-# For JSON serialization, use parse_file_to_dict
-problem_dict = parser.parse_file_to_dict("ALG001-1.p")
+match result {
+    SaturationResult::Proof(proof) => println!("Found proof!"),
+    SaturationResult::Saturated => println!("Saturated without proof"),
+    SaturationResult::ResourceLimit => println!("Resource limit exceeded"),
+}
 ```
 
-## Performance
-
-The Rust parser offers significant performance improvements:
-- 10-100x faster parsing for large files
-- Efficient pre-scanning to avoid parsing oversized problems
-- Zero-copy parsing where possible
-- Parallel processing support (future)
-
-## Integration with Existing Code
-
-The parser is designed as a drop-in replacement:
+### Python Bindings
+The Rust implementation provides Python bindings via PyO3 with array-based interface:
 
 ```python
-# Old Python code:
-from proofatlas.fileformats.tptp import TPTPFormat
-tptp = TPTPFormat()
-problem = tptp.parse_file(Path("example.p"))
+from proofatlas_rust.parser import parse_string_to_array
+from proofatlas_rust.array_repr import ArrayProblem
 
-# New Rust-accelerated code:
-import proofatlas_rust
-parser = proofatlas_rust.parser.RustTPTPParser()
-problem = parser.parse_file("example.p")
+# Parse TPTP to pre-allocated array problem
+problem = parse_string_to_array(
+    tptp_content,
+    max_nodes=1000000,    # Pre-allocate for 1M nodes
+    max_clauses=100000,   # Pre-allocate for 100k clauses
+    max_edges=5000000     # Pre-allocate for 5M edges
+)
+
+# Access arrays (currently copies, zero-copy planned)
+node_types, symbols, polarities, arities = problem.get_node_arrays()
+
+# Freeze to prevent modifications
+problem.freeze()
+
+# Run saturation (only on unfrozen problems)
+found_proof, num_clauses, num_steps = problem.saturate(max_clauses=10000)
 ```
 
-## Future Components
+## Performance Considerations
 
-This structure supports gradually porting more components:
+1. **Array Representation**: The CSR format provides excellent cache locality for traversing formula structures
+2. **String Interning**: All symbols are interned in a `SymbolTable` for fast comparison
+3. **Literal Selection**: Constrains the search space by limiting which literals participate in inference
+4. **Subsumption Checking**: Eliminates redundant clauses (currently uses linear search, discrimination trees planned)
 
-1. **Rules Module**: Port inference rules for faster proof search
-2. **Saturation Loops**: Parallel saturation with Rayon
-3. **Proof Compression**: Efficient proof storage and manipulation
-4. **Indexing**: Fast subsumption and unification indexes
+## Future Improvements
 
-Each component can be developed independently and integrated via PyO3.
+- [ ] Implement term ordering (KBO or LPO) for orienting equations
+- [ ] Add discrimination trees for efficient subsumption checking
+- [ ] Implement backward simplification in the saturation loop
+- [ ] Add support for AC (associative-commutative) theories
+- [ ] Optimize unification with occurs check
+
+## Contributing
+
+When adding new features:
+1. Follow the existing module structure (core/rules/saturation)
+2. Add comprehensive unit tests in `*_tests.rs` files
+3. Update documentation as needed
+4. Run `cargo fmt` and `cargo clippy` before submitting
+
+## License
+
+This is part of the ProofAtlas project. See the main project LICENSE file for details.

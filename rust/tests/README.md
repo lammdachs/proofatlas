@@ -8,8 +8,8 @@ This directory contains **integration tests** for the ProofAtlas Rust crate. The
 
 ## Test Organization
 
-- **Unit Tests** (~110 tests): Located in `src/` files, testing implementation details
-  - Example: `src/rules/resolution.rs` contains tests for the resolution rule
+- **Unit Tests**: Located in `src/` files, testing implementation details
+  - Example: `src/algorithms/rules_tests.rs` contains tests for inference rules
   - Run with: `cargo test --lib`
 
 - **Integration Tests** (this directory): Testing the public API
@@ -42,4 +42,4 @@ Integration tests in this directory:
 
 ## Current Tests
 
-- `integration_test.rs`: Tests inference rules working together, forward subsumption, and discrimination tree indexing
+- `integration_test.rs`: Tests array-based theorem prover with saturation loop and inference rules
