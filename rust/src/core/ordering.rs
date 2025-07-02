@@ -56,39 +56,69 @@ fn count_variables_recursive(problem: &Problem, term: usize, counts: &mut Vec<(u
 /// Returns Ordering::Less if term1 < term2  
 /// Returns Ordering::Equal if terms are equivalent
 pub fn kbo_compare(problem: &Problem, term1: usize, term2: usize) -> Ordering {
-    // First check variable occurrences
-    // If term1 has a variable that term2 doesn't, or has more occurrences, it can't be smaller
-    let vars1 = count_variables(problem, term1);
-    let vars2 = count_variables(problem, term2);
+    // First, handle the special case of variables
+    let is_var1 = problem.node_types[term1] == NodeType::Variable as u8;
+    let is_var2 = problem.node_types[term2] == NodeType::Variable as u8;
     
-    // Check if all variables in term2 occur in term1 with at least the same multiplicity
-    for (var2, count2) in &vars2 {
-        let count1 = vars1.iter()
-            .find(|(var1, _)| var1 == var2)
-            .map(|(_, c)| *c)
-            .unwrap_or(0);
-        if count1 < *count2 {
-            return Ordering::Less; // term1 < term2
+    match (is_var1, is_var2) {
+        (true, true) => {
+            // Both are variables - compare their symbols
+            let sym1 = problem.node_symbols[term1];
+            let sym2 = problem.node_symbols[term2];
+            if sym1 == sym2 {
+                Ordering::Equal
+            } else {
+                // Compare variable names lexicographically
+                let name1 = problem.symbols.get(sym1).unwrap_or("");
+                let name2 = problem.symbols.get(sym2).unwrap_or("");
+                name1.cmp(name2)
+            }
         }
-    }
-    
-    // Check if term1 has variables that term2 doesn't
-    for (var1, _) in &vars1 {
-        if !vars2.iter().any(|(var2, _)| var1 == var2) {
-            return Ordering::Greater; // term1 > term2
+        (true, false) => {
+            // Variable vs non-variable: variable is always smaller
+            Ordering::Less
         }
-    }
-    
-    // Compare weights
-    let weight1 = term_weight(problem, term1);
-    let weight2 = term_weight(problem, term2);
-    
-    match weight1.cmp(&weight2) {
-        Ordering::Greater => Ordering::Greater,
-        Ordering::Less => Ordering::Less,
-        Ordering::Equal => {
-            // Same weight, use lexicographic comparison
-            lexicographic_compare(problem, term1, term2)
+        (false, true) => {
+            // Non-variable vs variable: non-variable is always greater
+            Ordering::Greater
+        }
+        (false, false) => {
+            // Neither is a variable - proceed with standard KBO
+            
+            // Check variable occurrences
+            let vars1 = count_variables(problem, term1);
+            let vars2 = count_variables(problem, term2);
+            
+            // Check if all variables in term2 occur in term1 with at least the same multiplicity
+            for (var2, count2) in &vars2 {
+                let count1 = vars1.iter()
+                    .find(|(var1, _)| var1 == var2)
+                    .map(|(_, c)| *c)
+                    .unwrap_or(0);
+                if count1 < *count2 {
+                    return Ordering::Less; // term1 < term2
+                }
+            }
+            
+            // Check if term1 has variables that term2 doesn't
+            for (var1, _) in &vars1 {
+                if !vars2.iter().any(|(var2, _)| var1 == var2) {
+                    return Ordering::Greater; // term1 > term2
+                }
+            }
+            
+            // Compare weights
+            let weight1 = term_weight(problem, term1);
+            let weight2 = term_weight(problem, term2);
+            
+            match weight1.cmp(&weight2) {
+                Ordering::Greater => Ordering::Greater,
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => {
+                    // Same weight, use lexicographic comparison
+                    lexicographic_compare(problem, term1, term2)
+                }
+            }
         }
     }
 }
@@ -136,9 +166,8 @@ fn lexicographic_compare(problem: &Problem, term1: usize, term2: usize) -> Order
                 other => other,
             }
         }
-        // Variables < Constants < Functions (arbitrary but consistent)
-        (t1, _) if t1 == NodeType::Variable as u8 => Ordering::Less,
-        (_, t2) if t2 == NodeType::Variable as u8 => Ordering::Greater,
+        // Variables are handled in kbo_compare, so this shouldn't happen
+        // But if it does, maintain consistency: Variables < Constants < Functions
         (t1, t2) if t1 == NodeType::Constant as u8 && t2 == NodeType::Function as u8 => Ordering::Less,
         (t1, t2) if t1 == NodeType::Function as u8 && t2 == NodeType::Constant as u8 => Ordering::Greater,
         _ => Ordering::Equal,
@@ -148,7 +177,6 @@ fn lexicographic_compare(problem: &Problem, term1: usize, term2: usize) -> Order
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsing::parse_types::*;
     use crate::parsing::tptp_parser::parse_string;
     
     #[test]

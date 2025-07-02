@@ -16,10 +16,6 @@ pub fn resolve_clauses(
     let lits1 = problem.clause_literals(clause1_idx);
     let lits2 = problem.clause_literals(clause2_idx);
     
-    println!("resolve_clauses: clause {} has {} lits, clause {} has {} lits", 
-             clause1_idx, lits1.len(), clause2_idx, lits2.len());
-    println!("  lits1: {:?}", lits1);
-    println!("  lits2: {:?}", lits2);
     
     // Try to resolve on each pair of complementary literals
     for (i, &lit1_node) in lits1.iter().enumerate() {
@@ -40,21 +36,12 @@ pub fn resolve_clauses(
                     let pred1_node = get_literal_predicate(problem, lit1_node);
                     let pred2_node = get_literal_predicate(problem, lit2_node);
                     
-                    println!("  Checking lit {} (pol {}) vs lit {} (pol {}): pred1={:?}, pred2={:?}",
-                             lit1_node, pol1, lit2_node, pol2, pred1_node, pred2_node);
                     
-                    // Debug: check literal structure
-                    if pred1_node.is_none() && i == 0 && j == 1 {
-                        println!("    DEBUG: lit {} children = {:?}", lit1_node, problem.node_children(lit1_node));
-                        println!("    DEBUG: lit {} children = {:?}", lit2_node, problem.node_children(lit2_node));
-                    }
                     
-                    if pred1_node.is_none() || pred2_node.is_none() {
-                        continue;
-                    }
-                    
-                    let pred1_node = pred1_node.unwrap();
-                    let pred2_node = pred2_node.unwrap();
+                    let (pred1_node, pred2_node) = match (pred1_node, pred2_node) {
+                        (Some(p1), Some(p2)) => (p1, p2),
+                        _ => continue,
+                    };
                     
                     // Try to unify predicates
                     let mut subst = ArraySubstitution::new();
@@ -115,19 +102,24 @@ fn build_resolvent_graph(
         // Create clause node
         let clause_node = builder.add_node(NodeType::Clause, "", 0, literal_count as u32).ok()?;
         
+        // Create separate node mapping caches for each clause to keep variables distinct
+        let mut node_cache1 = std::collections::HashMap::new();
+        let mut node_cache2 = std::collections::HashMap::new();
+        
         // Copy literals from first clause (except resolved literal)
         for (i, &lit_node) in lits1.iter().enumerate() {
             if i != lit1_idx {
-                if let Some(new_lit) = copy_literal_graph(&mut builder, lit_node, clause_node, subst) {
+                if let Some(new_lit) = copy_literal_graph_cached(&mut builder, lit_node, clause_node, subst, &mut node_cache1) {
                     builder.add_edge(clause_node, new_lit).ok()?;
                 }
             }
         }
         
         // Copy literals from second clause (except resolved literal)
+        // Use a different cache to ensure variables are renamed apart
         for (j, &lit_node) in lits2.iter().enumerate() {
             if j != lit2_idx {
-                if let Some(new_lit) = copy_literal_graph(&mut builder, lit_node, clause_node, subst) {
+                if let Some(new_lit) = copy_literal_graph_cached(&mut builder, lit_node, clause_node, subst, &mut node_cache2) {
                     builder.add_edge(clause_node, new_lit).ok()?;
                 }
             }
@@ -145,12 +137,14 @@ fn build_resolvent_graph(
     Some(clause_idx)
 }
 
-/// Copy a literal and its subgraph using Builder
-fn copy_literal_graph(
+
+/// Copy a literal and its subgraph using Builder with node cache
+fn copy_literal_graph_cached(
     builder: &mut Builder,
     lit_node: usize,
     _parent_clause: usize,
     subst: &ArraySubstitution,
+    node_cache: &mut std::collections::HashMap<usize, usize>,
 ) -> Option<usize> {
     // Create new literal node
     let polarity = builder.problem.node_polarities[lit_node];
@@ -158,7 +152,7 @@ fn copy_literal_graph(
     
     // Copy the predicate and its arguments
     if let Some(pred_node) = get_literal_predicate(builder.problem, lit_node) {
-        if let Some(new_pred) = copy_predicate_graph(builder, pred_node, new_lit, subst) {
+        if let Some(new_pred) = copy_predicate_graph_cached(builder, pred_node, new_lit, subst, node_cache) {
             builder.add_edge(new_lit, new_pred).ok()?;
         }
     }
@@ -173,12 +167,13 @@ fn copy_literal_graph(
     Some(new_lit)
 }
 
-/// Copy a predicate and its arguments using Builder
-fn copy_predicate_graph(
+/// Copy a predicate and its arguments using Builder with node cache
+fn copy_predicate_graph_cached(
     builder: &mut Builder,
     pred_node: usize,
     _parent_lit: usize,
     subst: &ArraySubstitution,
+    node_cache: &mut std::collections::HashMap<usize, usize>,
 ) -> Option<usize> {
     // Get predicate info
     let symbol_id = builder.problem.node_symbols[pred_node];
@@ -195,7 +190,7 @@ fn copy_predicate_graph(
     // Copy arguments
     let args = builder.problem.node_children(pred_node);
     for arg in args {
-        if let Some(new_arg) = copy_term_graph(builder, arg, new_pred, subst) {
+        if let Some(new_arg) = copy_term_graph_cached(builder, arg, new_pred, subst, node_cache) {
             builder.add_edge(new_pred, new_arg).ok()?;
         }
     }
@@ -203,18 +198,24 @@ fn copy_predicate_graph(
     Some(new_pred)
 }
 
-/// Copy a term using Builder
-fn copy_term_graph(
+/// Copy a term using Builder with node cache to preserve variable sharing
+fn copy_term_graph_cached(
     builder: &mut Builder,
     term_node: usize,
     parent_node: usize,
     subst: &ArraySubstitution,
+    node_cache: &mut std::collections::HashMap<usize, usize>,
 ) -> Option<usize> {
     // Check if this is a variable that should be substituted
     if builder.problem.node_types[term_node] == NodeType::Variable as u8 {
         if let Some(replacement) = subst.get(term_node) {
             // Copy the replacement term instead
-            return copy_term_graph(builder, replacement, parent_node, subst);
+            return copy_term_graph_cached(builder, replacement, parent_node, subst, node_cache);
+        }
+        
+        // Check if we've already copied this variable
+        if let Some(&cached_node) = node_cache.get(&term_node) {
+            return Some(cached_node);
         }
     }
     
@@ -237,11 +238,16 @@ fn copy_term_graph(
     // Create new term node
     let new_term = builder.add_node(node_type, &symbol, 0, arity).ok()?;
     
+    // Cache the mapping for variables
+    if node_type == NodeType::Variable {
+        node_cache.insert(term_node, new_term);
+    }
+    
     // For functions, copy arguments
     if node_type == NodeType::Function {
         let children = builder.problem.node_children(term_node);
         for child in children {
-            if let Some(new_child) = copy_term_graph(builder, child, new_term, subst) {
+            if let Some(new_child) = copy_term_graph_cached(builder, child, new_term, subst, node_cache) {
                 builder.add_edge(new_term, new_child).ok()?;
             }
         }
