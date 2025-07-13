@@ -1,299 +1,254 @@
-//! Term ordering for superposition calculus
-//! 
-//! This module implements a basic Knuth-Bendix Ordering (KBO) with uniform weights.
-//! KBO is used to constrain superposition inferences and ensure completeness.
+//! Term ordering implementation (Knuth-Bendix Ordering)
 
-use crate::core::{Problem, NodeType};
-use std::cmp::Ordering;
+use super::{Term, Variable};
+use std::collections::HashMap;
 
-/// Calculate the weight of a term (number of symbols)
-pub fn term_weight(problem: &Problem, term: usize) -> usize {
-    match problem.node_types[term] {
-        t if t == NodeType::Variable as u8 => 1,
-        t if t == NodeType::Constant as u8 => 1,
-        t if t == NodeType::Function as u8 => {
-            let children = problem.node_children(term);
-            1 + children.iter().map(|&child| term_weight(problem, child)).sum::<usize>()
+/// Configuration for Knuth-Bendix Ordering
+#[derive(Debug, Clone)]
+pub struct KBOConfig {
+    /// Weight of each function/constant symbol (default weight is 1)
+    pub symbol_weights: HashMap<String, usize>,
+    /// Precedence ordering of symbols (higher value = higher precedence)
+    pub symbol_precedence: HashMap<String, usize>,
+    /// Weight of variables (must be positive)
+    pub variable_weight: usize,
+}
+
+impl Default for KBOConfig {
+    fn default() -> Self {
+        KBOConfig {
+            symbol_weights: HashMap::new(),
+            symbol_precedence: HashMap::new(),
+            variable_weight: 1,
         }
-        t if t == NodeType::Predicate as u8 => {
-            let children = problem.node_children(term);
-            1 + children.iter().map(|&child| term_weight(problem, child)).sum::<usize>()
-        }
-        _ => 0, // Literals and clauses don't have weight
     }
 }
 
-/// Count occurrences of each variable in a term
-pub fn count_variables(problem: &Problem, term: usize) -> Vec<(u32, usize)> {
-    let mut counts = Vec::new();
-    count_variables_recursive(problem, term, &mut counts);
-    counts.sort_by_key(|&(var, _)| var);
-    counts
+/// Result of comparing two terms
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ordering {
+    Greater,
+    Less,
+    Equal,
+    Incomparable,
 }
 
-fn count_variables_recursive(problem: &Problem, term: usize, counts: &mut Vec<(u32, usize)>) {
-    match problem.node_types[term] {
-        t if t == NodeType::Variable as u8 => {
-            let var_symbol = problem.node_symbols[term];
-            if let Some(entry) = counts.iter_mut().find(|(sym, _)| *sym == var_symbol) {
-                entry.1 += 1;
-            } else {
-                counts.push((var_symbol, 1));
-            }
-        }
-        t if t == NodeType::Function as u8 || t == NodeType::Predicate as u8 => {
-            let children = problem.node_children(term);
-            for &child in children.iter() {
-                count_variables_recursive(problem, child, counts);
-            }
-        }
-        _ => {}
+/// Knuth-Bendix Ordering implementation
+pub struct KBO {
+    config: KBOConfig,
+}
+
+impl KBO {
+    pub fn new(config: KBOConfig) -> Self {
+        KBO { config }
     }
-}
-
-/// Compare two terms using KBO (Knuth-Bendix Ordering)
-/// Returns Ordering::Greater if term1 > term2
-/// Returns Ordering::Less if term1 < term2  
-/// Returns Ordering::Equal if terms are equivalent
-pub fn kbo_compare(problem: &Problem, term1: usize, term2: usize) -> Ordering {
-    // First, handle the special case of variables
-    let is_var1 = problem.node_types[term1] == NodeType::Variable as u8;
-    let is_var2 = problem.node_types[term2] == NodeType::Variable as u8;
     
-    match (is_var1, is_var2) {
-        (true, true) => {
-            // Both are variables - compare their symbols
-            let sym1 = problem.node_symbols[term1];
-            let sym2 = problem.node_symbols[term2];
-            if sym1 == sym2 {
-                Ordering::Equal
-            } else {
-                // Compare variable names lexicographically
-                let name1 = problem.symbols.get(sym1).unwrap_or("");
-                let name2 = problem.symbols.get(sym2).unwrap_or("");
-                name1.cmp(name2)
+    /// Get weight of a symbol (default is 1)
+    fn symbol_weight(&self, name: &str) -> usize {
+        self.config.symbol_weights.get(name).copied().unwrap_or(1)
+    }
+    
+    /// Get precedence of a symbol (default is 0)
+    fn symbol_precedence(&self, name: &str) -> usize {
+        self.config.symbol_precedence.get(name).copied().unwrap_or(0)
+    }
+    
+    /// Calculate the weight of a term
+    pub fn term_weight(&self, term: &Term) -> usize {
+        match term {
+            Term::Variable(_) => self.config.variable_weight,
+            Term::Constant(c) => self.symbol_weight(&c.name),
+            Term::Function(f, args) => {
+                let func_weight = self.symbol_weight(&f.name);
+                let args_weight: usize = args.iter().map(|t| self.term_weight(t)).sum();
+                func_weight + args_weight
             }
         }
-        (true, false) => {
-            // Variable vs non-variable: variable is always smaller
-            Ordering::Less
+    }
+    
+    /// Count occurrences of each variable in a term
+    pub fn count_variables(&self, term: &Term) -> HashMap<Variable, usize> {
+        let mut counts = HashMap::new();
+        self.count_variables_rec(term, &mut counts);
+        counts
+    }
+    
+    fn count_variables_rec(&self, term: &Term, counts: &mut HashMap<Variable, usize>) {
+        match term {
+            Term::Variable(v) => {
+                *counts.entry(v.clone()).or_insert(0) += 1;
+            }
+            Term::Constant(_) => {}
+            Term::Function(_, args) => {
+                for arg in args {
+                    self.count_variables_rec(arg, counts);
+                }
+            }
         }
-        (false, true) => {
-            // Non-variable vs variable: non-variable is always greater
+    }
+    
+    /// Compare two terms using KBO
+    pub fn compare(&self, s: &Term, t: &Term) -> Ordering {
+        // First, check variable condition
+        let vars_s = self.count_variables(s);
+        let vars_t = self.count_variables(t);
+        
+        // Check if every variable in t occurs in s
+        for (var, count_t) in &vars_t {
+            let count_s = vars_s.get(var).copied().unwrap_or(0);
+            if count_s < *count_t {
+                // Variable condition violated
+                return Ordering::Incomparable;
+            }
+        }
+        
+        // Compare weights
+        let weight_s = self.term_weight(s);
+        let weight_t = self.term_weight(t);
+        
+        if weight_s > weight_t {
             Ordering::Greater
-        }
-        (false, false) => {
-            // Neither is a variable - proceed with standard KBO
-            
-            // Check variable occurrences
-            let vars1 = count_variables(problem, term1);
-            let vars2 = count_variables(problem, term2);
-            
-            // Check if all variables in term2 occur in term1 with at least the same multiplicity
-            for (var2, count2) in &vars2 {
-                let count1 = vars1.iter()
-                    .find(|(var1, _)| var1 == var2)
-                    .map(|(_, c)| *c)
-                    .unwrap_or(0);
-                if count1 < *count2 {
-                    return Ordering::Less; // term1 < term2
+        } else if weight_s < weight_t {
+            // Check variable condition for t > s
+            for (var, count_s) in &vars_s {
+                let count_t = vars_t.get(var).copied().unwrap_or(0);
+                if count_t < *count_s {
+                    return Ordering::Incomparable;
                 }
             }
-            
-            // Check if term1 has variables that term2 doesn't
-            for (var1, _) in &vars1 {
-                if !vars2.iter().any(|(var2, _)| var1 == var2) {
-                    return Ordering::Greater; // term1 > term2
-                }
-            }
-            
-            // Compare weights
-            let weight1 = term_weight(problem, term1);
-            let weight2 = term_weight(problem, term2);
-            
-            match weight1.cmp(&weight2) {
-                Ordering::Greater => Ordering::Greater,
-                Ordering::Less => Ordering::Less,
-                Ordering::Equal => {
-                    // Same weight, use lexicographic comparison
-                    lexicographic_compare(problem, term1, term2)
-                }
-            }
+            Ordering::Less
+        } else {
+            // Equal weight, use lexicographic comparison
+            self.compare_lex(s, t)
         }
     }
-}
-
-/// Lexicographic comparison of terms with same weight
-fn lexicographic_compare(problem: &Problem, term1: usize, term2: usize) -> Ordering {
-    // Compare node types first
-    let type1 = problem.node_types[term1];
-    let type2 = problem.node_types[term2];
     
-    match (type1, type2) {
-        (t1, t2) if t1 == NodeType::Variable as u8 && t2 == NodeType::Variable as u8 => {
-            // Compare variable symbol strings
-            let sym1 = problem.symbols.get(problem.node_symbols[term1]).unwrap_or("");
-            let sym2 = problem.symbols.get(problem.node_symbols[term2]).unwrap_or("");
-            sym1.cmp(sym2)
-        }
-        (t1, t2) if t1 == NodeType::Constant as u8 && t2 == NodeType::Constant as u8 => {
-            // Compare constant symbol strings, not IDs!
-            let sym1 = problem.symbols.get(problem.node_symbols[term1]).unwrap_or("");
-            let sym2 = problem.symbols.get(problem.node_symbols[term2]).unwrap_or("");
-            let result = sym1.cmp(sym2);
-            result
-        }
-        (t1, t2) if t1 == NodeType::Function as u8 && t2 == NodeType::Function as u8 => {
-            // First compare function symbol strings
-            let sym1 = problem.symbols.get(problem.node_symbols[term1]).unwrap_or("");
-            let sym2 = problem.symbols.get(problem.node_symbols[term2]).unwrap_or("");
-            match sym1.cmp(sym2) {
-                Ordering::Equal => {
-                    // Same function, compare arguments lexicographically
-                    let children1 = problem.node_children(term1);
-                    let children2 = problem.node_children(term2);
-                    
-                    for (c1, c2) in children1.iter().zip(children2.iter()) {
-                        match kbo_compare(problem, *c1, *c2) {
+    /// Lexicographic comparison for terms of equal weight
+    fn compare_lex(&self, s: &Term, t: &Term) -> Ordering {
+        match (s, t) {
+            (Term::Variable(v1), Term::Variable(v2)) => {
+                if v1 == v2 {
+                    Ordering::Equal
+                } else {
+                    // Variables are incomparable if different
+                    Ordering::Incomparable
+                }
+            }
+            (Term::Variable(_), _) => Ordering::Incomparable,
+            (_, Term::Variable(_)) => Ordering::Incomparable,
+            (Term::Constant(c1), Term::Constant(c2)) => {
+                if c1.name == c2.name {
+                    Ordering::Equal
+                } else {
+                    let prec1 = self.symbol_precedence(&c1.name);
+                    let prec2 = self.symbol_precedence(&c2.name);
+                    if prec1 > prec2 {
+                        Ordering::Greater
+                    } else if prec1 < prec2 {
+                        Ordering::Less
+                    } else {
+                        // Same precedence, use name comparison
+                        if c1.name > c2.name {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        }
+                    }
+                }
+            }
+            (Term::Function(f1, args1), Term::Function(f2, args2)) => {
+                if f1.name != f2.name {
+                    // Different function symbols
+                    let prec1 = self.symbol_precedence(&f1.name);
+                    let prec2 = self.symbol_precedence(&f2.name);
+                    if prec1 > prec2 {
+                        Ordering::Greater
+                    } else if prec1 < prec2 {
+                        Ordering::Less
+                    } else {
+                        // Same precedence, use name comparison
+                        if f1.name > f2.name {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Less
+                        }
+                    }
+                } else {
+                    // Same function symbol, compare arguments lexicographically
+                    for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                        match self.compare(arg1, arg2) {
                             Ordering::Equal => continue,
                             other => return other,
                         }
                     }
-                    
-                    // All arguments equal
                     Ordering::Equal
                 }
-                other => other,
             }
+            (Term::Function(_, _), Term::Constant(_)) => Ordering::Greater,
+            (Term::Constant(_), Term::Function(_, _)) => Ordering::Less,
         }
-        // Variables are handled in kbo_compare, so this shouldn't happen
-        // But if it does, maintain consistency: Variables < Constants < Functions
-        (t1, t2) if t1 == NodeType::Constant as u8 && t2 == NodeType::Function as u8 => Ordering::Less,
-        (t1, t2) if t1 == NodeType::Function as u8 && t2 == NodeType::Constant as u8 => Ordering::Greater,
-        _ => Ordering::Equal,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsing::tptp_parser::parse_string;
+    use crate::core::{Constant, FunctionSymbol};
     
     #[test]
     fn test_term_weight() {
-        // Use parser to create terms
-        let problem = parse_string("
-            cnf(test, axiom, (p(X) | q(a) | r(f(a)) | s(g(X, f(a))))).
-        ").expect("Failed to parse");
+        let kbo = KBO::new(KBOConfig::default());
         
-        // The clause has 4 literals with different terms
-        let clause_lits = problem.clause_literals(0);
+        // Variable
+        let x = Term::Variable(Variable { name: "X".to_string() });
+        assert_eq!(kbo.term_weight(&x), 1);
         
-        // First literal p(X) - get X
-        let pred1 = problem.node_children(clause_lits[0])[0];
-        let x_idx = problem.node_children(pred1)[0];
-        assert_eq!(term_weight(&problem, x_idx), 1); // variable weight
+        // Constant
+        let a = Term::Constant(Constant { name: "a".to_string() });
+        assert_eq!(kbo.term_weight(&a), 1);
         
-        // Second literal q(a) - get a
-        let pred2 = problem.node_children(clause_lits[1])[0];
-        let a_idx = problem.node_children(pred2)[0];
-        assert_eq!(term_weight(&problem, a_idx), 1); // constant weight
-        
-        // Third literal r(f(a)) - get f(a)
-        let pred3 = problem.node_children(clause_lits[2])[0];
-        let f_a_idx = problem.node_children(pred3)[0];
-        assert_eq!(term_weight(&problem, f_a_idx), 2); // f + a
-        
-        // Fourth literal s(g(X, f(a))) - get g(X, f(a))
-        let pred4 = problem.node_children(clause_lits[3])[0];
-        let g_idx = problem.node_children(pred4)[0];
-        assert_eq!(term_weight(&problem, g_idx), 4); // g + X + f + a
+        // Function f(a, X)
+        let f = FunctionSymbol { name: "f".to_string(), arity: 2 };
+        let fa_x = Term::Function(f, vec![a.clone(), x.clone()]);
+        assert_eq!(kbo.term_weight(&fa_x), 3); // f(1) + a(1) + X(1)
     }
     
     #[test]
-    fn test_variable_counting() {
-        // Use parser to create f(X, X)
-        let problem = parse_string("
-            cnf(test, axiom, p(f(X, X))).
-        ").expect("Failed to parse");
+    fn test_variable_condition() {
+        let kbo = KBO::new(KBOConfig::default());
         
-        // Get f(X, X) term
-        let clause_lits = problem.clause_literals(0);
-        let pred = problem.node_children(clause_lits[0])[0];
-        let f_xx_idx = problem.node_children(pred)[0];
+        let x = Term::Variable(Variable { name: "X".to_string() });
+        let y = Term::Variable(Variable { name: "Y".to_string() });
+        let a = Term::Constant(Constant { name: "a".to_string() });
         
-        let vars = count_variables(&problem, f_xx_idx);
-        assert_eq!(vars.len(), 1);
-        assert_eq!(vars[0].1, 2); // X appears twice
-    }
-    
-    #[test] 
-    fn test_variable_counting_multiple() {
-        // Use parser to create g(X, Y)
-        let problem = parse_string("
-            cnf(test, axiom, p(g(X, Y))).
-        ").expect("Failed to parse");
+        // X > Y should be incomparable (different variables)
+        assert_eq!(kbo.compare(&x, &y), Ordering::Incomparable);
         
-        // Get g(X, Y) term
-        let clause_lits = problem.clause_literals(0);
-        let pred = problem.node_children(clause_lits[0])[0];
-        let g_xy_idx = problem.node_children(pred)[0];
+        // a > X should be valid (no variable in a)
+        assert_eq!(kbo.compare(&a, &x), Ordering::Equal); // Same weight
         
-        let vars = count_variables(&problem, g_xy_idx);
-        assert_eq!(vars.len(), 2);
+        // f(X) > X should be valid
+        let f = FunctionSymbol { name: "f".to_string(), arity: 1 };
+        let fx = Term::Function(f, vec![x.clone()]);
+        assert_eq!(kbo.compare(&fx, &x), Ordering::Greater);
     }
     
     #[test]
-    fn test_kbo_basic() {
-        // Create terms using parser
-        let problem = parse_string("
-            cnf(c1, axiom, p(X)).
-            cnf(c2, axiom, q(a)).
-            cnf(c3, axiom, r(f(X))).
-        ").expect("Failed to parse");
+    fn test_precedence() {
+        let mut config = KBOConfig::default();
+        config.symbol_precedence.insert("f".to_string(), 2);
+        config.symbol_precedence.insert("g".to_string(), 1);
         
-        // Get terms from predicates
-        let c1_lits = problem.clause_literals(0);
-        let pred1 = problem.node_children(c1_lits[0])[0];
-        let x_idx = problem.node_children(pred1)[0];
+        let kbo = KBO::new(config);
         
-        let c2_lits = problem.clause_literals(1);
-        let pred2 = problem.node_children(c2_lits[0])[0];
-        let a_idx = problem.node_children(pred2)[0];
+        let a = Term::Constant(Constant { name: "a".to_string() });
+        let f = FunctionSymbol { name: "f".to_string(), arity: 1 };
+        let g = FunctionSymbol { name: "g".to_string(), arity: 1 };
         
-        let c3_lits = problem.clause_literals(2);
-        let pred3 = problem.node_children(c3_lits[0])[0];
-        let f_x_idx = problem.node_children(pred3)[0];
+        let fa = Term::Function(f, vec![a.clone()]);
+        let ga = Term::Function(g, vec![a.clone()]);
         
-        // f(X) > X (contains X as subterm)
-        assert_eq!(kbo_compare(&problem, f_x_idx, x_idx), Ordering::Greater);
-        
-        // a and X: since X doesn't occur in a but a doesn't contain X, a < X
-        assert_eq!(kbo_compare(&problem, a_idx, x_idx), Ordering::Less);
-    }
-    
-    #[test]
-    fn test_kbo_variable_condition() {
-        // Build f(X, Y) and g(X)
-        let problem = parse_string("
-            cnf(c1, axiom, p(f(X, Y))).
-            cnf(c2, axiom, q(g(X))).
-        ").expect("Failed to parse");
-        
-        // Get f(X, Y) from first clause
-        let c1_lits = problem.clause_literals(0);
-        let pred1 = problem.node_children(c1_lits[0])[0];
-        let f_xy_idx = problem.node_children(pred1)[0];
-        
-        // Get g(X) from second clause
-        let c2_lits = problem.clause_literals(1);
-        let pred2 = problem.node_children(c2_lits[0])[0];
-        let g_x_idx = problem.node_children(pred2)[0];
-        
-        // f(X,Y) > g(X) because f(X,Y) has variable Y that g(X) doesn't have
-        assert_eq!(kbo_compare(&problem, f_xy_idx, g_x_idx), Ordering::Greater);
-        
-        // g(X) cannot be greater than f(X,Y) due to missing Y
-        assert_eq!(kbo_compare(&problem, g_x_idx, f_xy_idx), Ordering::Less);
+        // f(a) > g(a) because f has higher precedence
+        assert_eq!(kbo.compare(&fa, &ga), Ordering::Greater);
     }
 }

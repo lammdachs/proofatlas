@@ -1,0 +1,4 @@
+% Simple FOF test
+fof(axiom1, axiom, p & q).
+fof(axiom2, axiom, r | s).
+fof(goal, conjecture, (p & r) | (q & s)).

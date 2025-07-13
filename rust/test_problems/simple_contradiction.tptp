@@ -1,0 +1,3 @@
+% Simple contradiction
+cnf(ax1, axiom, p(a)).
+cnf(ax2, axiom, ~p(a)).

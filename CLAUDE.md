@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important: Saturation and Completeness
+
+When working with theorem provers, remember:
+- If a problem is unsatisfiable (a theorem) and the prover saturates without finding a proof, this indicates **incompleteness** in the implementation
+- A complete theorem prover will NEVER saturate on an unsatisfiable problem - it will either find a proof or run out of resources
+- Do NOT claim the implementation is "complete in principle" or "correct" when it saturates on problems known to be theorems
+
 ## Environment Setup and Commands
 
 ### Initial Setup
@@ -55,37 +62,43 @@ Rust tests follow a different pattern with tests distributed across the codebase
 ```
 rust/
 ├── src/
-│   └── */                   # Each module contains:
-│       ├── mod.rs          # Module definition with inline unit tests (~110 tests total)
-│       └── *_tests.rs      # Comprehensive unit tests in separate files
-└── tests/                   # Integration tests ONLY (not all tests!)
-    ├── README.md           # Explains test organization
-    └── integration_test.rs # Cross-module integration tests
+│   ├── core/               # Core module with comprehensive tests
+│   │   ├── problem_tests.rs     # ArrayProblem tests (Box<[T]> arrays)
+│   │   ├── symbol_table_tests.rs # Symbol interning tests
+│   │   ├── builder_tests.rs     # ArrayBuilder tests
+│   │   └── proof_tests.rs       # Proof tracking tests
+│   ├── rules/
+│   │   ├── tests.rs        # Inference rule tests
+│   │   ├── variable_sharing_tests.rs # Variable handling tests
+│   │   └── failure_tests.rs     # Error case tests
+│   └── saturation/         # Saturation loop implementation
+└── tests/                   # Integration tests
+    ├── README.md           # Test organization guide
+    └── integration_test.rs # Cross-module tests
 ```
 
-**Important**: The `tests/` directory contains only integration tests. Most tests are unit tests within the `src/` directory.
+**Important**: Unit tests are colocated with source in `*_tests.rs` files.
 
 To run Rust tests:
 ```bash
+# Build and run with Python bindings
+cd rust && pip install -e .
+
 # Run all tests
 cargo test
 
 # Run only unit tests
 cargo test --lib
 
+# Run specific module tests
+cargo test core
+cargo test rules
+cargo test saturation
+
 # Run only integration tests  
 cargo test --test '*'
 ```
 
-### Development Commands
-```bash
-# Type checking (if mypy is configured)
-mypy src/proofatlas
-
-# Linting
-ruff check src/proofatlas
-black src/proofatlas --check
-```
 
 ## Codebase Architecture
 
@@ -101,7 +114,7 @@ The codebase follows a strict dependency hierarchy. When modifying code, respect
 8. `selectors` depends on `core`, `dataformats`
 9. `data` depends on all above
 
-### Core Module (`src/proofatlas/core/`)
+### Core Module (`./rust/src/proofatlas/core/`)
 The foundation of the system, implementing pure first-order logic:
 - **logic.py**: Immutable FOL objects (Variable, Constant, Function, Predicate, Term, Literal, Clause, Problem)
   - Variables and Constants don't take arity parameter in constructor
@@ -130,30 +143,73 @@ Rules return `RuleApplication` objects containing:
   - Applied rules are stored as RuleApplication objects
 - **serialization.py**: JSON serialization for proof objects including ProofState
 
-### Current Structure (Post-Refactoring)
+### Current Project Structure
+
 ```
-src/proofatlas/
-├── core/           # FOL logic and proof state
-├── rules/          # Modular inference rules (resolution, factoring, etc.)
-├── proofs/         # Proof tracking and management
-├── fileformats/    # File format parsers (TPTP)
-├── dataformats/    # ML data representation
-├── data/           # Problem and proof set management
-├── loops/          # Given clause algorithm implementations
-├── selectors/      # Clause selection strategies (base, random, gnn)
-├── navigator/      # Terminal-based proof visualization
-└── utils/
-
-scripts/
-├── benchmark_parser.py  # Compare Rust vs Vampire parser performance
-├── extract_tptp.py      # Unified TPTP extraction with filtering options
-├── inspect_proof.py     # Interactive proof navigator
-├── parse_tptp.py        # Simple TPTP parser for testing
-├── print_proof.py       # Non-interactive proof printer (CLI starts at step 0)
-└── tptp_to_json.py      # Convert TPTP files to JSON using Rust parser
-
-docs/
-└── saturation_loop_design.md  # Design and implementation details for BasicLoop
+proofatlas/
+├── python/                    # Python implementation
+│   ├── proofatlas/
+│   │   ├── core/             # FOL logic core (array-based)
+│   │   │   ├── array_builder.py      # Array construction utilities
+│   │   │   ├── array_from_dict.py    # Dict to array conversion
+│   │   │   ├── array_logic.py        # Array-based FOL implementation
+│   │   │   ├── logic_compat.py       # Compatibility layer
+│   │   │   ├── zero_copy_arrays.py   # Zero-copy array utilities
+│   │   │   └── zero_copy_wrapper.py  # Rust array wrapper
+│   │   ├── rules/            # Inference rules
+│   │   │   └── array_rules.py        # Array-based inference rules
+│   │   ├── loops/            # Saturation loops
+│   │   │   └── array_loop.py         # Array-based saturation
+│   │   └── selectors/        # Clause selection
+│   │       └── array_selectors.py    # Array-based selectors
+│   ├── tests/                # Test suite
+│   │   ├── core/             # Core module tests
+│   │   ├── test_array_*.py   # Array implementation tests
+│   │   └── test_rust_*.py    # Rust binding tests
+│   └── examples/             # Usage examples
+│       ├── array_logic_demo.py
+│       ├── array_selection_demo.py
+│       └── csr_to_coo_conversion.py
+│
+├── rust/                     # Rust implementation
+│   ├── src/
+│   │   ├── core/            # Core data structures
+│   │   │   ├── mod.rs       # Module exports
+│   │   │   ├── problem.rs   # Problem struct (Box<[T]> arrays)
+│   │   │   ├── builder.rs   # Builder for array construction
+│   │   │   ├── ordering.rs  # KBO term ordering
+│   │   │   └── symbol_table.rs # Symbol interning
+│   │   ├── rules/           # Inference rules
+│   │   │   ├── mod.rs       # Rule exports
+│   │   │   ├── common.rs    # Common rule utilities
+│   │   │   ├── resolution.rs        # Binary resolution
+│   │   │   ├── factoring.rs         # Factoring
+│   │   │   ├── superposition.rs     # Superposition calculus
+│   │   │   ├── equality_resolution.rs
+│   │   │   ├── equality_factoring.rs
+│   │   │   └── equality_symmetry.rs # Equality axioms
+│   │   ├── saturation/      # Saturation loop
+│   │   │   ├── mod.rs       # Loop implementation
+│   │   │   ├── loop.rs      # Main saturation algorithm
+│   │   │   ├── subsumption.rs # Subsumption checking
+│   │   │   ├── unification.rs # Unification algorithm
+│   │   │   └── indexing/    # Indexing structures
+│   │   ├── parsing/         # TPTP parser
+│   │   │   └── tptp_parser.rs
+│   │   └── bindings/        # Python bindings
+│   │       └── python/      # PyO3 bindings
+│   ├── tests/               # Integration tests
+│   ├── examples/            # Rust examples
+│   └── bin/                 # Binary executables
+│       ├── interactive_saturation.rs  # Interactive prover
+│       └── [various debug tools]
+│
+├── docs/                    # Documentation
+│   ├── calculus_quick_reference.md   # Inference rules reference
+│   ├── array_native_architecture.md  # Array design docs
+│   └── ARRAY_IMPLEMENTATION_UPDATE_2024.md
+│
+└── CLAUDE.md               # This file
 ```
 
 ### Navigator Module (`src/proofatlas/navigator/`)
@@ -206,7 +262,43 @@ Implements the given clause algorithm:
 
 8. **Proof Inspection**: Use python/scripts/print_proof.py or python/scripts/inspect_proof.py to examine generated proofs
 
-9. **Rust Components**: Optional high-performance components with Python bindings via PyO3 in `rust/` directory
+9. **Rust Components**: High-performance array-based implementation in `rust/` directory
+   - Uses CSR (Compressed Sparse Row) format with **Box<[T]> arrays** for stable memory
+   - Pre-allocated arrays with capacity tracking to prevent overflows
+   - Three main modules: `core/` (data structures), `rules/` (inference), `saturation/` (proof search)
+   - Python bindings via PyO3 with array-based interface
+   - See `rust/README.md` for detailed documentation
+   
+   **Key Changes (2024)**:
+   - Replaced Vec<T> with Box<[T]> for zero-copy potential
+   - All inference rules updated to use array indexing (no push/insert)
+   - Added PyArrayProblem with freeze mechanism for safety
+   - Parser can return pre-allocated arrays with user-specified capacity
+
+### Working with the Rust Array Interface
+
+```python
+# Using the array-based parser with pre-allocated capacity
+from proofatlas_rust.parser import parse_string_to_array, parse_file_to_array
+
+# Parse with capacity suitable for saturation
+problem = parse_string_to_array(
+    tptp_content,
+    max_nodes=1000000,    # 1M nodes
+    max_clauses=100000,   # 100k clauses  
+    max_edges=5000000     # 5M edges
+)
+
+# Access arrays (currently copies, zero-copy planned)
+node_types, symbols, polarities, arities = problem.get_node_arrays()
+
+# Arrays are numpy arrays
+print(f"Node types shape: {node_types.shape}")
+print(f"Memory owned by array: {node_types.flags['OWNDATA']}")  # True = copy
+
+# Freeze to prevent modifications (required for future zero-copy)
+problem.freeze()
+```
 
 ### Working with the Refactored Codebase
 
@@ -215,9 +307,25 @@ When implementing new features:
 2. Follow the established patterns (e.g., metadata dict for extensibility)
 3. Maintain the dependency hierarchy
 4. Add tests for any new functionality in the appropriate test file
+5. For Rust changes: ensure all array operations use indexing, not push/insert
 
 The refactoring prioritized:
 - Flatter directory structure
 - Clear module boundaries  
 - Flexible metadata-based extensibility
 - Testability and maintainability
+- Zero-copy ready array infrastructure
+
+### Key Bug Fixes (2024)
+
+1. **Equality Canonicalization**: The equality_symmetry rule now uses KBO ordering to prevent generating redundant clauses (e.g., won't generate `e = mult(X,X)` from `mult(X,X) = e`)
+
+2. **Empty Clause Generation**: Fixed superposition rule to allow empty clause generation (previously skipped with warning). Empty clauses represent contradictions and are essential for refutation proofs.
+
+### Interactive Saturation Tool
+
+Located at `rust/src/bin/interactive_saturation.rs`, this tool allows manual clause selection for debugging saturation:
+- Shows processed and unprocessed clauses at each step
+- Allows manual selection of the given clause
+- Useful for understanding why certain proofs are/aren't found
+- Run with: `cargo run --bin interactive_saturation`

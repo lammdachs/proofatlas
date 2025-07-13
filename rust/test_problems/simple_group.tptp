@@ -1,0 +1,7 @@
+% Simple group theory problem
+% Proving commutativity from square elements
+
+cnf(square_a, axiom, multiply(a,a) = identity).
+cnf(square_b, axiom, multiply(b,b) = identity).
+cnf(ab_equals_c, axiom, multiply(a,b) = c).
+cnf(goal, negated_conjecture, multiply(b,a) != c).

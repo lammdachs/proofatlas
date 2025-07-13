@@ -1,0 +1,4 @@
+% Simple modus ponens example
+cnf(premise1, axiom, ~p(X) | q(X)).
+cnf(premise2, axiom, p(a)).
+cnf(goal, negated_conjecture, ~q(a)).

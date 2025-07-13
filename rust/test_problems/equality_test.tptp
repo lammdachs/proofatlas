@@ -1,0 +1,5 @@
+% Equality test
+cnf(ax1, axiom, f(a) = b).
+cnf(ax2, axiom, g(b) = c).
+cnf(ax3, axiom, h(c) = d).
+cnf(goal, negated_conjecture, h(g(f(a))) != d).

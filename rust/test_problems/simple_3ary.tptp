@@ -1,0 +1,2 @@
+% Simple test with 3-ary predicate
+cnf(test1, axiom, product(a,b,c)).
