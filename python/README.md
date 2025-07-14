@@ -151,7 +151,7 @@ The main class for managing proof search.
 - `num_processed() -> int` - Number of processed clauses
 - `num_unprocessed() -> int` - Number of unprocessed clauses
 - `contains_empty_clause() -> bool` - Check if proof found
-- `select_given_clause(strategy="fifo") -> Optional[int]` - Select next clause
+- `select_given_clause(strategy="age") -> Optional[int]` - Select next clause
 - `generate_inferences(clause_id: int) -> List[InferenceResult]` - Generate inferences
 - `add_inference(inference: InferenceResult) -> Optional[int]` - Add new clause
 - `process_clause(clause_id: int)` - Mark clause as processed
@@ -185,7 +185,7 @@ Information about a clause.
 Perform one step of proof search.
 
 ```python
-result = saturate_step(state, clause_selection="fifo")
+result = saturate_step(state, clause_selection="age")
 # Returns dict with:
 #   given_id: Selected clause ID
 #   new_clauses: List of new clause IDs  
@@ -199,7 +199,7 @@ result = saturate_step(state, clause_selection="fifo")
 
 ```python
 # Available strategies
-state.select_given_clause(strategy="fifo")     # First-in-first-out
+state.select_given_clause(strategy="age")      # Age-based (FIFO)
 state.select_given_clause(strategy="smallest") # Smallest clause first
 ```
 

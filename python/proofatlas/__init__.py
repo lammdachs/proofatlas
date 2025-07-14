@@ -18,13 +18,14 @@ __version__ = "0.2.0"
 __author__ = "ProofAtlas Contributors"
 
 # Add helper function
-def saturate_step(state: ProofState, clause_selection: str = "fifo") -> Dict[str, Any]:
+def saturate_step(state: ProofState, clause_selection: str = "age") -> Dict[str, Any]:
     """
     Perform one step of the saturation algorithm.
     
     Args:
         state: The proof state
-        clause_selection: Strategy for selecting given clause ('fifo' or 'smallest')
+        clause_selection: Strategy for selecting given clause ('age' or 'smallest')
+                         Note: 'fifo' is accepted as an alias for 'age', 'size' for 'smallest'
         
     Returns:
         Dictionary with step information:

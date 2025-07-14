@@ -112,7 +112,7 @@ def test_saturate_step_helper():
     
     while steps < 20:
         steps += 1
-        result = saturate_step(state, clause_selection="fifo")
+        result = saturate_step(state, clause_selection="age")
         
         if result['saturated']:
             break

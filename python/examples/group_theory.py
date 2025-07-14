@@ -144,7 +144,7 @@ def prove_inverse_involution():
     state.add_clauses_from_tptp(axioms)
     
     # Try different strategies
-    for strategy in ["smallest", "fifo"]:
+    for strategy in ["smallest", "age"]:
         print(f"\nTrying with {strategy} clause selection...")
         
         steps = 0

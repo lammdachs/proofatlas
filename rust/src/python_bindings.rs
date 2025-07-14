@@ -204,12 +204,12 @@ impl ProofState {
         Ok((Vec::new(), "input".to_string()))
     }
     
-    /// Select next given clause (simple FIFO for now)
+    /// Select next given clause
     pub fn select_given_clause(&mut self, _py: Python, strategy: Option<&str>) -> PyResult<Option<usize>> {
-        let strategy = strategy.unwrap_or("fifo");
+        let strategy = strategy.unwrap_or("age");
         
         match strategy {
-            "fifo" => Ok(self.unprocessed.pop_front()),
+            "age" | "fifo" => Ok(self.unprocessed.pop_front()), // Accept both for backward compatibility
             "smallest" => {
                 // Find smallest clause
                 let mut best_idx = None;
@@ -232,7 +232,11 @@ impl ProofState {
                     Ok(None)
                 }
             }
-            _ => Ok(self.unprocessed.pop_front()) // Default to FIFO
+            "size" => {
+                // Alias for "smallest"
+                self.select_given_clause(_py, Some("smallest"))
+            }
+            _ => Ok(self.unprocessed.pop_front()) // Default to age-based
         }
     }
     
