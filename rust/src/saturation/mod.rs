@@ -1,12 +1,10 @@
 //! Saturation-based theorem proving using the given clause algorithm
 
 mod state;
-mod subsumption;
 mod simplification;
-mod custom;
+pub mod subsumption;
 
 pub use state::{SaturationState, SaturationConfig, SaturationResult, LiteralSelectionStrategy};
-pub use custom::custom_saturate_with_trace;
 
 use crate::core::CNFFormula;
 

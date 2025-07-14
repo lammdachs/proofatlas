@@ -4,7 +4,7 @@ use crate::core::{Clause, Proof, ProofStep};
 use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, InferenceResult};
 use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, SelectAll, SelectMaxWeight};
 use crate::parser::orient_equalities::orient_clause_equalities;
-use super::subsumption::{is_subsumed, has_duplicate};
+use super::subsumption::SubsumptionChecker;
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -66,6 +66,8 @@ pub struct SaturationState {
     proof_steps: Vec<ProofStep>,
     /// Configuration
     config: SaturationConfig,
+    /// Subsumption checker for redundancy elimination
+    subsumption_checker: SubsumptionChecker,
     /// Clause selector
     clause_selector: Box<dyn ClauseSelector>,
     /// Literal selector
@@ -77,10 +79,19 @@ impl SaturationState {
     pub fn new(initial_clauses: Vec<Clause>, config: SaturationConfig) -> Self {
         let mut clauses = Vec::new();
         let mut unprocessed = VecDeque::new();
+        let mut subsumption_checker = SubsumptionChecker::new();
         
         // Add initial clauses with IDs
         for (i, mut clause) in initial_clauses.into_iter().enumerate() {
             clause.id = Some(i);
+            // Orient equalities before adding
+            let mut oriented = clause.clone();
+            orient_clause_equalities(&mut oriented);
+            
+            // Add to subsumption checker
+            let idx = subsumption_checker.add_clause(oriented);
+            assert_eq!(idx, i); // Initial clauses should match their index
+            
             clauses.push(clause);
             unprocessed.push_back(i);
         }
@@ -95,6 +106,7 @@ impl SaturationState {
             clauses,
             processed: HashSet::new(),
             unprocessed,
+            subsumption_checker,
             proof_steps: Vec::new(),
             config,
             clause_selector: Box::new(AgeWeightRatioSelector::default()),
@@ -162,8 +174,10 @@ impl SaturationState {
             let mut unique_inferences = Vec::new();
             
             for inference in new_inferences {
-                // Create a normalized string representation for comparison
-                let clause_str = format!("{}", inference.conclusion);
+                // Orient the clause first to get canonical form
+                let mut oriented = inference.conclusion.clone();
+                orient_clause_equalities(&mut oriented);
+                let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
                     unique_inferences.push(inference);
                 }
@@ -238,23 +252,23 @@ impl SaturationState {
             return None;
         }
         
-        // Check for forward subsumption
-        if is_subsumed(&inference.conclusion, &self.clauses) {
-            return None;
-        }
+        // Orient equalities first so we check the canonical form
+        let mut oriented_clause = inference.conclusion.clone();
+        orient_clause_equalities(&mut oriented_clause);
         
-        // Check for duplicates
-        if has_duplicate(&inference.conclusion, &self.clauses) {
+        // Check subsumption for redundancy elimination
+        if self.subsumption_checker.is_subsumed(&oriented_clause) {
             return None;
         }
         
         // Add the clause
         let new_idx = self.clauses.len();
-        let mut clause_with_id = inference.conclusion.clone();
+        let mut clause_with_id = oriented_clause.clone();
         clause_with_id.id = Some(new_idx);
         
-        // Orient equalities before adding
-        orient_clause_equalities(&mut clause_with_id);
+        // Add to subsumption checker
+        let idx_from_subsumption = self.subsumption_checker.add_clause(oriented_clause);
+        assert_eq!(idx_from_subsumption, new_idx);
         
         self.clauses.push(clause_with_id.clone());
         self.unprocessed.push_back(new_idx);

@@ -8,7 +8,7 @@ A high-performance automated theorem prover using the superposition calculus.
 - **Standard data structures**: Clean type-safe representation using Rust structs and enums
 - **TPTP parser**: Supports CNF format input files with automatic equality orientation
 - **Given-clause algorithm**: Efficient saturation-based proof search
-- **Subsumption checking**: Automatic removal of redundant clauses
+- **Subsumption checking**: Pragmatic redundancy elimination with tiered approach
 - **Automatic equality orientation**: Equalities are preprocessed to ensure larger terms appear on the left (according to KBO)
 - **Selection strategies**: Configurable literal and clause selection for controlling search space
 
@@ -69,3 +69,4 @@ cargo run --bin prove -- example.tptp --verbose
 
 - [Selection Strategies](docs/selection_strategies.md) - Detailed guide to literal and clause selection
 - [Calculus Quick Reference](docs/calculus_quick_reference.md) - Inference rules and their conditions
+- [Subsumption](docs/subsumption.md) - Pragmatic redundancy elimination strategy

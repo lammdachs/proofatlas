@@ -29,6 +29,7 @@ When working with theorem provers, remember:
 - **Completeness**: If a problem is unsatisfiable (a theorem) and the prover saturates without finding a proof, this indicates incompleteness
 - A complete theorem prover will either find a proof for unsatisfiable problems or run out of resources (time/memory)
 - Recent bug fix: Unification now uses eager substitution propagation to prevent unsound inferences
+- Subsumption: Uses a pragmatic tiered approach (duplicates → variants → units → small clauses → greedy) for good performance
 
 ## Environment Setup and Commands
 
