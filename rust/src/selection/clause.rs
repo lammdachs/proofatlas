@@ -16,18 +16,6 @@ pub trait ClauseSelector: Send + Sync {
     fn name(&self) -> &str;
 }
 
-/// First-In-First-Out (FIFO) selection - simple queue
-pub struct FIFOSelector;
-
-impl ClauseSelector for FIFOSelector {
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, _clauses: &[Clause]) -> Option<usize> {
-        unprocessed.pop_front()
-    }
-    
-    fn name(&self) -> &str {
-        "FIFO"
-    }
-}
 
 /// Select smallest clauses first
 pub struct SizeBasedSelector;
@@ -59,30 +47,12 @@ impl ClauseSelector for SizeBasedSelector {
     }
 }
 
-/// Select oldest clauses first (by clause ID)
+/// Select oldest clauses first (FIFO - First In First Out)
 pub struct AgeBasedSelector;
 
 impl ClauseSelector for AgeBasedSelector {
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
-        if unprocessed.is_empty() {
-            return None;
-        }
-        
-        // Find the clause with the lowest ID (oldest)
-        let mut best_idx = 0;
-        let mut best_id = clauses[unprocessed[0]].id.unwrap_or(usize::MAX);
-        
-        for (i, &clause_idx) in unprocessed.iter().enumerate() {
-            if let Some(id) = clauses[clause_idx].id {
-                if id < best_id {
-                    best_id = id;
-                    best_idx = i;
-                }
-            }
-        }
-        
-        // Remove and return the selected clause
-        unprocessed.remove(best_idx)
+    fn select(&mut self, unprocessed: &mut VecDeque<usize>, _clauses: &[Clause]) -> Option<usize> {
+        unprocessed.pop_front()
     }
     
     fn name(&self) -> &str {
@@ -177,20 +147,9 @@ impl AgeWeightRatioSelector {
         }
     }
     
-    fn select_by_age(&self, unprocessed: &VecDeque<usize>, clauses: &[Clause]) -> usize {
-        let mut best_idx = 0;
-        let mut best_age = clauses[unprocessed[0]].id.unwrap_or(usize::MAX);
-        
-        for (i, &clause_idx) in unprocessed.iter().enumerate() {
-            if let Some(age) = clauses[clause_idx].id {
-                if age < best_age {
-                    best_age = age;
-                    best_idx = i;
-                }
-            }
-        }
-        
-        best_idx
+    fn select_by_age(&self, _unprocessed: &VecDeque<usize>, _clauses: &[Clause]) -> usize {
+        // FIFO: always select the first clause
+        0
     }
     
     fn select_by_weight(&self, unprocessed: &VecDeque<usize>, clauses: &[Clause]) -> usize {

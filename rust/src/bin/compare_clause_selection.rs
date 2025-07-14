@@ -3,7 +3,7 @@
 use std::env;
 use std::time::Instant;
 use proofatlas::{parse_tptp_file, SaturationConfig, SaturationState, SaturationResult, LiteralSelectionStrategy};
-use proofatlas::selection::{FIFOSelector, SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector};
+use proofatlas::selection::{SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -41,9 +41,8 @@ fn main() {
     
     // Test different clause selection strategies
     let strategies: Vec<(&str, Box<dyn Fn() -> Box<dyn proofatlas::selection::ClauseSelector>>)> = vec![
-        ("FIFO", Box::new(|| Box::new(FIFOSelector))),
+        ("Age-Based (FIFO)", Box::new(|| Box::new(AgeBasedSelector))),
         ("Size-Based", Box::new(|| Box::new(SizeBasedSelector))),
-        ("Age-Based", Box::new(|| Box::new(AgeBasedSelector))),
         ("Age-Weight 1:5", Box::new(|| Box::new(AgeWeightRatioSelector::new(1, 5)))),
         ("Age-Weight 1:1", Box::new(|| Box::new(AgeWeightRatioSelector::new(1, 1)))),
         ("Age-Weight 1:10", Box::new(|| Box::new(AgeWeightRatioSelector::new(1, 10)))),

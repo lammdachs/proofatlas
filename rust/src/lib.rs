@@ -32,7 +32,7 @@ pub use inference::{
 pub use selection::{
     LiteralSelector, ClauseSelector,
     NoSelection, SelectNegative, SelectMaxWeight,
-    FIFOSelector, SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector
+    SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector
 };
 
 pub use saturation::{
