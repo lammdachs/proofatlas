@@ -1,8 +1,8 @@
 //! Test to verify how literal selection affects inference rules
 
 use proofatlas::{
-    Clause, Literal, Atom, PredicateSymbol, Term, Variable,
-    resolution, factoring, NoSelection
+    Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
+    resolution, factoring, NoSelection, SelectNegative
 };
 
 #[test]
@@ -49,8 +49,8 @@ fn test_resolution_with_select_negative() {
     
     let x = Term::Variable(Variable { name: "X".to_string() });
     let y = Term::Variable(Variable { name: "Y".to_string() });
-    let a = Term::Variable(Variable { name: "a".to_string() });
-    let b = Term::Variable(Variable { name: "b".to_string() });
+    let a = Term::Constant(Constant { name: "a".to_string() });
+    let b = Term::Constant(Constant { name: "b".to_string() });
     
     let clause1 = Clause::new(vec![
         Literal::negative(Atom { predicate: p.clone(), args: vec![x.clone()] }),

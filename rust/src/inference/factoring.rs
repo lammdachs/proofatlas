@@ -91,10 +91,12 @@ mod tests {
         let selector = NoSelection;
         let results = factoring(&clause, 0, &selector);
         
-        // With NoSelection, both P literals can be factored
-        // Should get one factor: P(X) ∨ Q(Z)
-        assert_eq!(results.len(), 1);
+        // With NoSelection, both P literals are selected
+        // P(X) factors with P(Y), and P(Y) factors with P(X)
+        // Both produce the same clause: P(X) ∨ Q(Z) (with appropriate substitution)
+        assert_eq!(results.len(), 2);
         assert_eq!(results[0].conclusion.literals.len(), 2);
+        assert_eq!(results[1].conclusion.literals.len(), 2);
     }
     
     // #[test]

@@ -31,7 +31,7 @@ pub use inference::{
 
 pub use selection::{
     LiteralSelector, ClauseSelector,
-    NoSelection, SelectMaxWeight,
+    NoSelection, SelectNegative, SelectMaxWeight,
     FIFOSelector, SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector
 };
 

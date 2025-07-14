@@ -2,7 +2,7 @@
 
 use proofatlas::{
     Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
-    resolution, factoring, LiteralSelector, NoSelection
+    resolution, factoring, LiteralSelector, NoSelection, SelectNegative
 };
 
 #[test]
@@ -94,7 +94,8 @@ fn test_factoring_should_use_selection() {
     // But the current implementation will factor them anyway
     println!("Number of factors: {}", results.len());
     
-    // With selection: 0 factors (negative P can't factor with positive P)
-    // Without selection: 1 factor (P(Y) and P(Z) can factor)
-    assert_eq!(results.len(), 1);
+    // With NoSelection: all literals are selected
+    // P(Y) can factor with P(Z), and P(Z) can factor with P(Y)
+    // This produces 2 factors (both equivalent)
+    assert_eq!(results.len(), 2);
 }

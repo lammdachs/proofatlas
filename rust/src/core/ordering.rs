@@ -254,8 +254,8 @@ mod tests {
         // X > Y should be incomparable (different variables)
         assert_eq!(kbo.compare(&x, &y), Ordering::Incomparable);
         
-        // a > X should be valid (no variable in a)
-        assert_eq!(kbo.compare(&a, &x), Ordering::Equal); // Same weight
+        // a > X is incomparable (variable condition not satisfied)
+        assert_eq!(kbo.compare(&a, &x), Ordering::Incomparable);
         
         // f(X) > X should be valid
         let f = FunctionSymbol { name: "f".to_string(), arity: 1 };
