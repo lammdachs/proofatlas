@@ -10,6 +10,7 @@ A high-performance automated theorem prover using the superposition calculus.
 - **Given-clause algorithm**: Efficient saturation-based proof search
 - **Subsumption checking**: Automatic removal of redundant clauses
 - **Automatic equality orientation**: Equalities are preprocessed to ensure larger terms appear on the left (according to KBO)
+- **Selection strategies**: Configurable literal and clause selection for controlling search space
 
 ## Building
 
@@ -36,6 +37,8 @@ cargo test
 - `--max-clauses <n>`: Set maximum number of clauses (default: 10000)  
 - `--no-superposition`: Disable superposition inference rule
 - `--verbose`: Show detailed progress and proof steps
+- `--literal-selection <strategy>`: Set literal selection strategy (all, max-weight)
+- `--clause-selection <strategy>`: Set clause selection strategy (age, size, age-weight)
 
 ## Architecture
 
@@ -61,3 +64,8 @@ EOF
 # Prove it
 cargo run --bin prove -- example.tptp --verbose
 ```
+
+## Documentation
+
+- [Selection Strategies](docs/selection_strategies.md) - Detailed guide to literal and clause selection
+- [Calculus Quick Reference](docs/calculus_quick_reference.md) - Inference rules and their conditions

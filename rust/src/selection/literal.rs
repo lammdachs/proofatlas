@@ -2,6 +2,10 @@
 //!
 //! These strategies determine which literals in a clause are eligible
 //! for inference rules like resolution and superposition.
+//!
+//! In resolution-based theorem proving, not all literals need to participate
+//! in every inference. By restricting which literals can be used, we can
+//! dramatically reduce the number of generated clauses while still finding proofs.
 
 use crate::core::Clause;
 use std::collections::HashSet;
@@ -16,7 +20,13 @@ pub trait LiteralSelector: Send + Sync {
     fn name(&self) -> &str;
 }
 
-/// Select all literals - all literals are eligible
+/// Select all literals - all literals are eligible for inference
+/// 
+/// With this strategy, any literal in a clause can be resolved upon.
+/// For example, in the clause `P(x) ∨ Q(y) ∨ R(z)`, all three literals
+/// can participate in resolution with complementary literals from other clauses.
+/// 
+/// This preserves completeness but generates many inferences.
 pub struct SelectAll;
 
 impl LiteralSelector for SelectAll {
@@ -32,6 +42,15 @@ impl LiteralSelector for SelectAll {
 use crate::core::{Literal, Term};
 
 /// Select literals with maximum weight (symbol count)
+/// 
+/// Only the "largest" literals in a clause can be used for inference.
+/// For example, in `P(x) ∨ Q(f(g(a)))`, only `Q(f(g(a)))` would be selected
+/// because it contains more symbols.
+/// 
+/// The intuition: complex literals often contain the "meat" of the problem,
+/// while simpler literals may be auxiliary. This dramatically reduces the
+/// search space but is incomplete - some theorems may require resolving
+/// on the smaller literals.
 pub struct SelectMaxWeight;
 
 impl SelectMaxWeight {
