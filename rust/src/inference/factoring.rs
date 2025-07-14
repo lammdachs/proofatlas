@@ -70,10 +70,10 @@ pub fn factoring(
 mod tests {
     use super::*;
     use crate::core::{Variable, PredicateSymbol, Atom, Term, Literal};
-    use crate::selection::NoSelection;
+    use crate::selection::SelectAll;
     
     #[test]
-    fn test_factoring_with_no_selection() {
+    fn test_factoring_with_select_all() {
         // P(X) ∨ P(Y) ∨ Q(Z)
         let p = PredicateSymbol { name: "P".to_string(), arity: 1 };
         let q = PredicateSymbol { name: "Q".to_string(), arity: 1 };
@@ -88,10 +88,10 @@ mod tests {
             Literal::positive(Atom { predicate: q.clone(), args: vec![z.clone()] }),
         ]);
         
-        let selector = NoSelection;
+        let selector = SelectAll;
         let results = factoring(&clause, 0, &selector);
         
-        // With NoSelection, both P literals are selected
+        // With SelectAll, both P literals are selected
         // P(X) factors with P(Y), and P(Y) factors with P(X)
         // Both produce the same clause: P(X) ∨ Q(Z) (with appropriate substitution)
         assert_eq!(results.len(), 2);

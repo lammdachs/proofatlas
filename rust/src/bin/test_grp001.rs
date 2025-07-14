@@ -27,12 +27,12 @@ fn main() {
         max_clause_size: 20,
         timeout: std::time::Duration::from_secs(60),
         use_superposition: true,  // Need superposition for equality reasoning
-        literal_selection: LiteralSelectionStrategy::NoSelection,
+        literal_selection: LiteralSelectionStrategy::SelectAll,
     };
     
     println!("\nTesting with Age-Weight 1:5 clause selection:");
     println!("Superposition: {}", config.use_superposition);
-    println!("Literal selection: NoSelection");
+    println!("Literal selection: SelectAll");
     
     let mut state = SaturationState::new(cnf_formula.clauses.clone(), config);
     state.set_clause_selector(Box::new(AgeWeightRatioSelector::new(1, 5)));

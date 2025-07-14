@@ -81,10 +81,10 @@ pub fn resolution(
 mod tests {
     use super::*;
     use crate::core::{Variable, Constant, PredicateSymbol, Atom, Term, Literal};
-    use crate::selection::NoSelection;
+    use crate::selection::SelectAll;
     
     #[test]
-    fn test_resolution_with_no_selection() {
+    fn test_resolution_with_select_all() {
         // P(a) ∨ Q(X)
         // ~P(a) ∨ R(b)
         // Should resolve to Q(X) ∨ R(b)
@@ -107,7 +107,7 @@ mod tests {
             Literal::positive(Atom { predicate: r.clone(), args: vec![b.clone()] }),
         ]);
         
-        let selector = NoSelection;
+        let selector = SelectAll;
         let results = resolution(&clause1, &clause2, 0, 1, &selector);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].conclusion.literals.len(), 2);

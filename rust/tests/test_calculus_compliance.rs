@@ -2,7 +2,7 @@
 
 use proofatlas::{
     Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
-    resolution, factoring, LiteralSelector, NoSelection, SelectNegative
+    resolution, factoring, LiteralSelector, SelectAll
 };
 
 #[test]
@@ -18,42 +18,40 @@ fn test_resolution_should_use_selection() {
     let x = Term::Variable(Variable { name: "X".to_string() });
     let a = Term::Constant(Constant { name: "a".to_string() });
     
-    // Clause 1: P(X) ∨ Q(X) - with SelectNegative, P(X) should NOT be selected
+    // Clause 1: P(X) ∨ Q(X)
     let clause1 = Clause::new(vec![
         Literal::positive(Atom { predicate: p.clone(), args: vec![x.clone()] }),
         Literal::positive(Atom { predicate: q.clone(), args: vec![x.clone()] }),
     ]);
     
-    // Clause 2: ~P(a) ∨ Q(a) - with SelectNegative, only ~P(a) should be selected
+    // Clause 2: ~P(a) ∨ Q(a)
     let clause2 = Clause::new(vec![
         Literal::negative(Atom { predicate: p.clone(), args: vec![a.clone()] }),
         Literal::positive(Atom { predicate: q.clone(), args: vec![a.clone()] }),
     ]);
     
-    // What SHOULD happen with literal selection:
-    let selector = SelectNegative;
+    // With SelectAll, all literals are eligible for resolution
+    let selector = SelectAll;
     let selected1 = selector.select(&clause1);
     let selected2 = selector.select(&clause2);
     
     println!("Clause 1 selected literals: {:?}", selected1);
     println!("Clause 2 selected literals: {:?}", selected2);
     
-    // With SelectNegative:
-    // - Clause 1 has no negative literals, so NONE are selected: {}
-    // - Clause 2 has one negative literal, so only it is selected: {0}
-    assert_eq!(selected1.len(), 0);  // No negative literals!
-    assert_eq!(selected2.len(), 1);
-    assert!(selected2.contains(&0));
+    // With SelectAll:
+    // - Clause 1: all literals are selected: {0, 1}
+    // - Clause 2: all literals are selected: {0, 1}
+    assert_eq!(selected1.len(), 2);
+    assert_eq!(selected2.len(), 2);
     
-    // But the current resolution implementation uses selection:
-    let no_selector = NoSelection;
-    let results = resolution(&clause1, &clause2, 0, 1, &no_selector);
+    // Apply resolution with SelectAll
+    let selector = SelectAll;
+    let results = resolution(&clause1, &clause2, 0, 1, &selector);
     
-    // It should only resolve P(X) with ~P(a), but let's see:
+    // With SelectAll, resolution can happen on any complementary pair
     println!("Number of resolvents: {}", results.len());
     
-    // With proper selection, we should get exactly 1 resolvent
-    // But without selection, we get 1 (because only P matches)
+    // Since only P(X) and ~P(a) form a complementary pair, we get 1 resolvent
     assert_eq!(results.len(), 1);
 }
 
@@ -79,22 +77,20 @@ fn test_factoring_should_use_selection() {
         Literal::positive(Atom { predicate: q.clone(), args: vec![x.clone()] }),
     ]);
     
-    // With SelectNegative, only literal 0 (~P(X)) should be selected
-    let selector = SelectNegative;
+    // With SelectAll, all literals are selected
+    let selector = SelectAll;
     let selected = selector.select(&clause);
     println!("Selected literals for factoring: {:?}", selected);
-    assert_eq!(selected.len(), 1);
-    assert!(selected.contains(&0));
+    assert_eq!(selected.len(), 4);  // All 4 literals are selected
     
     // Current factoring implementation:
-    let no_selector = NoSelection;
-    let results = factoring(&clause, 0, &no_selector);
+    let selector = SelectAll;
+    let results = factoring(&clause, 0, &selector);
     
-    // It should NOT factor positive P literals because they're not selected
-    // But the current implementation will factor them anyway
+    // With SelectAll, all literals can participate in factoring
     println!("Number of factors: {}", results.len());
     
-    // With NoSelection: all literals are selected
+    // With SelectAll: all literals are selected
     // P(Y) can factor with P(Z), and P(Z) can factor with P(Y)
     // This produces 2 factors (both equivalent)
     assert_eq!(results.len(), 2);

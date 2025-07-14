@@ -16,37 +16,20 @@ pub trait LiteralSelector: Send + Sync {
     fn name(&self) -> &str;
 }
 
-/// No selection - all literals are eligible
-pub struct NoSelection;
+/// Select all literals - all literals are eligible
+pub struct SelectAll;
 
-impl LiteralSelector for NoSelection {
+impl LiteralSelector for SelectAll {
     fn select(&self, clause: &Clause) -> HashSet<usize> {
         (0..clause.literals.len()).collect()
     }
     
     fn name(&self) -> &str {
-        "NoSelection"
+        "SelectAll"
     }
 }
 
 use crate::core::{Literal, Term};
-
-/// Select only negative literals
-pub struct SelectNegative;
-
-impl LiteralSelector for SelectNegative {
-    fn select(&self, clause: &Clause) -> HashSet<usize> {
-        clause.literals.iter()
-            .enumerate()
-            .filter(|(_, lit)| !lit.polarity)
-            .map(|(idx, _)| idx)
-            .collect()
-    }
-    
-    fn name(&self) -> &str {
-        "SelectNegative"
-    }
-}
 
 /// Select literals with maximum weight (symbol count)
 pub struct SelectMaxWeight;

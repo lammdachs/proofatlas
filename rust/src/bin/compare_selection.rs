@@ -40,7 +40,7 @@ fn main() {
     
     // Test different selection strategies
     let strategies = vec![
-        ("No Selection", LiteralSelectionStrategy::NoSelection),
+        ("Select All", LiteralSelectionStrategy::SelectAll),
         ("Select Max Weight", LiteralSelectionStrategy::SelectMaxWeight),
     ];
     

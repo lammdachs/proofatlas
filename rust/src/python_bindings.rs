@@ -7,7 +7,7 @@ use std::collections::{HashMap, VecDeque, HashSet};
 use crate::core::{Clause, CNFFormula, Term, Variable};
 use crate::parser::parse_tptp;
 use crate::saturation::{SaturationConfig, LiteralSelectionStrategy};
-use crate::selection::{LiteralSelector, NoSelection, SelectMaxWeight};
+use crate::selection::{LiteralSelector, SelectAll, SelectMaxWeight};
 use crate::inference::{
     resolution, factoring, superposition, equality_resolution, equality_factoring,
     InferenceResult as RustInferenceResult, InferenceRule
@@ -91,7 +91,7 @@ impl ProofState {
             clauses: Vec::new(),
             processed: HashSet::new(),
             unprocessed: VecDeque::new(),
-            literal_selector: Box::new(NoSelection) as Box<dyn LiteralSelector + Send>,
+            literal_selector: Box::new(SelectAll) as Box<dyn LiteralSelector + Send>,
             proof_trace: Vec::new(),
             use_superposition: true,
         }
@@ -335,8 +335,8 @@ impl ProofState {
     /// Set literal selection strategy
     pub fn set_literal_selection(&mut self, strategy: &str) -> PyResult<()> {
         match strategy {
-            "all" | "no_selection" => {
-                self.literal_selector = Box::new(NoSelection) as Box<dyn LiteralSelector + Send>;
+            "all" | "select_all" => {
+                self.literal_selector = Box::new(SelectAll) as Box<dyn LiteralSelector + Send>;
                 Ok(())
             }
             "max_weight" => {

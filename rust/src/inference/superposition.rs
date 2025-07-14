@@ -201,14 +201,14 @@ fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
 mod tests {
     use super::*;
     use crate::core::{Variable, Constant, PredicateSymbol, FunctionSymbol};
-    use crate::selection::NoSelection;
+    use crate::selection::SelectAll;
     use crate::inference::common::rename_clause_variables;
     
     #[test]
     fn test_superposition_with_selection() {
         // f(a) = a  (Note: f(a) > a in ordering by weight)
         // g(a) != c
-        // Should derive g(f(a)) != c with NoSelection
+        // Should derive g(f(a)) != c with SelectAll
         
         let eq = PredicateSymbol { name: "=".to_string(), arity: 2 };
         let f = FunctionSymbol { name: "f".to_string(), arity: 1 };
@@ -234,7 +234,7 @@ mod tests {
             })
         ]);
         
-        let selector = NoSelection;
+        let selector = SelectAll;
         let results = superposition(&clause1, &clause2, 0, 1, &selector);
         
         

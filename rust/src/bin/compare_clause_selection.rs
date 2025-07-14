@@ -48,14 +48,14 @@ fn main() {
         ("Age-Weight 1:10", Box::new(|| Box::new(AgeWeightRatioSelector::new(1, 10)))),
     ];
     
-    // Use SelectFirstNegative as the literal selection strategy
+    // Use SelectAll as the literal selection strategy
     let config = SaturationConfig {
         max_clauses: 10000,
         max_iterations: 100000,
         max_clause_size: 20,
         timeout: std::time::Duration::from_secs(10),
         use_superposition: true,
-        literal_selection: LiteralSelectionStrategy::NoSelection,
+        literal_selection: LiteralSelectionStrategy::SelectAll,
     };
     
     for (name, selector_factory) in strategies {

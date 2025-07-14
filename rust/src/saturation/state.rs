@@ -2,7 +2,7 @@
 
 use crate::core::{Clause, Proof, ProofStep};
 use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, InferenceResult};
-use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, NoSelection, SelectMaxWeight};
+use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, SelectAll, SelectMaxWeight};
 use super::subsumption::{is_subsumed, has_duplicate};
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ pub struct SaturationConfig {
 /// Literal selection strategies
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiteralSelectionStrategy {
-    NoSelection,
+    SelectAll,
     SelectMaxWeight,
 }
 
@@ -33,7 +33,7 @@ impl Default for SaturationConfig {
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
             use_superposition: true,
-            literal_selection: LiteralSelectionStrategy::NoSelection,
+            literal_selection: LiteralSelectionStrategy::SelectAll,
         }
     }
 }
@@ -84,7 +84,7 @@ impl SaturationState {
         
         // Create literal selector based on configuration
         let literal_selector: Box<dyn LiteralSelector> = match config.literal_selection {
-            LiteralSelectionStrategy::NoSelection => Box::new(NoSelection),
+            LiteralSelectionStrategy::SelectAll => Box::new(SelectAll),
             LiteralSelectionStrategy::SelectMaxWeight => Box::new(SelectMaxWeight::new()),
         };
         

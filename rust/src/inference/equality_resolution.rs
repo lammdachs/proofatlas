@@ -59,10 +59,10 @@ pub fn equality_resolution(
 mod tests {
     use super::*;
     use crate::core::{Constant, PredicateSymbol, Atom, Term, Literal};
-    use crate::selection::NoSelection;
+    use crate::selection::SelectAll;
     
     #[test]
-    fn test_equality_resolution_with_no_selection() {
+    fn test_equality_resolution_with_select_all() {
         // Test ~a = a should resolve to empty clause
         let eq_pred = PredicateSymbol { name: "=".to_string(), arity: 2 };
         let a = Term::Constant(Constant { name: "a".to_string() });
@@ -74,7 +74,7 @@ mod tests {
             })
         ]);
         
-        let selector = NoSelection;
+        let selector = SelectAll;
         let results = equality_resolution(&clause, 0, &selector);
         assert_eq!(results.len(), 1);
         assert!(results[0].conclusion.is_empty());

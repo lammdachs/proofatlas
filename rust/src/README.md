@@ -80,7 +80,6 @@ Each inference rule is implemented as a separate module with a common interface.
 
 ### Literal Selection
 The saturation module supports various literal selection strategies to constrain the search space:
-- SelectNegative - Select only negative literals
 - SelectPositive - Select only positive literals  
 - SelectFirst - Select first literal
 - SelectFirstNegative - Select first negative, or first if none

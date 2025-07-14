@@ -2,7 +2,7 @@
 
 use proofatlas::{
     Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
-    resolution, factoring, NoSelection
+    resolution, factoring, SelectAll
 };
 
 #[test]
@@ -35,8 +35,8 @@ fn test_resolution_tries_all_literals() {
         Literal::negative(Atom { predicate: r.clone(), args: vec![c.clone()] }),
     ]);
     
-    // Apply resolution with NoSelection (all literals eligible)
-    let selector = NoSelection;
+    // Apply resolution with SelectAll (all literals eligible)
+    let selector = SelectAll;
     let results = resolution(&clause1, &clause2, 0, 1, &selector);
     
     // WITHOUT literal selection, we should get 3 different resolvents
@@ -66,8 +66,8 @@ fn test_factoring_tries_all_pairs() {
         Literal::positive(Atom { predicate: p.clone(), args: vec![z.clone()] }),
     ]);
     
-    // Apply factoring with NoSelection (all literals eligible)
-    let selector = NoSelection;
+    // Apply factoring with SelectAll (all literals eligible)
+    let selector = SelectAll;
     let results = factoring(&clause, 0, &selector);
     
     // WITHOUT literal selection, we get factors for each pair

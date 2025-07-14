@@ -7,5 +7,5 @@
 pub mod literal;
 pub mod clause;
 
-pub use literal::{LiteralSelector, NoSelection, SelectNegative, SelectMaxWeight};
+pub use literal::{LiteralSelector, SelectAll, SelectMaxWeight};
 pub use clause::{ClauseSelector, SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector};
