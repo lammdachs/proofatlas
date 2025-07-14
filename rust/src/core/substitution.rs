@@ -22,6 +22,30 @@ impl Substitution {
         self.map.insert(var, term);
     }
     
+    /// Add a variable -> term mapping with eager substitution propagation
+    /// This ensures all variables in the substitution are fully substituted
+    pub fn insert_normalized(&mut self, var: Variable, term: Term) {
+        // First, apply existing substitutions to the new term
+        let normalized_term = term.apply_substitution(self);
+        
+        // Insert the new mapping
+        self.map.insert(var.clone(), normalized_term);
+        
+        // Now apply the new substitution to all existing mappings
+        let mut updated_map = HashMap::new();
+        for (existing_var, existing_term) in self.map.iter() {
+            if existing_var != &var {
+                let single_subst = Substitution {
+                    map: [(var.clone(), self.map[&var].clone())].iter().cloned().collect()
+                };
+                updated_map.insert(existing_var.clone(), existing_term.apply_substitution(&single_subst));
+            } else {
+                updated_map.insert(existing_var.clone(), existing_term.clone());
+            }
+        }
+        self.map = updated_map;
+    }
+    
     /// Compose two substitutions
     pub fn compose(&self, other: &Substitution) -> Substitution {
         let mut result = Substitution::new();

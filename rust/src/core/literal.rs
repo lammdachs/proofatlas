@@ -49,6 +49,13 @@ impl Literal {
             polarity: !self.polarity,
         }
     }
+    
+    /// Collect all variables in this literal
+    pub fn collect_variables(&self, vars: &mut std::collections::HashSet<super::Variable>) {
+        for term in &self.atom.args {
+            term.collect_variables(vars);
+        }
+    }
 }
 
 // Display implementations

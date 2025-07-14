@@ -1,5 +1,0 @@
-% Simple resolution test
-cnf(ax1, axiom, p(a) | q(b)).
-cnf(ax2, axiom, ~p(X) | r(X)).
-cnf(ax3, axiom, ~q(Y) | r(Y)).
-cnf(goal, negated_conjecture, ~r(a) | ~r(b)).

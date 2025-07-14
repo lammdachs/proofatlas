@@ -40,7 +40,8 @@ fn unify_with_subst(term1: &Term, term2: &Term, subst: &mut Substitution) -> Res
             if occurs_check(v, t) {
                 Err(UnificationError::OccursCheck(v.clone(), t.clone()))
             } else {
-                subst.insert(v.clone(), t.clone());
+                // Use normalized insert to ensure all substitutions are propagated
+                subst.insert_normalized(v.clone(), t.clone());
                 Ok(())
             }
         }

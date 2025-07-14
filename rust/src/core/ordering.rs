@@ -89,37 +89,62 @@ impl KBO {
     
     /// Compare two terms using KBO
     pub fn compare(&self, s: &Term, t: &Term) -> Ordering {
-        // First, check variable condition
+        // First check if terms are syntactically equal
+        if s == t {
+            return Ordering::Equal;
+        }
+        
+        // Check variable condition for s > t
         let vars_s = self.count_variables(s);
         let vars_t = self.count_variables(t);
         
-        // Check if every variable in t occurs in s
-        for (var, count_t) in &vars_t {
+        // For s > t, need #(x, s) ≥ #(x, t) for all variables x
+        let s_gt_t_var_cond = vars_t.iter().all(|(var, count_t)| {
             let count_s = vars_s.get(var).copied().unwrap_or(0);
-            if count_s < *count_t {
-                // Variable condition violated
-                return Ordering::Incomparable;
-            }
-        }
+            count_s >= *count_t
+        });
+        
+        // For t > s, need #(x, t) ≥ #(x, s) for all variables x
+        let t_gt_s_var_cond = vars_s.iter().all(|(var, count_s)| {
+            let count_t = vars_t.get(var).copied().unwrap_or(0);
+            count_t >= *count_s
+        });
         
         // Compare weights
         let weight_s = self.term_weight(s);
         let weight_t = self.term_weight(t);
         
-        if weight_s > weight_t {
+        if weight_s > weight_t && s_gt_t_var_cond {
             Ordering::Greater
-        } else if weight_s < weight_t {
-            // Check variable condition for t > s
-            for (var, count_s) in &vars_s {
-                let count_t = vars_t.get(var).copied().unwrap_or(0);
-                if count_t < *count_s {
-                    return Ordering::Incomparable;
-                }
-            }
+        } else if weight_t > weight_s && t_gt_s_var_cond {
             Ordering::Less
+        } else if weight_s == weight_t {
+            // Equal weight, check lexicographic ordering
+            if s_gt_t_var_cond && t_gt_s_var_cond {
+                // Both variable conditions hold, use pure lexicographic
+                self.compare_lex(s, t)
+            } else if s_gt_t_var_cond {
+                // Only s > t possible
+                let lex = self.compare_lex(s, t);
+                if lex == Ordering::Greater || lex == Ordering::Equal {
+                    lex
+                } else {
+                    Ordering::Incomparable
+                }
+            } else if t_gt_s_var_cond {
+                // Only t > s possible
+                let lex = self.compare_lex(s, t);
+                if lex == Ordering::Less || lex == Ordering::Equal {
+                    lex
+                } else {
+                    Ordering::Incomparable
+                }
+            } else {
+                // Neither variable condition holds
+                Ordering::Incomparable
+            }
         } else {
-            // Equal weight, use lexicographic comparison
-            self.compare_lex(s, t)
+            Ordering::Incomparable
         }
     }
     
@@ -130,12 +155,17 @@ impl KBO {
                 if v1 == v2 {
                     Ordering::Equal
                 } else {
-                    // Variables are incomparable if different
-                    Ordering::Incomparable
+                    // Variables are totally ordered by name
+                    if v1.name > v2.name {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Less
+                    }
                 }
             }
-            (Term::Variable(_), _) => Ordering::Incomparable,
-            (_, Term::Variable(_)) => Ordering::Incomparable,
+            // Variable vs non-variable: variable is always smaller in lex ordering
+            (Term::Variable(_), _) => Ordering::Less,
+            (_, Term::Variable(_)) => Ordering::Greater,
             (Term::Constant(c1), Term::Constant(c2)) => {
                 if c1.name == c2.name {
                     Ordering::Equal

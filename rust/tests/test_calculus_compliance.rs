@@ -2,7 +2,7 @@
 
 use proofatlas::{
     Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
-    resolution, factoring, SelectNegative, LiteralSelector, NoSelection
+    resolution, factoring, LiteralSelector, NoSelection
 };
 
 #[test]

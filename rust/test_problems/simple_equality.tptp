@@ -1,3 +1,0 @@
-cnf(eq1, axiom, f(a) = b).
-cnf(eq2, axiom, f(a) = c).
-cnf(not_equal, negated_conjecture, b != c).

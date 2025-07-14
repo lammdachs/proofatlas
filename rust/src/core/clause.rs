@@ -52,6 +52,24 @@ impl Clause {
         
         false
     }
+    
+    /// Count the total number of symbols in this clause
+    pub fn symbol_count(&self) -> usize {
+        self.literals.iter().map(|lit| {
+            // Count predicate symbol
+            1 + lit.atom.args.iter().map(|t| Self::term_symbol_count(t)).sum::<usize>()
+        }).sum()
+    }
+    
+    fn term_symbol_count(term: &super::Term) -> usize {
+        match term {
+            super::Term::Variable(_) => 1,
+            super::Term::Constant(_) => 1,
+            super::Term::Function(_, args) => {
+                1 + args.iter().map(|t| Self::term_symbol_count(t)).sum::<usize>()
+            }
+        }
+    }
 }
 
 impl fmt::Display for Clause {

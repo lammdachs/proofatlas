@@ -1,5 +1,0 @@
-% Simple propositional test
-cnf(ax1, axiom, p | q).
-cnf(ax2, axiom, ~p | r).
-cnf(ax3, axiom, ~q | s).
-cnf(goal, negated_conjecture, ~r | ~s).

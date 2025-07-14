@@ -5,12 +5,23 @@ edition = "2021"
 authors = ["ProofAtlas Contributors"]
 description = "High-performance theorem proving using superposition calculus"
 
+[lib]
+name = "proofatlas"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # Parser
 nom = "7"
 
 # Error handling
 thiserror = "1.0"
+
+# Python bindings
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
 
 [dev-dependencies]
 # criterion = "0.5"  # Commented out due to rustc version requirements

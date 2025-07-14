@@ -73,16 +73,20 @@ pub fn superposition(
                                 // Apply superposition
                                 let mut new_literals = Vec::new();
                                 
-                                // Add literals from from_clause
-                                for lit in &from_clause.literals {
-                                    new_literals.push(lit.apply_substitution(&mgu));
+                                // Add literals from from_clause EXCEPT the equality being used
+                                for (i, lit) in from_clause.literals.iter().enumerate() {
+                                    if i != from_idx {
+                                        new_literals.push(lit.apply_substitution(&mgu));
+                                    }
                                 }
                                 
                                 // Add literals from into_clause, replacing at position
                                 for (k, lit) in renamed_into.literals.iter().enumerate() {
                                     if k == into_idx {
                                         // Replace at position
-                                        let new_atom = replace_at_position(&lit.atom, &pos.path, right, &mgu);
+                                        // IMPORTANT: Apply MGU to right before replacement to ensure all variables are substituted
+                                        let right_substituted = right.apply_substitution(&mgu);
+                                        let new_atom = replace_at_position(&lit.atom, &pos.path, &right_substituted, &mgu);
                                         new_literals.push(Literal {
                                             atom: new_atom,
                                             polarity: lit.polarity,
@@ -91,12 +95,6 @@ pub fn superposition(
                                         new_literals.push(lit.apply_substitution(&mgu));
                                     }
                                 }
-                                
-                                // Remove the equality literal that was used
-                                new_literals.retain(|lit| {
-                                    !(lit.polarity && lit.atom.is_equality() && 
-                                      lit.atom.args == from_lit.atom.args)
-                                });
                                 
                                 // Remove duplicates
                                 new_literals = remove_duplicate_literals(new_literals);
@@ -200,6 +198,7 @@ mod tests {
     use super::*;
     use crate::core::{Variable, Constant, PredicateSymbol, FunctionSymbol};
     use crate::selection::NoSelection;
+    use crate::inference::common::rename_clause_variables;
     
     #[test]
     fn test_superposition_with_selection() {

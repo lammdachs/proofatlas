@@ -1,34 +1,34 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0", "setuptools", "wheel"]
-build-backend = "maturin"
+requires = ["setuptools>=45", "wheel", "setuptools-rust>=1.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "proofatlas"
-version = "0.1.0"
-description = "ProofAtlas: Automated theorem proving with Python and Rust"
+version = "0.2.0"
+description = "High-performance theorem prover for first-order logic"
 authors = [{name = "ProofAtlas Contributors"}]
-requires-python = ">=3.11"
+requires-python = ">=3.7"
 readme = "README.md"
 license = {text = "MIT"}
-keywords = ["theorem-proving", "automated-reasoning", "tptp", "first-order-logic"]
+keywords = ["theorem-proving", "automated-reasoning", "logic", "first-order-logic", "ATP"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
 ]
-dependencies = [
-    "lark",
-    "networkx",
-    "numpy",
-    "tqdm",
-    "python-dotenv",
-    "pyyaml",
-    "torch>=2.0.0",  # Will install CPU version by default; see README for GPU setup
-]
+
+# Core dependencies (minimal for the theorem prover)
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/yourusername/proofatlas"
@@ -36,52 +36,63 @@ Documentation = "https://github.com/yourusername/proofatlas/blob/main/README.md"
 Repository = "https://github.com/yourusername/proofatlas"
 Issues = "https://github.com/yourusername/proofatlas/issues"
 
-[project.scripts]
-proofatlas-download-tptp = "proofatlas.utils.download_tptp:main"
-
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest>=6.0",
+    "pytest-cov",
     "pytest-benchmark",
-    "ruff",
     "black",
     "mypy",
-    "torch",
-    "torch-geometric",
-    "pytorch-lightning",
-    "torchmetrics",
-    "scipy",
-    "matplotlib",
-    "plotly",
-    "click",
-    "rich",
-    "textual",
-    "sortedcontainers",
-    "gitpython",
-    "omegaconf",
+    "types-setuptools",
+    "ruff",
+]
+examples = [
+    "matplotlib>=3.0",
+    "tqdm",
+]
+# Legacy dependencies from the old Python implementation (optional)
+legacy = [
+    "lark",
+    "networkx", 
+    "numpy",
+    "tqdm",
+    "python-dotenv",
+    "pyyaml",
+    "torch>=2.0.0",
 ]
 
-[tool.maturin]
-python-source = "python"
-module-name = "proofatlas_rust"
-manifest-path = "rust/Cargo.toml"
-features = ["pyo3/extension-module"]
-# Tell maturin to include the pure Python modules
-include = ["python/proofatlas/**/*"]
+[tool.setuptools]
+zip-safe = false
 
 [tool.setuptools.packages.find]
 where = ["python"]
 include = ["proofatlas*"]
 namespaces = false
 
+[tool.setuptools.package-data]
+proofatlas = ["*.so", "*.pyd", "*.dylib"]
+
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py37"
+extend-exclude = ["rust/"]
 
 [tool.black]
 line-length = 100
-target-version = ['py38']
+target-version = ['py37']
+extend-exclude = "rust/"
+
+[tool.mypy]
+python_version = "3.7"
+warn_return_any = true
+warn_unused_configs = true
+exclude = ["rust/", "build/", "dist/"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
 python_files = ["test_*.py", "*_test.py"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

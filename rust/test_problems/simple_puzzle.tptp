@@ -1,9 +1,0 @@
-% Simplified Dreadbury Mansion puzzle
-cnf(lives_agatha, axiom, lives(agatha)).
-cnf(lives_butler, axiom, lives(butler)).
-cnf(lives_charles, axiom, lives(charles)).
-cnf(agatha_hates_agatha, axiom, hates(agatha,agatha)).
-cnf(agatha_hates_charles, axiom, hates(agatha,charles)).
-cnf(killer_hates_victim, axiom, ~killed(X,Y) | hates(X,Y)).
-cnf(same_hates, axiom, ~hates(agatha,X) | hates(butler,X)).
-cnf(prove_not_agatha, negated_conjecture, ~killed(agatha,agatha)).

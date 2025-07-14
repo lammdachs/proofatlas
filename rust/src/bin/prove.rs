@@ -103,9 +103,9 @@ fn main() {
             
             if verbose {
                 println!("\nProof steps:");
-                for (i, step) in proof.steps.iter().enumerate() {
+                for step in proof.steps.iter() {
                     println!("  [{}] {} from {:?} => {}", 
-                        i, 
+                        step.clause_idx, 
                         match step.inference.rule {
                             proofatlas::InferenceRule::Resolution => "Resolution",
                             proofatlas::InferenceRule::Factoring => "Factoring",

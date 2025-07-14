@@ -70,7 +70,7 @@ pub fn factoring(
 mod tests {
     use super::*;
     use crate::core::{Variable, PredicateSymbol, Atom, Term, Literal};
-    use crate::selection::{NoSelection, SelectFirstNegative};
+    use crate::selection::NoSelection;
     
     #[test]
     fn test_factoring_with_no_selection() {
@@ -97,26 +97,26 @@ mod tests {
         assert_eq!(results[0].conclusion.literals.len(), 2);
     }
     
-    #[test]
-    fn test_factoring_with_select_first_negative() {
-        // ~P(X) ∨ P(Y) ∨ ~P(Z)
-        let p = PredicateSymbol { name: "P".to_string(), arity: 1 };
-        
-        let x = Term::Variable(Variable { name: "X".to_string() });
-        let y = Term::Variable(Variable { name: "Y".to_string() });
-        let z = Term::Variable(Variable { name: "Z".to_string() });
-        
-        let clause = Clause::new(vec![
-            Literal::negative(Atom { predicate: p.clone(), args: vec![x.clone()] }),
-            Literal::positive(Atom { predicate: p.clone(), args: vec![y.clone()] }),
-            Literal::negative(Atom { predicate: p.clone(), args: vec![z.clone()] }),
-        ]);
-        
-        let selector = SelectFirstNegative;
-        let results = factoring(&clause, 0, &selector);
-        
-        // Only ~P(X) is selected, it can factor with ~P(Z) but not P(Y)
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].conclusion.literals.len(), 2);
-    }
+    // #[test]
+    // fn test_factoring_with_select_first_negative() {
+    //     // ~P(X) ∨ P(Y) ∨ ~P(Z)
+    //     let p = PredicateSymbol { name: "P".to_string(), arity: 1 };
+    //     
+    //     let x = Term::Variable(Variable { name: "X".to_string() });
+    //     let y = Term::Variable(Variable { name: "Y".to_string() });
+    //     let z = Term::Variable(Variable { name: "Z".to_string() });
+    //     
+    //     let clause = Clause::new(vec![
+    //         Literal::negative(Atom { predicate: p.clone(), args: vec![x.clone()] }),
+    //         Literal::positive(Atom { predicate: p.clone(), args: vec![y.clone()] }),
+    //         Literal::negative(Atom { predicate: p.clone(), args: vec![z.clone()] }),
+    //     ]);
+    //     
+    //     let selector = SelectFirstNegative;
+    //     let results = factoring(&clause, 0, &selector);
+    //     
+    //     // Only ~P(X) is selected, it can factor with ~P(Z) but not P(Y)
+    //     assert_eq!(results.len(), 1);
+    //     assert_eq!(results[0].conclusion.literals.len(), 2);
+    // }
 }

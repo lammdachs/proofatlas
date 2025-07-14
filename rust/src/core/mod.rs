@@ -10,6 +10,9 @@ pub mod substitution;
 pub mod proof;
 pub mod ordering;
 
+#[cfg(test)]
+mod test_ordering_stability;
+
 // Re-export commonly used types
 pub use term::{Term, Variable, Constant, FunctionSymbol};
 pub use literal::{Literal, Atom, PredicateSymbol};

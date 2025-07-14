@@ -1,5 +1,0 @@
-% Unsatisfiable propositional test
-cnf(ax1, axiom, p | q).
-cnf(ax2, axiom, ~p | ~q).
-cnf(ax3, axiom, p | ~q).
-cnf(ax4, axiom, ~p | q).

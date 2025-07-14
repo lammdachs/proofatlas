@@ -47,10 +47,17 @@ __pycache__/
 
 # Rust build artifacts
 rust/target/
+target/
 rust/Cargo.lock
 *.so
 *.dylib
 *.dll
+*.pyd
+
+# Python extension build location
+python/proofatlas/*.so
+python/proofatlas/*.pyd
+python/proofatlas/*.dylib
 
 # Distribution / packaging
 .Python

@@ -42,6 +42,21 @@ impl Term {
             }
         }
     }
+    
+    /// Collect all variables in this term
+    pub fn collect_variables(&self, vars: &mut std::collections::HashSet<Variable>) {
+        match self {
+            Term::Variable(v) => {
+                vars.insert(v.clone());
+            }
+            Term::Constant(_) => {}
+            Term::Function(_, args) => {
+                for arg in args {
+                    arg.collect_variables(vars);
+                }
+            }
+        }
+    }
 }
 
 // Display implementations for pretty printing

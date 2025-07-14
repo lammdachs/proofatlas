@@ -1,3 +1,0 @@
-% Test include
-include('simple_3ary.tptp').
-cnf(test2, axiom, product(x,y,z)).

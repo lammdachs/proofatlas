@@ -10,6 +10,9 @@ pub mod saturation;
 pub mod unification;
 pub mod parser;
 
+#[cfg(feature = "python")]
+pub mod python_bindings;
+
 // Re-export commonly used types and functions
 pub use core::{
     Term, Variable, Constant, FunctionSymbol,

@@ -6,9 +6,10 @@ A high-performance automated theorem prover using the superposition calculus.
 
 - **Superposition calculus**: Complete implementation including resolution, factoring, and paramodulation
 - **Standard data structures**: Clean type-safe representation using Rust structs and enums
-- **TPTP parser**: Supports CNF format input files
+- **TPTP parser**: Supports CNF format input files with automatic equality orientation
 - **Given-clause algorithm**: Efficient saturation-based proof search
 - **Subsumption checking**: Automatic removal of redundant clauses
+- **Automatic equality orientation**: Equalities are preprocessed to ensure larger terms appear on the left (according to KBO)
 
 ## Building
 

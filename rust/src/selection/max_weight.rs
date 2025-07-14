@@ -63,7 +63,7 @@ impl LiteralSelector for SelectMaxWeight {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Term, Variable, Constant, FunctionSymbol, PredicateSymbol};
+    use crate::core::{Term, Variable, Constant, FunctionSymbol, PredicateSymbol, Atom, Literal, Clause};
     
     #[test]
     fn test_select_max_weight() {

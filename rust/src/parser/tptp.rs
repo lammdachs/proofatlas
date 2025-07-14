@@ -3,6 +3,7 @@
 use crate::core::{Term, Variable, Constant, FunctionSymbol, PredicateSymbol, Atom, Literal, Clause, CNFFormula};
 use super::fof::{FOFFormula, Quantifier, FormulaRole, NamedFormula};
 use super::cnf_conversion::fof_to_cnf;
+use super::orient_equalities::orient_all_equalities;
 use nom::{
     IResult,
     branch::alt,
@@ -42,6 +43,9 @@ pub fn parse_tptp_file(file_path: &str, include_dirs: &[&str]) -> Result<CNFForm
         all_clauses.extend(cnf.clauses);
     }
     
+    // Orient all equalities
+    orient_all_equalities(&mut all_clauses);
+    
     Ok(CNFFormula { clauses: all_clauses })
 }
 
@@ -68,6 +72,9 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
         let cnf = fof_to_cnf(formula);
         all_clauses.extend(cnf.clauses);
     }
+    
+    // Orient all equalities
+    orient_all_equalities(&mut all_clauses);
     
     Ok(CNFFormula { clauses: all_clauses })
 }

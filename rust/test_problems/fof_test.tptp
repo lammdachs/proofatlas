@@ -1,4 +1,0 @@
-% Test FOF formula parsing and conversion
-fof(axiom1, axiom, ![X]: (p(X) => q(X))).
-fof(axiom2, axiom, ?[Y]: p(Y)).
-fof(goal, conjecture, ?[Z]: q(Z)).
