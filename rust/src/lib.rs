@@ -36,7 +36,7 @@ pub use selection::{
 };
 
 pub use saturation::{
-    saturate, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy
+    saturate, saturate_with_steps, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy
 };
 
 pub use unification::{

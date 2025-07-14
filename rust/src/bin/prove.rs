@@ -123,7 +123,7 @@ fn main() {
             println!("✗ SATURATED in {:.3}s", elapsed.as_secs_f64());
             println!("  No proof found - the formula may be satisfiable");
         }
-        SaturationResult::ResourceLimit => {
+        SaturationResult::ResourceLimit(_) => {
             println!("✗ RESOURCE LIMIT in {:.3}s", elapsed.as_secs_f64());
             println!("  Exceeded clause limit or iteration limit");
         }

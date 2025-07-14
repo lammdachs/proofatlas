@@ -56,6 +56,7 @@ fn main() {
         timeout: std::time::Duration::from_secs(10),
         use_superposition: true,
         literal_selection: LiteralSelectionStrategy::SelectAll,
+        step_limit: None,
     };
     
     for (name, selector_factory) in strategies {
@@ -79,7 +80,7 @@ fn main() {
             SaturationResult::Saturated => {
                 println!("✗ SATURATED in {:.3}s (no proof found)", elapsed.as_secs_f64());
             }
-            SaturationResult::ResourceLimit => {
+            SaturationResult::ResourceLimit(_) => {
                 println!("✗ RESOURCE LIMIT in {:.3}s", elapsed.as_secs_f64());
                 println!("  Exceeded clause limit or iteration limit");
             }

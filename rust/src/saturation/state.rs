@@ -3,6 +3,7 @@
 use crate::core::{Clause, Proof, ProofStep};
 use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, InferenceResult};
 use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, SelectAll, SelectMaxWeight};
+use crate::parser::orient_equalities::orient_clause_equalities;
 use super::subsumption::{is_subsumed, has_duplicate};
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ pub struct SaturationConfig {
     pub timeout: Duration,
     pub use_superposition: bool,
     pub literal_selection: LiteralSelectionStrategy,
+    pub step_limit: Option<usize>,
 }
 
 /// Literal selection strategies
@@ -34,6 +36,7 @@ impl Default for SaturationConfig {
             timeout: Duration::from_secs(60),
             use_superposition: true,
             literal_selection: LiteralSelectionStrategy::SelectAll,
+            step_limit: None,
         }
     }
 }
@@ -45,8 +48,8 @@ pub enum SaturationResult {
     Proof(Proof),
     /// Saturated without finding empty clause
     Saturated,
-    /// Resource limit reached
-    ResourceLimit,
+    /// Resource limit reached (includes proof steps so far)
+    ResourceLimit(Vec<ProofStep>),
     /// Timeout reached
     Timeout,
 }
@@ -113,20 +116,29 @@ impl SaturationState {
     pub fn saturate(mut self) -> SaturationResult {
         let start_time = Instant::now();
         let mut iterations = 0;
+        let mut steps = 0;
         
         while let Some(given_idx) = self.select_given_clause() {
-            // Check limits
+            // Check step limit if specified
+            if let Some(limit) = self.config.step_limit {
+                if steps >= limit {
+                    return SaturationResult::ResourceLimit(self.proof_steps.clone());
+                }
+            }
+            
+            // Check other limits
             if iterations >= self.config.max_iterations {
-                return SaturationResult::ResourceLimit;
+                return SaturationResult::ResourceLimit(self.proof_steps.clone());
             }
             if self.clauses.len() >= self.config.max_clauses {
-                return SaturationResult::ResourceLimit;
+                return SaturationResult::ResourceLimit(self.proof_steps.clone());
             }
             if start_time.elapsed() > self.config.timeout {
                 return SaturationResult::Timeout;
             }
             
             iterations += 1;
+            steps += 1;
             
             // Process the given clause
             let given_clause = &self.clauses[given_idx];
@@ -145,8 +157,19 @@ impl SaturationState {
             // Add given clause to processed
             self.processed.insert(given_idx);
             
-            // Process new inferences
+            // Process new inferences - deduplicate within the batch first
+            let mut seen_in_batch = HashSet::new();
+            let mut unique_inferences = Vec::new();
+            
             for inference in new_inferences {
+                // Create a normalized string representation for comparison
+                let clause_str = format!("{}", inference.conclusion);
+                if seen_in_batch.insert(clause_str) {
+                    unique_inferences.push(inference);
+                }
+            }
+            
+            for inference in unique_inferences {
                 if let Some(new_idx) = self.add_clause(inference) {
                     // Check if we derived empty clause
                     if self.clauses[new_idx].is_empty() {
@@ -230,12 +253,17 @@ impl SaturationState {
         let mut clause_with_id = inference.conclusion.clone();
         clause_with_id.id = Some(new_idx);
         
-        self.clauses.push(clause_with_id);
+        // Orient equalities before adding
+        orient_clause_equalities(&mut clause_with_id);
+        
+        self.clauses.push(clause_with_id.clone());
         self.unprocessed.push_back(new_idx);
         
-        // Record proof step
+        // Record proof step with oriented clause
+        let mut oriented_inference = inference;
+        oriented_inference.conclusion = clause_with_id;
         self.proof_steps.push(ProofStep {
-            inference,
+            inference: oriented_inference,
             clause_idx: new_idx,
         });
         

@@ -65,7 +65,7 @@ fn main() {
             SaturationResult::Saturated => {
                 println!("✗ SATURATED in {:.3}s (no proof found)", elapsed.as_secs_f64());
             }
-            SaturationResult::ResourceLimit => {
+            SaturationResult::ResourceLimit(_) => {
                 println!("✗ RESOURCE LIMIT in {:.3}s", elapsed.as_secs_f64());
             }
             SaturationResult::Timeout => {

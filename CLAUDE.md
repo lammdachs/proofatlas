@@ -258,3 +258,14 @@ When implementing new features:
 2. **MGU Substitution Propagation**: Changed from lazy to eager propagation to prevent unsound variable substitutions.
 
 3. **Proof Reporting**: Fixed clause index display to show actual indices instead of array positions.
+
+### Important: Analysis Guidelines
+
+When a proof search times out or takes many steps, DO NOT conclude that "the proof is difficult" or make similar assessments. Instead, ask the user for analysis of what might be happening. The issue could be:
+- A bug in the implementation
+- Wrong selection strategy
+- Missing inference rules
+- Incorrect problem formulation
+- Or many other factors
+
+Always seek user input for analysis rather than making assumptions about proof difficulty.

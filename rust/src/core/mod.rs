@@ -9,6 +9,7 @@ pub mod clause;
 pub mod substitution;
 pub mod proof;
 pub mod ordering;
+pub mod proof_event;
 
 
 // Re-export commonly used types
@@ -18,3 +19,4 @@ pub use clause::{Clause, CNFFormula};
 pub use substitution::Substitution;
 pub use proof::{Proof, ProofStep};
 pub use ordering::{KBO, KBOConfig, Ordering as TermOrdering};
+pub use proof_event::{ProofEvent, SelectionType, DiscardReason};
