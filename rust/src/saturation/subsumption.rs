@@ -92,11 +92,10 @@ impl SubsumptionChecker {
         }
         
         // 3. Unit subsumption (fast and complete)
-        if clause.literals.len() > 1 {
-            for (unit, _) in &self.units {
-                if subsumes_unit(unit, clause) {
-                    return true;
-                }
+        // Check all clauses (including unit clauses) for subsumption by units
+        for (unit, _) in &self.units {
+            if subsumes_unit(unit, clause) {
+                return true;
             }
         }
         

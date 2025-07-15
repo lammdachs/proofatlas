@@ -18,15 +18,15 @@ P(s) ∨ P(t) ∨ C
 
 ### Superposition 1
 ```
-l ≈ r ∨ C₁    P[l] ∨ C₂
-------------------------  where σ = mgu(l, s), l ≻ r, P[s] is not and equality literal, l ≈ r and P[s] are selected.
+l ≈ r ∨ C₁    P[l'] ∨ C₂
+------------------------  where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable, P[l'] is not an equality literal, l ≈ r and P[l'] are selected.
    (P[r] ∨ C₁ ∨ C₂)σ
 ```
 
 ### Superposition 2
 ```
 l ≈ r ∨ C₁    s[l'] ⊕ t ∨ C₂
------------------------------  where σ = mgu(l, l'), l ≻ r, s[l'] ≻ t, ⊕ stands either for ≈ or ≉ , l ≈ r and s[l] ⊕ t are selected.
+-----------------------------  where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable, s[l'] ⪯̸ t, ⊕ stands either for ≈ or ≉, l ≈ r and s[l'] ⊕ t are selected.
    (s[r] ⊕ t ∨ C₁ ∨ C₂)σ
 ```
 
@@ -39,7 +39,7 @@ s ≉  t ∨ C
 ### Equality Factoring
 ```
 s ≈ t ∨ s' ≈ t' ∨ C
---------------------  where σ = mgu(s, s'), s ≈ t is selected, sσ ≻ tσ, s'σ ≻ t'σ
+--------------------  where σ = mgu(s, s'), s ≈ t is selected, sσ ⪯̸ tσ, s'σ ⪯̸ t'σ
 (t ≉ t' ∨ s ≈ t ∨ C)σ
 ```
 

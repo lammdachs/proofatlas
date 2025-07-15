@@ -237,6 +237,13 @@ impl SaturationState {
             }
         }
         
+        // IMPORTANT: Also do self-inferences (given clause with itself)
+        // This is needed for cases like associativity self-superposition
+        results.extend(resolution(given_clause, given_clause, given_idx, given_idx, selector));
+        if self.config.use_superposition {
+            results.extend(superposition(given_clause, given_clause, given_idx, given_idx, selector));
+        }
+        
         results
     }
     

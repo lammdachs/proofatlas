@@ -6,7 +6,7 @@ use crate::unification::unify;
 use super::common::{InferenceResult, InferenceRule};
 
 /// Apply equality factoring rule
-/// From s ≈ t ∨ s' ≈ t' ∨ C where σ = mgu(s, s'), s ≈ t is selected, sσ ≻ tσ, s'σ ≻ t'σ
+/// From s ≈ t ∨ s' ≈ t' ∨ C where σ = mgu(s, s'), s ≈ t is selected, sσ ⪯̸ tσ, s'σ ⪯̸ t'σ
 /// Derive (t ≉ t' ∨ s ≈ t ∨ C)σ
 pub fn equality_factoring(clause: &Clause, idx: usize, selector: &dyn LiteralSelector) -> Vec<InferenceResult> {
     let mut results = Vec::new();
@@ -46,9 +46,12 @@ pub fn equality_factoring(clause: &Clause, idx: usize, selector: &dyn LiteralSel
                 let s2_sigma = s2.apply_substitution(&sigma);
                 let t2_sigma = t2.apply_substitution(&sigma);
                 
-                // Check ordering constraints: sσ ≻ tσ, s'σ ≻ t'σ
-                if kbo.compare(&s1_sigma, &t1_sigma) == Ordering::Greater && 
-                   kbo.compare(&s2_sigma, &t2_sigma) == Ordering::Greater {
+                // Check ordering constraints: sσ ⪯̸ tσ, s'σ ⪯̸ t'σ
+                // This means sσ > tσ or sσ ‖ tσ (and same for s' and t')
+                let s1_not_smaller = matches!(kbo.compare(&s1_sigma, &t1_sigma), Ordering::Greater | Ordering::Incomparable);
+                let s2_not_smaller = matches!(kbo.compare(&s2_sigma, &t2_sigma), Ordering::Greater | Ordering::Incomparable);
+                
+                if s1_not_smaller && s2_not_smaller {
                     // Build the conclusion: (t ≉ t' ∨ s ≈ t ∨ C)σ
                     let mut new_literals = Vec::new();
                     

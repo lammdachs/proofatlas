@@ -15,9 +15,9 @@ struct Position {
 /// 
 /// Implements both Superposition 1 (into predicate) and Superposition 2 (into equality):
 /// - Superposition 1: l ≈ r ∨ C₁    P[l'] ∨ C₂  =>  (P[r] ∨ C₁ ∨ C₂)σ
+///   where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable
 /// - Superposition 2: l ≈ r ∨ C₁    s[l'] ⊕ t ∨ C₂  =>  (s[r] ⊕ t ∨ C₁ ∨ C₂)σ
-/// 
-/// where σ = mgu(l, l'), and ordering constraints must be satisfied
+///   where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable, s[l'] ⪯̸ t
 pub fn superposition(
     from_clause: &Clause, 
     into_clause: &Clause, 
@@ -31,6 +31,15 @@ pub fn superposition(
     // Get selected literals from both clauses
     let selected_from = selector.select(from_clause);
     let selected_into = selector.select(into_clause);
+    
+    #[cfg(debug_assertions)]
+    if idx1 == 2 && idx2 == 2 {
+        eprintln!("DEBUG: Self-superposition [2,2]");
+        eprintln!("  from_clause: {}", from_clause);
+        eprintln!("  into_clause: {}", into_clause);
+        eprintln!("  selected_from: {:?}", selected_from);
+        eprintln!("  selected_into: {:?}", selected_into);
+    }
     
     // If no literals are selected in either clause, no superposition is possible
     if selected_from.is_empty() || selected_into.is_empty() {
@@ -46,48 +55,134 @@ pub fn superposition(
         
         if from_lit.polarity && from_lit.atom.is_equality() {
             if let [ref l, ref r] = from_lit.atom.args.as_slice() {
-                // Use the equality l ≈ r in its given orientation (already pre-oriented with l ≥ r)
-                // Standard superposition: find occurrences of r and replace with l
+                // Use the equality l ≈ r in its given orientation
+                // The ordering constraint l ⪯̸ r will be checked after substitution
+                // Standard superposition: find occurrences of l and replace with r
                 
                 // For each selected literal in into_clause
                 for &into_idx in &selected_into {
                     let into_lit = &renamed_into.literals[into_idx];
                     
-                    // Find positions where r can be unified with some subterm in the target literal
-                    let positions = find_unifiable_positions(&into_lit.atom, r);
+                    // Find positions where l can be unified with some subterm in the target literal
+                    // This is the correct formulation - we look for the LARGER term and replace with the SMALLER
+                    let positions = find_unifiable_positions(&into_lit.atom, l);
                     
-                    for pos in positions {
-                        if let Ok(mgu) = unify(r, &pos.term) {
-                            // Verify ordering constraint: lσ ≻ rσ
-                            // This should always hold due to preprocessing, but we check as a safety measure
+                    
+                    // Filter positions: for equalities, only keep positions in the maximal side
+                    let valid_positions: Vec<_> = if into_lit.atom.is_equality() && into_lit.atom.args.len() == 2 {
+                        let left = &into_lit.atom.args[0];
+                        let right = &into_lit.atom.args[1];
+                        let left_not_smaller = matches!(kbo.compare(left, right), Ordering::Greater | Ordering::Incomparable);
+                        let right_not_smaller = matches!(kbo.compare(right, left), Ordering::Greater | Ordering::Incomparable);
+                        
+                        #[cfg(debug_assertions)]
+                        if (idx1 == 0 && idx2 == 1) || (idx1 == 1 && idx2 == 0) || (idx1 == 0 && idx2 == 4) {
+                            eprintln!("DEBUG: Filtering positions for equality {}", into_lit.atom);
+                            eprintln!("  Left: {}, Right: {}", left, right);
+                            eprintln!("  left_not_smaller: {}, right_not_smaller: {}", left_not_smaller, right_not_smaller);
+                            eprintln!("  Positions before filter: {:?}", positions.iter().map(|p| &p.path).collect::<Vec<_>>());
+                        }
+                        
+                        
+                        positions.into_iter().filter(|pos| {
+                            let keep = if left_not_smaller && pos.path.get(0) == Some(&0) {
+                                true // Position is in left side, which is not smaller
+                            } else if right_not_smaller && pos.path.get(0) == Some(&1) {
+                                true // Position is in right side, which is not smaller
+                            } else {
+                                false // Position is in smaller side
+                            };
+                            
+                            
+                            keep
+                        }).collect()
+                    } else {
+                        positions // For non-equalities, keep all positions
+                    };
+                    
+                    for pos in valid_positions {
+                        // CRITICAL: l' (pos.term) must not be a variable
+                        // This prevents unsound inferences like mult(inv(X),X) = mult(e,e)
+                        if matches!(pos.term, Term::Variable(_)) {
+                            continue;
+                        }
+                        
+                        #[cfg(debug_assertions)]
+                        if idx1 == 2 && idx2 == 2 {
+                            eprintln!("DEBUG [2->2]: Trying position {:?} with term {}", pos.path, pos.term);
+                            eprintln!("  l = {}, pos.term = {}", l, pos.term);
+                        }
+                        
+                        if let Ok(mgu) = unify(l, &pos.term) {
+                            #[cfg(debug_assertions)]
+                            if (idx1 == 1 && idx2 == 5) || (idx1 == 2 && idx2 == 5) || (idx1 == 0 && idx2 == 4) {
+                                eprintln!("\nDEBUG Inference [{},{}]:", idx1, idx2);
+                                eprintln!("  From: {} (l={}, r={})", from_clause, l, r);
+                                eprintln!("  Into: {}", into_clause);
+                                eprintln!("  Into renamed: {}", renamed_into);
+                                eprintln!("  Position {:?}: {}", pos.path, pos.term);
+                                eprintln!("  MGU: {:?}", mgu);
+                            }
+                            // CRITICAL CHECK: If r is a variable, we must ensure that after substitution,
+                            // the instantiated r is still smaller than the instantiated l
+                            // This prevents using equations "backwards" where a variable on the smaller side
+                            // matches a term that's actually larger than the left side
+                            
+                            // Apply substitution to both sides
                             let l_sigma = l.apply_substitution(&mgu);
                             let r_sigma = r.apply_substitution(&mgu);
                             
-                            if kbo.compare(&l_sigma, &r_sigma) != Ordering::Greater {
-                                continue; // Skip if ordering constraint not satisfied
-                            }
+                            // Check ordering constraint: l ⪯̸ r (which means l > r or l ‖ r)
+                            // After substitution, we need l_sigma ⪯̸ r_sigma
+                            // This is equivalent to: ¬(l_sigma ≤ r_sigma)
                             
-                            // For Superposition 2 (into equality), check additional constraint
+                            match kbo.compare(&l_sigma, &r_sigma) {
+                                Ordering::Less | Ordering::Equal => continue, // l_sigma ≤ r_sigma, skip
+                                Ordering::Greater | Ordering::Incomparable => {} // l_sigma ⪯̸ r_sigma, proceed
+                            }
+                            // Additional ordering check already performed above
+                            
+                            // For equalities (both positive and negative), check ordering constraints
                             if into_lit.atom.is_equality() && into_lit.atom.args.len() == 2 {
-                                // into_lit has form s[l'] ⊕ t where l' is at some position in s
-                                // Note: We're checking if the whole term s[l'] > t, not just s > t
-                                let s_with_l_prime_sigma = &into_lit.atom.args[0].apply_substitution(&mgu);
-                                let t_sigma = &into_lit.atom.args[1].apply_substitution(&mgu);
+                                // Get the two sides of the equality
+                                let left_side = &into_lit.atom.args[0].apply_substitution(&mgu);
+                                let right_side = &into_lit.atom.args[1].apply_substitution(&mgu);
                                 
-                                // Check s[l']σ ≻ tσ
-                                if kbo.compare(s_with_l_prime_sigma, t_sigma) != Ordering::Greater {
-                                    continue;
+                                // Determine which argument contains the position
+                                let pos_in_left = pos.path.get(0) == Some(&0);
+                                let pos_in_right = pos.path.get(0) == Some(&1);
+                                
+                                if pos_in_left {
+                                    // Position is in the left side - check if left ⪯̸ right (left > right or left ‖ right)
+                                    match kbo.compare(left_side, right_side) {
+                                        Ordering::Less | Ordering::Equal => continue, // left ≤ right, skip
+                                        Ordering::Greater | Ordering::Incomparable => {} // left ⪯̸ right, proceed
+                                    }
+                                } else if pos_in_right {
+                                    // Position is in the right side - check if right ⪯̸ left (right > left or right ‖ left)
+                                    match kbo.compare(right_side, left_side) {
+                                        Ordering::Less | Ordering::Equal => continue, // right ≤ left, skip
+                                        Ordering::Greater | Ordering::Incomparable => {} // right ⪯̸ left, proceed
+                                    }
                                 }
                                 
-                                // Additional check: if we're at the top level (path = [0]) and rσ = s[r']σ,
-                                // then we're replacing the entire left side with lσ
-                                // We need lσ ≻ s[r']σ for this to be valid
-                                if pos.path == vec![0] && r_sigma == *s_with_l_prime_sigma {
-                                    if kbo.compare(&l_sigma, s_with_l_prime_sigma) != Ordering::Greater {
+                                // Additional check for positive equalities: if we're at the top level,
+                                // ensure the result maintains the ordering
+                                if into_lit.polarity && pos.path.len() == 1 {
+                                    // We're replacing at the top level of one side
+                                    let new_atom = replace_at_position(&into_lit.atom, &pos.path, &l, &mgu);
+                                    let new_left = &new_atom.args[0];
+                                    let new_right = &new_atom.args[1];
+                                    
+                                    // The result must maintain proper orientation
+                                    if kbo.compare(new_left, new_right) != Ordering::Greater && 
+                                       kbo.compare(new_right, new_left) != Ordering::Greater {
+                                        // Neither side is larger - would create unorientable equality
                                         continue;
                                     }
                                 }
                             }
+                            
                             
                             // Apply superposition according to the calculus:
                             // Result is (s[l] ⊕ t ∨ C₁ ∨ C₂)σ where:
@@ -107,10 +202,12 @@ pub fn superposition(
                             for (k, lit) in renamed_into.literals.iter().enumerate() {
                                 if k == into_idx {
                                     // This is the literal s[l'] ⊕ t that we're modifying
-                                    // Replace the occurrence of r with l at the position
-                                    // IMPORTANT: Apply MGU to l before replacement to ensure all variables are substituted
-                                    let l_sigma = l.apply_substitution(&mgu);
-                                    let new_atom = replace_at_position(&lit.atom, &pos.path, &l_sigma, &mgu);
+                                    // Replace the occurrence of l with r at the position
+                                    // IMPORTANT: Apply MGU to r before replacement to ensure all variables are substituted
+                                    let r_sigma = r.apply_substitution(&mgu);
+                                    let new_atom = replace_at_position(&lit.atom, &pos.path, &r_sigma, &mgu);
+                                    
+                                    
                                     new_literals.push(Literal {
                                         atom: new_atom,
                                         polarity: lit.polarity,
@@ -144,15 +241,17 @@ pub fn superposition(
 }
 
 /// Find all positions in an atom where a term can potentially unify with pattern
-/// This is used to find occurrences of l' in the atom that can unify with l
-/// For equalities, we only look in the first argument (the larger side after orientation)
+/// This is used to find occurrences of l in the atom that can unify with l
+/// For equalities, we need to determine which side is maximal and only search there
 fn find_unifiable_positions(atom: &Atom, pattern: &Term) -> Vec<Position> {
     let mut positions = Vec::new();
     
     if atom.is_equality() && atom.args.len() == 2 {
-        // For equalities, only search in the first argument (larger side)
-        // This ensures we don't violate ordering constraints
+        // For equalities, we need to check which side is larger
+        // We'll do this check in the main superposition function since we need KBO
+        // For now, search in both sides but mark which side each position is in
         find_positions_in_term(&atom.args[0], pattern, vec![0], &mut positions);
+        find_positions_in_term(&atom.args[1], pattern, vec![1], &mut positions);
     } else {
         // For non-equalities, search in all arguments
         for (i, arg) in atom.args.iter().enumerate() {
@@ -234,69 +333,49 @@ mod tests {
     
     #[test]
     fn test_superposition_with_selection() {
-        // Test superposition
-        // mult(e,e) = e
-        // mult(e,X) = X
-        // Should derive mult(e,mult(e,X)) = X
+        // Test superposition with corrected implementation
+        // From: mult(e,X) = X
+        // Into: P(mult(e,c)) 
+        // Should derive: P(c)
         
         let eq = PredicateSymbol { name: "=".to_string(), arity: 2 };
+        let p = PredicateSymbol { name: "P".to_string(), arity: 1 };
         let mult = FunctionSymbol { name: "mult".to_string(), arity: 2 };
         
         let e = Term::Constant(Constant { name: "e".to_string() });
+        let c = Term::Constant(Constant { name: "c".to_string() });
         let x = Term::Variable(Variable { name: "X".to_string() });
-        let mult_ee = Term::Function(mult.clone(), vec![e.clone(), e.clone()]);
         let mult_ex = Term::Function(mult.clone(), vec![e.clone(), x.clone()]);
-        // mult(e,e) = e
-        let _clause1 = Clause::new(vec![
-            Literal::positive(Atom { 
-                predicate: eq.clone(), 
-                args: vec![mult_ee.clone(), e.clone()]
-            })
-        ]);
+        let mult_ec = Term::Function(mult.clone(), vec![e.clone(), c.clone()]);
         
         // mult(e,X) = X
-        let clause2 = Clause::new(vec![
+        let clause1 = Clause::new(vec![
             Literal::positive(Atom { 
                 predicate: eq.clone(), 
                 args: vec![mult_ex.clone(), x.clone()]
             })
         ]);
         
+        // P(mult(e,c))
+        let clause2 = Clause::new(vec![
+            Literal::positive(Atom { 
+                predicate: p.clone(), 
+                args: vec![mult_ec.clone()]
+            })
+        ]);
+        
         let selector = SelectAll;
-        let results = superposition(&clause2, &clause2, 1, 1, &selector);
+        let results = superposition(&clause1, &clause2, 0, 1, &selector);
         
-        // Should derive mult(e,mult(e,X)) = X and possibly other valid inferences
-        assert!(results.len() >= 1);
-        
-        // Check that at least one result is mult(e,mult(e,X)) = X
-        let found_expected = results.iter().any(|res| {
-            if res.conclusion.literals.len() != 1 || !res.conclusion.literals[0].polarity {
-                return false;
-            }
-            
-            if let [lhs, rhs] = &res.conclusion.literals[0].atom.args[..] {
-                // Check if LHS matches mult(e,mult(e,X)) pattern
-                if let Term::Function(f, args) = lhs {
-                    if f.name == "mult" && args.len() == 2 {
-                        if let Term::Constant(c) = &args[0] {
-                            if c.name == "e" {
-                                if let Term::Function(f2, args2) = &args[1] {
-                                    if f2.name == "mult" && args2.len() == 2 {
-                                        if let (Term::Constant(c2), Term::Variable(_)) = (&args2[0], &args2[1]) {
-                                            if c2.name == "e" && matches!(rhs, Term::Variable(_)) {
-                                                return true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            false
-        });
-        
-        assert!(found_expected, "Expected to find mult(e,mult(e,X)) = X in results");
+        // Should derive P(c)
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].conclusion.literals.len(), 1);
+        assert!(results[0].conclusion.literals[0].polarity);
+        assert_eq!(results[0].conclusion.literals[0].atom.predicate.name, "P");
+        assert_eq!(results[0].conclusion.literals[0].atom.args.len(), 1);
+        match &results[0].conclusion.literals[0].atom.args[0] {
+            Term::Constant(constant) => assert_eq!(constant.name, "c"),
+            _ => panic!("Expected constant c"),
+        }
     }
 }
