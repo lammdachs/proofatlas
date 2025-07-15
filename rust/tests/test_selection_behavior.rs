@@ -1,8 +1,7 @@
 //! Test to verify how literal selection affects inference rules
 
 use proofatlas::{
-    Clause, Literal, Atom, PredicateSymbol, Term, Variable, Constant,
-    resolution, factoring, SelectAll
+    Clause, Literal, Atom, PredicateSymbol, Term, Variable, factoring, SelectAll
 };
 
 #[test]

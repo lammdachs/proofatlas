@@ -7,7 +7,7 @@ Initial clauses:
 [4] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
 [5] ~inv(inv(a)) = a
 
-✓ PROOF FOUND in 0.027s
+✓ PROOF FOUND in 0.028s
 Generated 14 clauses
 Empty clause at index: 19
 
@@ -20,17 +20,17 @@ Empty clause at index: 19
     Rule: Superposition
     Parents: [6, 2]
 
-[8] mult(Y_2,Z_2) = mult(Y_2,Z_2)
-    Rule: Superposition
-    Parents: [0, 4]
-
-[9] mult(X_1,mult(Y_1,inv(mult(X_1,Y_1)))) = e
+[8] mult(X_1,mult(Y_1,inv(mult(X_1,Y_1)))) = e
     Rule: Superposition
     Parents: [4, 3]
 
-[10] mult(X_2,mult(inv(X_2),Z_2)) = Z_2
+[9] mult(X_2,mult(inv(X_2),Z_2)) = Z_2
     Rule: Superposition
     Parents: [3, 4]
+
+[10] mult(Y_2,Z_2) = mult(Y_2,Z_2)
+    Rule: Superposition
+    Parents: [0, 4]
 
 [11] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
     Rule: Superposition
@@ -38,31 +38,31 @@ Empty clause at index: 19
 
 [12] Z_2_2 = Z_2_2
     Rule: Superposition
-    Parents: [6, 10]
+    Parents: [6, 9]
 
 [13] X_2_2 = inv(inv(X_2_2))
     Rule: Superposition
-    Parents: [3, 10]
+    Parents: [3, 9]
 
 [14] mult(X_2,mult(Y_2,mult(inv(mult(X_2,Y_2)),Z_2_1))) = Z_2_1
     Rule: Superposition
-    Parents: [10, 4]
+    Parents: [9, 4]
 
 [15] mult(inv(inv(X_2_2)),Z_2_1) = mult(X_2_2,Z_2_1)
     Rule: Superposition
-    Parents: [10, 10]
+    Parents: [9, 9]
 
 [16] ~a = a
     Rule: Demodulation
     Parents: [13, 5]
 
-[17] mult(Y_1_1,inv(mult(inv(X_2_2),Y_1_1))) = X_2_2
+[17] mult(X_2,mult(Y_2,mult(Y_1_1,inv(mult(X_2,mult(Y_2,Y_1_1)))))) = e
     Rule: Superposition
-    Parents: [9, 10]
+    Parents: [8, 4]
 
-[18] mult(X_2,mult(Y_2,mult(Y_1_1,inv(mult(X_2,mult(Y_2,Y_1_1)))))) = e
+[18] mult(Y_1_1,inv(mult(inv(X_2_2),Y_1_1))) = X_2_2
     Rule: Superposition
-    Parents: [9, 4]
+    Parents: [8, 9]
 
 [19] ⊥
     Rule: EqualityResolution

@@ -1,6 +1,6 @@
 //! Full trace showing all proof steps for right identity problem
 
-use proofatlas::{parse_tptp_file, SaturationConfig, SaturationState, LiteralSelectionStrategy, SaturationResult, InferenceRule};
+use proofatlas::{parse_tptp_file, SaturationConfig, SaturationState, LiteralSelectionStrategy};
 use std::time::Instant;
 
 fn main() {

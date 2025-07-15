@@ -200,7 +200,7 @@ pub struct NamedFormula {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{PredicateSymbol, Constant};
+    use crate::core::{PredicateSymbol};
     
     #[test]
     fn test_nnf_conversion() {

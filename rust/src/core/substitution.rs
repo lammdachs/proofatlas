@@ -121,7 +121,7 @@ impl Clause {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, PredicateSymbol, FunctionSymbol};
+    use crate::core::{Constant};
     
     #[test]
     fn test_term_substitution() {
