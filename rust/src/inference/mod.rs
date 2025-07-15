@@ -5,6 +5,8 @@ pub mod factoring;
 pub mod superposition;
 pub mod equality_resolution;
 pub mod equality_factoring;
+pub mod demodulation;
+pub mod subsumption_resolution;
 pub mod common;
 
 // Re-export the main inference function and types
@@ -17,3 +19,5 @@ pub use factoring::factoring;
 pub use superposition::superposition;
 pub use equality_resolution::equality_resolution;
 pub use equality_factoring::equality_factoring;
+pub use demodulation::demodulate;
+pub use subsumption_resolution::{subsumption_resolution_1, subsumption_resolution_2};

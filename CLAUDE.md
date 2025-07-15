@@ -117,6 +117,8 @@ The core theorem prover is implemented in Rust for performance:
 - **superposition.rs**: Superposition calculus for equality
 - **equality_resolution.rs**: Equality resolution (reflexivity)
 - **equality_factoring.rs**: Equality factoring
+- **demodulation.rs**: Demodulation (simplifying inference)
+- **subsumption_resolution.rs**: Subsumption resolution (simplifying inference)
 - **common.rs**: Shared utilities for inference rules
 
 #### Saturation Module (`rust/src/saturation/`)
@@ -226,9 +228,15 @@ proofatlas/
    - Max weight literal
    - Custom selection functions
 
-5. **Subsumption**: Forward subsumption is implemented, backward subsumption is TODO.
+5. **Subsumption**: Both forward and backward subsumption are implemented with a pragmatic tiered approach.
 
 6. **Proof Tracking**: Each inference stores premises, rule used, and the derived clause.
+
+7. **Simplifying Inferences**: 
+   - Demodulation and subsumption resolution are applied before generating inferences
+   - When a simplifying inference is applicable, the original clause is marked as inactive and not used for generating inferences
+   - Demodulation uses one-way matching (variables in the rewrite rule can be substituted, but not in the target term)
+   - The ordering constraint lσ ≻ rσ is enforced, but weight decrease is not required
 
 ### Debugging the Prover
 
@@ -260,6 +268,8 @@ When implementing new features:
 
 3. **Proof Reporting**: Fixed clause index display to show actual indices instead of array positions.
 
+4. **Demodulation Ordering**: Removed overly restrictive weight check that prevented valid demodulations. Now correctly applies demodulation whenever the ordering constraint lσ ≻ rσ is satisfied, even if clause weight doesn't decrease.
+
 ### Important: Analysis Guidelines
 
 When a proof search times out or takes many steps, DO NOT conclude that "the proof is difficult" or make similar assessments. Instead, ask the user for analysis of what might be happening. The issue could be:
@@ -270,3 +280,10 @@ When a proof search times out or takes many steps, DO NOT conclude that "the pro
 - Or many other factors
 
 Always seek user input for analysis rather than making assumptions about proof difficulty.
+
+### Important: File System Usage
+
+When creating temporary files for testing or debugging:
+- Always create them in the current working directory (not in /tmp)
+- Clean up temporary files when done
+- Add useful test files to the appropriate tests/ or test_traces/ directories
