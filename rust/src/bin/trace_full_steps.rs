@@ -14,7 +14,7 @@ fn main() {
     // Parse the TPTP file
     let formula = parse_tptp_file(filename, &[]).expect("Failed to parse file");
     
-    println!("=== Right Identity Test - Trace (20 steps) ===\n");
+    println!("=== Right Identity Test - Trace (100 steps) ===\n");
     println!("Initial clauses:");
     for (i, clause) in formula.clauses.iter().enumerate() {
         println!("[{}] {}", i, clause);
@@ -22,7 +22,7 @@ fn main() {
     
     // Configure saturation
     let mut config = SaturationConfig::default();
-    config.step_limit = Some(10);
+    config.step_limit = Some(100);
     config.max_clauses = 1000;  // Allow more clauses to see what happens
     config.literal_selection = LiteralSelectionStrategy::SelectAll;
     config.max_clauses = 10000;

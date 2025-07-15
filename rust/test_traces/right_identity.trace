@@ -1,0 +1,2013 @@
+=== right_identity ===
+Initial clauses:
+[0] mult(e,X) = X
+[1] mult(inv(X),X) = e
+[2] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
+[3] ~mult(c,e) = c
+
+✓ PROOF FOUND in 0.379s
+Generated 500 clauses
+Empty clause at index: 503
+
+=== All Proof Steps ===
+[4] mult(inv(Y_2),mult(Y_2,Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [1, 2]
+
+[5] mult(mult(X_1,mult(Y_1,Y_2)),Z_2) = mult(mult(X_1,Y_1),mult(Y_2,Z_2))
+    Rule: Superposition
+    Parents: [2, 2]
+
+[6] mult(inv(Y_2_1),mult(mult(Y_2_1,Z_2_1),Z_2)) = mult(mult(e,Z_2_1),Z_2)
+    Rule: Superposition
+    Parents: [4, 2]
+
+[7] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [2, 4]
+
+[8] mult(inv(e),Z_2_2) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [0, 4]
+
+[9] mult(inv(inv(Z_2_2)),e) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [1, 4]
+
+[10] mult(inv(inv(Y_2_1)),mult(e,Z_2_1)) = mult(e,mult(Y_2_1,Z_2_1))
+    Rule: Superposition
+    Parents: [4, 4]
+
+[11] mult(inv(inv(e)),mult(e,Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [8, 4]
+
+[12] mult(inv(e),mult(Y_2,Z_2)) = mult(mult(e,Y_2),Z_2)
+    Rule: Superposition
+    Parents: [8, 2]
+
+[13] mult(mult(inv(e),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(e,mult(Y_1_2,Y_2_2)),Z_2_2)
+    Rule: Superposition
+    Parents: [8, 5]
+
+[14] mult(mult(X_1_2,inv(e)),mult(Y_2_2,Z_2_2)) = mult(mult(X_1_2,mult(e,Y_2_2)),Z_2_2)
+    Rule: Superposition
+    Parents: [8, 5]
+
+[15] mult(inv(mult(X_1_1,mult(Y_1_1,Y_2_1))),mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_2))) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [5, 4]
+
+[16] mult(mult(inv(Y_1_2),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(e,Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [4, 5]
+
+[17] mult(mult(X_1_2,inv(Y_2_1)),mult(mult(Y_2_1,Z_2_1),Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [4, 5]
+
+[18] mult(mult(X_2,Y_1_1),mult(Y_2_1,Z_2)) = mult(X_2,mult(mult(Y_1_1,Y_2_1),Z_2))
+    Rule: Superposition
+    Parents: [5, 2]
+
+[19] mult(mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Y_2)),Z_2) = mult(mult(X_1_1,mult(Y_1_1,Y_2_1)),mult(Y_2,Z_2))
+    Rule: Superposition
+    Parents: [5, 2]
+
+[20] mult(mult(X_1,mult(Y_1,mult(Y_1_2,Y_2_2))),Z_2_2) = mult(mult(mult(X_1,Y_1),Y_1_2),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [2, 5]
+
+[21] mult(mult(X_1_2,mult(X_1,mult(Y_1,Y_2_2))),Z_2_2) = mult(mult(X_1_2,mult(X_1,Y_1)),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [2, 5]
+
+[22] mult(mult(e,Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(Y_1_2,Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [0, 5]
+
+[23] mult(mult(X_1_2,e),mult(Y_2_2,Z_2_2)) = mult(mult(X_1_2,Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [0, 5]
+
+[24] mult(mult(inv(mult(Y_1_2,Y_2_2)),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [1, 5]
+
+[25] mult(mult(X_1_2,inv(Y_2_2)),mult(Y_2_2,Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [1, 5]
+
+[26] mult(mult(mult(X_1_1,Y_1_1),mult(Y_2_1,mult(Y_1_2,Y_2_2))),Z_2_2) = mult(mult(mult(X_1_1,mult(Y_1_1,Y_2_1)),Y_1_2),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [5, 5]
+
+[27] mult(mult(X_1_2,mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Y_2_2))),Z_2_2) = mult(mult(X_1_2,mult(X_1_1,mult(Y_1_1,Y_2_1))),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [5, 5]
+
+[28] mult(inv(inv(inv(Z_2_2_1))),mult(e,Z_2_2_1)) = mult(e,e)
+    Rule: Superposition
+    Parents: [9, 4]
+
+[29] mult(inv(inv(Z_2_2_1)),mult(e,Z_2)) = mult(mult(e,Z_2_2_1),Z_2)
+    Rule: Superposition
+    Parents: [9, 2]
+
+[30] mult(mult(X_1_2,inv(inv(Z_2_2_1))),mult(e,Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [9, 5]
+
+[31] mult(mult(inv(inv(e)),e),mult(Y_2_2,Z_2_2)) = mult(mult(e,Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [11, 5]
+
+[32] mult(mult(X_1_2,inv(inv(e))),mult(mult(e,Z_2_2_1),Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [11, 5]
+
+[33] mult(inv(inv(inv(e))),mult(e,Z_2_2_1)) = mult(e,mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [11, 4]
+
+[34] mult(inv(inv(e)),mult(mult(e,Z_2_2_1),Z_2)) = mult(mult(e,Z_2_2_1),Z_2)
+    Rule: Superposition
+    Parents: [11, 2]
+
+[35] mult(inv(inv(e)),Z_2_2_2) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 11]
+
+[36] mult(e,inv(e)) = e
+    Rule: Superposition
+    Parents: [35, 1]
+
+[37] mult(mult(inv(inv(e)),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(e,mult(Y_1_2,Y_2_2)),Z_2_2)
+    Rule: Superposition
+    Parents: [35, 5]
+
+[38] mult(mult(X_1_2,inv(inv(e))),mult(Y_2_2,Z_2_2)) = mult(mult(X_1_2,mult(e,Y_2_2)),Z_2_2)
+    Rule: Superposition
+    Parents: [35, 5]
+
+[39] mult(e,mult(inv(e),Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [35, 4]
+
+[40] mult(inv(inv(inv(e))),mult(e,Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [35, 4]
+
+[41] mult(inv(inv(e)),mult(Y_2,Z_2)) = mult(mult(e,Y_2),Z_2)
+    Rule: Superposition
+    Parents: [35, 2]
+
+[42] mult(inv(inv(e)),e) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [36, 11]
+
+[43] mult(mult(X_1_2,e),mult(inv(e),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [36, 5]
+
+[44] mult(inv(e),e) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [36, 4]
+
+[45] inv(e) = e
+    Rule: Superposition
+    Parents: [36, 0]
+
+[46] mult(inv(inv(inv(e))),mult(mult(e,Z_2_2_1),Z_2_2)) = mult(mult(e,mult(e,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [11, 6]
+
+[47] mult(mult(inv(Y_2_1_1),mult(Y_2_1_1,Z_2_1_1)),mult(Y_2_2,Z_2_2)) = mult(mult(mult(e,Z_2_1_1),Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [6, 5]
+
+[48] mult(mult(X_1_2,inv(Y_2_1_1)),mult(mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1),Z_2_2)) = mult(mult(X_1_2,mult(mult(e,Z_2_1_1),Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [6, 5]
+
+[49] mult(inv(Y_2_1_2),mult(mult(Y_2_1_2,Y_1_1),mult(Y_2_1,Z_2_2))) = mult(mult(e,mult(Y_1_1,Y_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [5, 6]
+
+[50] mult(inv(mult(X_1_1,mult(Y_1_1,Y_2_1))),mult(mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_1_2)),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [5, 6]
+
+[51] mult(inv(inv(inv(Z_2_2_1))),mult(mult(e,Z_2_2_1),Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [9, 6]
+
+[52] mult(inv(inv(Y_2_1_1)),mult(mult(e,Z_2_1_1),Z_2_1)) = mult(e,mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1))
+    Rule: Superposition
+    Parents: [6, 4]
+
+[53] mult(inv(inv(Y_2_1)),mult(mult(e,Z_2_1),Z_2_2)) = mult(mult(e,mult(Y_2_1,Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [4, 6]
+
+[54] mult(inv(Y_2_1_1),mult(mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1),Z_2)) = mult(mult(mult(e,Z_2_1_1),Z_2_1),Z_2)
+    Rule: Superposition
+    Parents: [6, 2]
+
+[55] mult(inv(Y_2_1_2),mult(Y_2_1_2,mult(Z_2_1_2,Z_2_2))) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [2, 6]
+
+[56] mult(inv(mult(X_1,Y_1)),mult(mult(X_1,mult(Y_1,Z_2_1_2)),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [2, 6]
+
+[57] mult(e,mult(mult(inv(e),Z_2_1_1),Z_2_1)) = mult(mult(e,Z_2_1_1),Z_2_1)
+    Rule: Superposition
+    Parents: [6, 35]
+
+[58] mult(inv(inv(inv(e))),mult(mult(e,Z_2_1_2),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [35, 6]
+
+[59] mult(mult(e,inv(e)),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [36, 6]
+
+[60] mult(inv(inv(Y_2_1_1)),mult(mult(mult(e,Z_2_1_1),Z_2_1),Z_2_2)) = mult(mult(e,mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [6, 6]
+
+[61] mult(e,inv(e)) = mult(e,e)
+    Rule: Superposition
+    Parents: [44, 8]
+
+[62] mult(mult(X_1_2,mult(e,inv(e))),Z_2_2) = mult(mult(X_1_2,inv(e)),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [44, 5]
+
+[63] mult(inv(inv(e)),mult(e,inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [44, 4]
+
+[64] mult(inv(inv(e)),mult(mult(e,inv(e)),Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [44, 6]
+
+[65] mult(inv(inv(e)),mult(e,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [61, 11]
+
+[66] mult(mult(X_1_2,e),mult(inv(e),Z_2_2)) = mult(mult(X_1_2,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [61, 5]
+
+[67] mult(inv(e),mult(e,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [61, 4]
+
+[68] mult(e,mult(inv(e),Z_2)) = mult(mult(e,e),Z_2)
+    Rule: Superposition
+    Parents: [61, 2]
+
+[69] mult(e,e) = inv(e)
+    Rule: Superposition
+    Parents: [61, 0]
+
+[70] mult(inv(e),mult(mult(e,e),Z_2_2)) = mult(mult(e,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [61, 6]
+
+[71] mult(inv(inv(e)),inv(e)) = mult(e,e)
+    Rule: Superposition
+    Parents: [69, 11]
+
+[72] mult(mult(X_1_2,e),mult(e,Z_2_2)) = mult(mult(X_1_2,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [69, 5]
+
+[73] mult(inv(e),inv(e)) = mult(e,e)
+    Rule: Superposition
+    Parents: [69, 4]
+
+[74] mult(e,mult(e,Z_2)) = mult(inv(e),Z_2)
+    Rule: Superposition
+    Parents: [69, 2]
+
+[75] mult(inv(e),mult(inv(e),Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [69, 6]
+
+[76] mult(mult(X_1_2,inv(e)),mult(inv(e),Z_2_2)) = mult(mult(X_1_2,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [73, 5]
+
+[77] mult(inv(inv(e)),mult(mult(e,e),Z_2_2)) = mult(mult(e,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [73, 6]
+
+[78] mult(inv(inv(e)),mult(e,Z_2_2_1)) = mult(e,mult(inv(e),Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 11]
+
+[79] mult(mult(e,inv(e)),mult(Y_2_2,Z_2_2)) = mult(mult(e,Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [39, 5]
+
+[80] mult(mult(X_1_2,e),mult(mult(inv(e),Z_2_2_1),Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [39, 5]
+
+[81] mult(inv(e),mult(e,Z_2_2_1)) = mult(e,mult(inv(e),Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 4]
+
+[82] mult(mult(e,mult(inv(e),Z_2_2_1)),Z_2_2) = mult(inv(e),mult(mult(e,Z_2_2_1),Z_2_2))
+    Rule: Superposition
+    Parents: [39, 6]
+
+[83] mult(e,mult(e,inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [44, 39]
+
+[84] mult(e,mult(e,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [73, 39]
+
+[85] mult(inv(mult(e,Y_1_2)),mult(inv(e),mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [8, 7]
+
+[86] mult(inv(mult(inv(e),Y_1_2)),mult(e,mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [8, 7]
+
+[87] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [8, 7]
+
+[88] mult(inv(inv(e)),mult(e,mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [69, 7]
+
+[89] mult(inv(mult(X_1_2,e)),mult(X_1_2,inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [69, 7]
+
+[90] mult(inv(mult(e,Z_2_2_1)),mult(inv(inv(e)),mult(mult(e,Z_2_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [11, 7]
+
+[91] mult(inv(mult(inv(inv(e)),e)),mult(e,Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [11, 7]
+
+[92] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,mult(e,Z_2_2_1))) = mult(e,mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [11, 7]
+
+[93] mult(mult(inv(mult(Y_1_2,Y_1_1)),Y_1_2),mult(mult(Y_1_1,Z_2_2_1),Z_2_2)) = mult(mult(e,Z_2_2_1),Z_2_2)
+    Rule: Superposition
+    Parents: [7, 5]
+
+[94] mult(mult(X_1_2,inv(mult(X_1_1,Y_1_1))),mult(mult(X_1_1,mult(Y_1_1,Z_2_2_1)),Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [7, 5]
+
+[95] mult(inv(mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Y_1_2))),mult(mult(X_1_1,mult(Y_1_1,Y_2_1)),mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 7]
+
+[96] mult(inv(mult(mult(X_1_1,mult(Y_1_1,Y_2_1)),Y_1_2)),mult(mult(X_1_1,Y_1_1),mult(Y_2_1,mult(Y_1_2,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 7]
+
+[97] mult(inv(mult(X_1_2,mult(X_1_1,mult(Y_1_1,Y_2_1)))),mult(X_1_2,mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 7]
+
+[98] mult(inv(mult(e,Z_2_2_1)),mult(inv(inv(Z_2_2_1)),mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [9, 7]
+
+[99] mult(inv(mult(X_1_2,inv(inv(Z_2_2_1)))),mult(X_1_2,mult(e,Z_2_2_1))) = mult(e,e)
+    Rule: Superposition
+    Parents: [9, 7]
+
+[100] mult(inv(inv(mult(X_1_1,Y_1_1))),mult(e,Z_2_2_1)) = mult(e,mult(X_1_1,mult(Y_1_1,Z_2_2_1)))
+    Rule: Superposition
+    Parents: [7, 4]
+
+[101] mult(inv(mult(e,Z_2_1)),mult(inv(Y_2_1),mult(mult(Y_2_1,Z_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [4, 7]
+
+[102] mult(inv(mult(inv(Y_1_2),Y_1_2)),mult(e,Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [4, 7]
+
+[103] mult(inv(mult(X_1_2,inv(Y_2_1))),mult(X_1_2,mult(e,Z_2_1))) = mult(e,mult(Y_2_1,Z_2_1))
+    Rule: Superposition
+    Parents: [4, 7]
+
+[104] mult(inv(mult(mult(X_1,Y_1),Y_1_2)),mult(X_1,mult(Y_1,mult(Y_1_2,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [2, 7]
+
+[105] mult(inv(mult(X_1_2,mult(X_1,Y_1))),mult(X_1_2,mult(X_1,mult(Y_1,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [2, 7]
+
+[106] mult(inv(inv(mult(X_1_1,Y_1_1))),mult(mult(e,Z_2_2_1),Z_2_2)) = mult(mult(e,mult(X_1_1,mult(Y_1_1,Z_2_2_1))),Z_2_2)
+    Rule: Superposition
+    Parents: [7, 6]
+
+[107] mult(inv(mult(mult(e,Z_2_1_1),Z_2_1)),mult(inv(Y_2_1_1),mult(mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [6, 7]
+
+[108] mult(inv(mult(inv(Y_2_1_1),mult(Y_2_1_1,Z_2_1_1))),mult(mult(e,Z_2_1_1),Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [6, 7]
+
+[109] mult(inv(mult(X_1_2,inv(Y_2_1_1))),mult(X_1_2,mult(mult(e,Z_2_1_1),Z_2_1))) = mult(e,mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1))
+    Rule: Superposition
+    Parents: [6, 7]
+
+[110] mult(inv(mult(e,e)),mult(e,mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [61, 7]
+
+[111] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(e,e))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [61, 7]
+
+[112] mult(inv(mult(e,Z_2_2_1)),mult(e,mult(mult(inv(e),Z_2_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [39, 7]
+
+[113] mult(inv(mult(e,inv(e))),mult(e,Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [39, 7]
+
+[114] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(e,Z_2_2_1))) = mult(e,mult(inv(e),Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 7]
+
+[115] mult(inv(e),mult(e,mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [36, 7]
+
+[116] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [36, 7]
+
+[117] mult(inv(mult(e,inv(e))),mult(inv(e),mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [44, 7]
+
+[118] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(e,inv(e)))) = mult(e,e)
+    Rule: Superposition
+    Parents: [44, 7]
+
+[119] mult(inv(e),mult(inv(Y_1_2),mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [1, 7]
+
+[120] mult(inv(mult(inv(mult(Y_1_2,Z_2_2_2)),Y_1_2)),e) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [1, 7]
+
+[121] mult(inv(mult(X_1_2,inv(Z_2_2_2))),mult(X_1_2,e)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [1, 7]
+
+[122] mult(inv(mult(e,Y_1_2)),mult(inv(inv(e)),mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [35, 7]
+
+[123] mult(inv(mult(inv(inv(e)),Y_1_2)),mult(e,mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [35, 7]
+
+[124] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [35, 7]
+
+[125] mult(inv(mult(e,e)),mult(inv(e),mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [73, 7]
+
+[126] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(e,e))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [73, 7]
+
+[127] mult(inv(Y_1_2),mult(e,mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 7]
+
+[128] mult(inv(mult(e,Y_1_2)),mult(Y_1_2,Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 7]
+
+[129] mult(inv(mult(X_1_2,e)),mult(X_1_2,Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 7]
+
+[130] mult(inv(mult(e,Z_2_2_1)),mult(inv(mult(X_1_1,Y_1_1)),mult(mult(X_1_1,mult(Y_1_1,Z_2_2_1)),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [7, 7]
+
+[131] mult(inv(mult(inv(mult(Y_1_2,Y_1_1)),Y_1_2)),mult(e,Z_2_2_1)) = mult(e,mult(Y_1_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [7, 7]
+
+[132] mult(inv(mult(X_1_2,inv(mult(X_1_1,Y_1_1)))),mult(X_1_2,mult(e,Z_2_2_1))) = mult(e,mult(X_1_1,mult(Y_1_1,Z_2_2_1)))
+    Rule: Superposition
+    Parents: [7, 7]
+
+[133] mult(mult(X_1_2,inv(inv(e))),mult(e,Z_2_2)) = mult(mult(X_1_2,mult(e,inv(e))),Z_2_2)
+    Rule: Superposition
+    Parents: [42, 5]
+
+[134] mult(inv(inv(inv(e))),mult(e,inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [42, 4]
+
+[135] mult(inv(inv(e)),mult(e,Z_2)) = mult(mult(e,inv(e)),Z_2)
+    Rule: Superposition
+    Parents: [42, 2]
+
+[136] mult(inv(inv(inv(e))),mult(mult(e,inv(e)),Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [42, 6]
+
+[137] mult(inv(mult(e,inv(e))),mult(inv(inv(e)),mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [42, 7]
+
+[138] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,mult(e,inv(e)))) = mult(e,e)
+    Rule: Superposition
+    Parents: [42, 7]
+
+[139] mult(mult(X_1_2,inv(inv(e))),mult(inv(e),Z_2_2)) = mult(mult(X_1_2,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [71, 5]
+
+[140] mult(inv(inv(inv(e))),mult(e,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [71, 4]
+
+[141] mult(inv(inv(e)),mult(inv(e),Z_2)) = mult(mult(e,e),Z_2)
+    Rule: Superposition
+    Parents: [71, 2]
+
+[142] mult(inv(inv(inv(e))),mult(mult(e,e),Z_2_2)) = mult(mult(e,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [71, 6]
+
+[143] mult(inv(mult(e,e)),mult(inv(inv(e)),mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [71, 7]
+
+[144] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,mult(e,e))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [71, 7]
+
+[145] mult(inv(inv(e)),mult(inv(e),Z_2_1)) = mult(e,mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [74, 11]
+
+[146] mult(mult(e,e),mult(Y_2_2,Z_2_2)) = mult(mult(inv(e),Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [74, 5]
+
+[147] mult(mult(X_1_2,e),mult(mult(e,Z_2_1),Z_2_2)) = mult(mult(X_1_2,mult(inv(e),Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [74, 5]
+
+[148] mult(inv(e),mult(inv(e),Z_2_1)) = mult(e,mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [74, 4]
+
+[149] mult(e,mult(mult(e,Z_2_1),Z_2)) = mult(mult(inv(e),Z_2_1),Z_2)
+    Rule: Superposition
+    Parents: [74, 2]
+
+[150] mult(inv(e),mult(mult(inv(e),Z_2_1),Z_2_2)) = mult(mult(e,mult(e,Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [74, 6]
+
+[151] mult(inv(e),inv(e)) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [61, 74]
+
+[152] mult(inv(mult(inv(e),Z_2_1)),mult(e,mult(mult(e,Z_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [74, 7]
+
+[153] mult(inv(mult(e,e)),mult(inv(e),Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [74, 7]
+
+[154] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(inv(e),Z_2_1))) = mult(e,mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [74, 7]
+
+[155] mult(inv(inv(e)),mult(e,e)) = mult(e,mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [83, 11]
+
+[156] mult(mult(X_1_2,e),mult(mult(e,inv(e)),Z_2_2)) = mult(mult(X_1_2,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [83, 5]
+
+[157] mult(inv(e),mult(e,e)) = mult(e,mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [83, 4]
+
+[158] mult(e,mult(mult(e,inv(e)),Z_2)) = mult(mult(e,e),Z_2)
+    Rule: Superposition
+    Parents: [83, 2]
+
+[159] mult(mult(e,mult(e,inv(e))),Z_2_2) = mult(inv(e),mult(mult(e,e),Z_2_2))
+    Rule: Superposition
+    Parents: [83, 6]
+
+[160] mult(inv(mult(e,e)),mult(e,mult(mult(e,inv(e)),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [83, 7]
+
+[161] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(e,e))) = mult(e,mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [83, 7]
+
+[162] mult(inv(e),mult(e,inv(e))) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [83, 74]
+
+[163] mult(inv(inv(e)),mult(e,inv(e))) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [84, 11]
+
+[164] mult(mult(X_1_2,e),mult(mult(e,e),Z_2_2)) = mult(mult(X_1_2,mult(e,inv(e))),Z_2_2)
+    Rule: Superposition
+    Parents: [84, 5]
+
+[165] mult(e,mult(mult(e,e),Z_2)) = mult(mult(e,inv(e)),Z_2)
+    Rule: Superposition
+    Parents: [84, 2]
+
+[166] mult(inv(e),mult(mult(e,inv(e)),Z_2_2)) = mult(mult(e,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [84, 6]
+
+[167] mult(inv(mult(e,inv(e))),mult(e,mult(mult(e,e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [84, 7]
+
+[168] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(e,inv(e)))) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [84, 7]
+
+[169] mult(inv(inv(Y_2_1_2)),inv(e)) = mult(e,mult(Y_2_1_2,e))
+    Rule: Superposition
+    Parents: [69, 10]
+
+[170] mult(mult(inv(inv(Y_2_1_1)),e),mult(Y_2_2,Z_2_2)) = mult(mult(e,mult(Y_2_1_1,Y_2_2)),Z_2_2)
+    Rule: Superposition
+    Parents: [10, 5]
+
+[171] mult(mult(X_1_2,inv(inv(Y_2_1_1))),mult(mult(e,Z_2_1_1),Z_2_2)) = mult(mult(X_1_2,mult(e,mult(Y_2_1_1,Z_2_1_1))),Z_2_2)
+    Rule: Superposition
+    Parents: [10, 5]
+
+[172] mult(inv(inv(inv(Y_2_1_1))),mult(e,mult(Y_2_1_1,Z_2_1_1))) = mult(e,mult(e,Z_2_1_1))
+    Rule: Superposition
+    Parents: [10, 4]
+
+[173] mult(inv(inv(inv(Y_2_1_1))),mult(mult(e,mult(Y_2_1_1,Z_2_1_1)),Z_2_2)) = mult(mult(e,mult(e,Z_2_1_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [10, 6]
+
+[174] mult(inv(inv(Y_2_1_2)),mult(e,e)) = mult(e,mult(Y_2_1_2,inv(e)))
+    Rule: Superposition
+    Parents: [61, 10]
+
+[175] mult(e,mult(Y_2_1_2,mult(inv(e),Z_2_2_1))) = mult(inv(inv(Y_2_1_2)),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 10]
+
+[176] mult(e,mult(Y_2_1_2,inv(e))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [36, 10]
+
+[177] mult(inv(mult(e,mult(Y_2_1_1,Z_2_1_1))),mult(inv(inv(Y_2_1_1)),mult(mult(e,Z_2_1_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [10, 7]
+
+[178] mult(inv(mult(inv(inv(Y_2_1_1)),e)),mult(e,mult(Y_2_1_1,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [10, 7]
+
+[179] mult(inv(mult(X_1_2,inv(inv(Y_2_1_1)))),mult(X_1_2,mult(e,mult(Y_2_1_1,Z_2_1_1)))) = mult(e,mult(e,Z_2_1_1))
+    Rule: Superposition
+    Parents: [10, 7]
+
+[180] mult(e,mult(Y_2_1_2,mult(e,inv(e)))) = mult(inv(inv(Y_2_1_2)),mult(e,e))
+    Rule: Superposition
+    Parents: [83, 10]
+
+[181] mult(inv(inv(Y_2_1_2)),mult(e,inv(e))) = mult(e,mult(Y_2_1_2,mult(e,e)))
+    Rule: Superposition
+    Parents: [84, 10]
+
+[182] mult(inv(inv(Y_2_1_2)),Z_2_1_2) = mult(e,mult(Y_2_1_2,Z_2_1_2))
+    Rule: Superposition
+    Parents: [0, 10]
+
+[183] mult(inv(inv(Y_2_1_2)),mult(inv(e),Z_2_1)) = mult(e,mult(Y_2_1_2,mult(e,Z_2_1)))
+    Rule: Superposition
+    Parents: [74, 10]
+
+[184] mult(mult(inv(e),e),mult(e,Z_2_2)) = mult(mult(e,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [67, 5]
+
+[185] mult(mult(X_1_2,inv(e)),mult(mult(e,e),Z_2_2)) = mult(mult(X_1_2,mult(e,inv(e))),Z_2_2)
+    Rule: Superposition
+    Parents: [67, 5]
+
+[186] mult(inv(inv(e)),mult(mult(e,inv(e)),Z_2_2)) = mult(mult(e,mult(e,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [67, 6]
+
+[187] mult(e,mult(e,inv(e))) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [67, 39]
+
+[188] mult(inv(mult(e,inv(e))),mult(inv(e),mult(mult(e,e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [67, 7]
+
+[189] mult(inv(mult(inv(e),e)),mult(e,inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [67, 7]
+
+[190] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(e,inv(e)))) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [67, 7]
+
+[191] mult(mult(X_1_2,mult(e,mult(e,e))),Z_2_2) = mult(mult(X_1_2,inv(e)),mult(inv(e),Z_2_2))
+    Rule: Superposition
+    Parents: [151, 5]
+
+[192] mult(inv(inv(e)),mult(e,mult(e,e))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [151, 4]
+
+[193] mult(mult(e,mult(e,e)),Z_2) = mult(inv(e),mult(inv(e),Z_2))
+    Rule: Superposition
+    Parents: [151, 2]
+
+[194] mult(inv(inv(e)),mult(mult(e,mult(e,e)),Z_2_2)) = mult(mult(e,inv(e)),Z_2_2)
+    Rule: Superposition
+    Parents: [151, 6]
+
+[195] mult(e,mult(e,mult(e,e))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [151, 39]
+
+[196] mult(inv(mult(e,mult(e,e))),mult(inv(e),mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [151, 7]
+
+[197] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(e,mult(e,e)))) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [151, 7]
+
+[198] mult(e,mult(e,mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 11]
+
+[199] mult(mult(e,mult(Y_2_1_2_1,mult(Y_1_2,Y_2_2))),Z_2_2) = mult(mult(inv(inv(Y_2_1_2_1)),Y_1_2),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [182, 5]
+
+[200] mult(mult(X_1_2,mult(e,mult(Y_2_1_2_1,Y_2_2))),Z_2_2) = mult(mult(X_1_2,inv(inv(Y_2_1_2_1))),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [182, 5]
+
+[201] mult(e,mult(Z_2_2_2,e)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 9]
+
+[202] mult(e,mult(Y_2_1_2_1,mult(inv(Y_2_1_2_1),Z_2_2))) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [182, 4]
+
+[203] mult(inv(inv(inv(Y_2_1_2_1))),mult(e,mult(Y_2_1_2_1,Z_2_2))) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [182, 4]
+
+[204] mult(mult(e,mult(Y_2_1_2_1,Y_2)),Z_2) = mult(inv(inv(Y_2_1_2_1)),mult(Y_2,Z_2))
+    Rule: Superposition
+    Parents: [182, 2]
+
+[205] mult(e,mult(Y_2_1_2_1,mult(mult(inv(Y_2_1_2_1),Z_2_1_2),Z_2_2))) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [182, 6]
+
+[206] mult(inv(inv(inv(Y_2_1_2_1))),mult(mult(e,mult(Y_2_1_2_1,Z_2_1_2)),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [182, 6]
+
+[207] mult(inv(mult(e,mult(Y_2_1_2_1,Y_1_2))),mult(inv(inv(Y_2_1_2_1)),mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 7]
+
+[208] mult(inv(mult(inv(inv(Y_2_1_2_1)),Y_1_2)),mult(e,mult(Y_2_1_2_1,mult(Y_1_2,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 7]
+
+[209] mult(inv(mult(X_1_2,inv(inv(Y_2_1_2_1)))),mult(X_1_2,mult(e,mult(Y_2_1_2_1,Z_2_2_2)))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 7]
+
+[210] mult(e,mult(Y_2_1_2_1,inv(Y_2_1_2_1))) = e
+    Rule: Superposition
+    Parents: [182, 1]
+
+[211] mult(e,mult(Y_2_1_2,mult(e,Z_2_1_2))) = mult(e,mult(Y_2_1_2,Z_2_1_2))
+    Rule: Superposition
+    Parents: [182, 10]
+
+[212] mult(e,mult(e,inv(inv(e)))) = e
+    Rule: Superposition
+    Parents: [8, 210]
+
+[213] mult(e,mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(inv(inv(e)),e)
+    Rule: Superposition
+    Parents: [210, 11]
+
+[214] mult(e,mult(e,e)) = e
+    Rule: Superposition
+    Parents: [45, 210]
+
+[215] mult(mult(e,Y_1_2),mult(inv(Y_1_2),Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [210, 5]
+
+[216] mult(mult(X_1_2,e),mult(mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [210, 5]
+
+[217] mult(e,mult(mult(X_1_1,Y_1_1),mult(Y_2_1,inv(mult(X_1_1,mult(Y_1_1,Y_2_1)))))) = e
+    Rule: Superposition
+    Parents: [5, 210]
+
+[218] mult(e,mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [210, 4]
+
+[219] mult(e,mult(mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [210, 2]
+
+[220] mult(e,mult(X_1,mult(Y_1,inv(mult(X_1,Y_1))))) = e
+    Rule: Superposition
+    Parents: [2, 210]
+
+[221] mult(mult(e,mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [210, 6]
+
+[222] mult(e,inv(inv(e))) = e
+    Rule: Superposition
+    Parents: [210, 39]
+
+[223] mult(inv(e),mult(e,mult(mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [210, 7]
+
+[224] mult(inv(mult(e,Y_1_2)),e) = mult(e,inv(Y_1_2))
+    Rule: Superposition
+    Parents: [210, 7]
+
+[225] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)))
+    Rule: Superposition
+    Parents: [210, 7]
+
+[226] mult(e,mult(e,inv(inv(inv(e))))) = e
+    Rule: Superposition
+    Parents: [35, 210]
+
+[227] mult(e,mult(Y_2_1_2,mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [210, 10]
+
+[228] mult(e,mult(e,mult(Y_2_1_2_1,inv(inv(inv(Y_2_1_2_1)))))) = e
+    Rule: Superposition
+    Parents: [182, 210]
+
+[229] mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1)) = e
+    Rule: Superposition
+    Parents: [210, 0]
+
+[230] mult(inv(e),inv(e)) = e
+    Rule: Superposition
+    Parents: [210, 74]
+
+[231] mult(inv(e),mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(e,e)
+    Rule: Superposition
+    Parents: [210, 74]
+
+[232] mult(e,inv(inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [229, 39]
+
+[233] mult(inv(e),mult(X_1_2,mult(inv(X_1_2),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [229, 7]
+
+[234] mult(inv(mult(X_1_2,Y_1_2)),mult(X_1_2,e)) = mult(e,inv(Y_1_2))
+    Rule: Superposition
+    Parents: [229, 7]
+
+[235] mult(inv(Y_2_2),e) = mult(e,inv(Y_2_2))
+    Rule: Superposition
+    Parents: [229, 4]
+
+[236] mult(e,mult(Y_2_1_2_2,inv(inv(inv(Y_2_1_2_2))))) = e
+    Rule: Superposition
+    Parents: [229, 182]
+
+[237] mult(mult(X_1_2,Y_1_2),mult(Y_2_2,inv(mult(X_1_2,mult(Y_1_2,Y_2_2))))) = e
+    Rule: Superposition
+    Parents: [229, 5]
+
+[238] mult(mult(X_1_2,Y_1_2),mult(inv(Y_1_2),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [229, 5]
+
+[239] mult(mult(e,Z_2_1_2),inv(mult(Y_2_1_2,Z_2_1_2))) = mult(inv(Y_2_1_2),e)
+    Rule: Superposition
+    Parents: [229, 6]
+
+[240] mult(mult(e,inv(Y_2_1_2)),Z_2_2) = mult(inv(Y_2_1_2),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [229, 6]
+
+[241] mult(X_2,mult(Y_2,inv(mult(X_2,Y_2)))) = e
+    Rule: Superposition
+    Parents: [229, 2]
+
+[242] mult(X_2,mult(inv(X_2),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [229, 2]
+
+[243] mult(e,inv(inv(inv(e)))) = e
+    Rule: Superposition
+    Parents: [229, 35]
+
+[244] mult(mult(e,e),e) = mult(inv(e),inv(e))
+    Rule: Superposition
+    Parents: [69, 12]
+
+[245] mult(mult(e,e),inv(e)) = mult(inv(e),mult(e,e))
+    Rule: Superposition
+    Parents: [61, 12]
+
+[246] mult(e,mult(mult(e,Y_2_1),Z_2_1)) = mult(e,mult(Y_2_1,Z_2_1))
+    Rule: Superposition
+    Parents: [12, 39]
+
+[247] mult(mult(e,e),mult(inv(e),Z_2_2_1)) = mult(inv(e),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 12]
+
+[248] mult(inv(mult(mult(e,Y_2_1),Z_2_1)),mult(inv(e),mult(mult(Y_2_1,Z_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [12, 7]
+
+[249] mult(inv(mult(inv(e),Y_1_2)),mult(mult(e,Y_1_2),Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [12, 7]
+
+[250] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,mult(mult(e,Y_2_1),Z_2_1))) = mult(e,mult(Y_2_1,Z_2_1))
+    Rule: Superposition
+    Parents: [12, 7]
+
+[251] mult(mult(e,inv(mult(X_1_1,Y_1_1))),mult(X_1_1,mult(Y_1_1,Z_2_2_1))) = mult(inv(e),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [7, 12]
+
+[252] mult(mult(e,e),Z_2_2) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [12, 4]
+
+[253] mult(inv(inv(e)),mult(mult(e,Y_2_1),Z_2_1)) = mult(e,mult(Y_2_1,Z_2_1))
+    Rule: Superposition
+    Parents: [12, 4]
+
+[254] mult(mult(e,inv(Y_2_1)),mult(Y_2_1,Z_2_1)) = mult(inv(e),mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [4, 12]
+
+[255] mult(mult(e,e),e) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [12, 67]
+
+[256] mult(mult(e,inv(e)),mult(e,e)) = mult(inv(e),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [67, 12]
+
+[257] mult(inv(e),mult(e,mult(Y_2_1_2_1,Z_2_2))) = mult(mult(e,inv(inv(Y_2_1_2_1))),Z_2_2)
+    Rule: Superposition
+    Parents: [182, 12]
+
+[258] mult(mult(e,e),mult(e,e)) = mult(inv(e),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [84, 12]
+
+[259] mult(mult(e,e),mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [210, 12]
+
+[260] mult(mult(e,inv(Z_2_2)),Z_2_2) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [1, 12]
+
+[261] mult(mult(e,inv(e)),inv(e)) = mult(inv(e),mult(e,e))
+    Rule: Superposition
+    Parents: [73, 12]
+
+[262] mult(mult(e,inv(inv(e))),e) = mult(inv(e),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [42, 12]
+
+[263] mult(mult(e,inv(inv(Y_2_1_1))),mult(e,Z_2_1_1)) = mult(inv(e),mult(e,mult(Y_2_1_1,Z_2_1_1)))
+    Rule: Superposition
+    Parents: [10, 12]
+
+[264] mult(mult(e,inv(inv(e))),mult(e,Z_2_2_1)) = mult(inv(e),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [11, 12]
+
+[265] mult(mult(e,Y_2_2),inv(Y_2_2)) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [229, 12]
+
+[266] mult(mult(inv(e),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(mult(e,Y_1_2),Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [12, 5]
+
+[267] mult(mult(X_1_2,inv(e)),mult(mult(Y_2_1,Z_2_1),Z_2_2)) = mult(mult(X_1_2,mult(mult(e,Y_2_1),Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [12, 5]
+
+[268] mult(inv(e),mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_2))) = mult(mult(e,mult(X_1_1,mult(Y_1_1,Y_2_1))),Z_2_2)
+    Rule: Superposition
+    Parents: [5, 12]
+
+[269] mult(mult(e,inv(inv(Z_2_2_1))),e) = mult(inv(e),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [9, 12]
+
+[270] mult(mult(e,mult(e,Z_2_1_2)),Z_2_2) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [12, 6]
+
+[271] mult(inv(inv(e)),mult(mult(mult(e,Y_2_1),Z_2_1),Z_2_2)) = mult(mult(e,mult(Y_2_1,Z_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [12, 6]
+
+[272] mult(mult(e,inv(Y_2_1_1)),mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1)) = mult(inv(e),mult(mult(e,Z_2_1_1),Z_2_1))
+    Rule: Superposition
+    Parents: [6, 12]
+
+[273] mult(inv(e),mult(mult(Y_2_1,Z_2_1),Z_2)) = mult(mult(mult(e,Y_2_1),Z_2_1),Z_2)
+    Rule: Superposition
+    Parents: [12, 2]
+
+[274] mult(inv(e),mult(X_1,mult(Y_1,Z_2_2))) = mult(mult(e,mult(X_1,Y_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [2, 12]
+
+[275] mult(mult(e,e),mult(e,inv(e))) = mult(inv(e),mult(e,e))
+    Rule: Superposition
+    Parents: [83, 12]
+
+[276] mult(inv(e),mult(e,inv(e))) = mult(mult(e,inv(e)),e)
+    Rule: Superposition
+    Parents: [44, 12]
+
+[277] mult(mult(e,inv(inv(e))),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [35, 12]
+
+[278] mult(mult(e,inv(inv(e))),inv(e)) = mult(inv(e),mult(e,e))
+    Rule: Superposition
+    Parents: [71, 12]
+
+[279] mult(inv(e),mult(e,mult(e,e))) = mult(mult(e,inv(e)),inv(e))
+    Rule: Superposition
+    Parents: [151, 12]
+
+[280] mult(mult(e,e),Z_2_2) = mult(inv(e),Z_2_2)
+    Rule: Superposition
+    Parents: [0, 12]
+
+[281] mult(mult(e,e),mult(e,Z_2_1)) = mult(inv(e),mult(inv(e),Z_2_1))
+    Rule: Superposition
+    Parents: [74, 12]
+
+[282] mult(mult(e,inv(e)),mult(Y_2_1,Z_2_1)) = mult(inv(e),mult(mult(e,Y_2_1),Z_2_1))
+    Rule: Superposition
+    Parents: [12, 12]
+
+[283] mult(inv(e),mult(e,mult(mult(e,e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [214, 7]
+
+[284] mult(inv(mult(e,e)),e) = mult(e,e)
+    Rule: Superposition
+    Parents: [214, 7]
+
+[285] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,mult(e,e))
+    Rule: Superposition
+    Parents: [214, 7]
+
+[286] mult(mult(e,e),mult(e,e)) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [214, 12]
+
+[287] mult(e,mult(Y_2_1_2,mult(e,e))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [214, 10]
+
+[288] mult(mult(e,e),mult(e,Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [214, 5]
+
+[289] mult(mult(X_1_2,e),mult(mult(e,e),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [214, 5]
+
+[290] mult(mult(e,mult(e,e)),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [214, 6]
+
+[291] mult(e,mult(mult(e,e),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [214, 2]
+
+[292] mult(inv(e),mult(e,mult(inv(inv(e)),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [222, 7]
+
+[293] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,inv(inv(e)))
+    Rule: Superposition
+    Parents: [222, 7]
+
+[294] mult(e,inv(inv(e))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [222, 4]
+
+[295] mult(mult(e,e),inv(inv(e))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [222, 12]
+
+[296] mult(e,mult(Y_2_1_2,inv(inv(e)))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [222, 10]
+
+[297] mult(mult(X_1_2,e),mult(inv(inv(e)),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [222, 5]
+
+[298] mult(e,mult(inv(inv(e)),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [222, 2]
+
+[299] inv(inv(e)) = e
+    Rule: Superposition
+    Parents: [222, 0]
+
+[300] mult(inv(e),inv(inv(e))) = mult(e,e)
+    Rule: Superposition
+    Parents: [222, 74]
+
+[301] mult(e,mult(inv(e),e)) = e
+    Rule: Superposition
+    Parents: [299, 210]
+
+[302] mult(inv(e),mult(inv(e),mult(inv(e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [230, 7]
+
+[303] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,e)) = mult(e,inv(e))
+    Rule: Superposition
+    Parents: [230, 7]
+
+[304] mult(mult(e,inv(e)),inv(e)) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [230, 12]
+
+[305] mult(mult(X_1_2,inv(e)),mult(inv(e),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [230, 5]
+
+[306] mult(inv(e),mult(inv(e),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [230, 2]
+
+[307] mult(inv(e),mult(e,mult(inv(inv(inv(e))),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [243, 7]
+
+[308] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,inv(inv(inv(e))))
+    Rule: Superposition
+    Parents: [243, 7]
+
+[309] mult(e,inv(inv(inv(e)))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [243, 4]
+
+[310] mult(mult(e,e),inv(inv(inv(e)))) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [243, 12]
+
+[311] mult(e,mult(Y_2_1_2,inv(inv(inv(e))))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [243, 10]
+
+[312] mult(e,inv(inv(inv(e)))) = mult(inv(inv(e)),e)
+    Rule: Superposition
+    Parents: [243, 11]
+
+[313] mult(mult(X_1_2,e),mult(inv(inv(inv(e))),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [243, 5]
+
+[314] mult(mult(e,inv(inv(inv(e)))),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [243, 6]
+
+[315] mult(e,mult(inv(inv(inv(e))),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [243, 2]
+
+[316] inv(inv(inv(e))) = e
+    Rule: Superposition
+    Parents: [243, 0]
+
+[317] mult(inv(e),inv(inv(inv(e)))) = mult(e,e)
+    Rule: Superposition
+    Parents: [243, 74]
+
+[318] mult(mult(e,mult(Y_1_2_2,inv(e))),Z_2_2_2) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_2))
+    Rule: Superposition
+    Parents: [8, 13]
+
+[319] mult(mult(e,mult(Y_1_2_2,e)),e) = mult(mult(inv(e),Y_1_2_2),inv(e))
+    Rule: Superposition
+    Parents: [69, 13]
+
+[320] mult(mult(e,mult(Y_1_2_2,e)),inv(e)) = mult(mult(inv(e),Y_1_2_2),mult(e,e))
+    Rule: Superposition
+    Parents: [61, 13]
+
+[321] mult(mult(e,mult(Y_1_2_2,e)),mult(inv(e),Z_2_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 13]
+
+[322] mult(inv(mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1)),mult(mult(inv(e),Y_1_2_1),mult(mult(Y_2_2_1,Z_2_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [13, 7]
+
+[323] mult(inv(mult(mult(inv(e),Y_1_2_1),Y_1_2)),mult(mult(e,mult(Y_1_2_1,Y_1_2)),Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [13, 7]
+
+[324] mult(inv(mult(X_1_2,mult(inv(e),Y_1_2_1))),mult(X_1_2,mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1))) = mult(e,mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 7]
+
+[325] mult(mult(e,mult(Y_1_2_2,inv(mult(X_1_1,Y_1_1)))),mult(X_1_1,mult(Y_1_1,Z_2_2_1))) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [7, 13]
+
+[326] mult(inv(mult(inv(e),Y_1_2_1)),mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1)) = mult(e,mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 4]
+
+[327] mult(mult(e,mult(mult(e,Z_2_1),Y_2_2_2)),Z_2_2_2) = mult(mult(e,Z_2_1),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [4, 13]
+
+[328] mult(mult(e,mult(Y_1_2_2,inv(Y_2_1))),mult(Y_2_1,Z_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [4, 13]
+
+[329] mult(mult(e,mult(mult(e,e),Y_2_2_2)),Z_2_2_2) = mult(mult(e,inv(e)),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [67, 13]
+
+[330] mult(mult(e,mult(Y_1_2_2,inv(e))),mult(e,e)) = mult(mult(inv(e),Y_1_2_2),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [67, 13]
+
+[331] mult(mult(inv(e),Y_1_2_2),mult(e,mult(Y_2_1_2_1,Z_2_2_2))) = mult(mult(e,mult(Y_1_2_2,inv(inv(Y_2_1_2_1)))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 13]
+
+[332] mult(mult(e,mult(inv(e),Y_1_2_1)),mult(Y_2_2_1,Z_2_2_1)) = mult(inv(e),mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 12]
+
+[333] mult(mult(e,mult(mult(Y_2_1,Z_2_1),Y_2_2_2)),Z_2_2_2) = mult(mult(mult(e,Y_2_1),Z_2_1),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [12, 13]
+
+[334] mult(mult(e,mult(Y_1_2_2,inv(e))),mult(Y_2_1,Z_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(mult(e,Y_2_1),Z_2_1))
+    Rule: Superposition
+    Parents: [12, 13]
+
+[335] mult(mult(e,mult(Y_1_2_2,e)),mult(e,e)) = mult(mult(inv(e),Y_1_2_2),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [84, 13]
+
+[336] mult(mult(e,mult(Y_1_2_2,e)),mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [210, 13]
+
+[337] mult(mult(e,mult(e,Y_2_2_2)),Z_2_2_2) = mult(e,mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [1, 13]
+
+[338] mult(mult(e,mult(Y_1_2_2,inv(Z_2_2_2))),Z_2_2_2) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [1, 13]
+
+[339] mult(mult(e,mult(inv(e),Y_2_2_2)),Z_2_2_2) = mult(mult(e,e),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [73, 13]
+
+[340] mult(mult(e,mult(Y_1_2_2,inv(e))),inv(e)) = mult(mult(inv(e),Y_1_2_2),mult(e,e))
+    Rule: Superposition
+    Parents: [73, 13]
+
+[341] mult(mult(e,mult(Y_1_2_2,inv(inv(e)))),e) = mult(mult(inv(e),Y_1_2_2),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [42, 13]
+
+[342] mult(mult(e,mult(Y_1_2_2,e)),mult(e,e)) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [214, 13]
+
+[343] mult(mult(e,mult(Y_1_2_2,inv(inv(Y_2_1_1)))),mult(e,Z_2_1_1)) = mult(mult(inv(e),Y_1_2_2),mult(e,mult(Y_2_1_1,Z_2_1_1)))
+    Rule: Superposition
+    Parents: [10, 13]
+
+[344] mult(mult(e,mult(Y_1_2_2,e)),inv(inv(inv(e)))) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [243, 13]
+
+[345] mult(mult(e,mult(Y_1_2_2,inv(inv(e)))),mult(e,Z_2_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [11, 13]
+
+[346] mult(mult(e,mult(inv(inv(e)),Y_2_2_2)),Z_2_2_2) = mult(e,mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [229, 13]
+
+[347] mult(mult(e,mult(Y_1_2_2,Y_2_2_2)),inv(Y_2_2_2)) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [229, 13]
+
+[348] mult(mult(inv(e),Y_1_2),mult(Y_2_2,mult(Y_2_2_1,Z_2_2_1))) = mult(mult(e,mult(mult(Y_1_2,Y_2_2),Y_2_2_1)),Z_2_2_1)
+    Rule: Superposition
+    Parents: [13, 5]
+
+[349] mult(mult(mult(inv(e),Y_1_2_1),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(mult(e,mult(Y_1_2_1,Y_1_2)),Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [13, 5]
+
+[350] mult(mult(X_1_2,mult(inv(e),Y_1_2_1)),mult(mult(Y_2_2_1,Z_2_2_1),Z_2_2)) = mult(mult(X_1_2,mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [13, 5]
+
+[351] mult(mult(inv(e),Y_1_2_2),mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_2_2))) = mult(mult(e,mult(Y_1_2_2,mult(X_1_1,mult(Y_1_1,Y_2_1)))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 13]
+
+[352] mult(mult(e,mult(Y_1_2_2,inv(inv(Z_2_2_1)))),e) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [9, 13]
+
+[353] mult(inv(inv(e)),mult(mult(e,mult(Z_2_1_2,Y_2_2_1)),Z_2_2_1)) = mult(mult(e,Z_2_1_2),mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 6]
+
+[354] mult(inv(mult(inv(e),Y_1_2_1)),mult(mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1),Z_2_2)) = mult(mult(e,mult(Y_2_2_1,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [13, 6]
+
+[355] mult(mult(e,mult(mult(mult(e,Z_2_1_1),Z_2_1),Y_2_2_2)),Z_2_2_2) = mult(mult(mult(e,Z_2_1_1),Z_2_1),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [6, 13]
+
+[356] mult(mult(e,mult(Y_1_2_2,inv(Y_2_1_1))),mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(mult(e,Z_2_1_1),Z_2_1))
+    Rule: Superposition
+    Parents: [6, 13]
+
+[357] mult(mult(inv(e),Y_1_2_1),mult(mult(Y_2_2_1,Z_2_2_1),Z_2)) = mult(mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1),Z_2)
+    Rule: Superposition
+    Parents: [13, 2]
+
+[358] mult(mult(inv(e),Y_1_2_2),mult(X_1,mult(Y_1,Z_2_2_2))) = mult(mult(e,mult(Y_1_2_2,mult(X_1,Y_1))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [2, 13]
+
+[359] mult(mult(e,mult(Y_1_2_2,e)),mult(e,inv(e))) = mult(mult(inv(e),Y_1_2_2),mult(e,e))
+    Rule: Superposition
+    Parents: [83, 13]
+
+[360] mult(mult(e,mult(inv(e),Y_2_2_2)),Z_2_2_2) = mult(e,mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [230, 13]
+
+[361] mult(mult(e,mult(Y_1_2_2,inv(e))),inv(e)) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [230, 13]
+
+[362] mult(mult(inv(e),Y_1_2_2),mult(e,inv(e))) = mult(mult(e,mult(Y_1_2_2,inv(e))),e)
+    Rule: Superposition
+    Parents: [44, 13]
+
+[363] mult(mult(e,mult(Y_1_2_2,inv(inv(e)))),Z_2_2_2) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_2))
+    Rule: Superposition
+    Parents: [35, 13]
+
+[364] mult(mult(e,mult(Y_1_2_2,inv(inv(e)))),inv(e)) = mult(mult(inv(e),Y_1_2_2),mult(e,e))
+    Rule: Superposition
+    Parents: [71, 13]
+
+[365] mult(mult(e,mult(e,e)),mult(Y_2_2_2,Z_2_2_2)) = mult(mult(e,mult(inv(e),Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [151, 13]
+
+[366] mult(mult(inv(e),Y_1_2_2),mult(e,mult(e,e))) = mult(mult(e,mult(Y_1_2_2,inv(e))),inv(e))
+    Rule: Superposition
+    Parents: [151, 13]
+
+[367] mult(mult(e,mult(Y_1_2_2,e)),Z_2_2_2) = mult(mult(inv(e),Y_1_2_2),Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 13]
+
+[368] mult(mult(e,mult(Y_1_2_2,e)),mult(e,Z_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(inv(e),Z_2_1))
+    Rule: Superposition
+    Parents: [74, 13]
+
+[369] mult(mult(e,mult(Y_1_2_2,e)),inv(inv(e))) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [222, 13]
+
+[370] mult(mult(e,mult(Y_1_2_2,mult(inv(e),Y_1_2_1))),mult(Y_2_2_1,Z_2_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 13]
+
+[371] mult(e,mult(inv(inv(e)),Z_2_1_2_2)) = mult(inv(e),Z_2_1_2_2)
+    Rule: Superposition
+    Parents: [316, 182]
+
+[372] mult(e,mult(inv(inv(e)),e)) = e
+    Rule: Superposition
+    Parents: [316, 210]
+
+[373] mult(e,mult(inv(e),Z_2_1_2)) = mult(e,mult(e,Z_2_1_2))
+    Rule: Superposition
+    Parents: [316, 10]
+
+[374] mult(e,mult(inv(inv(e)),Z_2_1_2)) = mult(inv(e),mult(e,Z_2_1_2))
+    Rule: Superposition
+    Parents: [316, 10]
+
+[375] mult(inv(inv(e)),e) = e
+    Rule: Superposition
+    Parents: [316, 229]
+
+[376] mult(e,mult(mult(inv(inv(e)),Z_2_1_2),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [316, 6]
+
+[377] mult(mult(e,mult(Y_1_2_2,inv(inv(e)))),e) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [375, 13]
+
+[378] mult(inv(e),mult(inv(inv(e)),mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [375, 7]
+
+[379] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,e)) = mult(e,e)
+    Rule: Superposition
+    Parents: [375, 7]
+
+[380] mult(inv(inv(inv(e))),e) = mult(e,e)
+    Rule: Superposition
+    Parents: [375, 4]
+
+[381] mult(mult(e,inv(inv(e))),e) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [375, 12]
+
+[382] mult(mult(X_1_2,inv(inv(e))),mult(e,Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [375, 5]
+
+[383] mult(inv(inv(inv(e))),mult(e,Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [375, 6]
+
+[384] mult(mult(e,mult(Y_1_2_2,e)),mult(inv(e),e)) = mult(mult(inv(e),Y_1_2_2),e)
+    Rule: Superposition
+    Parents: [301, 13]
+
+[385] mult(inv(e),mult(e,mult(mult(inv(e),e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [301, 7]
+
+[386] mult(inv(mult(e,inv(e))),e) = mult(e,e)
+    Rule: Superposition
+    Parents: [301, 7]
+
+[387] mult(inv(mult(X_1_2,e)),mult(X_1_2,e)) = mult(e,mult(inv(e),e))
+    Rule: Superposition
+    Parents: [301, 7]
+
+[388] mult(mult(e,e),mult(inv(e),e)) = mult(inv(e),e)
+    Rule: Superposition
+    Parents: [301, 12]
+
+[389] mult(e,mult(Y_2_1_2,mult(inv(e),e))) = mult(inv(inv(Y_2_1_2)),e)
+    Rule: Superposition
+    Parents: [301, 10]
+
+[390] mult(e,mult(inv(e),e)) = mult(inv(inv(e)),e)
+    Rule: Superposition
+    Parents: [301, 11]
+
+[391] mult(mult(e,inv(e)),mult(e,Z_2_2)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [301, 5]
+
+[392] mult(mult(X_1_2,e),mult(mult(inv(e),e),Z_2_2)) = mult(mult(X_1_2,e),Z_2_2)
+    Rule: Superposition
+    Parents: [301, 5]
+
+[393] mult(mult(e,mult(inv(e),e)),Z_2_2) = mult(inv(e),mult(e,Z_2_2))
+    Rule: Superposition
+    Parents: [301, 6]
+
+[394] mult(e,mult(mult(inv(e),e),Z_2)) = mult(e,Z_2)
+    Rule: Superposition
+    Parents: [301, 2]
+
+[395] mult(mult(e,mult(Y_1_2_2,e)),mult(Z_2_2_2_1,e)) = mult(mult(inv(e),Y_1_2_2),mult(e,Z_2_2_2_1))
+    Rule: Superposition
+    Parents: [201, 13]
+
+[396] mult(inv(mult(e,Z_2_2_2_1)),mult(e,mult(mult(Z_2_2_2_1,e),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [201, 7]
+
+[397] mult(inv(mult(e,Y_1_2)),mult(e,Y_1_2)) = mult(e,e)
+    Rule: Superposition
+    Parents: [201, 7]
+
+[398] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(e,Z_2_2_2_1))) = mult(e,mult(Z_2_2_2_1,e))
+    Rule: Superposition
+    Parents: [201, 7]
+
+[399] mult(inv(e),mult(e,Z_2_2_2_1)) = mult(e,mult(Z_2_2_2_1,e))
+    Rule: Superposition
+    Parents: [201, 4]
+
+[400] mult(e,mult(e,mult(Y_2_1_2_1,e))) = mult(e,inv(inv(Y_2_1_2_1)))
+    Rule: Superposition
+    Parents: [182, 201]
+
+[401] mult(mult(e,e),mult(Z_2_2_2_1,e)) = mult(inv(e),mult(e,Z_2_2_2_1))
+    Rule: Superposition
+    Parents: [201, 12]
+
+[402] mult(e,mult(e,inv(e))) = mult(e,inv(inv(e)))
+    Rule: Superposition
+    Parents: [42, 201]
+
+[403] mult(inv(inv(Y_2_1_2)),mult(e,Z_2_2_2_1)) = mult(e,mult(Y_2_1_2,mult(Z_2_2_2_1,e)))
+    Rule: Superposition
+    Parents: [201, 10]
+
+[404] mult(inv(inv(e)),mult(e,Z_2_2_2_1)) = mult(e,mult(Z_2_2_2_1,e))
+    Rule: Superposition
+    Parents: [201, 11]
+
+[405] mult(mult(e,Y_1_2),mult(e,Z_2_2)) = mult(mult(e,Y_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [201, 5]
+
+[406] mult(mult(X_1_2,e),mult(mult(Z_2_2_2_1,e),Z_2_2)) = mult(mult(X_1_2,mult(e,Z_2_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [201, 5]
+
+[407] mult(e,mult(mult(X_1_1,Y_1_1),mult(Y_2_1,e))) = mult(e,mult(X_1_1,mult(Y_1_1,Y_2_1)))
+    Rule: Superposition
+    Parents: [5, 201]
+
+[408] mult(e,mult(e,Z_2_2_1)) = mult(e,inv(inv(Z_2_2_1)))
+    Rule: Superposition
+    Parents: [9, 201]
+
+[409] mult(inv(e),mult(mult(e,Z_2_2_2_1),Z_2_2)) = mult(mult(e,mult(Z_2_2_2_1,e)),Z_2_2)
+    Rule: Superposition
+    Parents: [201, 6]
+
+[410] mult(e,mult(mult(Z_2_2_2_1,e),Z_2)) = mult(mult(e,Z_2_2_2_1),Z_2)
+    Rule: Superposition
+    Parents: [201, 2]
+
+[411] mult(e,mult(X_1,mult(Y_1,e))) = mult(e,mult(X_1,Y_1))
+    Rule: Superposition
+    Parents: [2, 201]
+
+[412] mult(e,Z_2_2_2_1) = mult(Z_2_2_2_1,e)
+    Rule: Superposition
+    Parents: [201, 0]
+
+[413] mult(Z_2_2_2_2,e) = mult(e,Z_2_2_2_2)
+    Rule: Superposition
+    Parents: [0, 201]
+
+[414] mult(inv(e),mult(Z_2_2_2_1,e)) = mult(e,mult(e,Z_2_2_2_1))
+    Rule: Superposition
+    Parents: [201, 74]
+
+[415] mult(mult(inv(e),Y_1_2_2),mult(Z_2_2_2,e)) = mult(mult(e,mult(Y_1_2_2,e)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [412, 13]
+
+[416] mult(inv(mult(Y_1_2,e)),mult(e,mult(Y_1_2,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [412, 7]
+
+[417] mult(inv(mult(X_1_2,e)),mult(X_1_2,mult(Z_2_2_2,e))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [412, 7]
+
+[418] mult(inv(e),mult(Z_2_2,e)) = mult(e,Z_2_2)
+    Rule: Superposition
+    Parents: [412, 4]
+
+[419] mult(inv(e),mult(Z_2_2,e)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [412, 12]
+
+[420] mult(inv(inv(Y_2_1_2)),mult(Z_2_1_2,e)) = mult(e,mult(Y_2_1_2,Z_2_1_2))
+    Rule: Superposition
+    Parents: [412, 10]
+
+[421] mult(inv(inv(e)),mult(Z_2_2_2,e)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [412, 11]
+
+[422] mult(mult(X_1_2,mult(Y_2_2,e)),Z_2_2) = mult(mult(X_1_2,e),mult(Y_2_2,Z_2_2))
+    Rule: Superposition
+    Parents: [412, 5]
+
+[423] mult(inv(e),mult(mult(Z_2_1_2,e),Z_2_2)) = mult(mult(e,Z_2_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [412, 6]
+
+[424] mult(mult(Y_2,e),Z_2) = mult(e,mult(Y_2,Z_2))
+    Rule: Superposition
+    Parents: [412, 2]
+
+[425] mult(X_2,e) = X_2
+    Rule: Superposition
+    Parents: [412, 0]
+
+[426] mult(e,mult(Z_2_2,e)) = mult(inv(e),Z_2_2)
+    Rule: Superposition
+    Parents: [412, 74]
+
+[427] mult(mult(inv(e),mult(e,Y_2_2_2)),Z_2_2_2) = mult(mult(e,inv(e)),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [8, 14]
+
+[428] mult(mult(X_1_2_2,mult(e,e)),e) = mult(mult(X_1_2_2,inv(e)),inv(e))
+    Rule: Superposition
+    Parents: [69, 14]
+
+[429] mult(mult(inv(e),mult(e,Y_2_2_2)),Z_2_2_2) = mult(mult(e,mult(inv(e),Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [14, 13]
+
+[430] mult(mult(e,mult(Y_1_2_2,mult(X_1_2_1,inv(e)))),mult(Y_2_2_1,Z_2_2_1)) = mult(mult(inv(e),Y_1_2_2),mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 13]
+
+[431] mult(mult(X_1_2_2,mult(e,mult(inv(e),Y_1_2_1))),mult(Y_2_2_1,Z_2_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(mult(e,mult(Y_1_2_1,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [13, 14]
+
+[432] mult(mult(X_1_2_2,mult(e,e)),inv(e)) = mult(mult(X_1_2_2,inv(e)),mult(e,e))
+    Rule: Superposition
+    Parents: [61, 14]
+
+[433] mult(mult(X_1_2_2,mult(e,e)),mult(inv(e),Z_2_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [39, 14]
+
+[434] mult(inv(mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1)),mult(mult(X_1_2_1,inv(e)),mult(mult(Y_2_2_1,Z_2_2_1),Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [14, 7]
+
+[435] mult(inv(mult(mult(X_1_2_1,inv(e)),Y_1_2)),mult(mult(X_1_2_1,mult(e,Y_1_2)),Z_2_2_2)) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [14, 7]
+
+[436] mult(inv(mult(X_1_2,mult(X_1_2_1,inv(e)))),mult(X_1_2,mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1))) = mult(e,mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 7]
+
+[437] mult(mult(X_1_2_2,mult(e,inv(mult(X_1_1,Y_1_1)))),mult(X_1_1,mult(Y_1_1,Z_2_2_1))) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [7, 14]
+
+[438] mult(inv(mult(X_1_2_1,inv(e))),mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1)) = mult(e,mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 4]
+
+[439] mult(mult(X_1_2_2,mult(e,inv(Y_2_1))),mult(Y_2_1,Z_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_1))
+    Rule: Superposition
+    Parents: [4, 14]
+
+[440] mult(mult(X_1_2_2,mult(e,inv(e))),mult(e,e)) = mult(mult(X_1_2_2,inv(e)),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [67, 14]
+
+[441] mult(mult(e,mult(Y_2_1_2_1,inv(e))),mult(Y_2_2_2,Z_2_2_2)) = mult(mult(inv(inv(Y_2_1_2_1)),mult(e,Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 14]
+
+[442] mult(mult(X_1_2_2,inv(e)),mult(e,mult(Y_2_1_2_1,Z_2_2_2))) = mult(mult(X_1_2_2,mult(e,inv(inv(Y_2_1_2_1)))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [182, 14]
+
+[443] mult(mult(e,mult(X_1_2_1,inv(e))),mult(Y_2_2_1,Z_2_2_1)) = mult(inv(e),mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 12]
+
+[444] mult(mult(X_1_2_2,mult(e,inv(e))),mult(Y_2_1,Z_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(mult(e,Y_2_1),Z_2_1))
+    Rule: Superposition
+    Parents: [12, 14]
+
+[445] mult(mult(X_1_2_2,mult(e,e)),mult(e,e)) = mult(mult(X_1_2_2,inv(e)),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [84, 14]
+
+[446] mult(mult(X_1_2_2,mult(e,e)),mult(Y_2_1_2_1_1,inv(Y_2_1_2_1_1))) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [210, 14]
+
+[447] mult(mult(X_1_2_2,mult(e,inv(inv(e)))),e) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [375, 14]
+
+[448] mult(mult(inv(inv(e)),mult(e,Y_2_2_2)),Z_2_2_2) = mult(e,mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [1, 14]
+
+[449] mult(mult(X_1_2_2,mult(e,inv(Z_2_2_2))),Z_2_2_2) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [1, 14]
+
+[450] mult(mult(inv(e),mult(e,Y_2_2_2)),Z_2_2_2) = mult(mult(e,e),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [73, 14]
+
+[451] mult(mult(X_1_2_2,mult(e,inv(e))),inv(e)) = mult(mult(X_1_2_2,inv(e)),mult(e,e))
+    Rule: Superposition
+    Parents: [73, 14]
+
+[452] mult(mult(X_1_2_2,mult(e,inv(inv(e)))),e) = mult(mult(X_1_2_2,inv(e)),mult(e,inv(e)))
+    Rule: Superposition
+    Parents: [42, 14]
+
+[453] mult(mult(X_1_2_2,mult(e,e)),mult(e,e)) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [214, 14]
+
+[454] mult(mult(X_1_2_2,mult(e,inv(inv(Y_2_1_1)))),mult(e,Z_2_1_1)) = mult(mult(X_1_2_2,inv(e)),mult(e,mult(Y_2_1_1,Z_2_1_1)))
+    Rule: Superposition
+    Parents: [10, 14]
+
+[455] mult(mult(X_1_2_2,mult(e,e)),inv(inv(inv(e)))) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [243, 14]
+
+[456] mult(mult(X_1_2_2,mult(e,e)),mult(inv(e),e)) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [301, 14]
+
+[457] mult(mult(X_1_2_2,mult(e,inv(inv(e)))),mult(e,Z_2_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [11, 14]
+
+[458] mult(mult(X_1_2_2,mult(e,Y_2_2_2)),inv(Y_2_2_2)) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [229, 14]
+
+[459] mult(mult(mult(X_1_2_1,inv(e)),Y_1_2),mult(Y_2_2,Z_2_2)) = mult(mult(mult(X_1_2_1,mult(e,Y_1_2)),Y_2_2),Z_2_2)
+    Rule: Superposition
+    Parents: [14, 5]
+
+[460] mult(mult(X_1_2,mult(X_1_2_1,inv(e))),mult(mult(Y_2_2_1,Z_2_2_1),Z_2_2)) = mult(mult(X_1_2,mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [14, 5]
+
+[461] mult(mult(mult(X_1_1,Y_1_1),mult(Y_2_1,inv(e))),mult(Y_2_2_2,Z_2_2_2)) = mult(mult(mult(X_1_1,mult(Y_1_1,Y_2_1)),mult(e,Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 14]
+
+[462] mult(mult(X_1_2_2,inv(e)),mult(mult(X_1_1,Y_1_1),mult(Y_2_1,Z_2_2_2))) = mult(mult(X_1_2_2,mult(e,mult(X_1_1,mult(Y_1_1,Y_2_1)))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [5, 14]
+
+[463] mult(mult(X_1_2_2,mult(e,inv(inv(Z_2_2_1)))),e) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_1))
+    Rule: Superposition
+    Parents: [9, 14]
+
+[464] mult(inv(Y_2_1_2),mult(mult(Y_2_1_2,mult(e,Y_2_2_1)),Z_2_2_1)) = mult(mult(e,inv(e)),mult(Y_2_2_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 6]
+
+[465] mult(inv(mult(X_1_2_1,inv(e))),mult(mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1),Z_2_2)) = mult(mult(e,mult(Y_2_2_1,Z_2_2_1)),Z_2_2)
+    Rule: Superposition
+    Parents: [14, 6]
+
+[466] mult(mult(X_1_2_2,mult(e,inv(Y_2_1_1))),mult(mult(Y_2_1_1,Z_2_1_1),Z_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(mult(e,Z_2_1_1),Z_2_1))
+    Rule: Superposition
+    Parents: [6, 14]
+
+[467] mult(X_2,mult(inv(e),mult(Y_2_2_1,Z_2_2_1))) = mult(mult(X_2,mult(e,Y_2_2_1)),Z_2_2_1)
+    Rule: Superposition
+    Parents: [14, 2]
+
+[468] mult(mult(X_1_2_1,inv(e)),mult(mult(Y_2_2_1,Z_2_2_1),Z_2)) = mult(mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1),Z_2)
+    Rule: Superposition
+    Parents: [14, 2]
+
+[469] mult(mult(X_1,mult(Y_1,inv(e))),mult(Y_2_2_2,Z_2_2_2)) = mult(mult(mult(X_1,Y_1),mult(e,Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [2, 14]
+
+[470] mult(mult(X_1_2_2,inv(e)),mult(X_1,mult(Y_1,Z_2_2_2))) = mult(mult(X_1_2_2,mult(e,mult(X_1,Y_1))),Z_2_2_2)
+    Rule: Superposition
+    Parents: [2, 14]
+
+[471] mult(mult(X_1_2_2,mult(e,e)),mult(e,inv(e))) = mult(mult(X_1_2_2,inv(e)),mult(e,e))
+    Rule: Superposition
+    Parents: [83, 14]
+
+[472] mult(mult(inv(e),mult(e,Y_2_2_2)),Z_2_2_2) = mult(e,mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [230, 14]
+
+[473] mult(mult(X_1_2_2,mult(e,inv(e))),inv(e)) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [230, 14]
+
+[474] mult(mult(X_1_2_2,inv(e)),mult(e,inv(e))) = mult(mult(X_1_2_2,mult(e,inv(e))),e)
+    Rule: Superposition
+    Parents: [44, 14]
+
+[475] mult(mult(inv(inv(e)),mult(e,Y_2_2_2)),Z_2_2_2) = mult(mult(e,inv(e)),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [35, 14]
+
+[476] mult(mult(X_1_2_2,mult(e,inv(inv(e)))),Z_2_2_2) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_2))
+    Rule: Superposition
+    Parents: [35, 14]
+
+[477] mult(mult(inv(inv(e)),mult(e,Y_2_2_2)),Z_2_2_2) = mult(mult(e,e),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [71, 14]
+
+[478] mult(mult(X_1_2_2,mult(e,inv(inv(e)))),inv(e)) = mult(mult(X_1_2_2,inv(e)),mult(e,e))
+    Rule: Superposition
+    Parents: [71, 14]
+
+[479] mult(mult(e,mult(e,e)),mult(Y_2_2_2,Z_2_2_2)) = mult(mult(inv(e),mult(e,Y_2_2_2)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [151, 14]
+
+[480] mult(mult(X_1_2_2,inv(e)),mult(e,mult(e,e))) = mult(mult(X_1_2_2,mult(e,inv(e))),inv(e))
+    Rule: Superposition
+    Parents: [151, 14]
+
+[481] mult(mult(X_1_2_2,inv(e)),mult(Z_2_2_2,e)) = mult(mult(X_1_2_2,mult(e,e)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [412, 14]
+
+[482] mult(mult(X_1_2_2,mult(e,e)),mult(Z_2_2_2_1,e)) = mult(mult(X_1_2_2,inv(e)),mult(e,Z_2_2_2_1))
+    Rule: Superposition
+    Parents: [201, 14]
+
+[483] mult(mult(e,mult(e,Y_2_2_2)),Z_2_2_2) = mult(inv(e),mult(Y_2_2_2,Z_2_2_2))
+    Rule: Superposition
+    Parents: [0, 14]
+
+[484] mult(mult(X_1_2_2,mult(e,e)),Z_2_2_2) = mult(mult(X_1_2_2,inv(e)),Z_2_2_2)
+    Rule: Superposition
+    Parents: [0, 14]
+
+[485] mult(mult(X_1_2_2,mult(e,e)),mult(e,Z_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(inv(e),Z_2_1))
+    Rule: Superposition
+    Parents: [74, 14]
+
+[486] mult(mult(X_1_2_2,mult(e,e)),inv(inv(e))) = mult(mult(X_1_2_2,inv(e)),e)
+    Rule: Superposition
+    Parents: [222, 14]
+
+[487] mult(mult(X_1_2_2,mult(e,mult(X_1_2_1,inv(e)))),mult(Y_2_2_1,Z_2_2_1)) = mult(mult(X_1_2_2,inv(e)),mult(mult(X_1_2_1,mult(e,Y_2_2_1)),Z_2_2_1))
+    Rule: Superposition
+    Parents: [14, 14]
+
+[488] mult(mult(e,mult(Y_1_2_2,Y_2_2_2)),e) = mult(mult(inv(e),Y_1_2_2),Y_2_2_2)
+    Rule: Superposition
+    Parents: [425, 13]
+
+[489] mult(inv(X_1_2),mult(X_1_2,mult(e,Z_2_2_2))) = mult(e,Z_2_2_2)
+    Rule: Superposition
+    Parents: [425, 7]
+
+[490] mult(inv(mult(X_1_2,Y_1_2)),mult(X_1_2,Y_1_2)) = mult(e,e)
+    Rule: Superposition
+    Parents: [425, 7]
+
+[491] mult(inv(Y_2_2),Y_2_2) = mult(e,e)
+    Rule: Superposition
+    Parents: [425, 4]
+
+[492] mult(e,mult(Y_2_1_2_2,e)) = inv(inv(Y_2_1_2_2))
+    Rule: Superposition
+    Parents: [425, 182]
+
+[493] mult(mult(e,Y_2_2),e) = mult(inv(e),Y_2_2)
+    Rule: Superposition
+    Parents: [425, 12]
+
+[494] mult(e,inv(e)) = inv(inv(e))
+    Rule: Superposition
+    Parents: [425, 42]
+
+[495] mult(mult(X_1_2_2,mult(e,Y_2_2_2)),e) = mult(mult(X_1_2_2,inv(e)),Y_2_2_2)
+    Rule: Superposition
+    Parents: [425, 14]
+
+[496] mult(mult(X_1_2,Y_1_2),mult(Y_2_2,e)) = mult(X_1_2,mult(Y_1_2,Y_2_2))
+    Rule: Superposition
+    Parents: [425, 5]
+
+[497] mult(mult(X_1_2,Y_1_2),mult(e,Z_2_2)) = mult(mult(X_1_2,Y_1_2),Z_2_2)
+    Rule: Superposition
+    Parents: [425, 5]
+
+[498] mult(e,Z_2_2_2) = inv(inv(Z_2_2_2))
+    Rule: Superposition
+    Parents: [425, 9]
+
+[499] mult(inv(Y_2_1_2),mult(Y_2_1_2,Z_2_1_2)) = mult(mult(e,Z_2_1_2),e)
+    Rule: Superposition
+    Parents: [425, 6]
+
+[500] mult(inv(Y_2_1_2),mult(Y_2_1_2,Z_2_2)) = mult(mult(e,e),Z_2_2)
+    Rule: Superposition
+    Parents: [425, 6]
+
+[501] mult(X_2,mult(Y_2,e)) = mult(X_2,Y_2)
+    Rule: Superposition
+    Parents: [425, 2]
+
+[502] mult(X_2,mult(e,Z_2)) = mult(X_2,Z_2)
+    Rule: Superposition
+    Parents: [425, 2]
+
+[503] ⊥
+    Rule: Resolution
+    Parents: [425, 3]
+
+

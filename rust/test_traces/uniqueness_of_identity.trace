@@ -1,0 +1,23 @@
+=== uniqueness_of_identity ===
+Initial clauses:
+[0] mult(e,X) = X
+[1] mult(X,e) = X
+[2] mult(inv(X),X) = e
+[3] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
+[4] mult(e1,X) = X
+[5] ~e1 = e
+
+✓ PROOF FOUND in 0.001s
+Generated 2 clauses
+Empty clause at index: 7
+
+=== All Proof Steps ===
+[6] e1 = e
+    Rule: Superposition
+    Parents: [4, 1]
+
+[7] ⊥
+    Rule: Resolution
+    Parents: [6, 5]
+
+
