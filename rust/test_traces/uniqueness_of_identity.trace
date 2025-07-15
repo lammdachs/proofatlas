@@ -7,16 +7,24 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.001s
-Generated 2 clauses
-Empty clause at index: 7
+✓ PROOF FOUND in 0.002s
+Generated 4 clauses
+Empty clause at index: 9
 
 === All Proof Steps ===
 [6] e1 = e
     Rule: Superposition
     Parents: [4, 1]
 
-[7] ⊥
+[7] X = X
+    Rule: Demodulation
+    Parents: [6, 4]
+
+[8] ~e = e
+    Rule: Demodulation
+    Parents: [6, 5]
+
+[9] ⊥
     Rule: Resolution
     Parents: [6, 5]
 

@@ -112,6 +112,7 @@ fn main() {
                             proofatlas::InferenceRule::Superposition => "Superposition",
                             proofatlas::InferenceRule::EqualityResolution => "Equality Resolution",
                             proofatlas::InferenceRule::EqualityFactoring => "Equality Factoring",
+                            proofatlas::InferenceRule::Demodulation => "Demodulation",
                         },
                         step.inference.premises,
                         step.inference.conclusion

@@ -20,6 +20,7 @@ pub enum InferenceRule {
     Superposition,
     EqualityResolution,
     EqualityFactoring,
+    Demodulation,
 }
 
 /// Rename all variables in a clause to avoid conflicts

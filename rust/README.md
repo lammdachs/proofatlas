@@ -5,6 +5,7 @@ A high-performance automated theorem prover using the superposition calculus.
 ## Features
 
 - **Superposition calculus**: Complete implementation including resolution, factoring, and paramodulation
+- **Demodulation**: Both forward and backward demodulation for efficient equational reasoning
 - **Standard data structures**: Clean type-safe representation using Rust structs and enums
 - **TPTP parser**: Supports CNF format input files with automatic equality orientation
 - **Given-clause algorithm**: Efficient saturation-based proof search

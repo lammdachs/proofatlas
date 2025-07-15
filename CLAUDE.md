@@ -232,11 +232,17 @@ proofatlas/
 
 6. **Proof Tracking**: Each inference stores premises, rule used, and the derived clause.
 
-7. **Simplifying Inferences**: 
-   - Demodulation and subsumption resolution are applied before generating inferences
-   - When a simplifying inference is applicable, the original clause is marked as inactive and not used for generating inferences
-   - Demodulation uses one-way matching (variables in the rewrite rule can be substituted, but not in the target term)
-   - The ordering constraint lσ ≻ rσ is enforced, but weight decrease is not required
+7. **Demodulation**: 
+   - Uses one-way matching (only variables in the rewrite rule can be substituted)
+   - The ordering constraint lσ ≻ rσ is strictly enforced
+   - Applied in two contexts:
+     - **Forward demodulation**: All new clauses are demodulated before being added to the clause set
+     - **Backward demodulation**: When a unit equality is selected as given clause, all existing clauses are demodulated
+   - This aggressive demodulation strategy is particularly effective for equational reasoning
+
+8. **Simplifying Inferences**: 
+   - Subsumption resolution is applied as a simplifying inference
+   - When applicable, the original clause is marked as inactive
 
 ### Debugging the Prover
 
@@ -268,7 +274,9 @@ When implementing new features:
 
 3. **Proof Reporting**: Fixed clause index display to show actual indices instead of array positions.
 
-4. **Demodulation Ordering**: Removed overly restrictive weight check that prevented valid demodulations. Now correctly applies demodulation whenever the ordering constraint lσ ≻ rσ is satisfied, even if clause weight doesn't decrease.
+4. **Demodulation Matching**: Fixed critical bug where unification was used instead of one-way matching. This caused unsound demodulations like reducing `mult(inv(Y),mult(Y,Z))` to `e` using pattern `mult(inv(X),X) = e`.
+
+5. **Backward Demodulation**: Implemented backward demodulation when unit equalities are selected as given clauses. This dramatically improves performance on equational problems (e.g., uniqueness_of_inverse test went from timeout to 0.013s).
 
 ### Important: Analysis Guidelines
 

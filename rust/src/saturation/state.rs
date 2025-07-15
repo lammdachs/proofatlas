@@ -1,7 +1,7 @@
 //! Main saturation state and algorithm
 
 use crate::core::{Clause, Proof, ProofStep};
-use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, InferenceResult};
+use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, demodulation, InferenceResult};
 use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, SelectAll, SelectMaxWeight};
 use crate::parser::orient_equalities::orient_clause_equalities;
 use super::subsumption::SubsumptionChecker;
@@ -169,6 +169,13 @@ impl SaturationState {
             // Add given clause to processed
             self.processed.insert(given_idx);
             
+            // If given clause is a unit equality, perform backward demodulation
+            if given_clause.literals.len() == 1 && 
+               given_clause.literals[0].polarity && 
+               given_clause.literals[0].atom.is_equality() {
+                self.backward_demodulate_with_unit(given_idx);
+            }
+            
             // Process new inferences - deduplicate within the batch first
             let mut seen_in_batch = HashSet::new();
             let mut unique_inferences = Vec::new();
@@ -263,32 +270,125 @@ impl SaturationState {
         let mut oriented_clause = inference.conclusion.clone();
         orient_clause_equalities(&mut oriented_clause);
         
+        // Apply demodulation with all unit equalities
+        let demodulated_clause = self.demodulate_clause(oriented_clause.clone(), &inference);
+        
         // Check subsumption for redundancy elimination
-        if self.subsumption_checker.is_subsumed(&oriented_clause) {
+        if self.subsumption_checker.is_subsumed(&demodulated_clause) {
             return None;
         }
         
         // Add the clause
         let new_idx = self.clauses.len();
-        let mut clause_with_id = oriented_clause.clone();
+        let mut clause_with_id = demodulated_clause.clone();
         clause_with_id.id = Some(new_idx);
         
         // Add to subsumption checker
-        let idx_from_subsumption = self.subsumption_checker.add_clause(oriented_clause);
+        let idx_from_subsumption = self.subsumption_checker.add_clause(demodulated_clause.clone());
         assert_eq!(idx_from_subsumption, new_idx);
         
         self.clauses.push(clause_with_id.clone());
         self.unprocessed.push_back(new_idx);
         
-        // Record proof step with oriented clause
-        let mut oriented_inference = inference;
-        oriented_inference.conclusion = clause_with_id;
+        // Record proof step with demodulated clause
+        let mut final_inference = inference;
+        final_inference.conclusion = clause_with_id;
         self.proof_steps.push(ProofStep {
-            inference: oriented_inference,
+            inference: final_inference,
             clause_idx: new_idx,
         });
         
         Some(new_idx)
+    }
+    
+    /// Apply demodulation to a clause using all available unit equalities
+    fn demodulate_clause(&self, clause: Clause, _original_inference: &InferenceResult) -> Clause {
+        let mut changed = true;
+        let mut current_clause = clause;
+        
+        // Keep applying demodulation until no more changes
+        while changed {
+            changed = false;
+            
+            // Try demodulation with each processed unit equality
+            for &unit_idx in &self.processed {
+                let unit_clause = &self.clauses[unit_idx];
+                
+                // Check if it's a unit equality
+                if unit_clause.literals.len() == 1 && 
+                   unit_clause.literals[0].polarity && 
+                   unit_clause.literals[0].atom.is_equality() {
+                    
+                    // Try to demodulate
+                    let results = demodulation::demodulate(unit_clause, &current_clause, unit_idx, 0);
+                    if !results.is_empty() {
+                        // Apply the first demodulation (there should be at most one)
+                        current_clause = results[0].conclusion.clone();
+                        changed = true;
+                        break; // Start over with the new clause
+                    }
+                }
+            }
+        }
+        
+        current_clause
+    }
+    
+    /// Perform backward demodulation using a newly processed unit equality
+    fn backward_demodulate_with_unit(&mut self, unit_idx: usize) {
+        let unit_clause = &self.clauses[unit_idx];
+        
+        // Collect clauses to demodulate (avoid modifying while iterating)
+        let mut clauses_to_demodulate = Vec::new();
+        
+        // Check all processed clauses (except the unit itself)
+        for &idx in &self.processed {
+            if idx != unit_idx {
+                clauses_to_demodulate.push(idx);
+            }
+        }
+        
+        // Check all unprocessed clauses
+        for &idx in &self.unprocessed {
+            if idx != unit_idx {
+                clauses_to_demodulate.push(idx);
+            }
+        }
+        
+        // Track which clauses were replaced
+        let mut replaced_clauses = Vec::new();
+        
+        // Try to demodulate each clause
+        for clause_idx in clauses_to_demodulate {
+            let original_clause = self.clauses[clause_idx].clone();
+            
+            // Try demodulation
+            let results = demodulation::demodulate(unit_clause, &original_clause, unit_idx, clause_idx);
+            
+            if !results.is_empty() {
+                // Clause was simplified - mark it for replacement
+                let simplified_clause = results[0].conclusion.clone();
+                
+                // Only replace if actually different
+                if simplified_clause != original_clause {
+                    replaced_clauses.push((clause_idx, simplified_clause, results[0].clone()));
+                }
+            }
+        }
+        
+        // Now process replacements
+        for (old_idx, _new_clause, inference_result) in replaced_clauses {
+            // Remove old clause from subsumption checker
+            // Note: We'll add the new clause through the normal add_clause process
+            
+            // Mark old clause as inactive by removing from processed/unprocessed
+            self.processed.remove(&old_idx);
+            self.unprocessed.retain(|&idx| idx != old_idx);
+            
+            // Add the simplified clause as a new clause
+            // This will apply orientation, subsumption checking, etc.
+            self.add_clause(inference_result);
+        }
     }
 }
 

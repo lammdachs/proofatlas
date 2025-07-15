@@ -5,13 +5,15 @@
 ### Demodulation
 ```
 l ≈ r   P[l'] ∨ C
--------------------  where lσ = l', lσ ≻ rσ, l ≈ r is a unit equality, removing P[l'] ∨ C
+-------------------  where σ = match(l, l'), lσ ≻ rσ, l ≈ r is a unit equality
    P[rσ] ∨ C
 ```
 - Applied to unit equalities (clauses with exactly one positive equality literal)
-- Uses one-way matching: variables in l can be substituted, but not in P[l']
-- The ordering constraint lσ ≻ rσ ensures we move toward a normal form
-- Immediately replaces the target clause when applied
+- Uses one-way matching: only variables in l can be substituted (not in l')
+- The ordering constraint lσ ≻ rσ ensures termination and confluence
+- Applied in two contexts:
+  1. **Forward demodulation**: When a new clause is generated, it's immediately demodulated by all existing unit equalities before being added to the clause set
+  2. **Backward demodulation**: When a unit equality is selected as the given clause, all existing clauses are demodulated by it
 
 ### Subsumption Resolution 1
 ```
