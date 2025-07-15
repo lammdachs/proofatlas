@@ -15,20 +15,6 @@ l ≈ r   P[l'] ∨ C
   1. **Forward demodulation**: When a new clause is generated, it's immediately demodulated by all existing unit equalities before being added to the clause set
   2. **Backward demodulation**: When a unit equality is selected as the given clause, all existing clauses are demodulated by it
 
-### Subsumption Resolution 1
-```
-A ∨ B   ¬C ∨ D
----------------  where A ∨ B subsumes C ∨ D, removing ¬C ∨ D
-       D
-```
-
-### Subsumption Resolution 2
-```
-¬A ∨ B   C ∨ D
----------------  where A ∨ B subsumes C ∨ D, removing C ∨ D
-       D
-```
-
 ## Generating Inferences
 
 ### Resolution

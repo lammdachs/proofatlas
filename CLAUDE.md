@@ -118,7 +118,6 @@ The core theorem prover is implemented in Rust for performance:
 - **equality_resolution.rs**: Equality resolution (reflexivity)
 - **equality_factoring.rs**: Equality factoring
 - **demodulation.rs**: Demodulation (simplifying inference)
-- **subsumption_resolution.rs**: Subsumption resolution (simplifying inference)
 - **common.rs**: Shared utilities for inference rules
 
 #### Saturation Module (`rust/src/saturation/`)
@@ -240,9 +239,6 @@ proofatlas/
      - **Backward demodulation**: When a unit equality is selected as given clause, all existing clauses are demodulated
    - This aggressive demodulation strategy is particularly effective for equational reasoning
 
-8. **Simplifying Inferences**: 
-   - Subsumption resolution is applied as a simplifying inference
-   - When applicable, the original clause is marked as inactive
 
 ### Debugging the Prover
 
