@@ -32,14 +32,45 @@ pub fn parse_tptp_file(file_path: &str, include_dirs: &[&str]) -> Result<CNFForm
     // Convert all formulas to CNF
     let mut all_clauses = result.cnf_formulas;
     
-    // Convert FOF formulas to CNF
+    // Separate conjectures from other formulas
+    let mut conjectures = Vec::new();
+    let mut other_formulas = Vec::new();
+    
     for named_fof in result.fof_formulas {
-        // Negate conjectures
-        let formula = match named_fof.role {
-            FormulaRole::Conjecture => FOFFormula::Not(Box::new(named_fof.formula)),
-            _ => named_fof.formula,
-        };
+        match named_fof.role {
+            FormulaRole::Conjecture => conjectures.push(named_fof.formula),
+            _ => other_formulas.push(named_fof.formula),
+        }
+    }
+    
+    // Convert non-conjecture formulas to CNF
+    for formula in other_formulas {
         let cnf = fof_to_cnf(formula);
+        all_clauses.extend(cnf.clauses);
+    }
+    
+    // Handle conjectures: form the negation of their conjunction
+    if !conjectures.is_empty() {
+        let conjecture_formula = if conjectures.len() == 1 {
+            // Single conjecture: just negate it
+            FOFFormula::Not(Box::new(conjectures.into_iter().next().unwrap()))
+        } else {
+            // Multiple conjectures: negate their conjunction
+            // ¬(C₁ ∧ C₂ ∧ ... ∧ Cₙ) = ¬C₁ ∨ ¬C₂ ∨ ... ∨ ¬Cₙ
+            let negated_conjectures: Vec<FOFFormula> = conjectures.into_iter()
+                .map(|c| FOFFormula::Not(Box::new(c)))
+                .collect();
+            
+            // Build the disjunction
+            let mut disjunction = negated_conjectures.into_iter().rev();
+            let mut result = disjunction.next().unwrap();
+            for negated in disjunction {
+                result = FOFFormula::Or(Box::new(negated), Box::new(result));
+            }
+            result
+        };
+        
+        let cnf = fof_to_cnf(conjecture_formula);
         all_clauses.extend(cnf.clauses);
     }
     
@@ -62,14 +93,45 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
     // Convert all formulas to CNF
     let mut all_clauses = result.cnf_formulas;
     
-    // Convert FOF formulas to CNF
+    // Separate conjectures from other formulas
+    let mut conjectures = Vec::new();
+    let mut other_formulas = Vec::new();
+    
     for named_fof in result.fof_formulas {
-        // Negate conjectures
-        let formula = match named_fof.role {
-            FormulaRole::Conjecture => FOFFormula::Not(Box::new(named_fof.formula)),
-            _ => named_fof.formula,
-        };
+        match named_fof.role {
+            FormulaRole::Conjecture => conjectures.push(named_fof.formula),
+            _ => other_formulas.push(named_fof.formula),
+        }
+    }
+    
+    // Convert non-conjecture formulas to CNF
+    for formula in other_formulas {
         let cnf = fof_to_cnf(formula);
+        all_clauses.extend(cnf.clauses);
+    }
+    
+    // Handle conjectures: form the negation of their conjunction
+    if !conjectures.is_empty() {
+        let conjecture_formula = if conjectures.len() == 1 {
+            // Single conjecture: just negate it
+            FOFFormula::Not(Box::new(conjectures.into_iter().next().unwrap()))
+        } else {
+            // Multiple conjectures: negate their conjunction
+            // ¬(C₁ ∧ C₂ ∧ ... ∧ Cₙ) = ¬C₁ ∨ ¬C₂ ∨ ... ∨ ¬Cₙ
+            let negated_conjectures: Vec<FOFFormula> = conjectures.into_iter()
+                .map(|c| FOFFormula::Not(Box::new(c)))
+                .collect();
+            
+            // Build the disjunction
+            let mut disjunction = negated_conjectures.into_iter().rev();
+            let mut result = disjunction.next().unwrap();
+            for negated in disjunction {
+                result = FOFFormula::Or(Box::new(negated), Box::new(result));
+            }
+            result
+        };
+        
+        let cnf = fof_to_cnf(conjecture_formula);
         all_clauses.extend(cnf.clauses);
     }
     
@@ -225,6 +287,10 @@ fn parse_cnf_line(input: &str) -> IResult<&str, Clause> {
     let (input, _) = multispace0(input)?;
     let (input, clause) = parse_clause(input)?;
     let (input, _) = multispace0(input)?;
+    
+    // Parse optional annotations
+    let (input, _annotations) = parse_annotations(input)?;
+    
     let (input, _) = char(')')(input)?;
     let (input, _) = char('.')(input)?;
     
@@ -242,6 +308,10 @@ fn parse_fof_line(input: &str) -> IResult<&str, NamedFormula> {
     let (input, _) = char(',')(input)?;
     let (input, _) = multispace0(input)?;
     let (input, formula) = parse_fof_formula(input)?;
+    
+    // Parse optional annotations
+    let (input, _annotations) = parse_annotations(input)?;
+    
     let (input, _) = char(')')(input)?;
     let (input, _) = char('.')(input)?;
     
@@ -262,15 +332,32 @@ fn parse_fof_binary(input: &str) -> IResult<&str, FOFFormula> {
     let (input, left) = parse_fof_unary(input)?;
     let (input, _) = multispace0(input)?;
     
-    // Try to parse binary operator
+    // Try to parse binary operator (order matters for precedence)
     if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("<=>")(input) {
         let (input, _) = multispace0(input)?;
         let (input, right) = parse_fof_binary(input)?;
         Ok((input, FOFFormula::Iff(Box::new(left), Box::new(right))))
+    } else if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("<~>")(input) {
+        let (input, _) = multispace0(input)?;
+        let (input, right) = parse_fof_binary(input)?;
+        Ok((input, FOFFormula::Xor(Box::new(left), Box::new(right))))
     } else if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("=>")(input) {
         let (input, _) = multispace0(input)?;
         let (input, right) = parse_fof_binary(input)?;
         Ok((input, FOFFormula::Implies(Box::new(left), Box::new(right))))
+    } else if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("<=")(input) {
+        let (input, _) = multispace0(input)?;
+        let (input, right) = parse_fof_binary(input)?;
+        // Reverse implication: P <= Q is Q => P
+        Ok((input, FOFFormula::Implies(Box::new(right), Box::new(left))))
+    } else if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("~|")(input) {
+        let (input, _) = multispace0(input)?;
+        let (input, right) = parse_fof_binary(input)?;
+        Ok((input, FOFFormula::Nand(Box::new(left), Box::new(right))))
+    } else if let Ok((input, _)) = tag::<_, _, nom::error::Error<_>>("~&")(input) {
+        let (input, _) = multispace0(input)?;
+        let (input, right) = parse_fof_binary(input)?;
+        Ok((input, FOFFormula::Nor(Box::new(left), Box::new(right))))
     } else if let Ok((input, _)) = char::<_, nom::error::Error<_>>('|')(input) {
         let (input, _) = multispace0(input)?;
         let (input, right) = parse_fof_binary(input)?;
@@ -289,9 +376,11 @@ fn parse_fof_unary(input: &str) -> IResult<&str, FOFFormula> {
     alt((
         // Negation
         map(
-            preceded(char('~'), parse_fof_unary),
+            preceded(tuple((char('~'), multispace0)), parse_fof_unary),
             |f| FOFFormula::Not(Box::new(f))
         ),
+        // Infix inequality (try before atomic to catch != operator)
+        parse_fof_infix_unary,
         // Quantified formula
         parse_fof_quantified,
         // Parenthesized formula
@@ -303,6 +392,27 @@ fn parse_fof_unary(input: &str) -> IResult<&str, FOFFormula> {
         // Atomic formula
         map(parse_atom, FOFFormula::Atom),
     ))(input)
+}
+
+/// Parse FOF infix unary (inequality)
+fn parse_fof_infix_unary(input: &str) -> IResult<&str, FOFFormula> {
+    let (input, left) = parse_term(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, _) = tag("!=")(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, right) = parse_term(input)?;
+    
+    // Create negated equality
+    let eq_pred = PredicateSymbol {
+        name: "=".to_string(),
+        arity: 2,
+    };
+    let eq_atom = Atom {
+        predicate: eq_pred,
+        args: vec![left, right],
+    };
+    
+    Ok((input, FOFFormula::Not(Box::new(FOFFormula::Atom(eq_atom)))))
 }
 
 /// Parse quantified formula
@@ -351,17 +461,80 @@ fn parse_formula_role(input: &str) -> IResult<&str, FormulaRole> {
         value(FormulaRole::Assumption, tag("assumption")),
         value(FormulaRole::Lemma, tag("lemma")),
         value(FormulaRole::Theorem, tag("theorem")),
+        value(FormulaRole::Corollary, tag("corollary")),
         value(FormulaRole::Conjecture, tag("conjecture")),
         value(FormulaRole::NegatedConjecture, tag("negated_conjecture")),
-        value(FormulaRole::Plain, tag("plain")),
-        value(FormulaRole::Type, tag("type")),
-        value(FormulaRole::Unknown, tag("unknown")),
     ))(input)
 }
 
-/// Parse a name (alphanumeric + underscore)
+/// Parse a name (atomic_word or integer)
+/// <name> ::= <atomic_word> | <integer>
+/// <atomic_word> ::= <lower_word> | <single_quoted>
 fn parse_name(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)
+    alt((
+        parse_single_quoted,
+        parse_integer_name,
+        parse_lower_word,
+    ))(input)
+}
+
+/// Parse a single-quoted name
+fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
+    if !input.starts_with('\'') {
+        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+    }
+    
+    let mut pos = 1;
+    let chars: Vec<char> = input.chars().collect();
+    
+    while pos < chars.len() {
+        if chars[pos] == '\'' {
+            // Check if it's an escaped quote
+            if pos + 1 < chars.len() && chars[pos + 1] == '\'' {
+                pos += 2; // Skip escaped quote
+            } else {
+                // Found closing quote
+                return Ok((&input[pos + 1..], &input[0..pos + 1]));
+            }
+        } else {
+            pos += 1;
+        }
+    }
+    
+    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)))
+}
+
+/// Parse an integer as a name
+fn parse_integer_name(input: &str) -> IResult<&str, &str> {
+    let (remaining, digits) = take_while1(|c: char| c.is_numeric())(input)?;
+    
+    // Make sure it's not followed by more identifier characters
+    if let Some(c) = remaining.chars().next() {
+        if c.is_alphabetic() || c == '_' {
+            return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)));
+        }
+    }
+    
+    Ok((remaining, digits))
+}
+
+/// Parse a lower word (starts with lowercase)
+fn parse_lower_word(input: &str) -> IResult<&str, &str> {
+    let mut chars = input.chars();
+    if let Some(first) = chars.next() {
+        if first.is_lowercase() {
+            let mut end = first.len_utf8();
+            while let Some(ch) = chars.next() {
+                if ch.is_alphanumeric() || ch == '_' {
+                    end += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            return Ok((&input[end..], &input[..end]));
+        }
+    }
+    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Alpha)))
 }
 
 /// Parse a role (for backward compatibility)
@@ -373,32 +546,37 @@ fn parse_role(input: &str) -> IResult<&str, &str> {
         tag("assumption"),
         tag("lemma"),
         tag("theorem"),
+        tag("corollary"),
         tag("conjecture"),
         tag("negated_conjecture"),
-        tag("plain"),
-        tag("type"),
-        tag("unknown"),
     ))(input)
 }
 
 /// Parse a clause (disjunction of literals)
 fn parse_clause(input: &str) -> IResult<&str, Clause> {
+    parse_cnf_formula(input)
+}
+
+/// Parse CNF formula (supports arbitrary parenthesization)
+fn parse_cnf_formula(input: &str) -> IResult<&str, Clause> {
     alt((
-        // Parenthesized clause
+        // Parenthesized formula - recursively parse what's inside
         delimited(
             tuple((char('('), multispace0)),
-            separated_list1(
-                tuple((multispace0, char('|'), multispace0)),
-                parse_literal
-            ),
+            parse_cnf_formula,
             tuple((multispace0, char(')')))
         ),
-        // Non-parenthesized clause
-        separated_list1(
-            tuple((multispace0, char('|'), multispace0)),
-            parse_literal
-        ),
+        // Disjunction of literals
+        parse_cnf_disjunction,
     ))(input)
+}
+
+/// Parse CNF disjunction
+fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
+    separated_list1(
+        tuple((multispace0, char('|'), multispace0)),
+        parse_literal
+    )(input)
         .map(|(remaining, literals)| (remaining, Clause::new(literals)))
 }
 
@@ -542,9 +720,13 @@ fn parse_constant_term(input: &str) -> IResult<&str, Term> {
     })))
 }
 
-/// Parse an identifier (letters, digits, underscore)
+/// Parse an identifier (atomic_word)
+/// <atomic_word> ::= <lower_word> | <single_quoted>
 fn parse_identifier(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| c.is_alphanumeric() || c == '_')(input)
+    alt((
+        parse_single_quoted,
+        take_while1(|c: char| c.is_alphanumeric() || c == '_')
+    ))(input)
 }
 
 /// Parse a lowercase identifier
@@ -571,6 +753,134 @@ fn parse_uppercase_ident(input: &str) -> IResult<&str, &str> {
         }
     }
     Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::TakeWhile1)))
+}
+
+/// Parse annotations (source and optional info)
+/// <annotations> ::= ,<source><optional_info> | <nothing>
+fn parse_annotations(input: &str) -> IResult<&str, ()> {
+    // Try to parse comma followed by source
+    if let Ok((input, _)) = char::<_, nom::error::Error<_>>(',')(input) {
+        let (input, _) = multispace0(input)?;
+        
+        // Source can be a term or a list
+        let (input, _) = alt((
+            map(parse_general_term, |_| ()),
+            map(parse_general_list, |_| ())
+        ))(input)?;
+        
+        // Optionally parse additional info (comma followed by another term or list)
+        let (input, _) = parse_optional_info(input)?;
+        
+        Ok((input, ()))
+    } else {
+        // No annotations
+        Ok((input, ()))
+    }
+}
+
+/// Parse optional info after source
+fn parse_optional_info(input: &str) -> IResult<&str, ()> {
+    // Try to parse comma followed by more info
+    if let Ok((input, _)) = tuple::<_, _, nom::error::Error<_>, _>((multispace0, char(','), multispace0))(input) {
+        // Could be a list or another term
+        let (input, _) = alt((
+            map(parse_general_list, |_| ()),
+            map(parse_general_term, |_| ())
+        ))(input)?;
+        Ok((input, ()))
+    } else {
+        Ok((input, ()))
+    }
+}
+
+/// Parse a general term (used in annotations)
+fn parse_general_term(input: &str) -> IResult<&str, ()> {
+    alt((
+        // Function-like term: name(args)
+        map(tuple((
+            parse_general_data,
+            char('('),
+            parse_general_args,
+            char(')')
+        )), |_| ()),
+        // Simple term
+        map(parse_general_data, |_| ())
+    ))(input)
+}
+
+/// Parse general data (identifier or quoted string)
+fn parse_general_data(input: &str) -> IResult<&str, &str> {
+    alt((
+        parse_single_quoted,
+        parse_identifier,
+    ))(input)
+}
+
+/// Parse general arguments
+fn parse_general_args(input: &str) -> IResult<&str, ()> {
+    // Skip arbitrary argument list
+    let mut depth = 0;
+    let mut pos = 0;
+    let chars: Vec<char> = input.chars().collect();
+    
+    while pos < chars.len() {
+        match chars[pos] {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            '\'' => {
+                // Skip quoted string
+                pos += 1;
+                while pos < chars.len() && chars[pos] != '\'' {
+                    if pos + 1 < chars.len() && chars[pos] == '\'' && chars[pos + 1] == '\'' {
+                        pos += 2; // Skip escaped quote
+                    } else {
+                        pos += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        pos += 1;
+    }
+    
+    Ok((&input[pos..], ()))
+}
+
+/// Parse a general list [item1, item2, ...]
+fn parse_general_list(input: &str) -> IResult<&str, ()> {
+    let (input, _) = char('[')(input)?;
+    
+    // Skip list contents
+    let mut depth = 1;
+    let mut pos = 0;
+    let chars: Vec<char> = input.chars().collect();
+    
+    while pos < chars.len() && depth > 0 {
+        match chars[pos] {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            '\'' => {
+                // Skip quoted string
+                pos += 1;
+                while pos < chars.len() && chars[pos] != '\'' {
+                    if pos + 1 < chars.len() && chars[pos] == '\'' && chars[pos + 1] == '\'' {
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        pos += 1;
+    }
+    
+    Ok((&input[pos..], ()))
 }
 
 #[cfg(test)]

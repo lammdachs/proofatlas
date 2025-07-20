@@ -28,6 +28,12 @@ pub enum FOFFormula {
     Implies(Box<FOFFormula>, Box<FOFFormula>),
     /// Biconditional
     Iff(Box<FOFFormula>, Box<FOFFormula>),
+    /// XOR (exclusive or)
+    Xor(Box<FOFFormula>, Box<FOFFormula>),
+    /// NAND (not and)
+    Nand(Box<FOFFormula>, Box<FOFFormula>),
+    /// NOR (not or)
+    Nor(Box<FOFFormula>, Box<FOFFormula>),
     /// Quantified formula
     Quantified(Quantifier, Variable, Box<FOFFormula>),
 }
@@ -43,7 +49,8 @@ impl FOFFormula {
             }
             FOFFormula::Not(f) => f.free_variables(),
             FOFFormula::And(f1, f2) | FOFFormula::Or(f1, f2) | 
-            FOFFormula::Implies(f1, f2) | FOFFormula::Iff(f1, f2) => {
+            FOFFormula::Implies(f1, f2) | FOFFormula::Iff(f1, f2) |
+            FOFFormula::Xor(f1, f2) | FOFFormula::Nand(f1, f2) | FOFFormula::Nor(f1, f2) => {
                 let mut vars = f1.free_variables();
                 vars.extend(f2.free_variables());
                 vars
@@ -154,6 +161,70 @@ impl FOFFormula {
                 )
             }
             
+            // XOR
+            (FOFFormula::Xor(f1, f2), false) => {
+                // A <~> B = (A & ~B) | (~A & B)
+                let f1_clone = f1.clone();
+                let f2_clone = f2.clone();
+                FOFFormula::Or(
+                    Box::new(FOFFormula::And(
+                        Box::new(f1.to_nnf_impl(false)),
+                        Box::new(f2.to_nnf_impl(true))
+                    )),
+                    Box::new(FOFFormula::And(
+                        Box::new(f1_clone.to_nnf_impl(true)),
+                        Box::new(f2_clone.to_nnf_impl(false))
+                    ))
+                )
+            }
+            (FOFFormula::Xor(f1, f2), true) => {
+                // ~(A <~> B) = (A & B) | (~A & ~B)
+                let f1_clone = f1.clone();
+                let f2_clone = f2.clone();
+                FOFFormula::Or(
+                    Box::new(FOFFormula::And(
+                        Box::new(f1.to_nnf_impl(false)),
+                        Box::new(f2.to_nnf_impl(false))
+                    )),
+                    Box::new(FOFFormula::And(
+                        Box::new(f1_clone.to_nnf_impl(true)),
+                        Box::new(f2_clone.to_nnf_impl(true))
+                    ))
+                )
+            }
+            
+            // NAND
+            (FOFFormula::Nand(f1, f2), false) => {
+                // A ~& B = ~(A & B) = ~A | ~B
+                FOFFormula::Or(
+                    Box::new(f1.to_nnf_impl(true)),
+                    Box::new(f2.to_nnf_impl(true))
+                )
+            }
+            (FOFFormula::Nand(f1, f2), true) => {
+                // ~(A ~& B) = A & B
+                FOFFormula::And(
+                    Box::new(f1.to_nnf_impl(false)),
+                    Box::new(f2.to_nnf_impl(false))
+                )
+            }
+            
+            // NOR
+            (FOFFormula::Nor(f1, f2), false) => {
+                // A ~| B = ~(A | B) = ~A & ~B
+                FOFFormula::And(
+                    Box::new(f1.to_nnf_impl(true)),
+                    Box::new(f2.to_nnf_impl(true))
+                )
+            }
+            (FOFFormula::Nor(f1, f2), true) => {
+                // ~(A ~| B) = A | B
+                FOFFormula::Or(
+                    Box::new(f1.to_nnf_impl(false)),
+                    Box::new(f2.to_nnf_impl(false))
+                )
+            }
+            
             // Quantifiers
             (FOFFormula::Quantified(Quantifier::Forall, var, f), false) => {
                 FOFFormula::Quantified(Quantifier::Forall, var, Box::new(f.to_nnf_impl(false)))
@@ -182,11 +253,9 @@ pub enum FormulaRole {
     Assumption,
     Lemma,
     Theorem,
+    Corollary,
     Conjecture,
     NegatedConjecture,
-    Plain,
-    Type,
-    Unknown,
 }
 
 /// A named FOF formula as it appears in TPTP

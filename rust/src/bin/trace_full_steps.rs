@@ -5,14 +5,43 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let filename = if args.len() > 1 {
-        &args[1]
-    } else {
-        "/tmp/right_identity.p"
-    };
     
-    // Parse the TPTP file
-    let formula = parse_tptp_file(filename, &[]).expect("Failed to parse file");
+    if args.len() < 2 {
+        eprintln!("Usage: {} <tptp_file> [options]", args[0]);
+        eprintln!("\nOptions:");
+        eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
+        std::process::exit(1);
+    }
+    
+    let filename = &args[1];
+    let mut include_dirs: Vec<String> = Vec::new();
+    
+    // Parse command line options
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--include" => {
+                if i + 1 < args.len() {
+                    include_dirs.push(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[i]);
+            }
+        }
+        i += 1;
+    }
+    
+    // Parse TPTP with include support
+    let include_dir_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
+    let formula = match parse_tptp_file(filename, &include_dir_refs) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
     
     println!("=== Right Identity Test - Trace (100 steps) ===\n");
     println!("Initial clauses:");

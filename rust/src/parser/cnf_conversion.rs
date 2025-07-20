@@ -94,8 +94,9 @@ impl CNFConverter {
             }
             
             // These shouldn't appear after NNF conversion
-            FOFFormula::Implies(_, _) | FOFFormula::Iff(_, _) => {
-                panic!("Implications and biconditionals should be eliminated by NNF conversion")
+            FOFFormula::Implies(_, _) | FOFFormula::Iff(_, _) | 
+            FOFFormula::Xor(_, _) | FOFFormula::Nand(_, _) | FOFFormula::Nor(_, _) => {
+                panic!("Complex connectives should be eliminated by NNF conversion")
             }
         }
     }
@@ -139,8 +140,9 @@ impl CNFConverter {
                 }
             }
             
-            FOFFormula::Implies(_, _) | FOFFormula::Iff(_, _) => {
-                panic!("Implications and biconditionals should be eliminated")
+            FOFFormula::Implies(_, _) | FOFFormula::Iff(_, _) | 
+            FOFFormula::Xor(_, _) | FOFFormula::Nand(_, _) | FOFFormula::Nor(_, _) => {
+                panic!("Complex connectives should be eliminated")
             }
         }
     }
