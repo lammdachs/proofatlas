@@ -17,11 +17,11 @@
 *.ckpt
 
 # Logs and temporary files
-wandb/
 *.json
 !setup.json
 !environment.json
 !tests/.data/**/*.json
+!wasm/examples/*.json
 
 # Environment files
 .env

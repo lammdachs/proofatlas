@@ -1,0 +1,52 @@
+{
+  "examples": [
+    {
+      "id": "simple-prop",
+      "title": "Simple Propositional Logic",
+      "description": "Basic propositional inference: p → q, q → r, p ⊢ r",
+      "file": "simple_propositional.p"
+    },
+    {
+      "id": "right-identity",
+      "title": "Right Identity",
+      "description": "Prove right identity from left identity and inverse",
+      "file": "right_identity.p"
+    },
+    {
+      "id": "right-inverse",
+      "title": "Right Inverse",
+      "description": "Prove right inverse from left inverse and identity",
+      "file": "right_inverse.p"
+    },
+    {
+      "id": "uniqueness-identity",
+      "title": "Uniqueness of Identity",
+      "description": "Prove that the identity element is unique",
+      "file": "uniqueness_of_identity.p"
+    },
+    {
+      "id": "uniqueness-inverse",
+      "title": "Uniqueness of Inverse",
+      "description": "Prove that inverse elements are unique",
+      "file": "uniqueness_of_inverse.p"
+    },
+    {
+      "id": "inverse-identity",
+      "title": "Inverse of Identity",
+      "description": "Prove that the inverse of identity is identity",
+      "file": "inverse_of_identity.p"
+    },
+    {
+      "id": "inverse-inverse",
+      "title": "Inverse of Inverse",
+      "description": "Prove that inv(inv(a)) = a",
+      "file": "inverse_of_inverse.p"
+    },
+    {
+      "id": "order-2-abelian",
+      "title": "Order 2 Implies Abelian",
+      "description": "Prove that a group where every element has order 2 is abelian",
+      "file": "order_2_implies_abelian.p"
+    }
+  ]
+}

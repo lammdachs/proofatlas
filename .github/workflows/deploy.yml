@@ -28,7 +28,7 @@ jobs:
 
       - name: Install wasm-bindgen-cli
         run: |
-          cargo install wasm-bindgen-cli --version 0.2.92 --locked
+          cargo install wasm-bindgen-cli --version 0.2.100 --locked
 
       - name: Build WASM module
         working-directory: ./wasm
