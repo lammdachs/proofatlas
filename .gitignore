@@ -2,12 +2,7 @@
 /.data/
 /.logs/
 /.selectors/
-
-# Old directories (for backward compatibility)
-.problems/
-.models/
-checkpoints/
-experiments/
+/.claude/
 
 # Legacy directories
 /problems/
@@ -20,7 +15,6 @@ experiments/
 # Model and data files
 *.pt
 *.ckpt
-*.p
 
 # Logs and temporary files
 wandb/
@@ -54,11 +48,6 @@ rust/Cargo.lock
 *.dll
 *.pyd
 
-# Python extension build location
-python/proofatlas/*.so
-python/proofatlas/*.pyd
-python/proofatlas/*.dylib
-
 # Distribution / packaging
 .Python
 build/
@@ -79,34 +68,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
+.pytest_cache
+.vscode
 
 
 # Jupyter Notebook

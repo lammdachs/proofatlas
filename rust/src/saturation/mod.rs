@@ -1,7 +1,6 @@
 //! Saturation-based theorem proving using the given clause algorithm
 
 mod state;
-mod simplification;
 pub mod subsumption;
 
 pub use state::{SaturationState, SaturationConfig, SaturationResult, LiteralSelectionStrategy};

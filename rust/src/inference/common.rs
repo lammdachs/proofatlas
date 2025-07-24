@@ -15,6 +15,7 @@ pub struct InferenceResult {
 /// Types of inference rules
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceRule {
+    Input, // Initial clause from input
     Resolution,
     Factoring,
     Superposition,

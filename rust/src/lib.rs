@@ -9,6 +9,7 @@ pub mod selection;
 pub mod saturation;
 pub mod unification;
 pub mod parser;
+pub mod time_compat;
 
 #[cfg(feature = "python")]
 pub mod python_bindings;

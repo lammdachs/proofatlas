@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'rust/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.92 --locked
+
+      - name: Build WASM module
+        working-directory: ./wasm
+        run: |
+          cargo build --target wasm32-unknown-unknown --release
+          ~/.cargo/bin/wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
+            --out-dir pkg \
+            --target web \
+            --no-typescript
+
+      - name: Prepare deployment files
+        working-directory: ./wasm
+        run: |
+          mkdir -p dist
+          cp index.html style.css app.js dist/
+          cp -r pkg dist/
+          cp -r examples dist/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./wasm/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

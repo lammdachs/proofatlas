@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProofAtlas - Online Theorem Prover</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ProofAtlas</h1>
+            <p>A client-side first-order theorem prover powered by WebAssembly</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <div class="toolbar">
+                    <select id="example-select">
+                        <option value="">Select an example...</option>
+                        <option value="group-identity">Group Identity</option>
+                        <option value="group-inverse">Group Inverse</option>
+                        <option value="simple-prop">Simple Propositional</option>
+                        <option value="custom">Custom Problem</option>
+                    </select>
+                    <button id="clear-btn">Clear</button>
+                </div>
+                
+                <textarea id="tptp-input" placeholder="Enter TPTP problem here...">% Example: Simple propositional problem
+fof(axiom1, axiom, p => q).
+fof(axiom2, axiom, q => r).
+fof(goal, conjecture, p => r).</textarea>
+            </div>
+
+            <div class="control-section">
+                <div class="options">
+                    <label>
+                        Timeout (ms):
+                        <input type="number" id="timeout" value="5000" min="100" max="60000">
+                    </label>
+                    <label>
+                        Max Clauses:
+                        <input type="number" id="max-clauses" value="10000" min="100" max="100000">
+                    </label>
+                    <label>
+                        <input type="checkbox" id="superposition" checked>
+                        Enable Superposition
+                    </label>
+                </div>
+                
+                <button id="prove-btn" class="prove-button">Prove</button>
+            </div>
+
+            <div id="result-section" class="result-section hidden">
+                <h2>Result</h2>
+                <div id="result-status"></div>
+                <div id="result-stats"></div>
+                <div id="clauses-container" class="proof-container hidden">
+                    <div class="clause-selector">
+                        <label>
+                            <input type="radio" name="clause-view" value="proof" checked> Proof Only
+                        </label>
+                        <label>
+                            <input type="radio" name="clause-view" value="all"> All Clauses
+                        </label>
+                    </div>
+                    <h3 id="clauses-title">Proof</h3>
+                    <div id="clause-list"></div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>
+                ProofAtlas runs entirely in your browser. No data is sent to any server.
+            </p>
+        </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

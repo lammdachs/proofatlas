@@ -1,12 +1,13 @@
 //! Main saturation state and algorithm
 
 use crate::core::{Clause, Proof, ProofStep};
-use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, demodulation, InferenceResult};
+use crate::inference::{resolution, factoring, superposition, equality_resolution, equality_factoring, demodulation, InferenceResult, InferenceRule};
 use crate::selection::{ClauseSelector, LiteralSelector, AgeWeightRatioSelector, SelectAll, SelectMaxWeight};
 use crate::parser::orient_equalities::orient_clause_equalities;
 use super::subsumption::SubsumptionChecker;
 use std::collections::{HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use crate::time_compat::Instant;
 
 /// Configuration for the saturation loop
 #[derive(Debug, Clone)]
@@ -44,14 +45,14 @@ impl Default for SaturationConfig {
 /// Result of saturation
 #[derive(Debug, Clone)]
 pub enum SaturationResult {
-    /// Empty clause derived - proof found
+    /// Empty clause derived - proof found (includes all proof steps)
     Proof(Proof),
-    /// Saturated without finding empty clause
-    Saturated,
+    /// Saturated without finding empty clause (includes all proof steps)
+    Saturated(Vec<ProofStep>),
     /// Resource limit reached (includes proof steps so far)
     ResourceLimit(Vec<ProofStep>),
-    /// Timeout reached
-    Timeout,
+    /// Timeout reached (includes proof steps so far)
+    Timeout(Vec<ProofStep>),
 }
 
 /// Main saturation state
@@ -81,6 +82,8 @@ impl SaturationState {
         let mut unprocessed = VecDeque::new();
         let mut subsumption_checker = SubsumptionChecker::new();
         
+        let mut proof_steps = Vec::new();
+        
         // Add initial clauses with IDs
         for (i, mut clause) in initial_clauses.into_iter().enumerate() {
             clause.id = Some(i);
@@ -89,8 +92,18 @@ impl SaturationState {
             orient_clause_equalities(&mut oriented);
             
             // Add to subsumption checker
-            let idx = subsumption_checker.add_clause(oriented);
+            let idx = subsumption_checker.add_clause(oriented.clone());
             assert_eq!(idx, i); // Initial clauses should match their index
+            
+            // Create proof step for initial clause
+            proof_steps.push(ProofStep {
+                inference: InferenceResult {
+                    rule: InferenceRule::Input,
+                    premises: vec![], // No parents for initial clauses
+                    conclusion: oriented,
+                },
+                clause_idx: i,
+            });
             
             clauses.push(clause);
             unprocessed.push_back(i);
@@ -107,7 +120,7 @@ impl SaturationState {
             processed: HashSet::new(),
             unprocessed,
             subsumption_checker,
-            proof_steps: Vec::new(),
+            proof_steps,
             config,
             clause_selector: Box::new(AgeWeightRatioSelector::default()),
             literal_selector,
@@ -146,7 +159,7 @@ impl SaturationState {
                 return SaturationResult::ResourceLimit(self.proof_steps.clone());
             }
             if start_time.elapsed() > self.config.timeout {
-                return SaturationResult::Timeout;
+                return SaturationResult::Timeout(self.proof_steps.clone());
             }
             
             iterations += 1;
@@ -204,7 +217,7 @@ impl SaturationState {
         }
         
         // No more clauses to process
-        SaturationResult::Saturated
+        SaturationResult::Saturated(self.proof_steps.clone())
     }
     
     /// Select the next given clause using the configured selector
