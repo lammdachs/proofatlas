@@ -34,14 +34,20 @@ impl Atom {
 impl Literal {
     /// Create a new positive literal
     pub fn positive(atom: Atom) -> Self {
-        Literal { atom, polarity: true }
+        Literal {
+            atom,
+            polarity: true,
+        }
     }
-    
+
     /// Create a new negative literal
     pub fn negative(atom: Atom) -> Self {
-        Literal { atom, polarity: false }
+        Literal {
+            atom,
+            polarity: false,
+        }
     }
-    
+
     /// Get the complement of this literal
     pub fn complement(&self) -> Literal {
         Literal {
@@ -49,7 +55,7 @@ impl Literal {
             polarity: !self.polarity,
         }
     }
-    
+
     /// Collect all variables in this literal
     pub fn collect_variables(&self, vars: &mut std::collections::HashSet<super::Variable>) {
         for term in &self.atom.args {
@@ -67,7 +73,9 @@ impl fmt::Display for Atom {
         } else {
             write!(f, "{}(", self.predicate.name)?;
             for (i, arg) in self.args.iter().enumerate() {
-                if i > 0 { write!(f, ",")?; }
+                if i > 0 {
+                    write!(f, ",")?;
+                }
                 write!(f, "{}", arg)?;
             }
             write!(f, ")")

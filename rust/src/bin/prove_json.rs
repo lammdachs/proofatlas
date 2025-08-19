@@ -1,9 +1,12 @@
-//! Command-line theorem prover
+//! Command-line theorem prover with JSON export
 
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::time::Instant;
 
-use proofatlas::{parse_tptp_file, saturate, SaturationConfig, SaturationResult};
+use proofatlas::core::json::{ClauseJson, ConfigJson, ProofAttemptJson, StatisticsJson};
+use proofatlas::{parse_tptp_file, SaturationConfig, SaturationState};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,6 +18,7 @@ fn main() {
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
         eprintln!("  --no-superposition     Disable superposition rule");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
+        eprintln!("  --json <file>          Export proof attempt to JSON file");
         eprintln!("  --verbose              Show detailed progress");
         std::process::exit(1);
     }
@@ -22,6 +26,7 @@ fn main() {
     let filename = &args[1];
     let mut config = SaturationConfig::default();
     let mut verbose = false;
+    let mut json_output: Option<String> = None;
     let mut include_dirs: Vec<String> = Vec::new();
 
     // Parse command line options
@@ -50,6 +55,12 @@ fn main() {
             "--include" => {
                 if i + 1 < args.len() {
                     include_dirs.push(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--json" => {
+                if i + 1 < args.len() {
+                    json_output = Some(args[i + 1].clone());
                     i += 1;
                 }
             }
@@ -87,6 +98,9 @@ fn main() {
         println!();
     }
 
+    // Store initial clauses for JSON export
+    let initial_clauses: Vec<ClauseJson> = formula.clauses.iter().map(|c| c.into()).collect();
+
     // Run saturation
     println!("Running saturation with:");
     println!("  Max clauses: {}", config.max_clauses);
@@ -102,12 +116,13 @@ fn main() {
     println!();
 
     let start_time = Instant::now();
-    let result = saturate(formula, config);
+    let saturation = SaturationState::new(formula.clauses, config.clone());
+    let result = saturation.saturate();
     let elapsed = start_time.elapsed();
 
     // Report result
-    match result {
-        SaturationResult::Proof(proof) => {
+    match &result {
+        proofatlas::SaturationResult::Proof(proof) => {
             println!("✓ THEOREM PROVED in {:.3}s", elapsed.as_secs_f64());
             println!("  Proof length: {} steps", proof.steps.len());
             println!(
@@ -138,20 +153,56 @@ fn main() {
                 }
             }
         }
-        SaturationResult::Saturated(_, clauses) => {
+        proofatlas::SaturationResult::Saturated(_, clauses) => {
             println!("✗ SATURATED in {:.3}s", elapsed.as_secs_f64());
             println!("  No proof found - the formula may be satisfiable");
             println!("  Final clauses: {}", clauses.len());
         }
-        SaturationResult::ResourceLimit(_, clauses) => {
+        proofatlas::SaturationResult::ResourceLimit(_, clauses) => {
             println!("✗ RESOURCE LIMIT in {:.3}s", elapsed.as_secs_f64());
             println!("  Exceeded clause limit or iteration limit");
             println!("  Final clauses: {}", clauses.len());
         }
-        SaturationResult::Timeout(_, clauses) => {
+        proofatlas::SaturationResult::Timeout(_, clauses) => {
             println!("✗ TIMEOUT in {:.3}s", elapsed.as_secs_f64());
             println!("  Exceeded time limit");
             println!("  Final clauses: {}", clauses.len());
+        }
+    }
+
+    // Export to JSON if requested
+    if let Some(json_file) = json_output {
+        let proof_attempt = ProofAttemptJson {
+            problem_file: filename.to_string(),
+            initial_clauses,
+            config: ConfigJson {
+                max_clauses: config.max_clauses,
+                max_iterations: config.max_iterations,
+                timeout_seconds: config.timeout.as_secs_f64(),
+                use_superposition: config.use_superposition,
+                literal_selection: format!("{:?}", config.literal_selection),
+            },
+            result: result.to_json(elapsed.as_secs_f64()),
+            statistics: StatisticsJson {
+                clauses_generated: 0, // TODO: track this
+                clauses_processed: 0, // TODO: track this
+                clauses_subsumed: 0,  // TODO: track this
+                time_elapsed_seconds: elapsed.as_secs_f64(),
+            },
+        };
+
+        match serde_json::to_string_pretty(&proof_attempt) {
+            Ok(json_str) => match File::create(&json_file) {
+                Ok(mut file) => {
+                    if let Err(e) = file.write_all(json_str.as_bytes()) {
+                        eprintln!("Failed to write JSON file: {}", e);
+                    } else {
+                        println!("\nProof attempt exported to: {}", json_file);
+                    }
+                }
+                Err(e) => eprintln!("Failed to create JSON file: {}", e),
+            },
+            Err(e) => eprintln!("Failed to serialize to JSON: {}", e),
         }
     }
 }

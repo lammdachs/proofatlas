@@ -1,51 +1,40 @@
 //! ProofAtlas: A high-performance theorem prover for first-order logic
-//! 
+//!
 //! This library provides a complete implementation of a theorem prover
 //! using the superposition calculus with equality.
 
 pub mod core;
-pub mod inference; 
-pub mod selection;
-pub mod saturation;
-pub mod unification;
+pub mod inference;
 pub mod parser;
+pub mod saturation;
+pub mod selection;
 pub mod time_compat;
+pub mod unification;
 
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
 // Re-export commonly used types and functions
 pub use core::{
-    Term, Variable, Constant, FunctionSymbol,
-    Literal, Atom, PredicateSymbol,
-    Clause, CNFFormula,
-    Substitution,
-    Proof, ProofStep,
-    KBO, KBOConfig, TermOrdering
+    Atom, CNFFormula, Clause, Constant, FunctionSymbol, KBOConfig, Literal, PredicateSymbol, Proof,
+    ProofStep, Substitution, Term, TermOrdering, Variable, KBO,
 };
 
 pub use inference::{
-    InferenceResult, InferenceRule,
-    resolution, factoring, superposition,
-    equality_resolution, equality_factoring
+    equality_factoring, equality_resolution, factoring, resolution, superposition, InferenceResult,
+    InferenceRule,
 };
 
 pub use selection::{
-    LiteralSelector, ClauseSelector,
-    SelectAll, SelectMaxWeight,
-    SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector
+    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll,
+    SelectMaxWeight, SizeBasedSelector,
 };
 
 pub use saturation::{
-    saturate, saturate_with_steps, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy
+    saturate, saturate_with_steps, LiteralSelectionStrategy, SaturationConfig, SaturationResult,
+    SaturationState,
 };
 
-pub use unification::{
-    unify, UnificationResult, UnificationError
-};
+pub use unification::{unify, UnificationError, UnificationResult};
 
-pub use parser::{
-    parse_tptp, parse_tptp_file,
-    FOFFormula, Quantifier,
-    fof_to_cnf
-};
+pub use parser::{fof_to_cnf, parse_tptp, parse_tptp_file, FOFFormula, Quantifier};

@@ -1,7 +1,7 @@
 //! Enhanced proof tracking with clause selection events
 
-use crate::inference::InferenceResult;
 use crate::core::Clause;
+use crate::inference::InferenceResult;
 
 /// Events that occur during proof search
 #[derive(Debug, Clone)]

@@ -1,11 +1,7 @@
 //! Count clauses generated over time
 
 use proofatlas::{
-    parse_tptp_file,
-    SaturationConfig,
-    SaturationState,
-    SaturationResult,
-    LiteralSelectionStrategy,
+    parse_tptp_file, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,
 };
 use std::fs::File;
 use std::io::Write;
@@ -19,7 +15,7 @@ cnf(right_inverse, axiom, mult(inv(X),X) = e).
 cnf(associativity, axiom, mult(mult(X,Y),Z) = mult(X,mult(Y,Z))).
 cnf(goal, negated_conjecture, mult(c,e) != c).
 "#;
-    
+
     let temp_filename = "/tmp/right_identity.p";
     let mut file = File::create(temp_filename).expect("Failed to create temp file");
     writeln!(file, "{}", tptp_content).expect("Failed to write temp file");
@@ -48,10 +44,14 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
         };
 
         let state = SaturationState::new(formula.clauses.clone(), config);
-        
+
         match state.saturate() {
-            SaturationResult::ResourceLimit(proof_steps) => {
-                println!("After {} steps: {} clauses generated", steps, proof_steps.len());
+            SaturationResult::ResourceLimit(proof_steps, _) => {
+                println!(
+                    "After {} steps: {} clauses generated",
+                    steps,
+                    proof_steps.len()
+                );
             }
             SaturationResult::Proof(proof) => {
                 println!("PROOF FOUND after {} steps!", proof.steps.len());

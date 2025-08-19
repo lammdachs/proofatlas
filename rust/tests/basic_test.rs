@@ -9,11 +9,11 @@ fn test_simple_resolution() {
         cnf(p_implies_q, axiom, ~p(X) | q(X)).
         cnf(not_q_a, negated_conjecture, ~q(a)).
     "#;
-    
+
     let formula = parse_tptp(tptp).unwrap();
     let config = SaturationConfig::default();
     let result = saturate(formula, config);
-    
+
     match result {
         SaturationResult::Proof(_) => {
             // Expected - proof found
@@ -27,11 +27,11 @@ fn test_equality_reflexivity() {
     let tptp = r#"
         cnf(not_self_equal, negated_conjecture, a != a).
     "#;
-    
+
     let formula = parse_tptp(tptp).unwrap();
     let config = SaturationConfig::default();
     let result = saturate(formula, config);
-    
+
     match result {
         SaturationResult::Proof(_) => {
             // Expected - contradiction found
@@ -46,12 +46,12 @@ fn test_satisfiable_formula() {
         cnf(p_a, axiom, p(a)).
         cnf(q_b, axiom, q(b)).
     "#;
-    
+
     let formula = parse_tptp(tptp).unwrap();
     let mut config = SaturationConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
     let result = saturate(formula, config);
-    
+
     match result {
         SaturationResult::Saturated => {
             // Expected - no contradiction, formula is satisfiable

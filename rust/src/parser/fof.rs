@@ -1,9 +1,9 @@
 //! First-Order Form (FOF) formula representation
-//! 
+//!
 //! This module provides structures for representing full first-order logic
 //! formulas before conversion to CNF.
 
-use crate::core::{Variable, Atom};
+use crate::core::{Atom, Variable};
 use std::collections::HashSet;
 
 /// Quantifier type
@@ -42,15 +42,15 @@ impl FOFFormula {
     /// Get all free variables in the formula
     pub fn free_variables(&self) -> HashSet<Variable> {
         match self {
-            FOFFormula::Atom(atom) => {
-                atom.args.iter()
-                    .flat_map(|t| t.variables())
-                    .collect()
-            }
+            FOFFormula::Atom(atom) => atom.args.iter().flat_map(|t| t.variables()).collect(),
             FOFFormula::Not(f) => f.free_variables(),
-            FOFFormula::And(f1, f2) | FOFFormula::Or(f1, f2) | 
-            FOFFormula::Implies(f1, f2) | FOFFormula::Iff(f1, f2) |
-            FOFFormula::Xor(f1, f2) | FOFFormula::Nand(f1, f2) | FOFFormula::Nor(f1, f2) => {
+            FOFFormula::And(f1, f2)
+            | FOFFormula::Or(f1, f2)
+            | FOFFormula::Implies(f1, f2)
+            | FOFFormula::Iff(f1, f2)
+            | FOFFormula::Xor(f1, f2)
+            | FOFFormula::Nand(f1, f2)
+            | FOFFormula::Nor(f1, f2) => {
                 let mut vars = f1.free_variables();
                 vars.extend(f2.free_variables());
                 vars
@@ -62,73 +62,69 @@ impl FOFFormula {
             }
         }
     }
-    
+
     /// Check if the formula is closed (no free variables)
     pub fn is_closed(&self) -> bool {
         self.free_variables().is_empty()
     }
-    
+
     /// Convert to negation normal form (NNF)
     pub fn to_nnf(self) -> FOFFormula {
         self.to_nnf_impl(false)
     }
-    
+
     fn to_nnf_impl(self, negate: bool) -> FOFFormula {
         match (self, negate) {
             // Atom
             (FOFFormula::Atom(a), false) => FOFFormula::Atom(a),
             (FOFFormula::Atom(a), true) => FOFFormula::Not(Box::new(FOFFormula::Atom(a))),
-            
+
             // Double negation
             (FOFFormula::Not(f), false) => f.to_nnf_impl(true),
             (FOFFormula::Not(f), true) => f.to_nnf_impl(false),
-            
+
             // Conjunction
-            (FOFFormula::And(f1, f2), false) => {
-                FOFFormula::And(
-                    Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false))
-                )
-            }
+            (FOFFormula::And(f1, f2), false) => FOFFormula::And(
+                Box::new(f1.to_nnf_impl(false)),
+                Box::new(f2.to_nnf_impl(false)),
+            ),
             (FOFFormula::And(f1, f2), true) => {
                 // De Morgan: ~(A & B) = ~A | ~B
                 FOFFormula::Or(
                     Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true))
+                    Box::new(f2.to_nnf_impl(true)),
                 )
             }
-            
+
             // Disjunction
-            (FOFFormula::Or(f1, f2), false) => {
-                FOFFormula::Or(
-                    Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false))
-                )
-            }
+            (FOFFormula::Or(f1, f2), false) => FOFFormula::Or(
+                Box::new(f1.to_nnf_impl(false)),
+                Box::new(f2.to_nnf_impl(false)),
+            ),
             (FOFFormula::Or(f1, f2), true) => {
                 // De Morgan: ~(A | B) = ~A & ~B
                 FOFFormula::And(
                     Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true))
+                    Box::new(f2.to_nnf_impl(true)),
                 )
             }
-            
+
             // Implication
             (FOFFormula::Implies(f1, f2), false) => {
                 // A => B = ~A | B
                 FOFFormula::Or(
                     Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(false))
+                    Box::new(f2.to_nnf_impl(false)),
                 )
             }
             (FOFFormula::Implies(f1, f2), true) => {
                 // ~(A => B) = A & ~B
                 FOFFormula::And(
                     Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(true))
+                    Box::new(f2.to_nnf_impl(true)),
                 )
             }
-            
+
             // Biconditional
             (FOFFormula::Iff(f1, f2), false) => {
                 // A <=> B = (A => B) & (B => A) = (~A | B) & (~B | A)
@@ -137,12 +133,12 @@ impl FOFFormula {
                 FOFFormula::And(
                     Box::new(FOFFormula::Or(
                         Box::new(f1.to_nnf_impl(true)),
-                        Box::new(f2.to_nnf_impl(false))
+                        Box::new(f2.to_nnf_impl(false)),
                     )),
                     Box::new(FOFFormula::Or(
                         Box::new(f2_clone.to_nnf_impl(true)),
-                        Box::new(f1_clone.to_nnf_impl(false))
-                    ))
+                        Box::new(f1_clone.to_nnf_impl(false)),
+                    )),
                 )
             }
             (FOFFormula::Iff(f1, f2), true) => {
@@ -152,15 +148,15 @@ impl FOFFormula {
                 FOFFormula::Or(
                     Box::new(FOFFormula::And(
                         Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(true))
+                        Box::new(f2.to_nnf_impl(true)),
                     )),
                     Box::new(FOFFormula::And(
                         Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(false))
-                    ))
+                        Box::new(f2_clone.to_nnf_impl(false)),
+                    )),
                 )
             }
-            
+
             // XOR
             (FOFFormula::Xor(f1, f2), false) => {
                 // A <~> B = (A & ~B) | (~A & B)
@@ -169,12 +165,12 @@ impl FOFFormula {
                 FOFFormula::Or(
                     Box::new(FOFFormula::And(
                         Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(true))
+                        Box::new(f2.to_nnf_impl(true)),
                     )),
                     Box::new(FOFFormula::And(
                         Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(false))
-                    ))
+                        Box::new(f2_clone.to_nnf_impl(false)),
+                    )),
                 )
             }
             (FOFFormula::Xor(f1, f2), true) => {
@@ -184,47 +180,47 @@ impl FOFFormula {
                 FOFFormula::Or(
                     Box::new(FOFFormula::And(
                         Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(false))
+                        Box::new(f2.to_nnf_impl(false)),
                     )),
                     Box::new(FOFFormula::And(
                         Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(true))
-                    ))
+                        Box::new(f2_clone.to_nnf_impl(true)),
+                    )),
                 )
             }
-            
+
             // NAND
             (FOFFormula::Nand(f1, f2), false) => {
                 // A ~& B = ~(A & B) = ~A | ~B
                 FOFFormula::Or(
                     Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true))
+                    Box::new(f2.to_nnf_impl(true)),
                 )
             }
             (FOFFormula::Nand(f1, f2), true) => {
                 // ~(A ~& B) = A & B
                 FOFFormula::And(
                     Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false))
+                    Box::new(f2.to_nnf_impl(false)),
                 )
             }
-            
+
             // NOR
             (FOFFormula::Nor(f1, f2), false) => {
                 // A ~| B = ~(A | B) = ~A & ~B
                 FOFFormula::And(
                     Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true))
+                    Box::new(f2.to_nnf_impl(true)),
                 )
             }
             (FOFFormula::Nor(f1, f2), true) => {
                 // ~(A ~| B) = A | B
                 FOFFormula::Or(
                     Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false))
+                    Box::new(f2.to_nnf_impl(false)),
                 )
             }
-            
+
             // Quantifiers
             (FOFFormula::Quantified(Quantifier::Forall, var, f), false) => {
                 FOFFormula::Quantified(Quantifier::Forall, var, Box::new(f.to_nnf_impl(false)))
@@ -269,27 +265,33 @@ pub struct NamedFormula {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{PredicateSymbol};
-    
+    use crate::core::PredicateSymbol;
+
     #[test]
     fn test_nnf_conversion() {
         // Test: ~(P & Q) -> ~P | ~Q
         let p = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol { name: "P".to_string(), arity: 0 },
+            predicate: PredicateSymbol {
+                name: "P".to_string(),
+                arity: 0,
+            },
             args: vec![],
         });
         let q = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol { name: "Q".to_string(), arity: 0 },
+            predicate: PredicateSymbol {
+                name: "Q".to_string(),
+                arity: 0,
+            },
             args: vec![],
         });
-        
+
         let formula = FOFFormula::Not(Box::new(FOFFormula::And(
             Box::new(p.clone()),
-            Box::new(q.clone())
+            Box::new(q.clone()),
         )));
-        
+
         let nnf = formula.to_nnf();
-        
+
         // Should be: ~P | ~Q
         match nnf {
             FOFFormula::Or(f1, f2) => {

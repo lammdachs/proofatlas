@@ -1,9 +1,9 @@
 //! Unification algorithm for first-order terms
 
-mod mgu;
 mod r#match;
+mod mgu;
 
-pub use mgu::{unify, UnificationResult, UnificationError};
+pub use mgu::{unify, UnificationError, UnificationResult};
 pub use r#match::match_term;
 
 // Re-export commonly used functions

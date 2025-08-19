@@ -1,16 +1,12 @@
 //! Test if improved subsumption reduces redundancy
 
 use proofatlas::{
-    parse_tptp_file,
-    SaturationConfig,
-    SaturationState,
-    SaturationResult,
-    LiteralSelectionStrategy,
+    parse_tptp_file, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,
 };
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::time::Duration;
-use std::collections::HashMap;
 
 fn main() {
     // Write right identity problem to temp file
@@ -20,7 +16,7 @@ cnf(right_inverse, axiom, mult(inv(X),X) = e).
 cnf(associativity, axiom, mult(mult(X,Y),Z) = mult(X,mult(Y,Z))).
 cnf(goal, negated_conjecture, mult(c,e) != c).
 "#;
-    
+
     let temp_filename = "/tmp/right_identity.p";
     let mut file = File::create(temp_filename).expect("Failed to create temp file");
     writeln!(file, "{}", tptp_content).expect("Failed to write temp file");
@@ -48,41 +44,49 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
     let state = SaturationState::new(formula.clauses.clone(), config);
 
     match state.saturate() {
-        SaturationResult::ResourceLimit(steps) => {
+        SaturationResult::ResourceLimit(steps, _) => {
             // Track clause strings and their indices
             let mut clause_map: HashMap<String, Vec<usize>> = HashMap::new();
-            
+
             // Add initial clauses
             for (i, clause) in formula.clauses.iter().enumerate() {
                 let clause_str = format!("{}", clause);
                 clause_map.entry(clause_str).or_insert(vec![]).push(i);
             }
-            
+
             // Add derived clauses
             for step in steps.iter() {
                 let clause_str = format!("{}", step.inference.conclusion);
-                clause_map.entry(clause_str).or_insert(vec![]).push(step.clause_idx);
+                clause_map
+                    .entry(clause_str)
+                    .or_insert(vec![])
+                    .push(step.clause_idx);
             }
-            
+
             // Count duplicates
             let mut duplicate_count = 0;
             let mut duplicate_instances = 0;
-            
+
             println!("=== Duplicate Analysis with Improved Subsumption ===");
             for (clause_str, indices) in clause_map.iter() {
                 if indices.len() > 1 {
                     duplicate_count += 1;
                     duplicate_instances += indices.len() - 1;
-                    println!("\"{}\" appears {} times: {:?}", clause_str, indices.len(), indices);
+                    println!(
+                        "\"{}\" appears {} times: {:?}",
+                        clause_str,
+                        indices.len(),
+                        indices
+                    );
                 }
             }
-            
+
             println!("\nSummary:");
             println!("Total clauses generated: {}", 4 + steps.len());
             println!("Unique clause strings: {}", clause_map.len());
             println!("Clauses with duplicates: {}", duplicate_count);
             println!("Total duplicate instances: {}", duplicate_instances);
-            
+
             // Also check for specific problematic clause
             println!("\n=== Checking mult(e,e) = e ===");
             let mut mult_ee_count = 0;

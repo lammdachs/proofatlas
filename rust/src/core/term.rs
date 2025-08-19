@@ -35,14 +35,10 @@ impl Term {
         match self {
             Term::Variable(v) => vec![v.clone()],
             Term::Constant(_) => vec![],
-            Term::Function(_, args) => {
-                args.iter()
-                    .flat_map(|arg| arg.variables())
-                    .collect()
-            }
+            Term::Function(_, args) => args.iter().flat_map(|arg| arg.variables()).collect(),
         }
     }
-    
+
     /// Collect all variables in this term
     pub fn collect_variables(&self, vars: &mut std::collections::HashSet<Variable>) {
         match self {
@@ -81,7 +77,9 @@ impl fmt::Display for Term {
             Term::Function(func, args) => {
                 write!(f, "{}(", func.name)?;
                 for (i, arg) in args.iter().enumerate() {
-                    if i > 0 { write!(f, ",")?; }
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
                     write!(f, "{}", arg)?;
                 }
                 write!(f, ")")

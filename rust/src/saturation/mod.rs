@@ -3,7 +3,7 @@
 mod state;
 pub mod subsumption;
 
-pub use state::{SaturationState, SaturationConfig, SaturationResult, LiteralSelectionStrategy};
+pub use state::{LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState};
 
 use crate::core::CNFFormula;
 
@@ -14,7 +14,11 @@ pub fn saturate(formula: CNFFormula, config: SaturationConfig) -> SaturationResu
 }
 
 /// Run saturation on a CNF formula with a step limit
-pub fn saturate_with_steps(formula: CNFFormula, mut config: SaturationConfig, steps: Option<usize>) -> SaturationResult {
+pub fn saturate_with_steps(
+    formula: CNFFormula,
+    mut config: SaturationConfig,
+    steps: Option<usize>,
+) -> SaturationResult {
     config.step_limit = steps;
     let state = SaturationState::new(formula.clauses, config);
     state.saturate()

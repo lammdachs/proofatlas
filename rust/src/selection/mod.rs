@@ -5,7 +5,7 @@
 //! - Clause selection from the unprocessed set (for saturation)
 //!
 //! # Literal Selection
-//! 
+//!
 //! Literal selection constrains which literals in a clause can participate
 //! in inference rules. More restrictive selection reduces the search space
 //! but may sacrifice completeness.
@@ -27,8 +27,8 @@
 //!
 //! See `docs/selection_strategies.md` for detailed documentation.
 
-pub mod literal;
 pub mod clause;
+pub mod literal;
 
+pub use clause::{AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, SizeBasedSelector};
 pub use literal::{LiteralSelector, SelectAll, SelectMaxWeight};
-pub use clause::{ClauseSelector, SizeBasedSelector, AgeBasedSelector, AgeWeightRatioSelector};

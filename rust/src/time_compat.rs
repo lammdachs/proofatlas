@@ -1,5 +1,6 @@
 //! Time compatibility layer for WASM and native
 
+#[allow(unused_imports)]
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,7 +21,7 @@ impl Instant {
             .unwrap_or(0.0);
         Instant { millis }
     }
-    
+
     pub fn elapsed(&self) -> Duration {
         let now = Self::now();
         let elapsed_millis = now.millis - self.millis;
