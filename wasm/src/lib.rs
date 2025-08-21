@@ -29,6 +29,24 @@ pub struct ProverResult {
     pub proof: Option<Vec<ProofStep>>,
     pub all_clauses: Option<Vec<ProofStep>>, // All generated clauses
     pub statistics: ProverStatistics,
+    pub trace: Option<ProofTrace>, // Detailed saturation trace
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProofTrace {
+    pub initial_clauses: Vec<ProofStep>,
+    pub saturation_steps: Vec<SaturationStep>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SaturationStep {
+    pub step_type: String, // "given_selection" or "inference"
+    pub clause_idx: usize,
+    pub clause: String,
+    pub rule: String,
+    pub premises: Vec<usize>,
+    pub processed_count: usize,
+    pub unprocessed_count: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,7 +65,17 @@ impl ProofAtlasWasm {
     }
 
     #[wasm_bindgen]
+    pub fn prove_with_trace(&self, tptp_input: &str, options_js: JsValue) -> Result<JsValue, JsError> {
+        // This method will return detailed proof trace with saturation steps
+        self.prove_internal(tptp_input, options_js, true)
+    }
+    
+    #[wasm_bindgen]
     pub fn prove(&self, tptp_input: &str, options_js: JsValue) -> Result<JsValue, JsError> {
+        self.prove_internal(tptp_input, options_js, false)
+    }
+    
+    fn prove_internal(&self, tptp_input: &str, options_js: JsValue, include_trace: bool) -> Result<JsValue, JsError> {
         // Parse options
         let options: ProverOptions = serde_wasm_bindgen::from_value(options_js)
             .map_err(|e| JsError::new(&format!("Invalid options: {}", e)))?;
@@ -110,25 +138,49 @@ impl ProofAtlasWasm {
                 // Proof found
                 let all_steps = convert_steps(&proof.steps);
                 
-                // Extract the proof path - collect all ancestors
+                // For "All Clauses" view: filter out GivenClauseSelection (keep Input and inference clauses)
+                let all_clauses: Vec<ProofStep> = all_steps.iter()
+                    .filter(|step| step.rule != "GivenClauseSelection")
+                    .cloned()
+                    .collect();
+                
+                // Build index mapping: step.id -> position in all_steps
+                // Only include non-GivenClauseSelection steps to avoid duplicates
+                let mut id_to_pos: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+                for (pos, step) in all_steps.iter().enumerate() {
+                    if step.rule != "GivenClauseSelection" {
+                        id_to_pos.insert(step.id, pos);
+                    }
+                }
+                
+                // Extract the proof path - trace back from empty clause
                 let mut proof_indices = std::collections::HashSet::new();
                 let mut to_visit = vec![proof.empty_clause_idx];
                 
-                // Collect all clauses that contribute to the proof
-                while let Some(current) = to_visit.pop() {
-                    if current < all_steps.len() && proof_indices.insert(current) {
-                        // Add all parents to visit
-                        for &parent in &all_steps[current].parents {
-                            if parent < all_steps.len() && !proof_indices.contains(&parent) {
-                                to_visit.push(parent);
+                // Collect all clause IDs that contribute to the proof
+                while let Some(current_id) = to_visit.pop() {
+                    if proof_indices.insert(current_id) {
+                        // Find this clause in all_steps by ID
+                        if let Some(&pos) = id_to_pos.get(&current_id) {
+                            let step = &all_steps[pos];
+                            // Add parents to visit (parents are clause IDs, not positions)
+                            for &parent_id in &step.parents {
+                                if !proof_indices.contains(&parent_id) {
+                                    to_visit.push(parent_id);
+                                }
                             }
                         }
                     }
                 }
                 
-                // Sort proof steps by index to show them in order
-                let mut proof_path: Vec<ProofStep> = proof_indices.into_iter()
-                    .map(|idx| all_steps[idx].clone())
+                // Build proof path: include all steps that contribute to the proof
+                // but filter out GivenClauseSelection (which is just bookkeeping)
+                let mut proof_path: Vec<ProofStep> = all_steps.iter()
+                    .filter(|step| {
+                        proof_indices.contains(&step.id) && 
+                        step.rule != "GivenClauseSelection"
+                    })
+                    .cloned()
                     .collect();
                 proof_path.sort_by_key(|step| step.id);
                 
@@ -137,63 +189,98 @@ impl ProofAtlasWasm {
                     status: "proof_found".to_string(),
                     message: format!("Proof found with {} steps", proof_path.len()),
                     proof: Some(proof_path),
-                    all_clauses: Some(all_steps),
+                    all_clauses: Some(all_clauses),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: proof.steps.len(),
                         final_clauses: proof.steps.len(),
                         time_ms,
                     },
+                    trace: if include_trace {
+                        Some(build_trace(&proof.steps, initial_clauses))
+                    } else {
+                        None
+                    },
                 }
             }
-            SaturationResult::Saturated(steps) => {
+            SaturationResult::Saturated(steps, _) => {
                 // Saturated without proof
                 let all_steps = convert_steps(&steps);
+                // Filter out GivenClauseSelection for all_clauses view
+                let all_clauses: Vec<ProofStep> = all_steps.iter()
+                    .filter(|step| step.rule != "GivenClauseSelection")
+                    .cloned()
+                    .collect();
                 ProverResult {
                     success: false,
                     status: "saturated".to_string(),
                     message: "Saturated without finding a proof - the formula may be satisfiable".to_string(),
                     proof: None,
-                    all_clauses: Some(all_steps),
+                    all_clauses: Some(all_clauses),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
                         final_clauses: steps.len(),
                         time_ms,
                     },
+                    trace: if include_trace {
+                        Some(build_trace(&steps, initial_clauses))
+                    } else {
+                        None
+                    },
                 }
             }
-            SaturationResult::Timeout(steps) => {
+            SaturationResult::Timeout(steps, _) => {
                 // Timeout
                 let all_steps = convert_steps(&steps);
+                // Filter out GivenClauseSelection for all_clauses view
+                let all_clauses: Vec<ProofStep> = all_steps.iter()
+                    .filter(|step| step.rule != "GivenClauseSelection")
+                    .cloned()
+                    .collect();
                 ProverResult {
                     success: false,
                     status: "timeout".to_string(),
                     message: "Timeout reached before finding a proof".to_string(),
                     proof: None,
-                    all_clauses: Some(all_steps),
+                    all_clauses: Some(all_clauses),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
                         final_clauses: steps.len(),
                         time_ms,
                     },
+                    trace: if include_trace {
+                        Some(build_trace(&steps, initial_clauses))
+                    } else {
+                        None
+                    },
                 }
             }
-            SaturationResult::ResourceLimit(steps) => {
+            SaturationResult::ResourceLimit(steps, _) => {
                 // Resource limit
                 let all_steps = convert_steps(&steps);
+                // Filter out GivenClauseSelection for all_clauses view
+                let all_clauses: Vec<ProofStep> = all_steps.iter()
+                    .filter(|step| step.rule != "GivenClauseSelection")
+                    .cloned()
+                    .collect();
                 ProverResult {
                     success: false,
                     status: "resource_limit".to_string(),
                     message: "Resource limit reached".to_string(),
                     proof: None,
-                    all_clauses: Some(all_steps),
+                    all_clauses: Some(all_clauses),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
                         final_clauses: steps.len(),
                         time_ms,
+                    },
+                    trace: if include_trace {
+                        Some(build_trace(&steps, initial_clauses))
+                    } else {
+                        None
                     },
                 }
             }
@@ -212,6 +299,55 @@ impl ProofAtlasWasm {
             Err(e) => Err(JsError::new(&format!("Parse error: {}", e))),
         }
     }
+}
+
+fn build_trace(steps: &[proofatlas::ProofStep], initial_count: usize) -> ProofTrace {
+    let mut trace = ProofTrace {
+        initial_clauses: Vec::new(),
+        saturation_steps: Vec::new(),
+    };
+    
+    let mut processed_count = 0;
+    let mut unprocessed_count = initial_count;
+    
+    for (i, step) in steps.iter().enumerate() {
+        if i < initial_count {
+            // Initial clause
+            trace.initial_clauses.push(ProofStep {
+                id: step.clause_idx,
+                clause: format_clause(&step.inference.conclusion),
+                rule: "Input".to_string(),
+                parents: vec![],
+            });
+        } else {
+            // Saturation step
+            let step_type = if step.inference.rule == proofatlas::InferenceRule::GivenClauseSelection {
+                "given_selection"
+            } else {
+                "inference"
+            };
+            
+            // Update counts based on step type
+            if step.inference.rule == proofatlas::InferenceRule::GivenClauseSelection {
+                processed_count += 1;
+                unprocessed_count = unprocessed_count.saturating_sub(1);
+            } else if step.inference.rule != proofatlas::InferenceRule::Input {
+                unprocessed_count += 1;
+            }
+            
+            trace.saturation_steps.push(SaturationStep {
+                step_type: step_type.to_string(),
+                clause_idx: step.clause_idx,
+                clause: format_clause(&step.inference.conclusion),
+                rule: format!("{:?}", step.inference.rule),
+                premises: step.inference.premises.clone(),
+                processed_count,
+                unprocessed_count,
+            });
+        }
+    }
+    
+    trace
 }
 
 fn format_clause(clause: &Clause) -> String {

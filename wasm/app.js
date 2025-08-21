@@ -1,64 +1,371 @@
 import init, { ProofAtlasWasm } from './pkg/proofatlas_wasm.js';
 
 // Examples will be loaded dynamically
-let EXAMPLES = {};
 let exampleMetadata = [];
+let exampleContents = {}; // Store example contents by ID
 
 let prover = null;
 
 async function loadExamples() {
+    console.log('loadExamples: Function called');
     try {
-        // Load examples metadata
-        const response = await fetch('./examples/examples.json');
+        // Use fetch API
+        console.log('Fetching examples.json with fetch API');
+        const response = await fetch('examples/examples.json');
+        
+        if (!response.ok) {
+            throw new Error(`Failed to load examples.json: ${response.status}`);
+        }
+        
         const data = await response.json();
         exampleMetadata = data.examples;
+        console.log('Loaded metadata for', exampleMetadata.length, 'examples');
         
-        // Load each example file
+        // Load all example files upfront
+        console.log('Loading all example files...');
         for (const example of exampleMetadata) {
-            const fileResponse = await fetch(`./examples/${example.file}`);
-            const content = await fileResponse.text();
-            EXAMPLES[example.id] = content;
+            try {
+                console.log(`Loading ${example.file}...`);
+                const fileResponse = await fetch(`examples/${example.file}`);
+                if (fileResponse.ok) {
+                    const content = await fileResponse.text();
+                    exampleContents[example.id] = content;
+                    console.log(`Loaded ${example.id}: ${content.length} characters`);
+                } else {
+                    console.error(`Failed to load ${example.file}: ${fileResponse.status}`);
+                }
+            } catch (error) {
+                console.error(`Error loading ${example.file}:`, error);
+            }
         }
+        console.log('All example files loaded:', Object.keys(exampleContents));
         
         // Populate the dropdown
         const select = document.getElementById('example-select');
-        select.innerHTML = '<option value="">Select an example...</option>';
+        if (!select) {
+            console.error('Example select element not found!');
+            return;
+        }
         
-        exampleMetadata.forEach(example => {
+        console.log('Populating dropdown with', exampleMetadata.length, 'examples');
+        console.log('Select element found:', select);
+        console.log('Current innerHTML before clear:', select.innerHTML);
+        
+        // Clear and repopulate
+        select.innerHTML = '';
+        
+        // Add default option
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Select an example...';
+        select.appendChild(defaultOption);
+        console.log('Added default option');
+        
+        // Add example options
+        exampleMetadata.forEach((example, index) => {
             const option = document.createElement('option');
             option.value = example.id;
             option.textContent = example.title;
             option.title = example.description;
             select.appendChild(option);
+            console.log(`Added option ${index + 1}:`, example.id, example.title);
         });
         
-        console.log('Examples loaded successfully');
+        console.log('Final innerHTML:', select.innerHTML);
+        console.log('Total options in select:', select.options.length);
+        
+        // Add event listener to use preloaded examples
+        select.addEventListener('change', (e) => {
+            const exampleId = e.target.value;
+            if (!exampleId) return;
+            
+            console.log('Selecting example:', exampleId);
+            
+            // Use preloaded content
+            const content = exampleContents[exampleId];
+            if (content) {
+                document.getElementById('tptp-input').value = content;
+                console.log('Successfully set example:', exampleId);
+            } else {
+                console.error('Example content not found:', exampleId);
+            }
+        });
+        
+        console.log('Example dropdown populated successfully');
     } catch (error) {
         console.error('Failed to load examples:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        // Still make the prover functional even if examples fail to load
+        const select = document.getElementById('example-select');
+        if (select) {
+            select.innerHTML = '<option value="">Examples unavailable (error)</option>';
+        } else {
+            console.error('Select element not found even in error handler');
+        }
     }
+    console.log('loadExamples: Function completed');
 }
 
 async function initializeWasm() {
+    console.log('initializeWasm: Starting...');
     try {
+        console.log('initializeWasm: About to init WASM');
         await init();
         prover = new ProofAtlasWasm();
         console.log('WASM module loaded successfully');
         document.getElementById('prove-btn').disabled = false;
         
+        // Small delay to ensure DOM is ready
+        console.log('initializeWasm: Waiting for DOM...');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         // Load examples after WASM is ready
-        await loadExamples();
+        console.log('initializeWasm: About to call loadExamples');
+        try {
+            await loadExamples();
+            console.log('initializeWasm: loadExamples completed');
+        } catch (loadError) {
+            console.error('initializeWasm: Error loading examples:', loadError);
+            // Don't fail the entire initialization
+        }
+        
+        // Force a reflow of the select element
+        const select = document.getElementById('example-select');
+        if (select) {
+            select.style.display = 'none';
+            select.offsetHeight; // Force reflow
+            select.style.display = '';
+            console.log('Forced reflow of select element');
+        }
     } catch (error) {
         console.error('Failed to load WASM module:', error);
         showError('Failed to initialize the prover. Please refresh the page.');
     }
 }
 
+// Proof Inspector class
+class ProofInspector {
+    constructor(trace, allClauses) {
+        this.trace = trace;
+        this.allClauses = allClauses;
+        this.currentStep = 0;
+        this.processedClauses = new Set();
+        this.unprocessedClauses = new Set();
+        this.currentGiven = null;
+        
+        // Group steps by given clause
+        this.givenClauseGroups = [];
+        this.buildGivenClauseGroups();
+        
+        // Initialize with initial clauses
+        if (trace && trace.initial_clauses) {
+            trace.initial_clauses.forEach(clause => {
+                this.unprocessedClauses.add(clause.id);
+            });
+        }
+        
+        this.setupEventHandlers();
+        this.render();
+    }
+    
+    buildGivenClauseGroups() {
+        if (!this.trace || !this.trace.saturation_steps) return;
+        
+        let currentGroup = null;
+        
+        for (const step of this.trace.saturation_steps) {
+            if (step.step_type === 'given_selection') {
+                // Start a new group for this given clause
+                currentGroup = {
+                    givenClauseId: step.clause_idx,
+                    givenClause: step.clause,
+                    inferences: []
+                };
+                this.givenClauseGroups.push(currentGroup);
+            } else if (step.step_type === 'inference' && currentGroup) {
+                // Add this inference to the current group
+                currentGroup.inferences.push(step);
+            }
+        }
+    }
+    
+    setupEventHandlers() {
+        document.getElementById('step-first').addEventListener('click', () => this.goToStep(0));
+        document.getElementById('step-prev').addEventListener('click', () => this.goToStep(this.currentStep - 1));
+        document.getElementById('step-next').addEventListener('click', () => this.goToStep(this.currentStep + 1));
+        document.getElementById('step-last').addEventListener('click', () => {
+            const maxStep = this.givenClauseGroups ? this.givenClauseGroups.length - 1 : 0;
+            this.goToStep(maxStep);
+        });
+    }
+    
+    goToStep(groupNum) {
+        if (!this.givenClauseGroups) return;
+        
+        const maxStep = this.givenClauseGroups.length - 1;
+        if (groupNum < 0 || groupNum > maxStep) return;
+        
+        // Reset state and replay up to the target group
+        this.processedClauses.clear();
+        this.unprocessedClauses.clear();
+        this.currentGiven = null;
+        
+        // Add initial clauses to unprocessed
+        if (this.trace && this.trace.initial_clauses) {
+            this.trace.initial_clauses.forEach(clause => {
+                this.unprocessedClauses.add(clause.id);
+            });
+        }
+        
+        // Process all groups up to and including the current one
+        for (let i = 0; i <= groupNum; i++) {
+            const group = this.givenClauseGroups[i];
+            
+            // Move previous given to processed
+            if (this.currentGiven !== null) {
+                this.processedClauses.add(this.currentGiven);
+            }
+            
+            // Set current given clause
+            this.unprocessedClauses.delete(group.givenClauseId);
+            this.currentGiven = group.givenClauseId;
+            
+            // If this is the current group, add all its inferences to unprocessed
+            if (i === groupNum) {
+                group.inferences.forEach(inf => {
+                    this.unprocessedClauses.add(inf.clause_idx);
+                });
+            } else {
+                // For previous groups, add all inferences to unprocessed then move given to processed
+                group.inferences.forEach(inf => {
+                    this.unprocessedClauses.add(inf.clause_idx);
+                });
+                this.processedClauses.add(this.currentGiven);
+                this.currentGiven = null;
+            }
+        }
+        
+        this.currentStep = groupNum;
+        this.render();
+    }
+    
+    render() {
+        if (!this.givenClauseGroups || this.givenClauseGroups.length === 0) return;
+        
+        const maxStep = this.givenClauseGroups.length - 1;
+        const currentGroup = this.currentStep >= 0 ? this.givenClauseGroups[this.currentStep] : null;
+        
+        // Update counter
+        document.getElementById('step-counter').textContent = `Given Clause ${this.currentStep + 1} / ${maxStep + 1}`;
+        
+        // Update buttons
+        document.getElementById('step-first').disabled = this.currentStep <= 0;
+        document.getElementById('step-prev').disabled = this.currentStep <= 0;
+        document.getElementById('step-next').disabled = this.currentStep >= maxStep;
+        document.getElementById('step-last').disabled = this.currentStep >= maxStep;
+        
+        // Update step info with all inferences for this given clause
+        const stepInfo = document.getElementById('step-info');
+        if (currentGroup) {
+            let infoHtml = '';
+            
+            if (currentGroup.inferences.length === 0) {
+                infoHtml = '<em>No inferences generated from this clause</em>';
+            } else {
+                infoHtml = `<strong>${currentGroup.inferences.length} inference(s) generated:</strong><div class="inference-list">`;
+                currentGroup.inferences.forEach(inf => {
+                    // The premises already include the given clause, don't add it again
+                    const parents = inf.premises && inf.premises.length > 0 ? inf.premises.join(', ') : '';
+                    if (parents) {
+                        infoHtml += `<div class="inference-item">${inf.rule} with [${parents}] → Clause ${inf.clause_idx}</div>`;
+                    } else {
+                        infoHtml += `<div class="inference-item">${inf.rule} → Clause ${inf.clause_idx}</div>`;
+                    }
+                });
+                infoHtml += '</div>';
+            }
+            stepInfo.innerHTML = infoHtml;
+        }
+        
+        // Update clause lists
+        this.renderClauseList('processed-clauses', 'processed-count', this.processedClauses);
+        this.renderClauseList('unprocessed-clauses', 'unprocessed-count', this.unprocessedClauses);
+        
+        // Update given clause - show the actual clause being processed
+        const givenDiv = document.getElementById('given-clause');
+        if (currentGroup) {
+            const clause = this.getClauseById(currentGroup.givenClauseId);
+            if (clause) {
+                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> ${escapeHtml(clause.clause)}`;
+            } else if (currentGroup.givenClause) {
+                // Fallback to clause from the group if available
+                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> ${escapeHtml(currentGroup.givenClause)}`;
+            } else {
+                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> (clause details not available)`;
+            }
+        } else {
+            givenDiv.textContent = '(none selected)';
+        }
+    }
+    
+    renderClauseList(divId, countId, clauseIds) {
+        const div = document.getElementById(divId);
+        const count = document.getElementById(countId);
+        
+        count.textContent = clauseIds.size;
+        
+        if (clauseIds.size === 0) {
+            div.innerHTML = '<div class="clause-item">(empty)</div>';
+            return;
+        }
+        
+        const clauseArray = Array.from(clauseIds).sort((a, b) => a - b);
+        div.innerHTML = clauseArray.map(id => {
+            const clause = this.getClauseById(id);
+            if (clause) {
+                return `<div class="clause-item">[${id}] ${escapeHtml(clause.clause)}</div>`;
+            } else {
+                return `<div class="clause-item">[${id}] (not available)</div>`;
+            }
+        }).join('');
+    }
+    
+    getClauseById(id) {
+        // Look in all clauses
+        if (this.allClauses) {
+            return this.allClauses.find(c => c.id === id);
+        }
+        
+        // Fallback to trace data
+        if (this.trace) {
+            // Check initial clauses
+            const initial = this.trace.initial_clauses?.find(c => c.id === id);
+            if (initial) return initial;
+            
+            // Check saturation steps
+            const step = this.trace.saturation_steps?.find(s => s.clause_idx === id);
+            if (step) {
+                return {
+                    id: step.clause_idx,
+                    clause: step.clause,
+                    rule: step.rule,
+                    parents: step.premises || []
+                };
+            }
+        }
+        
+        return null;
+    }
+}
+
+let proofInspector = null;
+
 function showResult(result) {
     const resultSection = document.getElementById('result-section');
     const resultStatus = document.getElementById('result-status');
     const resultStats = document.getElementById('result-stats');
-    const proofContainer = document.getElementById('proof-container');
-    const proofSteps = document.getElementById('proof-steps');
     
     resultSection.classList.remove('hidden');
     
@@ -78,37 +385,66 @@ function showResult(result) {
     // Store result for view switching
     window.currentResult = result;
     
-    // Show clauses container if we have any clauses
+    // Show clauses container if we have any clauses or trace
     const clausesContainer = document.getElementById('clauses-container');
     const clauseList = document.getElementById('clause-list');
     const clausesTitle = document.getElementById('clauses-title');
+    const proofInspectorDiv = document.getElementById('proof-inspector');
     
-    if ((result.proof && result.proof.length > 0) || (result.all_clauses && result.all_clauses.length > 0)) {
+    if ((result.proof && result.proof.length > 0) || (result.all_clauses && result.all_clauses.length > 0) || result.trace) {
         clausesContainer.classList.remove('hidden');
         
-        // Create a set of proof clause IDs for quick lookup
-        const proofClauseIds = new Set((result.proof || []).map(step => step.id));
+        // Initialize proof inspector if we have trace data
+        if (result.trace) {
+            proofInspector = new ProofInspector(result.trace, result.all_clauses);
+        }
         
         // Set up radio button handlers
         const radioButtons = document.querySelectorAll('input[name="clause-view"]');
         radioButtons.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                if (e.target.value === 'proof') {
-                    clausesTitle.textContent = 'Proof';
-                    displayClauses(result.proof || [], false);
-                } else {
-                    clausesTitle.textContent = 'All Clauses';
-                    displayClauses(result.all_clauses || [], true, proofClauseIds);
-                }
-            });
+            radio.removeEventListener('change', handleClauseViewChange); // Remove old listeners
+            radio.addEventListener('change', handleClauseViewChange);
         });
         
         // Show proof by default
         document.querySelector('input[name="clause-view"][value="proof"]').checked = true;
         clausesTitle.textContent = 'Proof';
+        clauseList.classList.remove('hidden');
+        proofInspectorDiv.classList.add('hidden');
         displayClauses(result.proof || [], false);
     } else {
         clausesContainer.classList.add('hidden');
+    }
+}
+
+function handleClauseViewChange(e) {
+    const clauseList = document.getElementById('clause-list');
+    const clausesTitle = document.getElementById('clauses-title');
+    const proofInspectorDiv = document.getElementById('proof-inspector');
+    const result = window.currentResult;
+    
+    if (!result) return;
+    
+    if (e.target.value === 'proof') {
+        clausesTitle.textContent = 'Proof';
+        clauseList.classList.remove('hidden');
+        proofInspectorDiv.classList.add('hidden');
+        displayClauses(result.proof || [], false);
+    } else if (e.target.value === 'all') {
+        const proofClauseIds = new Set((result.proof || []).map(step => step.id));
+        clausesTitle.textContent = 'All Clauses';
+        clauseList.classList.remove('hidden');
+        proofInspectorDiv.classList.add('hidden');
+        displayClauses(result.all_clauses || [], true, proofClauseIds);
+    } else if (e.target.value === 'stepper') {
+        clausesTitle.textContent = 'Inspector';
+        clauseList.classList.add('hidden');
+        proofInspectorDiv.classList.remove('hidden');
+        if (proofInspector) {
+            proofInspector.render();
+        } else {
+            console.error('ProofInspector not initialized - no trace data available');
+        }
     }
 }
 
@@ -174,8 +510,8 @@ async function prove() {
             use_superposition: document.getElementById('superposition').checked
         };
         
-        // Run prover
-        const result = await prover.prove(input, options);
+        // Run prover with trace for inspector
+        const result = await prover.prove_with_trace(input, options);
         showResult(result);
         
     } catch (error) {
@@ -191,13 +527,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeWasm();
     
     document.getElementById('prove-btn').addEventListener('click', prove);
-    
-    document.getElementById('example-select').addEventListener('change', (e) => {
-        const example = EXAMPLES[e.target.value];
-        if (example) {
-            document.getElementById('tptp-input').value = example;
-        }
-    });
     
     document.getElementById('clear-btn').addEventListener('click', () => {
         document.getElementById('tptp-input').value = '';

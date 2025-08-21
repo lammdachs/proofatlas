@@ -86,8 +86,6 @@ pub struct InferenceJson {
     pub rule: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub premises: Vec<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub conclusion: Option<ClauseJson>,
 }
 
 impl From<&InferenceResult> for InferenceJson {
@@ -104,18 +102,9 @@ impl From<&InferenceResult> for InferenceJson {
         }
         .to_string();
 
-        // For GivenClauseSelection, we don't need to store the conclusion
-        // since it's redundant with the clause already stored
-        let conclusion = if inf.rule == InferenceRule::GivenClauseSelection {
-            None
-        } else {
-            Some((&inf.conclusion).into())
-        };
-
         InferenceJson {
             rule: rule_str,
             premises: inf.premises.clone(),
-            conclusion,
         }
     }
 }

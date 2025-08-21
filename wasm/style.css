@@ -131,6 +131,11 @@ main {
     cursor: not-allowed;
 }
 
+/* Utility Classes */
+.hidden {
+    display: none !important;
+}
+
 .result-section {
     margin-top: 30px;
 }
@@ -268,4 +273,118 @@ footer a:hover {
         flex-direction: column;
         width: 100%;
     }
+}
+/* Proof Inspector Styles */
+.proof-inspector {
+    margin-top: 20px;
+}
+
+.stepper-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.stepper-controls button {
+    padding: 8px 15px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.stepper-controls button:hover:not(:disabled) {
+    background: #2980b9;
+}
+
+.stepper-controls button:disabled {
+    background: #bdc3c7;
+    cursor: not-allowed;
+}
+
+#step-counter {
+    padding: 0 20px;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.step-info {
+    padding: 15px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 5px;
+    margin-bottom: 15px;
+}
+
+.inference-list {
+    margin-top: 10px;
+}
+
+.inference-item {
+    padding: 5px 0;
+    margin-left: 10px;
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.given-clause-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #e8f5e9;
+    border: 2px solid #4caf50;
+    border-radius: 5px;
+}
+
+.given-clause-section h4 {
+    margin: 0 0 10px 0;
+    color: #2e7d32;
+}
+
+.given-clause {
+    font-family: monospace;
+    font-size: 14px;
+    padding: 10px;
+    background: white;
+    border-radius: 3px;
+    min-height: 30px;
+}
+
+.clause-sets {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.clause-set {
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.clause-set h4 {
+    margin-bottom: 10px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 5px;
+}
+
+.clause-list {
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.clause-list .clause-item {
+    padding: 5px;
+    margin-bottom: 5px;
+    background: #f8f9fa;
+    border-radius: 3px;
 }

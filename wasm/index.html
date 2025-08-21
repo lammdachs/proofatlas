@@ -4,12 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ProofAtlas - Online Theorem Prover</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>ProofAtlas</h1>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
+                <img src="favicon.svg" alt="ProofAtlas" style="width: 48px; height: 48px;">
+                <h1>ProofAtlas</h1>
+            </div>
             <p>A client-side first-order theorem prover powered by WebAssembly</p>
         </header>
 
@@ -17,11 +21,7 @@
             <div class="input-section">
                 <div class="toolbar">
                     <select id="example-select">
-                        <option value="">Select an example...</option>
-                        <option value="group-identity">Group Identity</option>
-                        <option value="group-inverse">Group Inverse</option>
-                        <option value="simple-prop">Simple Propositional</option>
-                        <option value="custom">Custom Problem</option>
+                        <option value="">Loading examples...</option>
                     </select>
                     <button id="clear-btn">Clear</button>
                 </div>
@@ -63,9 +63,38 @@ fof(goal, conjecture, p => r).</textarea>
                         <label>
                             <input type="radio" name="clause-view" value="all"> All Clauses
                         </label>
+                        <label>
+                            <input type="radio" name="clause-view" value="stepper"> Inspector
+                        </label>
                     </div>
                     <h3 id="clauses-title">Proof</h3>
                     <div id="clause-list"></div>
+                    <div id="proof-inspector" class="proof-inspector hidden">
+                        <div class="stepper-controls">
+                            <button id="step-first">⏮ First</button>
+                            <button id="step-prev">◀ Previous</button>
+                            <span id="step-counter">Step 0 / 0</span>
+                            <button id="step-next">Next ▶</button>
+                            <button id="step-last">Last ⏭</button>
+                        </div>
+                        <div class="stepper-content">
+                            <div class="given-clause-section">
+                                <h4>Current Given Clause</h4>
+                                <div id="given-clause" class="given-clause"></div>
+                            </div>
+                            <div id="step-info" class="step-info"></div>
+                            <div class="clause-sets">
+                                <div class="clause-set">
+                                    <h4>Processed (<span id="processed-count">0</span>)</h4>
+                                    <div id="processed-clauses" class="clause-list"></div>
+                                </div>
+                                <div class="clause-set">
+                                    <h4>Unprocessed (<span id="unprocessed-count">0</span>)</h4>
+                                    <div id="unprocessed-clauses" class="clause-list"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>

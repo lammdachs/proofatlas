@@ -14,7 +14,7 @@ echo "Generating JS bindings..."
 # Copy files for deployment
 echo "Preparing deployment files..."
 mkdir -p dist
-cp index.html style.css app.js dist/
+cp index.html style.css app.js favicon.svg dist/
 cp -r pkg dist/
 
 # Copy examples
