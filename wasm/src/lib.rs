@@ -310,8 +310,8 @@ fn build_trace(steps: &[proofatlas::ProofStep], initial_count: usize) -> ProofTr
     let mut processed_count = 0;
     let mut unprocessed_count = initial_count;
     
-    for (i, step) in steps.iter().enumerate() {
-        if i < initial_count {
+    for step in steps.iter() {
+        if step.inference.rule == proofatlas::InferenceRule::Input {
             // Initial clause
             trace.initial_clauses.push(ProofStep {
                 id: step.clause_idx,

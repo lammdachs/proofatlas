@@ -25,7 +25,17 @@ class ProofStepper:
     
     def _build_steps(self):
         """Build the sequence of saturation steps from proof data."""
-        # Initialize with input clauses
+        # First, pre-populate clauses from final_clauses if available
+        # This ensures we have clause data even when conclusions are not included
+        if 'result' in self.data and 'final_clauses' in self.data['result']:
+            for clause in self.data['result']['final_clauses']:
+                if 'id' in clause:
+                    idx = clause['id']
+                    # Store clause without the 'id' field
+                    clause_data = {k: v for k, v in clause.items() if k != 'id'}
+                    self.clauses[idx] = clause_data
+        
+        # Initialize with input clauses (overwrite if they exist)
         for i, clause in enumerate(self.data['initial_clauses']):
             self.clauses[i] = clause
             self.unprocessed.add(i)
@@ -65,7 +75,10 @@ class ProofStepper:
                     if idx in self.unprocessed:
                         self.unprocessed.discard(idx)
                     
-                    # For GivenClauseSelection, the clause was already stored
+                    # For GivenClauseSelection, the clause should already exist
+                    if idx not in self.clauses:
+                        print(f"Warning: GivenClauseSelection for missing clause {idx}, skipping")
+                        continue
                     clause = self.clauses[idx]
                     
                     # Track this as the current given clause
@@ -85,6 +98,11 @@ class ProofStepper:
                     # Regular inference step - store the new clause
                     if 'conclusion' in step['inference'] and step['inference']['conclusion']:
                         self.clauses[idx] = step['inference']['conclusion']
+                    elif idx not in self.clauses:
+                        # If no conclusion and clause doesn't exist, create a placeholder
+                        self.clauses[idx] = {
+                            'literals': [{'polarity': True, 'atom': {'predicate': f'[Clause {idx} - conclusion not included in JSON]', 'args': []}}]
+                        }
                     
                     # The new clause goes to unprocessed
                     self.unprocessed.add(idx)
@@ -101,7 +119,7 @@ class ProofStepper:
                     self.steps.append({
                         'type': 'inference',
                         'clause_idx': idx,
-                        'clause': self.clauses[idx],
+                        'clause': self.clauses.get(idx, {'literals': []}),
                         'inference': step['inference'],
                         'processed': self.processed.copy(),
                         'unprocessed': self.unprocessed.copy(),

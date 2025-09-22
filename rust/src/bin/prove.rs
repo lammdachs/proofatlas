@@ -138,20 +138,92 @@ fn main() {
                 }
             }
         }
-        SaturationResult::Saturated(_, clauses) => {
+        SaturationResult::Saturated(proof_steps, clauses) => {
             println!("✗ SATURATED in {:.3}s", elapsed.as_secs_f64());
             println!("  No proof found - the formula may be satisfiable");
             println!("  Final clauses: {}", clauses.len());
+            
+            if verbose {
+                println!("\nProof steps (inference trace):");
+                for step in proof_steps.iter() {
+                    if !matches!(step.inference.rule, proofatlas::InferenceRule::Input) &&
+                       !matches!(step.inference.rule, proofatlas::InferenceRule::GivenClauseSelection) {
+                        println!(
+                            "  [{}] {} from {:?} => {}",
+                            step.clause_idx,
+                            match step.inference.rule {
+                                proofatlas::InferenceRule::Resolution => "Resolution",
+                                proofatlas::InferenceRule::Factoring => "Factoring",
+                                proofatlas::InferenceRule::Superposition => "Superposition",
+                                proofatlas::InferenceRule::EqualityResolution => "Equality Resolution",
+                                proofatlas::InferenceRule::EqualityFactoring => "Equality Factoring",
+                                proofatlas::InferenceRule::Demodulation => "Demodulation",
+                                _ => "Other",
+                            },
+                            step.inference.premises,
+                            step.inference.conclusion
+                        );
+                    }
+                }
+            }
         }
-        SaturationResult::ResourceLimit(_, clauses) => {
+        SaturationResult::ResourceLimit(proof_steps, clauses) => {
             println!("✗ RESOURCE LIMIT in {:.3}s", elapsed.as_secs_f64());
             println!("  Exceeded clause limit or iteration limit");
             println!("  Final clauses: {}", clauses.len());
+            
+            if verbose {
+                println!("\nProof steps (inference trace):");
+                for step in proof_steps.iter() {
+                    if !matches!(step.inference.rule, proofatlas::InferenceRule::Input) &&
+                       !matches!(step.inference.rule, proofatlas::InferenceRule::GivenClauseSelection) {
+                        println!(
+                            "  [{}] {} from {:?} => {}",
+                            step.clause_idx,
+                            match step.inference.rule {
+                                proofatlas::InferenceRule::Resolution => "Resolution",
+                                proofatlas::InferenceRule::Factoring => "Factoring",
+                                proofatlas::InferenceRule::Superposition => "Superposition",
+                                proofatlas::InferenceRule::EqualityResolution => "Equality Resolution",
+                                proofatlas::InferenceRule::EqualityFactoring => "Equality Factoring",
+                                proofatlas::InferenceRule::Demodulation => "Demodulation",
+                                _ => "Other",
+                            },
+                            step.inference.premises,
+                            step.inference.conclusion
+                        );
+                    }
+                }
+            }
         }
-        SaturationResult::Timeout(_, clauses) => {
+        SaturationResult::Timeout(proof_steps, clauses) => {
             println!("✗ TIMEOUT in {:.3}s", elapsed.as_secs_f64());
             println!("  Exceeded time limit");
             println!("  Final clauses: {}", clauses.len());
+            
+            if verbose {
+                println!("\nProof steps (inference trace):");
+                for step in proof_steps.iter() {
+                    if !matches!(step.inference.rule, proofatlas::InferenceRule::Input) &&
+                       !matches!(step.inference.rule, proofatlas::InferenceRule::GivenClauseSelection) {
+                        println!(
+                            "  [{}] {} from {:?} => {}",
+                            step.clause_idx,
+                            match step.inference.rule {
+                                proofatlas::InferenceRule::Resolution => "Resolution",
+                                proofatlas::InferenceRule::Factoring => "Factoring",
+                                proofatlas::InferenceRule::Superposition => "Superposition",
+                                proofatlas::InferenceRule::EqualityResolution => "Equality Resolution",
+                                proofatlas::InferenceRule::EqualityFactoring => "Equality Factoring",
+                                proofatlas::InferenceRule::Demodulation => "Demodulation",
+                                _ => "Other",
+                            },
+                            step.inference.premises,
+                            step.inference.conclusion
+                        );
+                    }
+                }
+            }
         }
     }
 }

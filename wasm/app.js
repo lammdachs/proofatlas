@@ -174,6 +174,7 @@ class ProofInspector {
         if (!this.trace || !this.trace.saturation_steps) return;
         
         let currentGroup = null;
+        let resolutionCount = 0;
         
         for (const step of this.trace.saturation_steps) {
             if (step.step_type === 'given_selection') {
@@ -187,8 +188,17 @@ class ProofInspector {
             } else if (step.step_type === 'inference' && currentGroup) {
                 // Add this inference to the current group
                 currentGroup.inferences.push(step);
+                
+                // Debug: count resolutions
+                if (step.rule === 'Resolution') {
+                    resolutionCount++;
+                    console.log(`Resolution #${resolutionCount}: clause ${step.clause_idx} from [${step.premises}]`);
+                }
             }
         }
+        
+        console.log(`Total Resolution steps in trace: ${resolutionCount}`);
+        console.log(`Total given clause groups: ${this.givenClauseGroups.length}`);
     }
     
     setupEventHandlers() {

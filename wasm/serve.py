@@ -4,7 +4,7 @@ import http.server
 import socketserver
 import os
 
-PORT = 8001
+PORT = 8000
 
 # Change to dist directory first
 os.chdir('dist')
