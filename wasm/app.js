@@ -517,7 +517,8 @@ async function prove() {
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
-            use_superposition: document.getElementById('superposition').checked
+            use_superposition: document.getElementById('superposition').checked,
+            literal_selection: document.getElementById('literal-selection').value
         };
         
         // Run prover with trace for inspector

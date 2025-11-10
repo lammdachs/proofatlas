@@ -11,6 +11,7 @@ pub struct ProverOptions {
     pub timeout_ms: u32,
     pub max_clauses: usize,
     pub use_superposition: bool,
+    pub literal_selection: Option<String>, // "all" or "max_weight"
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -96,14 +97,19 @@ impl ProofAtlasWasm {
             .unwrap()
             .now();
         
-        // Create saturation config
+        // Create saturation config with configurable literal selection
+        let literal_selection = match options.literal_selection.as_deref() {
+            Some("max_weight") => LiteralSelectionStrategy::SelectMaxWeight,
+            _ => LiteralSelectionStrategy::SelectAll, // Default to SelectAll
+        };
+
         let config = SaturationConfig {
             max_clauses: options.max_clauses,
             max_iterations: 10000,
             max_clause_size: 100,
             timeout: Duration::from_millis(options.timeout_ms as u64),
             use_superposition: options.use_superposition,
-            literal_selection: LiteralSelectionStrategy::SelectAll,
+            literal_selection,
             step_limit: None,
         };
         
