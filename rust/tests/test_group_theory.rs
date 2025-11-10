@@ -68,13 +68,14 @@ fn run_group_problem(
                 trace.push("".to_string());
             }
         }
-        SaturationResult::Saturated => {
+        SaturationResult::Saturated(steps, _clauses) => {
             trace.push(format!(
                 "✗ SATURATED without proof in {:.3}s",
                 elapsed.as_secs_f64()
             ));
+            trace.push(format!("Generated {} clauses", steps.len()));
         }
-        SaturationResult::ResourceLimit(steps) => {
+        SaturationResult::ResourceLimit(steps, _clauses) => {
             trace.push(format!(
                 "✗ RESOURCE LIMIT reached in {:.3}s",
                 elapsed.as_secs_f64()
@@ -94,7 +95,7 @@ fn run_group_problem(
                 trace.push("".to_string());
             }
         }
-        SaturationResult::Timeout => {
+        SaturationResult::Timeout(_steps, _clauses) => {
             trace.push(format!("✗ TIMEOUT after {:.3}s", elapsed.as_secs_f64()));
         }
     }

@@ -53,7 +53,7 @@ fn test_satisfiable_formula() {
     let result = saturate(formula, config);
 
     match result {
-        SaturationResult::Saturated => {
+        SaturationResult::Saturated(_, _) => {
             // Expected - no contradiction, formula is satisfiable
         }
         SaturationResult::Proof(_) => {

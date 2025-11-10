@@ -103,7 +103,7 @@ impl ProofAtlasWasm {
             max_clause_size: 100,
             timeout: Duration::from_millis(options.timeout_ms as u64),
             use_superposition: options.use_superposition,
-            literal_selection: LiteralSelectionStrategy::SelectMaxWeight,
+            literal_selection: LiteralSelectionStrategy::SelectAll,
             step_limit: None,
         };
         
