@@ -22,6 +22,7 @@
 !environment.json
 !tests/.data/**/*.json
 !wasm/examples/*.json
+!wasm/benchmark_problems.json
 
 # Environment files
 .env

@@ -185,6 +185,37 @@ fof(goal, conjecture, p => r).</textarea>
                         <li>Average solve time: ProofAtlas 1.15s, Vampire 0.71s</li>
                     </ul>
                 </div>
+
+                <div class="benchmark-problems">
+                    <h3>Benchmark Problem List</h3>
+                    <div class="problem-controls">
+                        <label>
+                            Filter by category:
+                            <select id="category-filter">
+                                <option value="all">All Categories</option>
+                                <option value="Unit Equalities">Unit Equalities</option>
+                                <option value="CNF Without Equality">CNF Without Equality</option>
+                                <option value="CNF With Equality">CNF With Equality</option>
+                            </select>
+                        </label>
+                        <span id="problem-count">Loading problems...</span>
+                    </div>
+                    <div class="problems-table-container">
+                        <table class="problems-table">
+                            <thead>
+                                <tr>
+                                    <th>Problem</th>
+                                    <th>Domain</th>
+                                    <th>Category</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="problems-tbody">
+                                <tr><td colspan="4">Loading problems...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </main>
         </div>

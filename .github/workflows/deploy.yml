@@ -43,7 +43,7 @@ jobs:
         working-directory: ./wasm
         run: |
           mkdir -p dist
-          cp index.html docs.html style.css docs-style.css app.js favicon.svg dist/
+          cp index.html docs.html style.css docs-style.css app.js favicon.svg benchmark_problems.json dist/
           cp -r pkg dist/
           cp -r examples dist/
 

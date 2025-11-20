@@ -1,0 +1,1062 @@
+{
+  "problems": [
+    {
+      "name": "GRP012-4",
+      "file": "GRP/GRP012-4.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP012-4.p"
+    },
+    {
+      "name": "BOO014-10",
+      "file": "BOO/BOO014-10.p",
+      "domain": "BOO",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=BOO&File=BOO014-10.p"
+    },
+    {
+      "name": "GRP609-1",
+      "file": "GRP/GRP609-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP609-1.p"
+    },
+    {
+      "name": "GRP547-1",
+      "file": "GRP/GRP547-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP547-1.p"
+    },
+    {
+      "name": "GRP503-1",
+      "file": "GRP/GRP503-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP503-1.p"
+    },
+    {
+      "name": "GRP168-2",
+      "file": "GRP/GRP168-2.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP168-2.p"
+    },
+    {
+      "name": "CSR044-10",
+      "file": "CSR/CSR044-10.p",
+      "domain": "CSR",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=CSR&File=CSR044-10.p"
+    },
+    {
+      "name": "SWV234-10",
+      "file": "SWV/SWV234-10.p",
+      "domain": "SWV",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV234-10.p"
+    },
+    {
+      "name": "COL063-4",
+      "file": "COL/COL063-4.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL063-4.p"
+    },
+    {
+      "name": "LCL132-1",
+      "file": "LCL/LCL132-1.p",
+      "domain": "LCL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL132-1.p"
+    },
+    {
+      "name": "BOO025-1",
+      "file": "BOO/BOO025-1.p",
+      "domain": "BOO",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=BOO&File=BOO025-1.p"
+    },
+    {
+      "name": "BOO021-1",
+      "file": "BOO/BOO021-1.p",
+      "domain": "BOO",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=BOO&File=BOO021-1.p"
+    },
+    {
+      "name": "COL064-9",
+      "file": "COL/COL064-9.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL064-9.p"
+    },
+    {
+      "name": "GRP493-1",
+      "file": "GRP/GRP493-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP493-1.p"
+    },
+    {
+      "name": "GRP522-1",
+      "file": "GRP/GRP522-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP522-1.p"
+    },
+    {
+      "name": "REL044-1",
+      "file": "REL/REL044-1.p",
+      "domain": "REL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=REL&File=REL044-1.p"
+    },
+    {
+      "name": "BOO015-10",
+      "file": "BOO/BOO015-10.p",
+      "domain": "BOO",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=BOO&File=BOO015-10.p"
+    },
+    {
+      "name": "GRP453-1",
+      "file": "GRP/GRP453-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP453-1.p"
+    },
+    {
+      "name": "LCL113-2",
+      "file": "LCL/LCL113-2.p",
+      "domain": "LCL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL113-2.p"
+    },
+    {
+      "name": "GRP497-1",
+      "file": "GRP/GRP497-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP497-1.p"
+    },
+    {
+      "name": "LCL400-10",
+      "file": "LCL/LCL400-10.p",
+      "domain": "LCL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL400-10.p"
+    },
+    {
+      "name": "GRP615-1",
+      "file": "GRP/GRP615-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP615-1.p"
+    },
+    {
+      "name": "ALG241-1",
+      "file": "ALG/ALG241-1.p",
+      "domain": "ALG",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ALG&File=ALG241-1.p"
+    },
+    {
+      "name": "GRP184-2",
+      "file": "GRP/GRP184-2.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP184-2.p"
+    },
+    {
+      "name": "LCL133-1",
+      "file": "LCL/LCL133-1.p",
+      "domain": "LCL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL133-1.p"
+    },
+    {
+      "name": "GRP769-1",
+      "file": "GRP/GRP769-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP769-1.p"
+    },
+    {
+      "name": "GRP182-2",
+      "file": "GRP/GRP182-2.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP182-2.p"
+    },
+    {
+      "name": "GRP486-1",
+      "file": "GRP/GRP486-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP486-1.p"
+    },
+    {
+      "name": "GRP754-1",
+      "file": "GRP/GRP754-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP754-1.p"
+    },
+    {
+      "name": "COL064-7",
+      "file": "COL/COL064-7.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL064-7.p"
+    },
+    {
+      "name": "LAT140-1",
+      "file": "LAT/LAT140-1.p",
+      "domain": "LAT",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT140-1.p"
+    },
+    {
+      "name": "COL084-1",
+      "file": "COL/COL084-1.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL084-1.p"
+    },
+    {
+      "name": "LAT027-1",
+      "file": "LAT/LAT027-1.p",
+      "domain": "LAT",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT027-1.p"
+    },
+    {
+      "name": "KLE090-10",
+      "file": "KLE/KLE090-10.p",
+      "domain": "KLE",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=KLE&File=KLE090-10.p"
+    },
+    {
+      "name": "GRP587-1",
+      "file": "GRP/GRP587-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP587-1.p"
+    },
+    {
+      "name": "COL003-1",
+      "file": "COL/COL003-1.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL003-1.p"
+    },
+    {
+      "name": "MVA010-1",
+      "file": "MVA/MVA010-1.p",
+      "domain": "MVA",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=MVA&File=MVA010-1.p"
+    },
+    {
+      "name": "ROB009-1",
+      "file": "ROB/ROB009-1.p",
+      "domain": "ROB",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ROB&File=ROB009-1.p"
+    },
+    {
+      "name": "GRP148-1",
+      "file": "GRP/GRP148-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP148-1.p"
+    },
+    {
+      "name": "LAT097-1",
+      "file": "LAT/LAT097-1.p",
+      "domain": "LAT",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT097-1.p"
+    },
+    {
+      "name": "COL057-1",
+      "file": "COL/COL057-1.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL057-1.p"
+    },
+    {
+      "name": "SYN615-10",
+      "file": "SYN/SYN615-10.p",
+      "domain": "SYN",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN615-10.p"
+    },
+    {
+      "name": "GRP666-5",
+      "file": "GRP/GRP666-5.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP666-5.p"
+    },
+    {
+      "name": "LAT034-1",
+      "file": "LAT/LAT034-1.p",
+      "domain": "LAT",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT034-1.p"
+    },
+    {
+      "name": "GRP439-1",
+      "file": "GRP/GRP439-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP439-1.p"
+    },
+    {
+      "name": "COL042-8",
+      "file": "COL/COL042-8.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL042-8.p"
+    },
+    {
+      "name": "COL003-15",
+      "file": "COL/COL003-15.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL003-15.p"
+    },
+    {
+      "name": "GRP512-1",
+      "file": "GRP/GRP512-1.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP512-1.p"
+    },
+    {
+      "name": "GRP664-11",
+      "file": "GRP/GRP664-11.p",
+      "domain": "GRP",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP664-11.p"
+    },
+    {
+      "name": "COL058-2",
+      "file": "COL/COL058-2.p",
+      "domain": "COL",
+      "category": "Unit Equalities",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=COL&File=COL058-2.p"
+    },
+    {
+      "name": "SYN462-1",
+      "file": "SYN/SYN462-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN462-1.p"
+    },
+    {
+      "name": "FLD089-3",
+      "file": "FLD/FLD089-3.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD089-3.p"
+    },
+    {
+      "name": "FLD005-1",
+      "file": "FLD/FLD005-1.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD005-1.p"
+    },
+    {
+      "name": "SYN724-1",
+      "file": "SYN/SYN724-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN724-1.p"
+    },
+    {
+      "name": "LCL382-1",
+      "file": "LCL/LCL382-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL382-1.p"
+    },
+    {
+      "name": "LCL202-1",
+      "file": "LCL/LCL202-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL202-1.p"
+    },
+    {
+      "name": "LCL119-1",
+      "file": "LCL/LCL119-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL119-1.p"
+    },
+    {
+      "name": "GRP128-3.005",
+      "file": "GRP/GRP128-3.005.p",
+      "domain": "GRP",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP128-3.005.p"
+    },
+    {
+      "name": "SYN711-1",
+      "file": "SYN/SYN711-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN711-1.p"
+    },
+    {
+      "name": "FLD070-3",
+      "file": "FLD/FLD070-3.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD070-3.p"
+    },
+    {
+      "name": "SYN588-1",
+      "file": "SYN/SYN588-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN588-1.p"
+    },
+    {
+      "name": "SYN719-1",
+      "file": "SYN/SYN719-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN719-1.p"
+    },
+    {
+      "name": "SYN160-1",
+      "file": "SYN/SYN160-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN160-1.p"
+    },
+    {
+      "name": "FLD059-4",
+      "file": "FLD/FLD059-4.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD059-4.p"
+    },
+    {
+      "name": "SYN253-1",
+      "file": "SYN/SYN253-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN253-1.p"
+    },
+    {
+      "name": "SWV279-2",
+      "file": "SWV/SWV279-2.p",
+      "domain": "SWV",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV279-2.p"
+    },
+    {
+      "name": "FLD010-5",
+      "file": "FLD/FLD010-5.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD010-5.p"
+    },
+    {
+      "name": "FLD009-1",
+      "file": "FLD/FLD009-1.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD009-1.p"
+    },
+    {
+      "name": "FLD064-1",
+      "file": "FLD/FLD064-1.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD064-1.p"
+    },
+    {
+      "name": "LCL109-1",
+      "file": "LCL/LCL109-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL109-1.p"
+    },
+    {
+      "name": "LCL173-1",
+      "file": "LCL/LCL173-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL173-1.p"
+    },
+    {
+      "name": "SYN067-1",
+      "file": "SYN/SYN067-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN067-1.p"
+    },
+    {
+      "name": "SYN276-1",
+      "file": "SYN/SYN276-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN276-1.p"
+    },
+    {
+      "name": "FLD006-3",
+      "file": "FLD/FLD006-3.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD006-3.p"
+    },
+    {
+      "name": "SYN193-1",
+      "file": "SYN/SYN193-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN193-1.p"
+    },
+    {
+      "name": "LCL074-1",
+      "file": "LCL/LCL074-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL074-1.p"
+    },
+    {
+      "name": "SYN669-1",
+      "file": "SYN/SYN669-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN669-1.p"
+    },
+    {
+      "name": "SYN485-1",
+      "file": "SYN/SYN485-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN485-1.p"
+    },
+    {
+      "name": "SYN639-1",
+      "file": "SYN/SYN639-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN639-1.p"
+    },
+    {
+      "name": "SWV270-2",
+      "file": "SWV/SWV270-2.p",
+      "domain": "SWV",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV270-2.p"
+    },
+    {
+      "name": "LCL113-1",
+      "file": "LCL/LCL113-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL113-1.p"
+    },
+    {
+      "name": "SWV419-1.035",
+      "file": "SWV/SWV419-1.035.p",
+      "domain": "SWV",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV419-1.035.p"
+    },
+    {
+      "name": "SYN250-1",
+      "file": "SYN/SYN250-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN250-1.p"
+    },
+    {
+      "name": "LCL388-1",
+      "file": "LCL/LCL388-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL388-1.p"
+    },
+    {
+      "name": "SYO691-1.002",
+      "file": "SYO/SYO691-1.002.p",
+      "domain": "SYO",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYO&File=SYO691-1.002.p"
+    },
+    {
+      "name": "ANA038-2",
+      "file": "ANA/ANA038-2.p",
+      "domain": "ANA",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ANA&File=ANA038-2.p"
+    },
+    {
+      "name": "SYN866-1",
+      "file": "SYN/SYN866-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN866-1.p"
+    },
+    {
+      "name": "SYO685-1",
+      "file": "SYO/SYO685-1.p",
+      "domain": "SYO",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYO&File=SYO685-1.p"
+    },
+    {
+      "name": "LAT261-2",
+      "file": "LAT/LAT261-2.p",
+      "domain": "LAT",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT261-2.p"
+    },
+    {
+      "name": "SYN632-1",
+      "file": "SYN/SYN632-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN632-1.p"
+    },
+    {
+      "name": "SWV280-2",
+      "file": "SWV/SWV280-2.p",
+      "domain": "SWV",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV280-2.p"
+    },
+    {
+      "name": "PLA005-1",
+      "file": "PLA/PLA005-1.p",
+      "domain": "PLA",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=PLA&File=PLA005-1.p"
+    },
+    {
+      "name": "KRS003-1",
+      "file": "KRS/KRS003-1.p",
+      "domain": "KRS",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=KRS&File=KRS003-1.p"
+    },
+    {
+      "name": "LCL102-1",
+      "file": "LCL/LCL102-1.p",
+      "domain": "LCL",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL102-1.p"
+    },
+    {
+      "name": "SYN879-1",
+      "file": "SYN/SYN879-1.p",
+      "domain": "SYN",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SYN&File=SYN879-1.p"
+    },
+    {
+      "name": "NUM284-1.014",
+      "file": "NUM/NUM284-1.014.p",
+      "domain": "NUM",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=NUM&File=NUM284-1.014.p"
+    },
+    {
+      "name": "FLD063-1",
+      "file": "FLD/FLD063-1.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD063-1.p"
+    },
+    {
+      "name": "PUZ039-1",
+      "file": "PUZ/PUZ039-1.p",
+      "domain": "PUZ",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=PUZ&File=PUZ039-1.p"
+    },
+    {
+      "name": "FLD067-2",
+      "file": "FLD/FLD067-2.p",
+      "domain": "FLD",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=FLD&File=FLD067-2.p"
+    },
+    {
+      "name": "PUZ003-1",
+      "file": "PUZ/PUZ003-1.p",
+      "domain": "PUZ",
+      "category": "CNF Without Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=PUZ&File=PUZ003-1.p"
+    },
+    {
+      "name": "SWC347-1",
+      "file": "SWC/SWC347-1.p",
+      "domain": "SWC",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWC&File=SWC347-1.p"
+    },
+    {
+      "name": "GEO053-2",
+      "file": "GEO/GEO053-2.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO053-2.p"
+    },
+    {
+      "name": "ALG428-1",
+      "file": "ALG/ALG428-1.p",
+      "domain": "ALG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ALG&File=ALG428-1.p"
+    },
+    {
+      "name": "SWV624-1",
+      "file": "SWV/SWV624-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV624-1.p"
+    },
+    {
+      "name": "LAT220-1",
+      "file": "LAT/LAT220-1.p",
+      "domain": "LAT",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT220-1.p"
+    },
+    {
+      "name": "HWV059-1",
+      "file": "HWV/HWV059-1.p",
+      "domain": "HWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HWV&File=HWV059-1.p"
+    },
+    {
+      "name": "HWV003-2",
+      "file": "HWV/HWV003-2.p",
+      "domain": "HWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HWV&File=HWV003-2.p"
+    },
+    {
+      "name": "GRP035-3",
+      "file": "GRP/GRP035-3.p",
+      "domain": "GRP",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP035-3.p"
+    },
+    {
+      "name": "SWV603-1",
+      "file": "SWV/SWV603-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV603-1.p"
+    },
+    {
+      "name": "GEO032-3",
+      "file": "GEO/GEO032-3.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO032-3.p"
+    },
+    {
+      "name": "SWV293-1",
+      "file": "SWV/SWV293-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV293-1.p"
+    },
+    {
+      "name": "SWV620-1",
+      "file": "SWV/SWV620-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV620-1.p"
+    },
+    {
+      "name": "SET787-1",
+      "file": "SET/SET787-1.p",
+      "domain": "SET",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SET&File=SET787-1.p"
+    },
+    {
+      "name": "GEO002-2",
+      "file": "GEO/GEO002-2.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO002-2.p"
+    },
+    {
+      "name": "SWC114-1",
+      "file": "SWC/SWC114-1.p",
+      "domain": "SWC",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWC&File=SWC114-1.p"
+    },
+    {
+      "name": "RNG007-1",
+      "file": "RNG/RNG007-1.p",
+      "domain": "RNG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=RNG&File=RNG007-1.p"
+    },
+    {
+      "name": "ANA013-1",
+      "file": "ANA/ANA013-1.p",
+      "domain": "ANA",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ANA&File=ANA013-1.p"
+    },
+    {
+      "name": "ANA007-1",
+      "file": "ANA/ANA007-1.p",
+      "domain": "ANA",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ANA&File=ANA007-1.p"
+    },
+    {
+      "name": "GEO013-1",
+      "file": "GEO/GEO013-1.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO013-1.p"
+    },
+    {
+      "name": "HEN010-3",
+      "file": "HEN/HEN010-3.p",
+      "domain": "HEN",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HEN&File=HEN010-3.p"
+    },
+    {
+      "name": "HWV023-2",
+      "file": "HWV/HWV023-2.p",
+      "domain": "HWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HWV&File=HWV023-2.p"
+    },
+    {
+      "name": "SET159-6",
+      "file": "SET/SET159-6.p",
+      "domain": "SET",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SET&File=SET159-6.p"
+    },
+    {
+      "name": "SWC168-1",
+      "file": "SWC/SWC168-1.p",
+      "domain": "SWC",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWC&File=SWC168-1.p"
+    },
+    {
+      "name": "ALG434-1",
+      "file": "ALG/ALG434-1.p",
+      "domain": "ALG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ALG&File=ALG434-1.p"
+    },
+    {
+      "name": "SET860-1",
+      "file": "SET/SET860-1.p",
+      "domain": "SET",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SET&File=SET860-1.p"
+    },
+    {
+      "name": "GRP373-1",
+      "file": "GRP/GRP373-1.p",
+      "domain": "GRP",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP373-1.p"
+    },
+    {
+      "name": "SWV539-1.010",
+      "file": "SWV/SWV539-1.010.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV539-1.010.p"
+    },
+    {
+      "name": "SWC389-1",
+      "file": "SWC/SWC389-1.p",
+      "domain": "SWC",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWC&File=SWC389-1.p"
+    },
+    {
+      "name": "SWV359-2",
+      "file": "SWV/SWV359-2.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV359-2.p"
+    },
+    {
+      "name": "SET566-6",
+      "file": "SET/SET566-6.p",
+      "domain": "SET",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SET&File=SET566-6.p"
+    },
+    {
+      "name": "RNG002-1",
+      "file": "RNG/RNG002-1.p",
+      "domain": "RNG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=RNG&File=RNG002-1.p"
+    },
+    {
+      "name": "HEN011-3",
+      "file": "HEN/HEN011-3.p",
+      "domain": "HEN",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HEN&File=HEN011-3.p"
+    },
+    {
+      "name": "SCT080-1",
+      "file": "SCT/SCT080-1.p",
+      "domain": "SCT",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SCT&File=SCT080-1.p"
+    },
+    {
+      "name": "SWC109-1",
+      "file": "SWC/SWC109-1.p",
+      "domain": "SWC",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWC&File=SWC109-1.p"
+    },
+    {
+      "name": "LAT233-1",
+      "file": "LAT/LAT233-1.p",
+      "domain": "LAT",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT233-1.p"
+    },
+    {
+      "name": "SWV904-1",
+      "file": "SWV/SWV904-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV904-1.p"
+    },
+    {
+      "name": "ALG352-1",
+      "file": "ALG/ALG352-1.p",
+      "domain": "ALG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=ALG&File=ALG352-1.p"
+    },
+    {
+      "name": "SWV695-1",
+      "file": "SWV/SWV695-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV695-1.p"
+    },
+    {
+      "name": "SWV889-1",
+      "file": "SWV/SWV889-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV889-1.p"
+    },
+    {
+      "name": "GRP212-1",
+      "file": "GRP/GRP212-1.p",
+      "domain": "GRP",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP212-1.p"
+    },
+    {
+      "name": "SWV350-1",
+      "file": "SWV/SWV350-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV350-1.p"
+    },
+    {
+      "name": "RNG008-5",
+      "file": "RNG/RNG008-5.p",
+      "domain": "RNG",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=RNG&File=RNG008-5.p"
+    },
+    {
+      "name": "LCL440-1",
+      "file": "LCL/LCL440-1.p",
+      "domain": "LCL",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL440-1.p"
+    },
+    {
+      "name": "LAT232-1",
+      "file": "LAT/LAT232-1.p",
+      "domain": "LAT",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LAT&File=LAT232-1.p"
+    },
+    {
+      "name": "GRP103-1",
+      "file": "GRP/GRP103-1.p",
+      "domain": "GRP",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GRP&File=GRP103-1.p"
+    },
+    {
+      "name": "HEN008-1",
+      "file": "HEN/HEN008-1.p",
+      "domain": "HEN",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=HEN&File=HEN008-1.p"
+    },
+    {
+      "name": "SWV714-1",
+      "file": "SWV/SWV714-1.p",
+      "domain": "SWV",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=SWV&File=SWV714-1.p"
+    },
+    {
+      "name": "LCL351-3",
+      "file": "LCL/LCL351-3.p",
+      "domain": "LCL",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=LCL&File=LCL351-3.p"
+    },
+    {
+      "name": "GEO032-2",
+      "file": "GEO/GEO032-2.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO032-2.p"
+    },
+    {
+      "name": "GEO011-4",
+      "file": "GEO/GEO011-4.p",
+      "domain": "GEO",
+      "category": "CNF With Equality",
+      "tptp_url": "https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=GEO&File=GEO011-4.p"
+    }
+  ],
+  "summary": {
+    "total": 150,
+    "categories": [
+      "Unit Equalities",
+      "CNF Without Equality",
+      "CNF With Equality"
+    ]
+  }
+}

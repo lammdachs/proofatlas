@@ -610,4 +610,107 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('load-url-btn').click();
         }
     });
+
+    // Load benchmark problems
+    let benchmarkProblems = [];
+
+    async function loadBenchmarkProblems() {
+        try {
+            const response = await fetch('benchmark_problems.json');
+            const data = await response.json();
+            benchmarkProblems = data.problems;
+            displayBenchmarkProblems();
+        } catch (error) {
+            console.error('Error loading benchmark problems:', error);
+            document.getElementById('problems-tbody').innerHTML =
+                '<tr><td colspan="4">Error loading problems</td></tr>';
+        }
+    }
+
+    function displayBenchmarkProblems(filterCategory = 'all') {
+        const tbody = document.getElementById('problems-tbody');
+        const filtered = filterCategory === 'all'
+            ? benchmarkProblems
+            : benchmarkProblems.filter(p => p.category === filterCategory);
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No problems found</td></tr>';
+            document.getElementById('problem-count').textContent = '0 problems';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(problem => `
+            <tr>
+                <td><strong>${problem.name}</strong></td>
+                <td>${problem.domain}</td>
+                <td>${problem.category}</td>
+                <td>
+                    <button class="load-problem-btn" data-url="${problem.tptp_url}">
+                        Load in Prover
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        document.getElementById('problem-count').textContent =
+            `${filtered.length} problem${filtered.length !== 1 ? 's' : ''}`;
+
+        // Add click handlers to load buttons
+        document.querySelectorAll('.load-problem-btn').forEach(button => {
+            button.addEventListener('click', async () => {
+                const url = button.dataset.url;
+                await loadProblemFromUrl(url);
+            });
+        });
+    }
+
+    async function loadProblemFromUrl(tptpUrl) {
+        try {
+            // Use CORS proxy for TPTP.org
+            const url = `https://corsproxy.io/?${encodeURIComponent(tptpUrl)}`;
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch: ${response.status}`);
+            }
+            const html = await response.text();
+
+            // Parse HTML to extract TPTP content from <pre> tag
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const preTag = doc.querySelector('pre');
+
+            if (preTag) {
+                const content = preTag.textContent;
+
+                // Switch to Prover tab
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                document.querySelector('[data-tab="prover"]').classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.getElementById('prover-tab').classList.add('active');
+
+                // Load problem into textarea
+                document.getElementById('tptp-input').value = content;
+                document.getElementById('example-select').value = '';
+
+                // Scroll to top
+                window.scrollTo(0, 0);
+
+                console.log('Loaded problem from benchmark list');
+            } else {
+                throw new Error('Could not find problem content in page');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert(`Error loading problem: ${error.message}`);
+        }
+    }
+
+    // Category filter
+    document.getElementById('category-filter').addEventListener('change', (e) => {
+        displayBenchmarkProblems(e.target.value);
+    });
+
+    // Load problems on page load
+    loadBenchmarkProblems();
 });

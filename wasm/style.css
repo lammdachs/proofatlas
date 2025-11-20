@@ -630,6 +630,98 @@ footer a:hover {
     color: #555;
 }
 
+/* Benchmark Problem List */
+.benchmark-problems {
+    margin-top: 30px;
+}
+
+.benchmark-problems h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.problem-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.problem-controls label {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.problem-controls select {
+    margin-left: 10px;
+    padding: 5px 10px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+#problem-count {
+    font-size: 14px;
+    color: #7f8c8d;
+    font-weight: 500;
+}
+
+.problems-table-container {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+.problems-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.problems-table thead {
+    background: #34495e;
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.problems-table th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #2c3e50;
+}
+
+.problems-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #dee2e6;
+    font-size: 14px;
+}
+
+.problems-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.load-problem-btn {
+    padding: 6px 12px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.load-problem-btn:hover {
+    background: #2980b9;
+}
+
 @media (max-width: 768px) {
     .benchmark-stats {
         flex-direction: column;
@@ -646,5 +738,20 @@ footer a:hover {
     .benchmark-table th,
     .benchmark-table td {
         padding: 8px;
+    }
+
+    .problems-table {
+        font-size: 12px;
+    }
+
+    .problems-table th,
+    .problems-table td {
+        padding: 8px;
+    }
+
+    .problem-controls {
+        flex-direction: column;
+        gap: 10px;
+        align-items: flex-start;
     }
 }
