@@ -551,4 +551,63 @@ document.addEventListener('DOMContentLoaded', () => {
             prove();
         }
     });
+
+    // Tab switching
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', () => {
+            const tabName = button.dataset.tab;
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+        });
+    });
+
+    // Load from TPTP URL
+    document.getElementById('load-url-btn').addEventListener('click', async () => {
+        const urlInput = document.getElementById('tptp-url');
+        let url = urlInput.value.trim();
+        if (!url) {
+            alert('Please enter a TPTP URL');
+            return;
+        }
+        try {
+            // Try to use CORS proxy if available, otherwise direct fetch
+            const useCorsProxy = url.includes('tptp.org');
+            if (useCorsProxy) {
+                // Use a CORS proxy for TPTP.org
+                url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            }
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch: ${response.status}`);
+            }
+            const html = await response.text();
+
+            // Parse HTML to extract TPTP content from <pre> tag
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const preTag = doc.querySelector('pre');
+
+            if (preTag) {
+                const content = preTag.textContent;
+                document.getElementById('tptp-input').value = content;
+                document.getElementById('example-select').value = '';
+                urlInput.value = '';
+                console.log('Loaded problem from TPTP');
+            } else {
+                throw new Error('Could not find problem content in page');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert(`Error loading problem: ${error.message}\n\nWorkaround: Copy the problem text directly from the TPTP page.`);
+        }
+    });
+
+    document.getElementById('tptp-url').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('load-url-btn').click();
+        }
+    });
 });
