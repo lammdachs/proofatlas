@@ -206,13 +206,17 @@
 
                     <h3>Impact on Performance</h3>
                     <p>
-                        Different selection strategies can dramatically affect proof search efficiency:
+                        The choice of literal selection strategy significantly affects which inferences are performed:
                     </p>
                     <ul>
-                        <li><strong>Select All</strong>: Most inferences, but potentially redundant</li>
-                        <li><strong>Select Max Weight</strong>: Balanced approach, good for general problems</li>
-                        <li><strong>Select Largest Negative</strong>: Often best for problems with many negative literals</li>
+                        <li><strong>Select All</strong>: Generates the most inferences, exploring the search space broadly</li>
+                        <li><strong>Select Max Weight</strong>: Focuses on "heavy" literals, reducing the number of inferences</li>
+                        <li><strong>Select Largest Negative</strong>: Prioritizes negative literals when available</li>
                     </ul>
+                    <p class="note">
+                        <strong>Note:</strong> No single strategy is universally best. Performance varies significantly
+                        depending on problem structure, and the optimal choice is often problem-specific.
+                    </p>
                 </section>
 
                 <section id="simplification">
