@@ -100,6 +100,7 @@ impl ProofAtlasWasm {
         // Create saturation config with configurable literal selection
         let literal_selection = match options.literal_selection.as_deref() {
             Some("max_weight") => LiteralSelectionStrategy::SelectMaxWeight,
+            Some("largest_negative") => LiteralSelectionStrategy::SelectLargestNegative,
             _ => LiteralSelectionStrategy::SelectAll, // Default to SelectAll
         };
 

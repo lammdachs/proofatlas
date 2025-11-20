@@ -51,6 +51,10 @@ fn main() {
             "Select Max Weight",
             LiteralSelectionStrategy::SelectMaxWeight,
         ),
+        (
+            "Select Largest Negative",
+            LiteralSelectionStrategy::SelectLargestNegative,
+        ),
     ];
 
     for (name, strategy) in strategies {

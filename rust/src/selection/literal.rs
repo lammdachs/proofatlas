@@ -114,6 +114,90 @@ impl LiteralSelector for SelectMaxWeight {
     }
 }
 
+/// Select the largest negative literal (by weight)
+///
+/// This strategy selects the negative literal with the maximum symbol count.
+/// If there are no negative literals (i.e., the clause is purely positive),
+/// all literals are selected to maintain completeness.
+///
+/// This is a common and effective strategy because:
+/// - It restricts the search space by selecting fewer literals
+/// - Negative literals are often good candidates for resolution
+/// - Larger literals tend to contain more information about the problem
+/// - Maintains completeness through the "all positive" fallback rule
+pub struct SelectLargestNegative;
+
+impl SelectLargestNegative {
+    pub fn new() -> Self {
+        SelectLargestNegative
+    }
+
+    /// Calculate the weight of a literal (predicate + argument symbols)
+    fn literal_weight(&self, literal: &Literal) -> usize {
+        // Count predicate symbol + all symbols in arguments
+        1 + literal
+            .atom
+            .args
+            .iter()
+            .map(|term| Self::term_symbol_count(term))
+            .sum::<usize>()
+    }
+
+    /// Count the number of symbols in a term
+    fn term_symbol_count(term: &Term) -> usize {
+        match term {
+            Term::Variable(_) => 1,
+            Term::Constant(_) => 1,
+            Term::Function(_, args) => {
+                1 + args
+                    .iter()
+                    .map(|t| Self::term_symbol_count(t))
+                    .sum::<usize>()
+            }
+        }
+    }
+}
+
+impl LiteralSelector for SelectLargestNegative {
+    fn select(&self, clause: &Clause) -> HashSet<usize> {
+        if clause.literals.is_empty() {
+            return HashSet::new();
+        }
+
+        // Find all negative literals
+        let negative_literals: Vec<(usize, usize)> = clause
+            .literals
+            .iter()
+            .enumerate()
+            .filter(|(_, lit)| !lit.polarity)
+            .map(|(idx, lit)| (idx, self.literal_weight(lit)))
+            .collect();
+
+        // If there are no negative literals, select all (for completeness)
+        if negative_literals.is_empty() {
+            return (0..clause.literals.len()).collect();
+        }
+
+        // Find the maximum weight among negative literals
+        let max_weight = negative_literals
+            .iter()
+            .map(|(_, weight)| weight)
+            .max()
+            .unwrap();
+
+        // Select all negative literals with maximum weight
+        negative_literals
+            .iter()
+            .filter(|(_, weight)| weight == max_weight)
+            .map(|(idx, _)| *idx)
+            .collect()
+    }
+
+    fn name(&self) -> &str {
+        "SelectLargestNegative"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +248,206 @@ mod tests {
         assert_eq!(selected.len(), 2);
         assert!(selected.contains(&0));
         assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_largest_negative() {
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+        let q = PredicateSymbol {
+            name: "Q".to_string(),
+            arity: 1,
+        };
+
+        let x = Term::Variable(Variable {
+            name: "X".to_string(),
+        });
+        let a = Term::Constant(Constant {
+            name: "a".to_string(),
+        });
+        let f = FunctionSymbol {
+            name: "f".to_string(),
+            arity: 1,
+        };
+        let fa = Term::Function(f, vec![a.clone()]);
+
+        // ~P(X) ∨ ~Q(f(a)) ∨ P(a)
+        // Should select ~Q(f(a)) because it's the largest negative literal
+        let clause = Clause::new(vec![
+            Literal::negative(Atom {
+                predicate: p.clone(),
+                args: vec![x.clone()],
+            }),
+            Literal::negative(Atom {
+                predicate: q.clone(),
+                args: vec![fa.clone()],
+            }),
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            }),
+        ]);
+
+        let selector = SelectLargestNegative::new();
+        let selected = selector.select(&clause);
+
+        // Should select only ~Q(f(a)) (index 1) as it's the largest negative
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_largest_negative_all_positive() {
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+
+        let x = Term::Variable(Variable {
+            name: "X".to_string(),
+        });
+        let a = Term::Constant(Constant {
+            name: "a".to_string(),
+        });
+
+        // P(X) ∨ P(a) - all positive, should select all for completeness
+        let clause = Clause::new(vec![
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![x.clone()],
+            }),
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            }),
+        ]);
+
+        let selector = SelectLargestNegative::new();
+        let selected = selector.select(&clause);
+
+        // Should select all literals (completeness for all-positive clauses)
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&0));
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_largest_negative_equal_weight_negatives() {
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+        let q = PredicateSymbol {
+            name: "Q".to_string(),
+            arity: 1,
+        };
+
+        let x = Term::Variable(Variable { name: "X".to_string() });
+        let y = Term::Variable(Variable { name: "Y".to_string() });
+        let a = Term::Constant(Constant { name: "a".to_string() });
+
+        // ~P(X) ∨ ~Q(Y) ∨ R(a) - two negatives with equal weight
+        let clause = Clause::new(vec![
+            Literal::negative(Atom {
+                predicate: p.clone(),
+                args: vec![x.clone()],
+            }),
+            Literal::negative(Atom {
+                predicate: q.clone(),
+                args: vec![y.clone()],
+            }),
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            }),
+        ]);
+
+        let selector = SelectLargestNegative::new();
+        let selected = selector.select(&clause);
+
+        // Should select both negative literals (same weight)
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&0));
+        assert!(selected.contains(&1));
+        assert!(!selected.contains(&2)); // Should NOT select positive literal
+    }
+
+    #[test]
+    fn test_select_largest_negative_subset_of_select_all() {
+        // Verify that SelectLargestNegative selects a subset of SelectAll
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+
+        let x = Term::Variable(Variable { name: "X".to_string() });
+        let a = Term::Constant(Constant { name: "a".to_string() });
+
+        // ~P(X) ∨ P(a)
+        let clause = Clause::new(vec![
+            Literal::negative(Atom {
+                predicate: p.clone(),
+                args: vec![x.clone()],
+            }),
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            }),
+        ]);
+
+        let select_all = SelectAll;
+        let select_largest_neg = SelectLargestNegative::new();
+
+        let all_selected = select_all.select(&clause);
+        let neg_selected = select_largest_neg.select(&clause);
+
+        // SelectLargestNegative should be a subset of SelectAll
+        for &idx in &neg_selected {
+            assert!(all_selected.contains(&idx));
+        }
+
+        // In this case, should select only the negative literal
+        assert_eq!(neg_selected.len(), 1);
+        assert!(neg_selected.contains(&0));
+    }
+
+    #[test]
+    fn test_select_largest_negative_unit_clause() {
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+        let a = Term::Constant(Constant { name: "a".to_string() });
+
+        // Unit positive clause: P(a)
+        let clause_pos = Clause::new(vec![
+            Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            }),
+        ]);
+
+        let selector = SelectLargestNegative::new();
+        let selected = selector.select(&clause_pos);
+
+        // Should select the only literal (all-positive rule)
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&0));
+
+        // Unit negative clause: ~P(a)
+        let clause_neg = Clause::new(vec![
+            Literal::negative(Atom {
+                predicate: p,
+                args: vec![a],
+            }),
+        ]);
+
+        let selected = selector.select(&clause_neg);
+
+        // Should select the negative literal
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&0));
     }
 }

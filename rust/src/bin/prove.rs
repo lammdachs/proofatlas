@@ -3,7 +3,7 @@
 use std::env;
 use std::time::Instant;
 
-use proofatlas::{parse_tptp_file, saturate, SaturationConfig, SaturationResult};
+use proofatlas::{parse_tptp_file, saturate, LiteralSelectionStrategy, SaturationConfig, SaturationResult};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -14,6 +14,8 @@ fn main() {
         eprintln!("  --timeout <seconds>    Set timeout (default: 60)");
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
         eprintln!("  --no-superposition     Disable superposition rule");
+        eprintln!("  --literal-selection <strategy>");
+        eprintln!("                         Literal selection: all, max_weight, largest_negative (default: all)");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
         eprintln!("  --verbose              Show detailed progress");
         std::process::exit(1);
@@ -46,6 +48,21 @@ fn main() {
             }
             "--no-superposition" => {
                 config.use_superposition = false;
+            }
+            "--literal-selection" => {
+                if i + 1 < args.len() {
+                    config.literal_selection = match args[i + 1].as_str() {
+                        "all" => LiteralSelectionStrategy::SelectAll,
+                        "max_weight" => LiteralSelectionStrategy::SelectMaxWeight,
+                        "largest_negative" => LiteralSelectionStrategy::SelectLargestNegative,
+                        _ => {
+                            eprintln!("Unknown literal selection strategy: {}", args[i + 1]);
+                            eprintln!("Valid options: all, max_weight, largest_negative");
+                            std::process::exit(1);
+                        }
+                    };
+                    i += 1;
+                }
             }
             "--include" => {
                 if i + 1 < args.len() {

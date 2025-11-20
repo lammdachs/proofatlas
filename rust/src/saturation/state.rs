@@ -8,7 +8,7 @@ use crate::inference::{
 };
 use crate::parser::orient_equalities::orient_clause_equalities;
 use crate::selection::{
-    AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll, SelectMaxWeight,
+    AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
 };
 use crate::time_compat::Instant;
 use std::collections::{HashSet, VecDeque};
@@ -31,6 +31,7 @@ pub struct SaturationConfig {
 pub enum LiteralSelectionStrategy {
     SelectAll,
     SelectMaxWeight,
+    SelectLargestNegative,
 }
 
 impl Default for SaturationConfig {
@@ -150,6 +151,7 @@ impl SaturationState {
         let literal_selector: Box<dyn LiteralSelector> = match config.literal_selection {
             LiteralSelectionStrategy::SelectAll => Box::new(SelectAll),
             LiteralSelectionStrategy::SelectMaxWeight => Box::new(SelectMaxWeight::new()),
+            LiteralSelectionStrategy::SelectLargestNegative => Box::new(SelectLargestNegative::new()),
         };
 
         SaturationState {

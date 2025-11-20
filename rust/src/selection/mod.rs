@@ -12,7 +12,8 @@
 //!
 //! Available strategies:
 //! - [`SelectAll`] - No restriction, all literals eligible (complete)
-//! - [`SelectMaxWeight`] - Only literals with maximum symbol count
+//! - [`SelectMaxWeight`] - Only literals with maximum symbol count (incomplete)
+//! - [`SelectLargestNegative`] - Largest negative literal, or all if none (complete)
 //!
 //! # Clause Selection
 //!
@@ -31,4 +32,4 @@ pub mod clause;
 pub mod literal;
 
 pub use clause::{AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, SizeBasedSelector};
-pub use literal::{LiteralSelector, SelectAll, SelectMaxWeight};
+pub use literal::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};

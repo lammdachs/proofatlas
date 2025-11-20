@@ -124,7 +124,8 @@ pub fn superposition(
                             let mut new_literals = Vec::new();
 
                             // Add C₁: literals from from_clause EXCEPT the equality l ≈ r being used
-                            for (i, lit) in from_clause.literals.iter().enumerate() {
+                            // IMPORTANT: Use renamed_from to ensure substitution applies correctly
+                            for (i, lit) in renamed_from.literals.iter().enumerate() {
                                 if i != from_idx {
                                     new_literals.push(lit.apply_substitution(&mgu));
                                 }

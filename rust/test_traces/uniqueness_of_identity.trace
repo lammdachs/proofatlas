@@ -7,22 +7,66 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.002s
-Generated 4 clauses
+✓ PROOF FOUND in 0.000s
+Generated 15 clauses
 Empty clause at index: 9
 
 === All Proof Steps ===
+[0] mult(e,X) = X
+    Rule: Input
+    Parents: []
+
+[1] mult(X,e) = X
+    Rule: Input
+    Parents: []
+
+[2] mult(inv(X),X) = e
+    Rule: Input
+    Parents: []
+
+[3] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
+    Rule: Input
+    Parents: []
+
+[4] mult(e1,X) = X
+    Rule: Input
+    Parents: []
+
+[5] ~e1 = e
+    Rule: Input
+    Parents: []
+
+[0] mult(e,X) = X
+    Rule: GivenClauseSelection
+    Parents: []
+
+[5] ~e1 = e
+    Rule: GivenClauseSelection
+    Parents: []
+
+[1] mult(X,e) = X
+    Rule: GivenClauseSelection
+    Parents: []
+
+[4] mult(e1,X) = X
+    Rule: GivenClauseSelection
+    Parents: []
+
 [6] e1 = e
     Rule: Superposition
     Parents: [4, 1]
 
-[7] ~e = e
-    Rule: Demodulation
-    Parents: [6, 5]
+[6] e1 = e
+    Rule: GivenClauseSelection
+    Parents: []
 
-[8] X = X
+[7] X = X
     Rule: Demodulation
     Parents: [6, 4]
+
+[8] ~e = e
+    Rule: Demodulation
+    Parents: [6, 5]
 
 [9] ⊥
     Rule: Resolution
