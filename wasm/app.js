@@ -563,6 +563,71 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Helper function to fetch TPTP content from URL
+    async function fetchTptpContent(url) {
+        const corsUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const response = await fetch(corsUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+        }
+        const html = await response.text();
+
+        // Parse HTML to extract TPTP content from <pre> tag
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const preTag = doc.querySelector('pre');
+
+        if (!preTag) {
+            throw new Error('Could not find problem content in page');
+        }
+
+        return preTag.textContent;
+    }
+
+    // Helper function to resolve include directives
+    async function resolveIncludes(content) {
+        // Match include directives like: include('Axioms/GRP004-0.ax')
+        const includeRegex = /include\s*\(\s*'([^']+)'\s*\)/g;
+        const includes = [...content.matchAll(includeRegex)];
+
+        if (includes.length === 0) {
+            return content;
+        }
+
+        console.log(`Found ${includes.length} include directive(s), fetching axioms...`);
+
+        let resolvedContent = content;
+
+        for (const match of includes) {
+            const includePath = match[1];
+            const includeDirective = match[0];
+
+            try {
+                // Construct TPTP URL for the axiom file
+                // Path format: 'Axioms/GRP004-0.ax' -> Category=Axioms, File=GRP004-0.ax
+                const parts = includePath.split('/');
+                const filename = parts[parts.length - 1];
+
+                const axiomUrl = `https://tptp.org/cgi-bin/SeeTPTP?Category=Axioms&File=${filename}`;
+                console.log(`Fetching axiom: ${includePath}`);
+
+                const axiomContent = await fetchTptpContent(axiomUrl);
+
+                // Replace the include directive with the actual axiom content
+                // Add comments to mark the included content
+                const replacement = `% BEGIN include('${includePath}')\n${axiomContent}\n% END include('${includePath}')`;
+                resolvedContent = resolvedContent.replace(includeDirective, replacement);
+
+                console.log(`✓ Loaded axiom: ${includePath}`);
+            } catch (error) {
+                console.warn(`Failed to load axiom ${includePath}:`, error);
+                // Leave the include directive in place if we can't fetch it
+            }
+        }
+
+        return resolvedContent;
+    }
+
     // Load from TPTP URL
     document.getElementById('load-url-btn').addEventListener('click', async () => {
         const urlInput = document.getElementById('tptp-url');
@@ -572,33 +637,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         try {
-            // Try to use CORS proxy if available, otherwise direct fetch
-            const useCorsProxy = url.includes('tptp.org');
-            if (useCorsProxy) {
-                // Use a CORS proxy for TPTP.org
-                url = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-            }
+            console.log('Loading problem from:', url);
 
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch: ${response.status}`);
-            }
-            const html = await response.text();
+            // Fetch the main problem file
+            const content = await fetchTptpContent(url);
 
-            // Parse HTML to extract TPTP content from <pre> tag
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const preTag = doc.querySelector('pre');
+            // Resolve any include directives
+            const resolvedContent = await resolveIncludes(content);
 
-            if (preTag) {
-                const content = preTag.textContent;
-                document.getElementById('tptp-input').value = content;
-                document.getElementById('example-select').value = '';
-                urlInput.value = '';
-                console.log('Loaded problem from TPTP');
-            } else {
-                throw new Error('Could not find problem content in page');
-            }
+            // Load into textarea
+            document.getElementById('tptp-input').value = resolvedContent;
+            document.getElementById('example-select').value = '';
+            urlInput.value = '';
+
+            console.log('✓ Problem loaded successfully');
         } catch (error) {
             console.error('Error:', error);
             alert(`Error loading problem: ${error.message}\n\nWorkaround: Copy the problem text directly from the TPTP page.`);
@@ -666,40 +718,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadProblemFromUrl(tptpUrl) {
         try {
-            // Use CORS proxy for TPTP.org
-            const url = `https://corsproxy.io/?${encodeURIComponent(tptpUrl)}`;
+            console.log('Loading problem from:', tptpUrl);
 
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch: ${response.status}`);
-            }
-            const html = await response.text();
+            // Fetch the main problem file
+            const content = await fetchTptpContent(tptpUrl);
 
-            // Parse HTML to extract TPTP content from <pre> tag
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const preTag = doc.querySelector('pre');
+            // Resolve any include directives
+            const resolvedContent = await resolveIncludes(content);
 
-            if (preTag) {
-                const content = preTag.textContent;
+            // Switch to Prover tab
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            document.querySelector('[data-tab="prover"]').classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById('prover-tab').classList.add('active');
 
-                // Switch to Prover tab
-                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-                document.querySelector('[data-tab="prover"]').classList.add('active');
-                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-                document.getElementById('prover-tab').classList.add('active');
+            // Load problem into textarea
+            document.getElementById('tptp-input').value = resolvedContent;
+            document.getElementById('example-select').value = '';
 
-                // Load problem into textarea
-                document.getElementById('tptp-input').value = content;
-                document.getElementById('example-select').value = '';
+            // Scroll to top
+            window.scrollTo(0, 0);
 
-                // Scroll to top
-                window.scrollTo(0, 0);
-
-                console.log('Loaded problem from benchmark list');
-            } else {
-                throw new Error('Could not find problem content in page');
-            }
+            console.log('✓ Problem loaded successfully');
         } catch (error) {
             console.error('Error:', error);
             alert(`Error loading problem: ${error.message}`);
