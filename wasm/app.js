@@ -635,15 +635,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return input;
         }
 
-        // Extract problem name (e.g., "GRP001-1" or "GRP001-1.p")
-        let problemName = input.trim();
+        // Extract problem name (e.g., "GRP001-1" or "grp001-1" or "GRP001-1.p")
+        let problemName = input.trim().toUpperCase();
 
-        // Remove .p extension if present
-        if (problemName.endsWith('.p')) {
+        // Remove .P extension if present
+        if (problemName.endsWith('.P')) {
             problemName = problemName.slice(0, -2);
         }
 
-        // Extract domain (first 3 letters)
+        // Extract domain (first 3 letters, case-insensitive)
         const domainMatch = problemName.match(/^([A-Z]{3})/);
         if (!domainMatch) {
             throw new Error('Invalid problem name format. Expected format: ABC123-1 (e.g., GRP001-1)');
