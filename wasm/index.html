@@ -15,7 +15,80 @@
                 <h1>ProofAtlas</h1>
             </div>
             <p>A client-side first-order theorem prover powered by WebAssembly</p>
+            <nav class="main-nav">
+                <a href="docs.html">📖 Documentation</a>
+                <a href="https://github.com/lexpk/proofatlas" target="_blank">💻 GitHub</a>
+            </nav>
         </header>
+
+        <details class="benchmark-section">
+            <summary>📊 Benchmark Results</summary>
+            <div class="benchmark-content">
+                <p class="benchmark-description">
+                    Performance comparison on 150 TPTP Unsatisfiable problems (50 per category, 10s timeout)
+                </p>
+
+                <div class="benchmark-overall">
+                    <h3>Overall Performance</h3>
+                    <div class="benchmark-stats">
+                        <div class="stat-card">
+                            <div class="stat-label">ProofAtlas</div>
+                            <div class="stat-value">41/150</div>
+                            <div class="stat-percent">27.3%</div>
+                        </div>
+                        <div class="stat-card winner">
+                            <div class="stat-label">Vampire 5.0</div>
+                            <div class="stat-value">50/150</div>
+                            <div class="stat-percent">33.3%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="benchmark-categories">
+                    <h3>Performance by Category</h3>
+                    <table class="benchmark-table">
+                        <thead>
+                            <tr>
+                                <th>Category</th>
+                                <th>ProofAtlas</th>
+                                <th>Vampire</th>
+                                <th>Winner</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Unit Equalities</td>
+                                <td>18/50 (36%)</td>
+                                <td>23/50 (46%)</td>
+                                <td class="winner-cell">Vampire +5</td>
+                            </tr>
+                            <tr class="tied-row">
+                                <td>CNF Without Equality</td>
+                                <td>16/50 (32%)</td>
+                                <td>16/50 (32%)</td>
+                                <td class="tied-cell">Tied</td>
+                            </tr>
+                            <tr>
+                                <td>CNF With Equality</td>
+                                <td>7/50 (14%)</td>
+                                <td>11/50 (22%)</td>
+                                <td class="winner-cell">Vampire +4</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="benchmark-notes">
+                    <h4>Notes</h4>
+                    <ul>
+                        <li>ProofAtlas uses SelectLargestNegative literal selection strategy</li>
+                        <li>Vampire uses default clause selection (-s 0) with avatar disabled</li>
+                        <li>All problems are Unsatisfiable (should have proofs)</li>
+                        <li>Average solve time: ProofAtlas 1.15s, Vampire 0.71s</li>
+                    </ul>
+                </div>
+            </div>
+        </details>
 
         <main>
             <div class="input-section">

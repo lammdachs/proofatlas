@@ -31,6 +31,27 @@ header p {
     color: #7f8c8d;
 }
 
+.main-nav {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+.main-nav a {
+    color: #3498db;
+    text-decoration: none;
+    font-size: 16px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.main-nav a:hover {
+    background: #ecf0f1;
+    color: #2980b9;
+}
+
 main {
     background: white;
     border-radius: 8px;
@@ -387,4 +408,181 @@ footer a:hover {
     margin-bottom: 5px;
     background: #f8f9fa;
     border-radius: 3px;
+}
+
+/* Benchmark Section Styles */
+.benchmark-section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.benchmark-section summary {
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 10px;
+    user-select: none;
+    list-style: none;
+}
+
+.benchmark-section summary::-webkit-details-marker {
+    display: none;
+}
+
+.benchmark-section summary:hover {
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.benchmark-content {
+    padding: 20px 10px 10px 10px;
+}
+
+.benchmark-description {
+    color: #7f8c8d;
+    margin-bottom: 20px;
+    text-align: center;
+    font-style: italic;
+}
+
+.benchmark-overall {
+    margin-bottom: 30px;
+}
+
+.benchmark-overall h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.benchmark-stats {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px 40px;
+    text-align: center;
+    min-width: 180px;
+}
+
+.stat-card.winner {
+    border-color: #27ae60;
+    background: #e8f5e9;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.stat-value {
+    font-size: 32px;
+    font-weight: bold;
+    color: #2c3e50;
+    margin-bottom: 5px;
+}
+
+.stat-percent {
+    font-size: 18px;
+    color: #7f8c8d;
+}
+
+.benchmark-categories {
+    margin-bottom: 25px;
+}
+
+.benchmark-categories h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.benchmark-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.benchmark-table thead {
+    background: #34495e;
+    color: white;
+}
+
+.benchmark-table th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+}
+
+.benchmark-table td {
+    padding: 12px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.benchmark-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.benchmark-table .tied-row {
+    background: #fff9e6;
+}
+
+.winner-cell {
+    color: #27ae60;
+    font-weight: 600;
+}
+
+.tied-cell {
+    color: #f39c12;
+    font-weight: 600;
+}
+
+.benchmark-notes {
+    background: #f8f9fa;
+    border-left: 4px solid #3498db;
+    padding: 15px;
+    border-radius: 4px;
+}
+
+.benchmark-notes h4 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+.benchmark-notes ul {
+    margin-left: 20px;
+}
+
+.benchmark-notes li {
+    margin-bottom: 5px;
+    color: #555;
+}
+
+@media (max-width: 768px) {
+    .benchmark-stats {
+        flex-direction: column;
+    }
+
+    .stat-card {
+        width: 100%;
+    }
+
+    .benchmark-table {
+        font-size: 14px;
+    }
+
+    .benchmark-table th,
+    .benchmark-table td {
+        padding: 8px;
+    }
 }

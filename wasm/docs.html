@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProofAtlas - Documentation</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="docs-style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
+                <img src="favicon.svg" alt="ProofAtlas" style="width: 48px; height: 48px;">
+                <h1>ProofAtlas</h1>
+            </div>
+            <p>Documentation</p>
+            <nav class="doc-nav">
+                <a href="index.html">← Back to Prover</a>
+            </nav>
+        </header>
+
+        <main class="docs-main">
+            <div class="docs-sidebar">
+                <h3>Contents</h3>
+                <ul>
+                    <li><a href="#overview">Overview</a></li>
+                    <li><a href="#saturation">Saturation-Based Proving</a></li>
+                    <li><a href="#calculus">Inference Calculus</a></li>
+                    <li><a href="#selection">Literal Selection</a></li>
+                    <li><a href="#simplification">Simplification Rules</a></li>
+                    <li><a href="#examples">Examples</a></li>
+                </ul>
+            </div>
+
+            <div class="docs-content">
+                <section id="overview">
+                    <h2>Overview</h2>
+                    <p>
+                        ProofAtlas is a <strong>saturation-based theorem prover</strong> for first-order logic with equality.
+                        It implements the superposition calculus, a complete inference system for equational reasoning.
+                    </p>
+                    <p>
+                        The prover runs entirely in your browser using WebAssembly, providing a fast and private
+                        proof search experience without any server-side computation.
+                    </p>
+
+                    <h3>Key Features</h3>
+                    <ul>
+                        <li>Complete superposition calculus for equality reasoning</li>
+                        <li>Multiple literal selection strategies</li>
+                        <li>Clause subsumption and simplification</li>
+                        <li>Knuth-Bendix Ordering (KBO) for term ordering</li>
+                        <li>Interactive proof inspection</li>
+                    </ul>
+                </section>
+
+                <section id="saturation">
+                    <h2>Saturation-Based Proving</h2>
+                    <p>
+                        The prover uses a <strong>given clause algorithm</strong> to systematically explore the
+                        search space:
+                    </p>
+
+                    <div class="algorithm-box">
+                        <h4>Given Clause Loop</h4>
+                        <ol>
+                            <li>Start with initial clauses from the problem (negated conjecture + axioms)</li>
+                            <li>Maintain two sets:
+                                <ul>
+                                    <li><strong>Processed</strong>: Clauses already used for inference</li>
+                                    <li><strong>Unprocessed</strong>: Clauses waiting to be processed</li>
+                                </ul>
+                            </li>
+                            <li>Repeat until proof found or resources exhausted:
+                                <ul>
+                                    <li>Select a <em>given clause</em> from unprocessed</li>
+                                    <li>Apply all inference rules between given clause and processed clauses</li>
+                                    <li>Simplify and filter new clauses</li>
+                                    <li>Check if empty clause (⊥) derived → <strong>Proof found!</strong></li>
+                                    <li>Move given clause to processed set</li>
+                                </ul>
+                            </li>
+                        </ol>
+                    </div>
+
+                    <p class="note">
+                        <strong>Note:</strong> The empty clause ⊥ represents a contradiction, proving that the
+                        original formula is unsatisfiable (and thus the conjecture is a theorem).
+                    </p>
+                </section>
+
+                <section id="calculus">
+                    <h2>Inference Calculus</h2>
+                    <p>
+                        ProofAtlas implements the following inference rules:
+                    </p>
+
+                    <div class="inference-rule">
+                        <h3>Binary Resolution</h3>
+                        <div class="rule-formula">
+                            <div class="premise">C ∨ L</div>
+                            <div class="premise">D ∨ ¬L'</div>
+                            <div class="conclusion">(C ∨ D)σ</div>
+                        </div>
+                        <p>where σ = mgu(L, L') is the most general unifier</p>
+                        <p class="rule-description">
+                            Combines two clauses by resolving complementary literals.
+                        </p>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h3>Factoring</h3>
+                        <div class="rule-formula">
+                            <div class="premise">C ∨ L ∨ L'</div>
+                            <div class="conclusion">(C ∨ L)σ</div>
+                        </div>
+                        <p>where σ = mgu(L, L')</p>
+                        <p class="rule-description">
+                            Merges two identical literals in a clause.
+                        </p>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h3>Superposition</h3>
+                        <div class="rule-formula">
+                            <div class="premise">C ∨ l ≈ r</div>
+                            <div class="premise">D ∨ s[u] ≈ t</div>
+                            <div class="conclusion">(C ∨ D ∨ s[r] ≈ t)σ</div>
+                        </div>
+                        <p>where σ = mgu(l, u), and ordering constraints apply</p>
+                        <p class="rule-description">
+                            Replaces a subterm in an equality using another equality. This is the key rule
+                            for equational reasoning.
+                        </p>
+                        <div class="constraints">
+                            <strong>Constraints:</strong>
+                            <ul>
+                                <li>l ≈ r must be a positive equality</li>
+                                <li>lσ ≻ rσ (l is maximal in the equation)</li>
+                                <li>l ≈ r is selected in C ∨ l ≈ r</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h3>Equality Resolution</h3>
+                        <div class="rule-formula">
+                            <div class="premise">C ∨ ¬(s ≈ t)</div>
+                            <div class="conclusion">Cσ</div>
+                        </div>
+                        <p>where σ = mgu(s, t)</p>
+                        <p class="rule-description">
+                            Removes reflexive negative equalities (e.g., ¬(X ≈ X) is always false).
+                        </p>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h3>Equality Factoring</h3>
+                        <div class="rule-formula">
+                            <div class="premise">C ∨ s ≈ t ∨ u ≈ v</div>
+                            <div class="conclusion">(C ∨ s ≈ t ∨ ¬(t ≈ v))σ</div>
+                        </div>
+                        <p>where σ = mgu(s, u) and sσ ≻ tσ, uσ ≻ vσ</p>
+                        <p class="rule-description">
+                            Special factoring rule for equalities that maintains ordering constraints.
+                        </p>
+                    </div>
+                </section>
+
+                <section id="selection">
+                    <h2>Literal Selection Strategies</h2>
+                    <p>
+                        Literal selection determines which literals in a clause are eligible for inference.
+                        ProofAtlas supports three strategies:
+                    </p>
+
+                    <div class="strategy-box">
+                        <h3>Select All</h3>
+                        <p>All literals are selected for inference.</p>
+                        <p class="strategy-note">
+                            <strong>Use case:</strong> Maximum inference potential, but can generate many clauses.
+                        </p>
+                    </div>
+
+                    <div class="strategy-box">
+                        <h3>Select Max Weight</h3>
+                        <p>Selects the literal(s) with the maximum weight (based on symbol count).</p>
+                        <p class="strategy-note">
+                            <strong>Use case:</strong> Focuses on "heavy" literals that might be easier to resolve.
+                        </p>
+                    </div>
+
+                    <div class="strategy-box">
+                        <h3>Select Largest Negative</h3>
+                        <p>
+                            Selects the largest negative literal. If no negative literals exist,
+                            selects all positive literals.
+                        </p>
+                        <p class="strategy-note">
+                            <strong>Use case:</strong> Prioritizes eliminating negative literals, which often
+                            leads to more efficient proof search.
+                        </p>
+                    </div>
+
+                    <h3>Impact on Performance</h3>
+                    <p>
+                        Different selection strategies can dramatically affect proof search efficiency:
+                    </p>
+                    <ul>
+                        <li><strong>Select All</strong>: Most inferences, but potentially redundant</li>
+                        <li><strong>Select Max Weight</strong>: Balanced approach, good for general problems</li>
+                        <li><strong>Select Largest Negative</strong>: Often best for problems with many negative literals</li>
+                    </ul>
+                </section>
+
+                <section id="simplification">
+                    <h2>Simplification Rules</h2>
+                    <p>
+                        ProofAtlas uses several simplification techniques to keep the search space manageable:
+                    </p>
+
+                    <div class="simplification-box">
+                        <h3>Subsumption</h3>
+                        <p>
+                            A clause C <em>subsumes</em> clause D if there exists a substitution σ such that
+                            Cσ ⊆ D. The subsumed clause D can be removed.
+                        </p>
+                        <p class="example">
+                            <strong>Example:</strong> <code>P(X)</code> subsumes <code>P(a) ∨ Q(b)</code>
+                        </p>
+                        <ul>
+                            <li><strong>Forward subsumption:</strong> New clause subsumed by existing clause → discard</li>
+                            <li><strong>Backward subsumption:</strong> New clause subsumes existing clauses → remove old clauses</li>
+                        </ul>
+                    </div>
+
+                    <div class="simplification-box">
+                        <h3>Demodulation</h3>
+                        <p>
+                            Rewrites clauses using unit equalities to create simpler clauses.
+                        </p>
+                        <p class="example">
+                            <strong>Example:</strong> Using <code>f(X) ≈ X</code>, rewrite
+                            <code>g(f(a)) ≈ b</code> to <code>g(a) ≈ b</code>
+                        </p>
+                        <div class="constraints">
+                            <strong>Requirements:</strong>
+                            <ul>
+                                <li>Rewrite rule must be a unit equality</li>
+                                <li>One-way matching only (only variables in rewrite rule can be substituted)</li>
+                                <li>Ordering constraint: lσ ≻ rσ</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="simplification-box">
+                        <h3>Tautology Deletion</h3>
+                        <p>
+                            Clauses that are always true (e.g., <code>P(X) ∨ ¬P(X)</code>) are removed.
+                        </p>
+                    </div>
+                </section>
+
+                <section id="examples">
+                    <h2>Examples</h2>
+
+                    <div class="example-box">
+                        <h3>Example 1: Simple Propositional Logic</h3>
+                        <pre class="tptp-code">% If P implies Q, and Q implies R, then P implies R
+fof(axiom1, axiom, p => q).
+fof(axiom2, axiom, q => r).
+fof(goal, conjecture, p => r).</pre>
+                        <p class="example-result">
+                            <strong>Result:</strong> Proof found in ~10ms using binary resolution
+                        </p>
+                    </div>
+
+                    <div class="example-box">
+                        <h3>Example 2: Equality Reasoning</h3>
+                        <pre class="tptp-code">% Symmetry and transitivity imply that equality is an equivalence
+fof(symmetry, axiom, ![X,Y]: (X = Y => Y = X)).
+fof(transitivity, axiom, ![X,Y,Z]: ((X = Y & Y = Z) => X = Z)).
+fof(goal, conjecture, ![A,B,C]: ((A = B & C = B) => A = C)).</pre>
+                        <p class="example-result">
+                            <strong>Result:</strong> Requires superposition to handle equality reasoning
+                        </p>
+                    </div>
+
+                    <div class="example-box">
+                        <h3>Example 3: Group Theory</h3>
+                        <pre class="tptp-code">% Identity element exists
+fof(left_identity, axiom, ![X]: mult(e, X) = X).
+% Inverse exists
+fof(left_inverse, axiom, ![X]: mult(inv(X), X) = e).
+% Associativity
+fof(associativity, axiom, ![X,Y,Z]:
+    mult(X, mult(Y, Z)) = mult(mult(X, Y), Z)).
+% Prove right identity
+fof(right_identity, conjecture, ![X]: mult(X, e) = X).</pre>
+                        <p class="example-result">
+                            <strong>Result:</strong> Classic group theory proof using superposition and demodulation
+                        </p>
+                    </div>
+                </section>
+
+                <section id="references">
+                    <h2>References</h2>
+                    <ul>
+                        <li>
+                            Bachmair, L., & Ganzinger, H. (2001).
+                            <em>Resolution Theorem Proving</em>.
+                            Handbook of Automated Reasoning.
+                        </li>
+                        <li>
+                            Nieuwenhuis, R., & Rubio, A. (2001).
+                            <em>Paramodulation-Based Theorem Proving</em>.
+                            Handbook of Automated Reasoning.
+                        </li>
+                        <li>
+                            Schulz, S. (2013).
+                            <em>System Description: E 1.8</em>.
+                            LPAR 2013.
+                        </li>
+                    </ul>
+                </section>
+            </div>
+        </main>
+
+        <footer>
+            <p>
+                ProofAtlas - A saturation-based theorem prover |
+                <a href="https://github.com/lexpk/proofatlas">GitHub</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>
