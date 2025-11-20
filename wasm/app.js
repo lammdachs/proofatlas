@@ -628,15 +628,45 @@ document.addEventListener('DOMContentLoaded', () => {
         return resolvedContent;
     }
 
-    // Load from TPTP URL
+    // Helper function to convert problem name to TPTP URL
+    function problemNameToUrl(input) {
+        // If it's already a full URL, return as-is
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            return input;
+        }
+
+        // Extract problem name (e.g., "GRP001-1" or "GRP001-1.p")
+        let problemName = input.trim();
+
+        // Remove .p extension if present
+        if (problemName.endsWith('.p')) {
+            problemName = problemName.slice(0, -2);
+        }
+
+        // Extract domain (first 3 letters)
+        const domainMatch = problemName.match(/^([A-Z]{3})/);
+        if (!domainMatch) {
+            throw new Error('Invalid problem name format. Expected format: ABC123-1 (e.g., GRP001-1)');
+        }
+
+        const domain = domainMatch[1];
+        const filename = `${problemName}.p`;
+
+        // Construct TPTP URL
+        return `https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=${domain}&File=${filename}`;
+    }
+
+    // Load from TPTP problem name or URL
     document.getElementById('load-url-btn').addEventListener('click', async () => {
         const urlInput = document.getElementById('tptp-url');
-        let url = urlInput.value.trim();
-        if (!url) {
-            alert('Please enter a TPTP URL');
+        const input = urlInput.value.trim();
+        if (!input) {
+            alert('Please enter a problem name (e.g., GRP001-1) or TPTP URL');
             return;
         }
         try {
+            // Convert problem name to URL if needed
+            const url = problemNameToUrl(input);
             console.log('Loading problem from:', url);
 
             // Fetch the main problem file
@@ -653,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('✓ Problem loaded successfully');
         } catch (error) {
             console.error('Error:', error);
-            alert(`Error loading problem: ${error.message}\n\nWorkaround: Copy the problem text directly from the TPTP page.`);
+            alert(`Error loading problem: ${error.message}`);
         }
     });
 
