@@ -5,6 +5,7 @@
 
 pub mod core;
 pub mod inference;
+pub mod ml;
 pub mod parser;
 pub mod saturation;
 pub mod selection;

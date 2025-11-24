@@ -4,11 +4,15 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[cfg(feature = "python")]
+use numpy::{PyArray1, PyArray2, ToPyArray};
+
 use crate::core::{CNFFormula, Clause, Term, Variable};
 use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     InferenceResult as RustInferenceResult, InferenceRule,
 };
+use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
 use crate::selection::{LiteralSelector, SelectAll, SelectMaxWeight};
@@ -80,6 +84,73 @@ pub struct ProofStep {
     pub parent_ids: Vec<usize>,
     #[pyo3(get)]
     pub rule_name: String,
+}
+
+/// Graph representation of a clause (Python-accessible)
+#[pyclass]
+pub struct ClauseGraphData {
+    graph: ClauseGraph,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl ClauseGraphData {
+    /// Get edge indices as numpy array (2, num_edges)
+    fn edge_indices<'py>(&self, py: Python<'py>) -> &'py PyArray2<i64> {
+        let num_edges = self.graph.edge_indices.len();
+
+        // Build separate source and target arrays
+        let mut sources = Vec::with_capacity(num_edges);
+        let mut targets = Vec::with_capacity(num_edges);
+
+        for (src, tgt) in &self.graph.edge_indices {
+            sources.push(*src as i64);
+            targets.push(*tgt as i64);
+        }
+
+        // Create 2D array with shape (2, num_edges)
+        PyArray2::from_vec2(py, &vec![sources, targets]).unwrap()
+    }
+
+    /// Get node features as numpy array (num_nodes, feature_dim)
+    fn node_features<'py>(&self, py: Python<'py>) -> &'py PyArray2<f32> {
+        // Convert Vec<[f32; FEATURE_DIM]> to Vec<Vec<f32>>
+        let features_vec: Vec<Vec<f32>> = self.graph.node_features
+            .iter()
+            .map(|arr| arr.to_vec())
+            .collect();
+
+        PyArray2::from_vec2(py, &features_vec).unwrap()
+    }
+
+    /// Get node types as numpy array (num_nodes,)
+    fn node_types<'py>(&self, py: Python<'py>) -> &'py PyArray1<u8> {
+        self.graph.node_types.to_pyarray(py)
+    }
+
+    /// Number of nodes
+    fn num_nodes(&self) -> usize {
+        self.graph.num_nodes
+    }
+
+    /// Number of edges
+    fn num_edges(&self) -> usize {
+        self.graph.edge_indices.len()
+    }
+
+    /// Feature dimension
+    fn feature_dim(&self) -> usize {
+        if self.graph.node_features.is_empty() {
+            0
+        } else {
+            self.graph.node_features[0].len()
+        }
+    }
+
+    /// Get node names for debugging
+    fn node_names(&self) -> Vec<String> {
+        self.graph.node_names.clone()
+    }
 }
 
 #[pymethods]
@@ -451,6 +522,32 @@ impl ProofState {
             Vec::new()
         }
     }
+
+    /// Convert clause to sparse graph representation
+    #[cfg(feature = "python")]
+    pub fn clause_to_graph(&self, clause_id: usize) -> PyResult<ClauseGraphData> {
+        let clause = self
+            .clauses
+            .get(clause_id)
+            .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", clause_id)))?;
+
+        let graph = GraphBuilder::build_from_clause(clause);
+
+        Ok(ClauseGraphData { graph })
+    }
+
+    /// Convert multiple clauses to batch of graphs
+    #[cfg(feature = "python")]
+    pub fn clauses_to_graphs(&self, clause_ids: Vec<usize>) -> PyResult<Vec<ClauseGraphData>> {
+        let mut graphs = Vec::new();
+
+        for clause_id in clause_ids {
+            let graph_data = self.clause_to_graph(clause_id)?;
+            graphs.push(graph_data);
+        }
+
+        Ok(graphs)
+    }
 }
 
 impl ProofState {
@@ -458,11 +555,14 @@ impl ProofState {
     fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
         let clause_string = rust_result.conclusion.to_string();
         let rule_name = match rust_result.rule {
+            InferenceRule::Input => "input",
+            InferenceRule::GivenClauseSelection => "given_clause_selection",
             InferenceRule::Resolution => "resolution",
             InferenceRule::Factoring => "factoring",
             InferenceRule::Superposition => "superposition",
             InferenceRule::EqualityResolution => "equality_resolution",
             InferenceRule::EqualityFactoring => "equality_factoring",
+            InferenceRule::Demodulation => "demodulation",
         }
         .to_string();
 
@@ -482,5 +582,7 @@ fn proofatlas(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ClauseInfo>()?;
     m.add_class::<InferenceResult>()?;
     m.add_class::<ProofStep>()?;
+    #[cfg(feature = "python")]
+    m.add_class::<ClauseGraphData>()?;
     Ok(())
 }
