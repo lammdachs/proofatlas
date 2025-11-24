@@ -1,0 +1,214 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly full test (Sunday 00:00 UTC)
+
+jobs:
+  # Detect what changed
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_core: ${{ steps.filter.outputs.rust_core }}
+      rust_ml: ${{ steps.filter.outputs.rust_ml }}
+      python_ml: ${{ steps.filter.outputs.python_ml }}
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            rust_core:
+              - 'rust/src/core/**'
+              - 'rust/src/inference/**'
+              - 'rust/src/saturation/**'
+              - 'rust/src/parser/**'
+              - 'rust/src/unification/**'
+              - 'rust/src/selection/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            rust_ml:
+              - 'rust/src/ml/**'
+            python_ml:
+              - 'python/proofatlas/ml/**'
+              - 'python/tests/ml/**'
+            docs_only:
+              - '**/*.md'
+              - 'docs/**'
+
+  # Tier 1: Critical tests (always run)
+  critical-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Rust compile check
+        run: cargo check
+        working-directory: rust
+
+      - name: End-to-end proof tests
+        run: cargo test --test basic_test
+        working-directory: rust
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Basic Python import test
+        run: |
+          pip install -e .
+          python -c "from proofatlas import ProofState; print('OK')"
+
+  # Tier 2: Selective tests based on changes
+  rust-core-tests:
+    needs: [detect-changes, critical-tests]
+    if: needs.detect-changes.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run all Rust tests
+        run: |
+          cargo test --lib
+          cargo test --test '*'
+        working-directory: rust
+
+  rust-ml-tests:
+    needs: [detect-changes, critical-tests]
+    if: needs.detect-changes.outputs.rust_ml == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run ML tests
+        run: cargo test ml::
+        working-directory: rust
+
+  python-ml-tests:
+    needs: [detect-changes, critical-tests]
+    if: needs.detect-changes.outputs.python_ml == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-ml-${{ hashFiles('**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-ml-
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install torch torch-geometric
+
+      - name: Run Python ML tests
+        run: pytest python/tests/ml/ -v
+
+  # Skip tests for docs-only changes
+  docs-only:
+    needs: [detect-changes, critical-tests]
+    if: |
+      needs.detect-changes.outputs.docs_only == 'true' &&
+      needs.detect-changes.outputs.rust_core == 'false' &&
+      needs.detect-changes.outputs.rust_ml == 'false' &&
+      needs.detect-changes.outputs.python_ml == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Documentation-only changes
+        run: echo "Only documentation changed, skipping component tests"
+
+  # Tier 3: Full test suite (on main or schedule)
+  full-suite:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-full-${{ hashFiles('**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-full-
+
+      - name: Run all Rust tests
+        run: cargo test --all
+        working-directory: rust
+
+      - name: Run all Python tests
+        run: |
+          pip install -e .
+          pip install torch torch-geometric
+          pytest python/tests/ -v
