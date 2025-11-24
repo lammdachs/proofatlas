@@ -575,6 +575,16 @@ impl ProofState {
     }
 }
 
+/// Training example for ML
+#[pyclass]
+#[derive(Clone)]
+pub struct TrainingExample {
+    #[pyo3(get)]
+    pub clause_idx: usize,
+    #[pyo3(get)]
+    pub label: u8,  // 1 = in proof, 0 = not in proof
+}
+
 /// Python module definition
 #[pymodule]
 fn proofatlas(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -584,5 +594,6 @@ fn proofatlas(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ProofStep>()?;
     #[cfg(feature = "python")]
     m.add_class::<ClauseGraphData>()?;
+    m.add_class::<TrainingExample>()?;
     Ok(())
 }
