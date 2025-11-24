@@ -786,4 +786,4 @@ clause_embedding = embeddings[0]  # Take root node
 print(f"Clause embedding shape: {clause_embedding.shape}")  # (16,)
 ```
 
-This example demonstrates the core components working together.
+This example demonstrates the core components workingI together.
