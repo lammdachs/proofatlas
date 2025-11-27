@@ -1,7 +1,10 @@
 """Machine learning utilities for ProofAtlas
 
-This module provides utilities for converting clause graphs to PyTorch tensors,
-batching graphs for GNN training, and collecting training data from proofs.
+This module provides:
+- Graph conversion: clause graphs to PyTorch tensors
+- Data collection: extract training data from proofs
+- Models: GNN architectures for clause scoring
+- Training: training loop and utilities
 """
 
 from .graph_utils import (
@@ -24,6 +27,21 @@ from .data_collection import (
     load_training_dataset,
 )
 
+from .model import (
+    ClauseGNN,
+    ClauseGNNWithAttention,
+    create_model,
+)
+
+from .training import (
+    TrainingConfig,
+    create_pyg_dataset,
+    split_dataset,
+    train,
+    save_model,
+    load_model,
+)
+
 __all__ = [
     # Graph utilities
     "to_torch_tensors",
@@ -41,4 +59,15 @@ __all__ = [
     "collect_from_problem",
     "collect_from_directory",
     "load_training_dataset",
+    # Models
+    "ClauseGNN",
+    "ClauseGNNWithAttention",
+    "create_model",
+    # Training
+    "TrainingConfig",
+    "create_pyg_dataset",
+    "split_dataset",
+    "train",
+    "save_model",
+    "load_model",
 ]
