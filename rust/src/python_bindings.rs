@@ -548,6 +548,78 @@ impl ProofState {
 
         Ok(graphs)
     }
+
+    /// Extract training examples: all clauses labeled by whether they're in the proof
+    /// Returns list of (clause_id, label) where label=1 if in proof, 0 otherwise
+    pub fn extract_training_examples(&self) -> Vec<TrainingExample> {
+        // Find empty clause
+        let empty_clause_id = self.clauses.iter().position(|c| c.is_empty());
+
+        if empty_clause_id.is_none() {
+            return Vec::new(); // No proof found
+        }
+
+        let empty_id = empty_clause_id.unwrap();
+
+        // Build set of clauses in proof DAG
+        let mut proof_clauses = HashSet::new();
+        let mut to_visit = vec![empty_id];
+
+        while let Some(current_id) = to_visit.pop() {
+            if proof_clauses.contains(&current_id) {
+                continue;
+            }
+            proof_clauses.insert(current_id);
+
+            // Find parents in proof trace
+            if let Some(step) = self.proof_trace.iter().find(|s| s.clause_id == current_id) {
+                to_visit.extend(&step.parent_ids);
+            }
+        }
+
+        // Create training examples for all clauses
+        let mut examples = Vec::new();
+        for clause_id in 0..self.clauses.len() {
+            let label = if proof_clauses.contains(&clause_id) { 1 } else { 0 };
+            examples.push(TrainingExample { clause_idx: clause_id, label });
+        }
+
+        examples
+    }
+
+    /// Get all clause IDs
+    pub fn all_clause_ids(&self) -> Vec<usize> {
+        (0..self.clauses.len()).collect()
+    }
+
+    /// Get clause IDs that are in the proof (if proof found)
+    pub fn proof_clause_ids(&self) -> Vec<usize> {
+        self.extract_training_examples()
+            .into_iter()
+            .filter(|e| e.label == 1)
+            .map(|e| e.clause_idx)
+            .collect()
+    }
+
+    /// Get proof statistics
+    pub fn get_proof_statistics(&self) -> HashMap<String, usize> {
+        let examples = self.extract_training_examples();
+        let mut stats = HashMap::new();
+
+        let total = examples.len();
+        let in_proof = examples.iter().filter(|e| e.label == 1).count();
+        let not_in_proof = total - in_proof;
+
+        stats.insert("total_clauses".to_string(), total);
+        stats.insert("proof_clauses".to_string(), in_proof);
+        stats.insert("non_proof_clauses".to_string(), not_in_proof);
+
+        if total > 0 {
+            stats.insert("proof_percentage".to_string(), (in_proof * 100) / total);
+        }
+
+        stats
+    }
 }
 
 impl ProofState {

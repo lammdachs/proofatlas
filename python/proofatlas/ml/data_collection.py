@@ -1,194 +1,270 @@
 """Collect training data from TPTP problems for clause selection learning"""
 
-import json
-import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
 import torch
-from tqdm import tqdm
 
 from proofatlas import ProofState
 from .graph_utils import to_torch_tensors
 
 
-class TrainingDataCollector:
-    """Collect training data from successful proofs"""
+@dataclass
+class TrainingDataset:
+    """Dataset of training examples for clause selection"""
 
-    def __init__(
-        self,
-        prove_binary: str = "target/release/prove",
-        timeout: int = 60,
-    ):
-        """
-        Args:
-            prove_binary: Path to prove binary
-            timeout: Timeout in seconds per problem
-        """
-        self.prove_binary = prove_binary
-        self.timeout = timeout
+    # List of graph tensors (one per clause)
+    graphs: List[Dict[str, torch.Tensor]]
 
-    def collect_from_problem(
-        self, problem_file: Path
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Run prover on a problem and extract training data if proof found.
+    # Labels (1 = in proof, 0 = not in proof)
+    labels: torch.Tensor
 
-        Args:
-            problem_file: Path to TPTP problem file
-
-        Returns:
-            Dictionary with training examples and metadata, or None if no proof
-        """
-        # Run prover with JSON output
-        try:
-            result = subprocess.run(
-                [self.prove_binary, str(problem_file), "--timeout", str(self.timeout)],
-                capture_output=True,
-                text=True,
-                timeout=self.timeout + 10,  # Extra time for overhead
-            )
-        except subprocess.TimeoutExpired:
-            return None
-
-        if result.returncode != 0:
-            return None  # No proof found
-
-        # Parse proof from output
-        # The prove binary outputs proof information to stdout
-        output_lines = result.stdout.strip().split("\n")
-
-        # Look for "Proof found" indicator
-        if not any("Proof found" in line for line in output_lines):
-            return None
-
-        # Extract training data using Python interface
-        # Read the problem and generate proof
-        state = ProofState()
-        state.add_clauses_from_file(str(problem_file))
-
-        # Get proof trace (would need to be added to ProofState)
-        # For now, return placeholder
-        # TODO: Implement proper proof extraction from ProofState
-
-        return {
-            "problem": str(problem_file),
-            "status": "proof_found",
-            "training_examples": [],  # Placeholder
-        }
-
-    def collect_from_directory(
-        self,
-        problems_dir: Path,
-        output_file: Path,
-        pattern: str = "**/*.p",
-        max_problems: Optional[int] = None,
-    ):
-        """
-        Collect training data from all problems in a directory.
-
-        Args:
-            problems_dir: Directory containing TPTP problems
-            output_file: Where to save collected training data
-            pattern: Glob pattern for problem files
-            max_problems: Maximum number of problems to process
-        """
-        problem_files = list(problems_dir.glob(pattern))
-
-        if max_problems:
-            problem_files = problem_files[:max_problems]
-
-        training_dataset = []
-        successful_problems = 0
-
-        for problem_file in tqdm(problem_files, desc="Collecting data"):
-            data = self.collect_from_problem(problem_file)
-
-            if data is not None:
-                training_dataset.append(data)
-                successful_problems += 1
-
-        print(f"\nCollected data from {successful_problems}/{len(problem_files)} problems")
-        print(f"Total training examples: {sum(len(d['training_examples']) for d in training_dataset)}")
-
-        # Save dataset
-        torch.save(training_dataset, output_file)
-        print(f"Saved training data to {output_file}")
+    # Metadata
+    problem_names: List[str]  # Problem name for each example
+    clause_ids: List[int]     # Original clause ID
 
 
-def extract_training_examples_from_proof_steps(
-    proof_steps: List[Dict[str, Any]],
-    empty_clause_idx: int,
-) -> List[Dict[str, Any]]:
+def run_saturation_loop(state: ProofState, max_iterations: int = 10000) -> bool:
     """
-    Extract training examples from proof steps.
-
-    This implements the proof DAG extraction in Python.
+    Run saturation loop on a ProofState until proof found or limit reached.
 
     Args:
-        proof_steps: List of proof steps from ProofState
-        empty_clause_idx: Index of the empty clause (proof goal)
+        state: ProofState with initial clauses
+        max_iterations: Maximum number of iterations
 
     Returns:
-        List of training examples with clause indices and labels
+        True if proof found, False otherwise
     """
-    # Build proof DAG backwards from empty clause
-    proof_clauses = set()
-    to_visit = [empty_clause_idx]
+    for _ in range(max_iterations):
+        # Check if we have a proof
+        if state.contains_empty_clause():
+            return True
 
-    # Map clause index to proof step
-    step_map = {step["clause_idx"]: step for step in proof_steps}
+        # Select given clause
+        given_id = state.select_given_clause()
+        if given_id is None:
+            break  # Saturated
 
-    while to_visit:
-        clause_idx = to_visit.pop()
+        # Generate inferences
+        inferences = state.generate_inferences(given_id)
 
-        if clause_idx in proof_clauses:
+        # Add non-redundant inferences
+        for inf in inferences:
+            state.add_inference(inf)
+
+        # Mark as processed
+        state.process_clause(given_id)
+
+    return state.contains_empty_clause()
+
+
+def collect_from_problem(
+    problem_file: Path,
+    max_iterations: int = 10000,
+) -> Optional[Dict[str, Any]]:
+    """
+    Run prover on a problem and extract training data if proof found.
+
+    Args:
+        problem_file: Path to TPTP problem file
+        max_iterations: Maximum saturation iterations
+
+    Returns:
+        Dictionary with training data, or None if no proof found
+    """
+    # Read and parse problem
+    with open(problem_file) as f:
+        content = f.read()
+
+    # Create proof state and add clauses
+    state = ProofState()
+    try:
+        state.add_clauses_from_tptp(content)
+    except Exception as e:
+        print(f"Parse error for {problem_file}: {e}")
+        return None
+
+    # Run saturation
+    proof_found = run_saturation_loop(state, max_iterations)
+
+    if not proof_found:
+        return None
+
+    # Extract training examples
+    examples = state.extract_training_examples()
+
+    if not examples:
+        return None
+
+    # Get clause graphs for all clauses
+    clause_ids = [e.clause_idx for e in examples]
+    graphs = state.clauses_to_graphs(clause_ids)
+
+    # Convert graphs to tensors
+    graph_tensors = []
+    for graph in graphs:
+        tensors = to_torch_tensors(graph)
+        graph_tensors.append(tensors)
+
+    # Get labels
+    labels = [e.label for e in examples]
+
+    # Get statistics
+    stats = state.get_proof_statistics()
+
+    return {
+        "problem": str(problem_file),
+        "graphs": graph_tensors,
+        "labels": labels,
+        "clause_ids": clause_ids,
+        "statistics": stats,
+    }
+
+
+def collect_from_directory(
+    problems_dir: Path,
+    output_file: Path,
+    pattern: str = "**/*.p",
+    max_problems: Optional[int] = None,
+    max_iterations: int = 10000,
+    verbose: bool = True,
+) -> TrainingDataset:
+    """
+    Collect training data from all problems in a directory.
+
+    Args:
+        problems_dir: Directory containing TPTP problems
+        output_file: Where to save collected training data
+        pattern: Glob pattern for problem files
+        max_problems: Maximum number of problems to process
+        max_iterations: Max saturation iterations per problem
+        verbose: Print progress
+
+    Returns:
+        TrainingDataset with all collected examples
+    """
+    problem_files = sorted(problems_dir.glob(pattern))
+
+    if max_problems:
+        problem_files = problem_files[:max_problems]
+
+    all_graphs = []
+    all_labels = []
+    all_problem_names = []
+    all_clause_ids = []
+
+    successful = 0
+    failed = 0
+
+    for i, problem_file in enumerate(problem_files):
+        if verbose and (i + 1) % 10 == 0:
+            print(f"Processing {i + 1}/{len(problem_files)}: {problem_file.name}")
+
+        try:
+            data = collect_from_problem(problem_file, max_iterations)
+        except Exception as e:
+            if verbose:
+                print(f"Error processing {problem_file}: {e}")
+            failed += 1
             continue
 
-        proof_clauses.add(clause_idx)
+        if data is None:
+            failed += 1
+            continue
 
-        # Add parent clauses
-        if clause_idx in step_map:
-            step = step_map[clause_idx]
-            to_visit.extend(step.get("parent_ids", []))
+        successful += 1
 
-    # Create training examples
-    training_examples = []
-    all_clause_indices = set(step["clause_idx"] for step in proof_steps)
+        # Accumulate data
+        all_graphs.extend(data["graphs"])
+        all_labels.extend(data["labels"])
+        all_problem_names.extend([str(problem_file)] * len(data["labels"]))
+        all_clause_ids.extend(data["clause_ids"])
 
-    for clause_idx in all_clause_indices:
-        label = 1 if clause_idx in proof_clauses else 0
-        training_examples.append({
-            "clause_idx": clause_idx,
-            "label": label,
-        })
+    if verbose:
+        print(f"\nCollected data from {successful}/{len(problem_files)} problems")
+        print(f"Total training examples: {len(all_labels)}")
+        if all_labels:
+            pos = sum(all_labels)
+            neg = len(all_labels) - pos
+            print(f"Positive (in proof): {pos} ({100*pos/len(all_labels):.1f}%)")
+            print(f"Negative (not in proof): {neg} ({100*neg/len(all_labels):.1f}%)")
 
-    return training_examples
+    # Create dataset
+    dataset = TrainingDataset(
+        graphs=all_graphs,
+        labels=torch.tensor(all_labels, dtype=torch.float32),
+        problem_names=all_problem_names,
+        clause_ids=all_clause_ids,
+    )
+
+    # Save dataset
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({
+        "graphs": all_graphs,
+        "labels": all_labels,
+        "problem_names": all_problem_names,
+        "clause_ids": all_clause_ids,
+    }, output_file)
+
+    if verbose:
+        print(f"Saved training data to {output_file}")
+
+    return dataset
 
 
-# Example usage
+def load_training_dataset(path: Path) -> TrainingDataset:
+    """Load a saved training dataset"""
+    data = torch.load(path)
+    return TrainingDataset(
+        graphs=data["graphs"],
+        labels=torch.tensor(data["labels"], dtype=torch.float32),
+        problem_names=data["problem_names"],
+        clause_ids=data["clause_ids"],
+    )
+
+
+# CLI
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Collect ML training data from TPTP problems")
-    parser.add_argument("problems_dir", type=Path, help="Directory containing TPTP problems")
-    parser.add_argument("--output", "-o", type=Path, default=Path("data/training_data.pt"),
-                        help="Output file for training data")
-    parser.add_argument("--prove-binary", default="target/release/prove",
-                        help="Path to prove binary")
-    parser.add_argument("--timeout", type=int, default=60,
-                        help="Timeout per problem in seconds")
-    parser.add_argument("--max-problems", type=int, default=None,
-                        help="Maximum number of problems to process")
+    parser = argparse.ArgumentParser(
+        description="Collect ML training data from TPTP problems"
+    )
+    parser.add_argument(
+        "problems_dir",
+        type=Path,
+        help="Directory containing TPTP problems"
+    )
+    parser.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=Path("data/training_data.pt"),
+        help="Output file for training data"
+    )
+    parser.add_argument(
+        "--max-problems",
+        type=int,
+        default=None,
+        help="Maximum number of problems to process"
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=10000,
+        help="Maximum saturation iterations per problem"
+    )
+    parser.add_argument(
+        "--pattern",
+        default="**/*.p",
+        help="Glob pattern for problem files"
+    )
 
     args = parser.parse_args()
 
-    collector = TrainingDataCollector(
-        prove_binary=args.prove_binary,
-        timeout=args.timeout,
-    )
-
-    collector.collect_from_directory(
+    collect_from_directory(
         problems_dir=args.problems_dir,
         output_file=args.output,
+        pattern=args.pattern,
         max_problems=args.max_problems,
+        max_iterations=args.max_iterations,
     )
