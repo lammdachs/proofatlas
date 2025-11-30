@@ -8,11 +8,9 @@
 //! allowing the model to consider clause interactions (e.g., which
 //! clauses can resolve together, which are redundant).
 
-#[cfg(feature = "onnx")]
 use tract_onnx::prelude::*;
 
 use crate::core::Clause;
-#[cfg(feature = "onnx")]
 use crate::ml::{GraphBuilder, FEATURE_DIM};
 use std::path::Path;
 
@@ -39,7 +37,6 @@ impl std::fmt::Display for InferenceError {
 impl std::error::Error for InferenceError {}
 
 /// Type alias for the tract model
-#[cfg(feature = "onnx")]
 type TractModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 
 /// ML-based clause scorer using ONNX models via tract.
@@ -48,25 +45,16 @@ type TractModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<d
 /// context and clause interactions. The score for each clause may depend
 /// on all other clauses in the set.
 pub struct ClauseScorer {
-    #[cfg(feature = "onnx")]
     model: Option<TractModel>,
-    #[cfg(not(feature = "onnx"))]
-    _phantom: std::marker::PhantomData<()>,
 }
 
 impl ClauseScorer {
     /// Create a new clause scorer (without loading a model)
     pub fn new() -> Self {
-        ClauseScorer {
-            #[cfg(feature = "onnx")]
-            model: None,
-            #[cfg(not(feature = "onnx"))]
-            _phantom: std::marker::PhantomData,
-        }
+        ClauseScorer { model: None }
     }
 
     /// Load an ONNX model from a file
-    #[cfg(feature = "onnx")]
     pub fn load_model<P: AsRef<Path>>(&mut self, model_path: P) -> Result<(), InferenceError> {
         // Load the model without specifying input facts - let tract infer them from the model
         // The model is exported with fixed shapes, tract will handle dynamic shapes at runtime
@@ -82,15 +70,7 @@ impl ClauseScorer {
         Ok(())
     }
 
-    #[cfg(not(feature = "onnx"))]
-    pub fn load_model<P: AsRef<Path>>(&mut self, _model_path: P) -> Result<(), InferenceError> {
-        Err(InferenceError::SessionError(
-            "onnx feature not enabled".to_string(),
-        ))
-    }
-
     /// Load an ONNX model from bytes (for WASM where file system is not available)
-    #[cfg(feature = "onnx")]
     pub fn load_model_from_bytes(&mut self, model_bytes: &[u8]) -> Result<(), InferenceError> {
         let model = tract_onnx::onnx()
             .model_for_read(&mut std::io::Cursor::new(model_bytes))
@@ -104,23 +84,9 @@ impl ClauseScorer {
         Ok(())
     }
 
-    #[cfg(not(feature = "onnx"))]
-    pub fn load_model_from_bytes(&mut self, _model_bytes: &[u8]) -> Result<(), InferenceError> {
-        Err(InferenceError::SessionError(
-            "onnx feature not enabled".to_string(),
-        ))
-    }
-
     /// Check if a model is loaded
     pub fn is_model_loaded(&self) -> bool {
-        #[cfg(feature = "onnx")]
-        {
-            self.model.is_some()
-        }
-        #[cfg(not(feature = "onnx"))]
-        {
-            false
-        }
+        self.model.is_some()
     }
 
     /// Score a set of clauses together.
@@ -137,7 +103,6 @@ impl ClauseScorer {
     /// # Returns
     /// * `Ok(Vec<f32>)` - One score per clause, in the same order as input
     /// * `Err(InferenceError)` - If model not loaded or inference fails
-    #[cfg(feature = "onnx")]
     pub fn score_clauses(&self, clauses: &[&Clause]) -> Result<Vec<f32>, InferenceError> {
         // Use default max_age of 1000
         self.score_clauses_with_context(clauses, 1000)
@@ -148,7 +113,6 @@ impl ClauseScorer {
     /// # Arguments
     /// * `clauses` - Slice of clauses to score together
     /// * `max_age` - Maximum age for normalization (clause ages divided by this)
-    #[cfg(feature = "onnx")]
     pub fn score_clauses_with_context(
         &self,
         clauses: &[&Clause],
@@ -210,32 +174,14 @@ impl ClauseScorer {
             ))
             .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
 
-        // Extract scores
+        // Extract scores (logits, not probabilities)
         let scores_tensor = outputs[0]
             .to_array_view::<f32>()
             .map_err(|e| InferenceError::InferenceError(e.to_string()))?;
 
-        // Apply sigmoid to get probabilities
-        let scores: Vec<f32> = scores_tensor
-            .iter()
-            .map(|&logit| 1.0 / (1.0 + (-logit).exp()))
-            .collect();
+        let scores: Vec<f32> = scores_tensor.iter().cloned().collect();
 
         Ok(scores)
-    }
-
-    #[cfg(not(feature = "onnx"))]
-    pub fn score_clauses(&self, _clauses: &[&Clause]) -> Result<Vec<f32>, InferenceError> {
-        Err(InferenceError::ModelNotLoaded)
-    }
-
-    #[cfg(not(feature = "onnx"))]
-    pub fn score_clauses_with_context(
-        &self,
-        _clauses: &[&Clause],
-        _max_age: usize,
-    ) -> Result<Vec<f32>, InferenceError> {
-        Err(InferenceError::ModelNotLoaded)
     }
 }
 
@@ -271,7 +217,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "onnx")]
     fn test_scorer_with_nonexistent_model() {
         let mut scorer = ClauseScorer::new();
         let result = scorer.load_model("/nonexistent/model.onnx");

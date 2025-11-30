@@ -1,10 +1,7 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal};
+use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal, OnnxClauseSelector};
 use std::time::Duration;
-
-#[cfg(feature = "onnx")]
-use proofatlas::OnnxClauseSelector;
 
 #[wasm_bindgen]
 pub struct ProofAtlasWasm;
@@ -121,8 +118,7 @@ impl ProofAtlasWasm {
 
         web_sys::console::log_1(&"Config created, calling saturate...".into());
 
-        // Run saturation - use ONNX selector if requested and available
-        #[cfg(feature = "onnx")]
+        // Run saturation - use ONNX selector if requested
         let result = if options.use_onnx_selector.unwrap_or(false) {
             if let Some(model_data) = &options.onnx_model_data {
                 // Create ONNX selector from model data
@@ -145,12 +141,6 @@ impl ProofAtlasWasm {
                 state.saturate()
             }
         } else {
-            let state = SaturationState::new(cnf.clauses, config);
-            state.saturate()
-        };
-
-        #[cfg(not(feature = "onnx"))]
-        let result = {
             let state = SaturationState::new(cnf.clauses, config);
             state.saturate()
         };

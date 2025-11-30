@@ -32,9 +32,7 @@ pub mod clause;
 pub mod literal;
 
 pub use clause::{
-    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, ProbabilisticAgeWeightSelector,
-    SizeBasedSelector,
+    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, OnnxClauseSelector,
+    ProbabilisticAgeWeightSelector, SizeBasedSelector,
 };
-#[cfg(feature = "onnx")]
-pub use clause::OnnxClauseSelector;
 pub use literal::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};

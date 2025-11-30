@@ -44,7 +44,7 @@ jobs:
         shell: bash -el {0}
         working-directory: ./wasm
         run: |
-          cargo build --target wasm32-unknown-unknown --release --features onnx
+          cargo build --target wasm32-unknown-unknown --release
           wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
             --out-dir pkg \
             --target web \
@@ -57,22 +57,56 @@ jobs:
           python -c "
           import torch
           import torch.nn as nn
+          import math
 
-          class AgeWeightHeuristicSimple(nn.Module):
+          class AgeWeightSelector(nn.Module):
+              '''
+              Mimics age-weight ratio selection:
+              - With probability p, select the OLDEST clause (highest age)
+              - With probability 1-p, select the LIGHTEST clause (lowest weight/depth)
+
+              Outputs logits such that softmax sampling gives these probabilities.
+              '''
               def __init__(self, age_probability=0.5):
                   super().__init__()
-                  weight_vector = torch.zeros(20, dtype=torch.float32)
-                  weight_vector[7] = -(1.0 - age_probability) / 10.0
-                  weight_vector[8] = -age_probability
-                  self.register_buffer('weight_vector', weight_vector)
-                  self.register_buffer('bias', torch.tensor([1.0], dtype=torch.float32))
+                  self.register_buffer('p', torch.tensor(age_probability, dtype=torch.float32))
+                  self.register_buffer('neg_inf', torch.tensor(-1e9, dtype=torch.float32))
 
               def forward(self, node_features, pool_matrix):
+                  # Pool to get clause-level features: [num_clauses, 20]
                   clause_features = torch.mm(pool_matrix, node_features)
-                  scores = torch.mv(clause_features, self.weight_vector) + self.bias
-                  return scores
 
-          model = AgeWeightHeuristicSimple(age_probability=0.5)
+                  # Extract age (feature 8) and weight/depth (feature 7)
+                  ages = clause_features[:, 8]      # Higher = older
+                  weights = clause_features[:, 7]   # Higher = heavier
+
+                  num_clauses = clause_features.size(0)
+
+                  # Find oldest clause (max age)
+                  oldest_idx = torch.argmax(ages)
+
+                  # Find lightest clause (min weight)
+                  lightest_idx = torch.argmin(weights)
+
+                  # Build logits: -inf everywhere except oldest and lightest
+                  logits = torch.full((num_clauses,), -1e9, dtype=torch.float32, device=clause_features.device)
+
+                  # Handle case where oldest == lightest (same clause)
+                  if oldest_idx == lightest_idx:
+                      # All probability goes to this one clause
+                      logits[oldest_idx] = 0.0
+                  else:
+                      # Assign log probabilities
+                      # logit for oldest = log(p)
+                      # logit for lightest = log(1-p)
+                      log_p = torch.log(self.p + 1e-10)
+                      log_1mp = torch.log(1 - self.p + 1e-10)
+                      logits[oldest_idx] = log_p
+                      logits[lightest_idx] = log_1mp
+
+                  return logits
+
+          model = AgeWeightSelector(age_probability=0.5)
           model.eval()
           dummy_nodes = torch.randn(50, 20)
           dummy_pool = torch.randn(10, 50)

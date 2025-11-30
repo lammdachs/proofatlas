@@ -25,7 +25,7 @@ pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 numpy = { version = "0.20", optional = true }
 
 # ML inference with tract (pure Rust ONNX runtime, WASM compatible)
-tract-onnx = { version = "0.21", optional = true }
+tract-onnx = "0.21"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Performance", "Window"] }
@@ -33,9 +33,8 @@ web-sys = { version = "0.3", features = ["Performance", "Window"] }
 [features]
 default = []
 python = ["pyo3", "numpy"]
-onnx = ["tract-onnx"]
-# WASM with ONNX support for ML-guided theorem proving in browser
-wasm-onnx = ["onnx", "tract-onnx/getrandom-js"]
+# WASM needs getrandom-js for tract's random number generation
+wasm = ["tract-onnx/getrandom-js"]
 
 [dev-dependencies]
 # criterion = "0.5"  # Commented out due to rustc version requirements
@@ -51,4 +50,3 @@ path = "src/bin/prove_json.rs"
 [[bin]]
 name = "test_onnx"
 path = "src/bin/test_onnx.rs"
-required-features = ["onnx"]

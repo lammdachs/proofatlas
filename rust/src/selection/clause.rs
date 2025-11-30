@@ -4,10 +4,8 @@
 //! unprocessed set during saturation.
 
 use crate::core::Clause;
-#[cfg(feature = "onnx")]
 use crate::ml::ClauseScorer;
 use std::collections::VecDeque;
-#[cfg(feature = "onnx")]
 use std::path::Path;
 
 /// Trait for clause selection strategies
@@ -369,7 +367,6 @@ impl Default for ProbabilisticAgeWeightSelector {
 /// Scores are treated as logits and converted to probabilities via softmax.
 /// Clauses are then sampled from this distribution rather than always
 /// picking the highest score, allowing for exploration.
-#[cfg(feature = "onnx")]
 pub struct OnnxClauseSelector {
     /// The underlying clause scorer
     scorer: ClauseScorer,
@@ -381,7 +378,6 @@ pub struct OnnxClauseSelector {
     rng_state: u64,
 }
 
-#[cfg(feature = "onnx")]
 impl OnnxClauseSelector {
     /// Create a new ONNX clause selector from a model file.
     ///
@@ -490,7 +486,6 @@ impl OnnxClauseSelector {
     }
 }
 
-#[cfg(feature = "onnx")]
 impl ClauseSelector for OnnxClauseSelector {
     fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
         if unprocessed.is_empty() {

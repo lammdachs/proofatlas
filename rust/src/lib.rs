@@ -27,12 +27,9 @@ pub use inference::{
 };
 
 pub use selection::{
-    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll,
-    SelectMaxWeight, SizeBasedSelector,
+    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, LiteralSelector, OnnxClauseSelector,
+    SelectAll, SelectMaxWeight, SizeBasedSelector,
 };
-#[cfg(feature = "onnx")]
-pub use selection::OnnxClauseSelector;
-#[cfg(feature = "onnx")]
 pub use ml::ClauseScorer;
 
 pub use saturation::{
