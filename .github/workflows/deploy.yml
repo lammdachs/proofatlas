@@ -94,19 +94,24 @@ jobs:
                   # Find lightest clause (min weight)
                   lightest_idx = torch.argmin(weights)
 
-                  # Build logits: -inf everywhere except oldest and lightest
-                  logits = torch.full((num_clauses,), -1e9, dtype=torch.float32, device=clause_features.device)
+                  # Create one-hot masks for oldest and lightest
+                  indices = torch.arange(num_clauses, device=clause_features.device)
+                  oldest_mask = (indices == oldest_idx).float()
+                  lightest_mask = (indices == lightest_idx).float()
 
-                  # Handle case where oldest == lightest (same clause)
-                  if oldest_idx == lightest_idx:
-                      # All probability goes to this one clause
-                      logits[oldest_idx] = 0.0
-                  else:
-                      # Assign log probabilities
-                      log_p = torch.log(self.p + 1e-10)
-                      log_1mp = torch.log(1 - self.p + 1e-10)
-                      logits[oldest_idx] = log_p
-                      logits[lightest_idx] = log_1mp
+                  # Compute log probabilities
+                  log_p = torch.log(self.p + 1e-10)
+                  log_1mp = torch.log(1 - self.p + 1e-10)
+
+                  # Logits when oldest != lightest: oldest gets log_p, lightest gets log_1mp, rest get -inf
+                  logits_diff = oldest_mask * log_p + lightest_mask * log_1mp + (1 - oldest_mask) * (1 - lightest_mask) * (-1e9)
+
+                  # Logits when oldest == lightest: that clause gets 0, rest get -inf
+                  logits_same = oldest_mask * 0.0 + (1 - oldest_mask) * (-1e9)
+
+                  # Select based on whether oldest and lightest are the same
+                  same_clause = (oldest_idx == lightest_idx)
+                  logits = torch.where(same_clause, logits_same, logits_diff)
 
                   return logits
 
