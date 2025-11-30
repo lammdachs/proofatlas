@@ -1,6 +1,6 @@
 //! TPTP parser for the standard formula representation
 
-use super::cnf_conversion::{fof_to_cnf, fof_to_cnf_with_role};
+use super::cnf_conversion::{fof_to_cnf_with_role};
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
 use super::orient_equalities::orient_all_equalities;
 use crate::core::{

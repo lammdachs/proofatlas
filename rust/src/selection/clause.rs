@@ -366,7 +366,9 @@ impl Default for ProbabilisticAgeWeightSelector {
 /// to score clauses. The model considers clause features like structure,
 /// age, and context to predict which clauses are most likely to be useful.
 ///
-/// Higher scores indicate clauses more likely to contribute to finding a proof.
+/// Scores are treated as logits and converted to probabilities via softmax.
+/// Clauses are then sampled from this distribution rather than always
+/// picking the highest score, allowing for exploration.
 #[cfg(feature = "onnx")]
 pub struct OnnxClauseSelector {
     /// The underlying clause scorer
@@ -375,6 +377,8 @@ pub struct OnnxClauseSelector {
     max_age: usize,
     /// Fallback selector to use if scoring fails
     fallback: AgeWeightRatioSelector,
+    /// Random number generator state (simple LCG)
+    rng_state: u64,
 }
 
 #[cfg(feature = "onnx")]
@@ -397,6 +401,7 @@ impl OnnxClauseSelector {
             scorer,
             max_age: 1000,
             fallback: AgeWeightRatioSelector::default(),
+            rng_state: 12345,
         })
     }
 
@@ -421,6 +426,7 @@ impl OnnxClauseSelector {
             scorer,
             max_age: 1000,
             fallback: AgeWeightRatioSelector::default(),
+            rng_state: 12345,
         })
     }
 
@@ -439,6 +445,49 @@ impl OnnxClauseSelector {
             .score_clauses_with_context(clauses, self.max_age)
             .map_err(|e| format!("Scoring failed: {}", e))
     }
+
+    /// Generate a random float in [0, 1)
+    fn next_random(&mut self) -> f64 {
+        // Simple LCG: x_{n+1} = (a * x_n + c) mod m
+        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (self.rng_state >> 33) as f64 / (1u64 << 31) as f64
+    }
+
+    /// Sample an index from scores treated as logits (softmax sampling).
+    fn sample_from_logits(&mut self, logits: &[f32]) -> usize {
+        if logits.is_empty() {
+            return 0;
+        }
+        if logits.len() == 1 {
+            return 0;
+        }
+
+        // Compute softmax probabilities
+        // First find max for numerical stability
+        let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        let exp_scores: Vec<f64> = logits
+            .iter()
+            .map(|&x| ((x - max_logit) as f64).exp())
+            .collect();
+
+        let sum: f64 = exp_scores.iter().sum();
+        let probs: Vec<f64> = exp_scores.iter().map(|&e| e / sum).collect();
+
+        // Sample from the distribution
+        let r = self.next_random();
+        let mut cumsum = 0.0;
+
+        for (i, &p) in probs.iter().enumerate() {
+            cumsum += p;
+            if r < cumsum {
+                return i;
+            }
+        }
+
+        // Fallback to last index (shouldn't happen with proper probabilities)
+        logits.len() - 1
+    }
 }
 
 #[cfg(feature = "onnx")]
@@ -454,19 +503,11 @@ impl ClauseSelector for OnnxClauseSelector {
         // Try to score clauses using the model
         match self.score_clauses(&clause_refs) {
             Ok(scores) => {
-                // Find the index with the highest score
-                let mut best_idx = 0;
-                let mut best_score = scores[0];
-
-                for (i, &score) in scores.iter().enumerate() {
-                    if score > best_score {
-                        best_score = score;
-                        best_idx = i;
-                    }
-                }
+                // Sample from scores treated as logits
+                let selected_idx = self.sample_from_logits(&scores);
 
                 // Remove and return the selected clause
-                unprocessed.remove(best_idx)
+                unprocessed.remove(selected_idx)
             }
             Err(_) => {
                 // Fall back to age-weight ratio if scoring fails

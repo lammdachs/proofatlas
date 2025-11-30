@@ -1,6 +1,6 @@
 === right_identity ===
 
-Default:    "PROOF" in 0.013s, 50 clauses
-ONNX p=0.3: "PROOF" in 0.006s, 34 clauses
-ONNX p=0.5: "PROOF" in 0.005s, 33 clauses
-ONNX p=0.7: "PROOF" in 0.005s, 34 clauses
+Default:    "PROOF" in 0.041s, 51 clauses
+ONNX p=0.3: "PROOF" in 0.033s, 33 clauses
+ONNX p=0.5: "PROOF" in 0.025s, 33 clauses
+ONNX p=0.7: "PROOF" in 0.026s, 34 clauses

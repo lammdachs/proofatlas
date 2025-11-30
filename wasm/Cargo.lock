@@ -666,15 +666,11 @@ dependencies = [
 name = "proofatlas"
 version = "0.2.0"
 dependencies = [
- "console_error_panic_hook",
- "getrandom",
- "js-sys",
  "nom",
  "serde",
  "serde_json",
  "thiserror",
  "tract-onnx",
- "wasm-bindgen",
  "web-sys",
 ]
 

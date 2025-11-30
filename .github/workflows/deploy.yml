@@ -21,33 +21,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v2
         with:
-          targets: wasm32-unknown-unknown
+          micromamba-version: '2.0.5-0'
+          environment-name: build
+          create-args: >-
+            python=3.11
+            rust=1.85
+            rust-std-wasm32-unknown-unknown=1.85
+            pytorch-cpu
+            onnx
+            onnxscript
+          init-shell: bash
 
       - name: Install wasm-bindgen-cli
+        shell: bash -el {0}
         run: |
           cargo install wasm-bindgen-cli --version 0.2.100 --locked
 
       - name: Build WASM module
+        shell: bash -el {0}
         working-directory: ./wasm
         run: |
           cargo build --target wasm32-unknown-unknown --release --features onnx
-          ~/.cargo/bin/wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
+          wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
             --out-dir pkg \
             --target web \
             --no-typescript
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Generate ONNX model
+        shell: bash -el {0}
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install onnx
           mkdir -p wasm/models
           python -c "
           import torch
@@ -92,7 +97,6 @@ jobs:
           cp index.html docs.html style.css docs-style.css app.js favicon.svg benchmark_problems.json dist/
           cp -r pkg dist/
           cp -r examples dist/
-          # Copy generated ONNX model
           mkdir -p dist/models
           cp models/clause_selector.onnx dist/models/
 
