@@ -64,7 +64,7 @@ jobs:
               - With probability p, select the OLDEST clause (highest age)
               - With probability 1-p, select the LIGHTEST clause (lowest weight/depth)
 
-              Feature layout (16 dimensions):
+              Feature layout (12 dimensions):
               - 0-5: Node type one-hot
               - 6: Arity
               - 7: Depth (proxy for weight)
@@ -72,17 +72,13 @@ jobs:
               - 9: Role
               - 10: Polarity
               - 11: Is equality
-              - 12: Is unit
-              - 13: Is Horn
-              - 14: Is ground
-              - 15: Symbol hash
               '''
               def __init__(self, age_probability=0.5):
                   super().__init__()
                   self.register_buffer('p', torch.tensor(age_probability, dtype=torch.float32))
 
               def forward(self, node_features, pool_matrix):
-                  # Pool to get clause-level features: [num_clauses, 16]
+                  # Pool to get clause-level features: [num_clauses, 12]
                   clause_features = torch.mm(pool_matrix, node_features)
 
                   # Extract age (feature 8) and weight/depth (feature 7)
@@ -115,7 +111,7 @@ jobs:
 
           model = AgeWeightSelector(age_probability=0.5)
           model.eval()
-          dummy_nodes = torch.randn(50, 16)
+          dummy_nodes = torch.randn(50, 12)
           dummy_pool = torch.randn(10, 50)
           torch.onnx.export(
               model, (dummy_nodes, dummy_pool), 'wasm/models/clause_selector.onnx',

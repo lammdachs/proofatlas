@@ -1,6 +1,6 @@
 //! Graph representation of logical clauses for GNN training
 //!
-//! Feature layout (16 dimensions):
+//! Feature layout (12 dimensions):
 //! - 0-5: Node type one-hot (clause, literal, predicate, function, variable, constant)
 //! - 6: Arity (for predicates and functions)
 //! - 7: Depth in the clause tree
@@ -8,10 +8,6 @@
 //! - 9: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
 //! - 10: Literal polarity (1=positive, 0=negative)
 //! - 11: Is equality predicate
-//! - 12: Is unit clause
-//! - 13: Is Horn clause
-//! - 14: Is ground clause (no variables)
-//! - 15: Symbol hash (for predicates, functions, constants, variables)
 
 use crate::core::{Clause, Literal, Term};
 
@@ -33,7 +29,7 @@ pub const NODE_TYPES: [&str; 6] = [
 ];
 
 /// Feature dimension
-pub const FEATURE_DIM: usize = 16;
+pub const FEATURE_DIM: usize = 12;
 
 /// Feature indices
 pub const FEAT_NODE_TYPE_START: usize = 0;
@@ -43,10 +39,6 @@ pub const FEAT_AGE: usize = 8;
 pub const FEAT_ROLE: usize = 9;
 pub const FEAT_POLARITY: usize = 10;
 pub const FEAT_IS_EQUALITY: usize = 11;
-pub const FEAT_IS_UNIT: usize = 12;
-pub const FEAT_IS_HORN: usize = 13;
-pub const FEAT_IS_GROUND: usize = 14;
-pub const FEAT_HASH: usize = 15;
 
 /// Sparse graph representation of a clause
 #[derive(Debug, Clone)]
@@ -182,19 +174,6 @@ impl GraphBuilder {
 
         // Role: numeric encoding of clause role (goal can be derived from role == 3)
         features[FEAT_ROLE] = clause.role.to_feature_value();
-
-        // is_unit
-        features[FEAT_IS_UNIT] = if clause.literals.len() == 1 { 1.0 } else { 0.0 };
-
-        // is_horn: at most one positive literal
-        let num_positive = clause.literals.iter().filter(|l| l.polarity).count();
-        features[FEAT_IS_HORN] = if num_positive <= 1 { 1.0 } else { 0.0 };
-
-        // is_ground: no variables
-        let has_variables = clause.literals.iter().any(|l| {
-            !l.atom.args.iter().all(|t| t.variables().is_empty())
-        });
-        features[FEAT_IS_GROUND] = if has_variables { 0.0 } else { 1.0 };
     }
 
     /// Add a literal node
@@ -212,12 +191,10 @@ impl GraphBuilder {
         let pred_node = self.add_predicate(&literal.atom.predicate.name, lit_node, depth + 1);
 
         // Update predicate features
-        let hash = self.simple_hash(&literal.atom.predicate.name);
         {
             let features = &mut self.features[pred_node];
             features[FEAT_ARITY] = literal.atom.args.len() as f32;
             features[FEAT_IS_EQUALITY] = if literal.atom.is_equality() { 1.0 } else { 0.0 };
-            features[FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
         }
 
         // Process arguments
@@ -241,20 +218,12 @@ impl GraphBuilder {
             Term::Variable(var) => {
                 let node = self.add_node(NODE_TYPE_VARIABLE, &var.name, depth);
                 self.add_edge(parent, node);
-
-                let hash = self.simple_hash(&var.name);
-                self.features[node][FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
-
                 node
             }
 
             Term::Constant(c) => {
                 let node = self.add_node(NODE_TYPE_CONSTANT, &c.name, depth);
                 self.add_edge(parent, node);
-
-                let hash = self.simple_hash(&c.name);
-                self.features[node][FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
-
                 node
             }
 
@@ -262,12 +231,7 @@ impl GraphBuilder {
                 let func_node = self.add_node(NODE_TYPE_FUNCTION, &func.name, depth);
                 self.add_edge(parent, func_node);
 
-                let hash = self.simple_hash(&func.name);
-                {
-                    let features = &mut self.features[func_node];
-                    features[FEAT_ARITY] = args.len() as f32;
-                    features[FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
-                }
+                self.features[func_node][FEAT_ARITY] = args.len() as f32;
 
                 // Process arguments recursively
                 for arg in args {
@@ -277,15 +241,6 @@ impl GraphBuilder {
                 func_node
             }
         }
-    }
-
-    /// Simple string hash function
-    fn simple_hash(&self, s: &str) -> usize {
-        let mut hash = 5381usize;
-        for byte in s.bytes() {
-            hash = hash.wrapping_mul(33).wrapping_add(byte as usize);
-        }
-        hash
     }
 }
 
@@ -419,9 +374,6 @@ mod tests {
         assert_eq!(graph.node_types[1], NODE_TYPE_LITERAL);
         assert_eq!(graph.node_types[2], NODE_TYPE_PREDICATE);
         assert_eq!(graph.node_types[3], NODE_TYPE_VARIABLE);
-
-        // Check is_unit feature
-        assert_eq!(graph.node_features[0][FEAT_IS_UNIT], 1.0);
     }
 
     #[test]
@@ -468,9 +420,6 @@ mod tests {
         let lit2_node = 4;
         assert_eq!(graph.node_features[lit1_node][FEAT_POLARITY], 1.0); // positive
         assert_eq!(graph.node_features[lit2_node][FEAT_POLARITY], 0.0); // negative
-
-        // Check is_unit (should be false)
-        assert_eq!(graph.node_features[0][FEAT_IS_UNIT], 0.0);
     }
 
     #[test]
