@@ -120,21 +120,8 @@ async function loadOnnxModel() {
         const arrayBuffer = await response.arrayBuffer();
         onnxModelData = new Uint8Array(arrayBuffer);
         console.log('ONNX model loaded:', onnxModelData.length, 'bytes');
-
-        // Enable the ML checkbox now that model is available
-        const onnxCheckbox = document.getElementById('use-onnx');
-        if (onnxCheckbox) {
-            onnxCheckbox.disabled = false;
-            onnxCheckbox.title = 'Use ML-based clause selection (GNN model)';
-        }
     } catch (error) {
         console.warn('Failed to load ONNX model:', error);
-        // Disable the ML checkbox if model couldn't be loaded
-        const onnxCheckbox = document.getElementById('use-onnx');
-        if (onnxCheckbox) {
-            onnxCheckbox.disabled = true;
-            onnxCheckbox.title = 'ML model not available';
-        }
     }
 }
 
@@ -547,11 +534,12 @@ async function prove() {
     
     try {
         // Get options
-        const useOnnx = document.getElementById('use-onnx').checked && onnxModelData !== null;
+        // Always use ONNX if model is loaded
+        const useOnnx = onnxModelData !== null;
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
-            use_superposition: document.getElementById('superposition').checked,
+            use_superposition: true,
             literal_selection: document.getElementById('literal-selection').value,
             use_onnx_selector: useOnnx,
             onnx_model_data: useOnnx ? Array.from(onnxModelData) : null
@@ -559,6 +547,8 @@ async function prove() {
 
         if (useOnnx) {
             console.log('Using ML-guided clause selection');
+        } else {
+            console.log('ONNX model not loaded, using default selection');
         }
 
         // Run prover with trace for inspector
