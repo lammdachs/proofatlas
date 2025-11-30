@@ -45,6 +45,8 @@ pub fn rename_clause_variables(clause: &Clause, suffix: &str) -> Clause {
             })
             .collect(),
         id: clause.id,
+        role: clause.role,
+        age: clause.age,
     }
 }
 

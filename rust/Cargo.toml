@@ -24,6 +24,10 @@ serde_json = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 numpy = { version = "0.20", optional = true }
 
+# ML inference with tract (pure Rust ONNX runtime, WASM compatible)
+# Note: Using version 0.21.6 for Rust 1.77 compatibility
+tract-onnx = { version = "=0.21.6", optional = true }
+
 # WASM support
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Performance", "Window"] }
@@ -31,6 +35,7 @@ web-sys = { version = "0.3", features = ["Performance", "Window"] }
 [features]
 default = []
 python = ["pyo3", "numpy"]
+onnx = ["tract-onnx"]
 
 [dev-dependencies]
 # criterion = "0.5"  # Commented out due to rustc version requirements
@@ -42,3 +47,8 @@ path = "src/bin/prove.rs"
 [[bin]]
 name = "prove_json"
 path = "src/bin/prove_json.rs"
+
+[[bin]]
+name = "test_onnx"
+path = "src/bin/test_onnx.rs"
+required-features = ["onnx"]

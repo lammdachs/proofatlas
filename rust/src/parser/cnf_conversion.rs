@@ -4,24 +4,33 @@
 //! first-order formulas to Conjunctive Normal Form (CNF).
 
 use super::fof::{FOFFormula, Quantifier};
-use crate::core::{Atom, CNFFormula, Clause, Constant, FunctionSymbol, Literal, Term, Variable};
+use crate::core::{
+    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, Term, Variable,
+};
 
 /// Convert a FOF formula to CNF
 pub fn fof_to_cnf(formula: FOFFormula) -> CNFFormula {
-    let mut converter = CNFConverter::new();
+    fof_to_cnf_with_role(formula, ClauseRole::Axiom)
+}
+
+/// Convert a FOF formula to CNF with a specific role for all generated clauses
+pub fn fof_to_cnf_with_role(formula: FOFFormula, role: ClauseRole) -> CNFFormula {
+    let mut converter = CNFConverter::new(role);
     converter.convert(formula)
 }
 
 struct CNFConverter {
     skolem_counter: usize,
     universal_vars: Vec<Variable>,
+    role: ClauseRole,
 }
 
 impl CNFConverter {
-    fn new() -> Self {
+    fn new(role: ClauseRole) -> Self {
         CNFConverter {
             skolem_counter: 0,
             universal_vars: Vec::new(),
+            role,
         }
     }
 
@@ -239,7 +248,7 @@ impl CNFConverter {
 
     fn formula_to_clause(&self, formula: FOFFormula) -> Clause {
         let literals = self.collect_literals(formula);
-        Clause::new(literals)
+        Clause::with_role(literals, self.role)
     }
 
     fn collect_literals(&self, formula: FOFFormula) -> Vec<Literal> {

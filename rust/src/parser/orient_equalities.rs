@@ -56,16 +56,13 @@ mod tests {
         };
 
         // Create clause: a = b
-        let mut clause = Clause {
-            literals: vec![Literal {
-                atom: Atom {
-                    predicate: eq_pred.clone(),
-                    args: vec![a.clone(), b.clone()],
-                },
-                polarity: true,
-            }],
-            id: None,
-        };
+        let mut clause = Clause::new(vec![Literal {
+            atom: Atom {
+                predicate: eq_pred.clone(),
+                args: vec![a.clone(), b.clone()],
+            },
+            polarity: true,
+        }]);
 
         orient_clause_equalities(&mut clause);
 
@@ -89,16 +86,13 @@ mod tests {
         };
 
         // Create clause: c = a (already correctly oriented)
-        let mut clause = Clause {
-            literals: vec![Literal {
-                atom: Atom {
-                    predicate: eq_pred.clone(),
-                    args: vec![c.clone(), a.clone()],
-                },
-                polarity: true,
-            }],
-            id: None,
-        };
+        let mut clause = Clause::new(vec![Literal {
+            atom: Atom {
+                predicate: eq_pred.clone(),
+                args: vec![c.clone(), a.clone()],
+            },
+            polarity: true,
+        }]);
 
         orient_clause_equalities(&mut clause);
 

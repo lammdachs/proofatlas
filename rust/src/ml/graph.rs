@@ -1,4 +1,20 @@
 //! Graph representation of logical clauses for GNN training
+//!
+//! Feature layout (20 dimensions):
+//! - 0-5: Node type one-hot (clause, literal, predicate, function, variable, constant)
+//! - 6: Arity (for predicates and functions)
+//! - 7: Depth in the clause tree
+//! - 8: Clause age (normalized, 0-1 range based on max_age parameter)
+//! - 9: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
+//! - 10: Is goal clause (1 if negated_conjecture, 0 otherwise)
+//! - 11: (reserved)
+//! - 12: Literal polarity (1=positive, 0=negative)
+//! - 13: Is equality predicate
+//! - 14: Is unit clause
+//! - 15: Is Horn clause
+//! - 16: Is ground clause (no variables)
+//! - 17-18: Symbol hash (for predicates, functions, constants, variables)
+//! - 19: (reserved)
 
 use crate::core::{Clause, Literal, Term};
 
@@ -21,6 +37,21 @@ pub const NODE_TYPES: [&str; 6] = [
 
 /// Feature dimension
 pub const FEATURE_DIM: usize = 20;
+
+/// Feature indices
+pub const FEAT_NODE_TYPE_START: usize = 0;
+pub const FEAT_ARITY: usize = 6;
+pub const FEAT_DEPTH: usize = 7;
+pub const FEAT_AGE: usize = 8;
+pub const FEAT_ROLE: usize = 9;
+pub const FEAT_IS_GOAL: usize = 10;
+pub const FEAT_POLARITY: usize = 12;
+pub const FEAT_IS_EQUALITY: usize = 13;
+pub const FEAT_IS_UNIT: usize = 14;
+pub const FEAT_IS_HORN: usize = 15;
+pub const FEAT_IS_GROUND: usize = 16;
+pub const FEAT_HASH1: usize = 17;
+pub const FEAT_HASH2: usize = 18;
 
 /// Sparse graph representation of a clause
 #[derive(Debug, Clone)]
@@ -75,8 +106,17 @@ impl GraphBuilder {
         }
     }
 
-    /// Build graph from a clause
+    /// Build graph from a clause (with default max_age of 1000)
     pub fn build_from_clause(clause: &Clause) -> ClauseGraph {
+        Self::build_from_clause_with_context(clause, 1000)
+    }
+
+    /// Build graph from a clause with context information
+    ///
+    /// # Arguments
+    /// * `clause` - The clause to build a graph for
+    /// * `max_age` - Maximum age for normalization (age will be divided by this)
+    pub fn build_from_clause_with_context(clause: &Clause, max_age: usize) -> ClauseGraph {
         let mut builder = GraphBuilder::new();
 
         // Add clause root node
@@ -86,8 +126,8 @@ impl GraphBuilder {
             0, // depth
         );
 
-        // Update clause root features
-        builder.update_clause_features(clause_node, clause);
+        // Update clause root features including age and role
+        builder.update_clause_features(clause_node, clause, max_age);
 
         // Process each literal
         for literal in &clause.literals {
@@ -117,11 +157,11 @@ impl GraphBuilder {
 
         // Type one-hot (indices 0-5)
         if (node_type as usize) < 6 {
-            features[node_type as usize] = 1.0;
+            features[FEAT_NODE_TYPE_START + node_type as usize] = 1.0;
         }
 
-        // Depth (index 7)
-        features[7] = depth as f32;
+        // Depth
+        features[FEAT_DEPTH] = depth as f32;
 
         self.features.push(features);
 
@@ -134,21 +174,35 @@ impl GraphBuilder {
     }
 
     /// Update clause root node features
-    fn update_clause_features(&mut self, node_id: usize, clause: &Clause) {
+    fn update_clause_features(&mut self, node_id: usize, clause: &Clause, max_age: usize) {
         let features = &mut self.features[node_id];
 
+        // Age (index 8): normalized to 0-1 range
+        let normalized_age = if max_age > 0 {
+            (clause.age as f32) / (max_age as f32)
+        } else {
+            0.0
+        };
+        features[FEAT_AGE] = normalized_age.min(1.0); // Clamp to 1.0
+
+        // Role (index 9): numeric encoding of clause role
+        features[FEAT_ROLE] = clause.role.to_feature_value();
+
+        // Is goal (index 10): 1 if this is a negated conjecture
+        features[FEAT_IS_GOAL] = if clause.role.is_goal() { 1.0 } else { 0.0 };
+
         // is_unit (index 14)
-        features[14] = if clause.literals.len() == 1 { 1.0 } else { 0.0 };
+        features[FEAT_IS_UNIT] = if clause.literals.len() == 1 { 1.0 } else { 0.0 };
 
         // is_horn (index 15): at most one positive literal
         let num_positive = clause.literals.iter().filter(|l| l.polarity).count();
-        features[15] = if num_positive <= 1 { 1.0 } else { 0.0 };
+        features[FEAT_IS_HORN] = if num_positive <= 1 { 1.0 } else { 0.0 };
 
         // is_ground (index 16): no variables
         let has_variables = clause.literals.iter().any(|l| {
             !l.atom.args.iter().all(|t| t.variables().is_empty())
         });
-        features[16] = if has_variables { 0.0 } else { 1.0 };
+        features[FEAT_IS_GROUND] = if has_variables { 0.0 } else { 1.0 };
     }
 
     /// Add a literal node
@@ -159,9 +213,7 @@ impl GraphBuilder {
         // Update literal features
         {
             let features = &mut self.features[lit_node];
-
-            // Polarity (index 12)
-            features[12] = if literal.polarity { 1.0 } else { 0.0 };
+            features[FEAT_POLARITY] = if literal.polarity { 1.0 } else { 0.0 };
         }
 
         // Add predicate node
@@ -171,16 +223,10 @@ impl GraphBuilder {
         let hash = self.simple_hash(&literal.atom.predicate.name);
         {
             let features = &mut self.features[pred_node];
-
-            // Arity (index 6)
-            features[6] = literal.atom.args.len() as f32;
-
-            // is_equality (index 13)
-            features[13] = if literal.atom.is_equality() { 1.0 } else { 0.0 };
-
-            // Symbol hash (simple hash for now)
-            features[17] = (hash % 1000) as f32 / 1000.0;
-            features[18] = ((hash >> 10) % 1000) as f32 / 1000.0;
+            features[FEAT_ARITY] = literal.atom.args.len() as f32;
+            features[FEAT_IS_EQUALITY] = if literal.atom.is_equality() { 1.0 } else { 0.0 };
+            features[FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
+            features[FEAT_HASH2] = ((hash >> 10) % 1000) as f32 / 1000.0;
         }
 
         // Process arguments
@@ -205,9 +251,8 @@ impl GraphBuilder {
                 let node = self.add_node(NODE_TYPE_VARIABLE, &var.name, depth);
                 self.add_edge(parent, node);
 
-                // Symbol hash
                 let hash = self.simple_hash(&var.name);
-                self.features[node][17] = (hash % 1000) as f32 / 1000.0;
+                self.features[node][FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
 
                 node
             }
@@ -216,9 +261,8 @@ impl GraphBuilder {
                 let node = self.add_node(NODE_TYPE_CONSTANT, &c.name, depth);
                 self.add_edge(parent, node);
 
-                // Symbol hash
                 let hash = self.simple_hash(&c.name);
-                self.features[node][17] = (hash % 1000) as f32 / 1000.0;
+                self.features[node][FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
 
                 node
             }
@@ -227,17 +271,12 @@ impl GraphBuilder {
                 let func_node = self.add_node(NODE_TYPE_FUNCTION, &func.name, depth);
                 self.add_edge(parent, func_node);
 
-                // Update function features
                 let hash = self.simple_hash(&func.name);
                 {
                     let features = &mut self.features[func_node];
-
-                    // Arity (index 6)
-                    features[6] = args.len() as f32;
-
-                    // Symbol hash
-                    features[17] = (hash % 1000) as f32 / 1000.0;
-                    features[18] = ((hash >> 10) % 1000) as f32 / 1000.0;
+                    features[FEAT_ARITY] = args.len() as f32;
+                    features[FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
+                    features[FEAT_HASH2] = ((hash >> 10) % 1000) as f32 / 1000.0;
                 }
 
                 // Process arguments recursively
@@ -375,10 +414,7 @@ mod tests {
             atom,
             polarity: true,
         };
-        let clause = Clause {
-            literals: vec![literal],
-            id: None,
-        };
+        let clause = Clause::new(vec![literal]);
 
         let graph = GraphBuilder::build_from_clause(&clause);
 
@@ -395,7 +431,7 @@ mod tests {
         assert_eq!(graph.node_types[3], NODE_TYPE_VARIABLE);
 
         // Check is_unit feature
-        assert_eq!(graph.node_features[0][14], 1.0);
+        assert_eq!(graph.node_features[0][FEAT_IS_UNIT], 1.0);
     }
 
     #[test]
@@ -430,10 +466,7 @@ mod tests {
             polarity: false,
         };
 
-        let clause = Clause {
-            literals: vec![lit1, lit2],
-            id: None,
-        };
+        let clause = Clause::new(vec![lit1, lit2]);
 
         let graph = GraphBuilder::build_from_clause(&clause);
 
@@ -443,10 +476,73 @@ mod tests {
         // Check polarities
         let lit1_node = 1;
         let lit2_node = 4;
-        assert_eq!(graph.node_features[lit1_node][12], 1.0); // positive
-        assert_eq!(graph.node_features[lit2_node][12], 0.0); // negative
+        assert_eq!(graph.node_features[lit1_node][FEAT_POLARITY], 1.0); // positive
+        assert_eq!(graph.node_features[lit2_node][FEAT_POLARITY], 0.0); // negative
 
         // Check is_unit (should be false)
-        assert_eq!(graph.node_features[0][14], 0.0);
+        assert_eq!(graph.node_features[0][FEAT_IS_UNIT], 0.0);
+    }
+
+    #[test]
+    fn test_clause_age_and_role_features() {
+        use crate::core::ClauseRole;
+
+        // Create a simple clause P(x)
+        let x = Term::Variable(Variable {
+            name: "x".to_string(),
+        });
+        let atom = Atom {
+            predicate: PredicateSymbol {
+                name: "P".to_string(),
+                arity: 1,
+            },
+            args: vec![x],
+        };
+        let literal = Literal {
+            atom,
+            polarity: true,
+        };
+
+        // Create clause with specific age and role
+        let mut clause = Clause::new(vec![literal]);
+        clause.age = 500;
+        clause.role = ClauseRole::NegatedConjecture;
+
+        // Build graph with max_age = 1000
+        let graph = GraphBuilder::build_from_clause_with_context(&clause, 1000);
+
+        // Check age feature (should be 0.5 = 500/1000)
+        assert!((graph.node_features[0][FEAT_AGE] - 0.5).abs() < 0.001);
+
+        // Check role feature (NegatedConjecture = 3.0)
+        assert_eq!(graph.node_features[0][FEAT_ROLE], 3.0);
+
+        // Check is_goal feature (should be 1.0 for NegatedConjecture)
+        assert_eq!(graph.node_features[0][FEAT_IS_GOAL], 1.0);
+
+        // Test with Axiom role
+        let mut axiom_clause = Clause::new(vec![Literal {
+            atom: Atom {
+                predicate: PredicateSymbol {
+                    name: "Q".to_string(),
+                    arity: 0,
+                },
+                args: vec![],
+            },
+            polarity: true,
+        }]);
+        axiom_clause.age = 0;
+        axiom_clause.role = ClauseRole::Axiom;
+
+        let axiom_graph = GraphBuilder::build_from_clause_with_context(&axiom_clause, 1000);
+
+        // Check age feature (should be 0.0)
+        assert_eq!(axiom_graph.node_features[0][FEAT_AGE], 0.0);
+
+        // Check role feature (Axiom = 0.0)
+        assert_eq!(axiom_graph.node_features[0][FEAT_ROLE], 0.0);
+
+        // Check is_goal feature (should be 0.0 for Axiom)
+        assert_eq!(axiom_graph.node_features[0][FEAT_IS_GOAL], 0.0);
     }
 }

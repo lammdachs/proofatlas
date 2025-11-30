@@ -125,6 +125,8 @@ impl Clause {
                 .map(|lit| lit.apply_substitution(subst))
                 .collect(),
             id: None, // New clause gets no ID
+            role: self.role,
+            age: self.age,
         }
     }
 }

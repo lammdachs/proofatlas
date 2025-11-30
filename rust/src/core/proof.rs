@@ -1,5 +1,6 @@
 //! Proof tracking structures
 
+use crate::core::Clause;
 use crate::inference::InferenceResult;
 
 /// A single step in a proof
@@ -14,4 +15,6 @@ pub struct ProofStep {
 pub struct Proof {
     pub steps: Vec<ProofStep>,
     pub empty_clause_idx: usize,
+    /// All clauses generated during saturation (for ML training data extraction)
+    pub all_clauses: Vec<Clause>,
 }

@@ -13,7 +13,7 @@ pub mod substitution;
 pub mod term;
 
 // Re-export commonly used types
-pub use clause::{CNFFormula, Clause};
+pub use clause::{CNFFormula, Clause, ClauseRole};
 pub use literal::{Atom, Literal, PredicateSymbol};
 pub use ordering::{KBOConfig, Ordering as TermOrdering, KBO};
 pub use proof::{Proof, ProofStep};

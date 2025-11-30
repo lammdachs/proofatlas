@@ -1,0 +1,6 @@
+=== right_identity ===
+
+Default:     "PROOF" in 0.012s, 51 clauses
+Torch p=0.3: "PROOF" in 0.123s, 34 clauses
+Torch p=0.5: "PROOF" in 0.010s, 34 clauses
+Torch p=0.7: "PROOF" in 0.009s, 34 clauses

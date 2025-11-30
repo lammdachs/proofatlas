@@ -1,10 +1,11 @@
 //! TPTP parser for the standard formula representation
 
-use super::cnf_conversion::fof_to_cnf;
+use super::cnf_conversion::{fof_to_cnf, fof_to_cnf_with_role};
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
 use super::orient_equalities::orient_all_equalities;
 use crate::core::{
-    Atom, CNFFormula, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable,
+    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, PredicateSymbol, Term,
+    Variable,
 };
 use nom::{
     branch::alt,
@@ -41,13 +42,14 @@ pub fn parse_tptp_file(file_path: &str, include_dirs: &[&str]) -> Result<CNFForm
     for named_fof in result.fof_formulas {
         match named_fof.role {
             FormulaRole::Conjecture => conjectures.push(named_fof.formula),
-            _ => other_formulas.push(named_fof.formula),
+            _ => other_formulas.push((named_fof.formula, named_fof.role)),
         }
     }
 
-    // Convert non-conjecture formulas to CNF
-    for formula in other_formulas {
-        let cnf = fof_to_cnf(formula);
+    // Convert non-conjecture formulas to CNF with their roles
+    for (formula, role) in other_formulas {
+        let clause_role = formula_role_to_clause_role(&role);
+        let cnf = fof_to_cnf_with_role(formula, clause_role);
         all_clauses.extend(cnf.clauses);
     }
 
@@ -73,7 +75,8 @@ pub fn parse_tptp_file(file_path: &str, include_dirs: &[&str]) -> Result<CNFForm
             result
         };
 
-        let cnf = fof_to_cnf(conjecture_formula);
+        // Negated conjectures get the NegatedConjecture role
+        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture);
         all_clauses.extend(cnf.clauses);
     }
 
@@ -105,13 +108,14 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
     for named_fof in result.fof_formulas {
         match named_fof.role {
             FormulaRole::Conjecture => conjectures.push(named_fof.formula),
-            _ => other_formulas.push(named_fof.formula),
+            _ => other_formulas.push((named_fof.formula, named_fof.role)),
         }
     }
 
-    // Convert non-conjecture formulas to CNF
-    for formula in other_formulas {
-        let cnf = fof_to_cnf(formula);
+    // Convert non-conjecture formulas to CNF with their roles
+    for (formula, role) in other_formulas {
+        let clause_role = formula_role_to_clause_role(&role);
+        let cnf = fof_to_cnf_with_role(formula, clause_role);
         all_clauses.extend(cnf.clauses);
     }
 
@@ -137,7 +141,8 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
             result
         };
 
-        let cnf = fof_to_cnf(conjecture_formula);
+        // Negated conjectures get the NegatedConjecture role
+        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture);
         all_clauses.extend(cnf.clauses);
     }
 
@@ -147,6 +152,20 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
     Ok(CNFFormula {
         clauses: all_clauses,
     })
+}
+
+/// Convert a FormulaRole to a ClauseRole
+fn formula_role_to_clause_role(role: &FormulaRole) -> ClauseRole {
+    match role {
+        FormulaRole::Axiom
+        | FormulaRole::Lemma
+        | FormulaRole::Theorem
+        | FormulaRole::Corollary
+        | FormulaRole::Assumption => ClauseRole::Axiom,
+        FormulaRole::Hypothesis => ClauseRole::Hypothesis,
+        FormulaRole::Definition => ClauseRole::Definition,
+        FormulaRole::Conjecture | FormulaRole::NegatedConjecture => ClauseRole::NegatedConjecture,
+    }
 }
 
 fn parse_file_recursive(
@@ -304,10 +323,10 @@ fn parse_cnf_line(input: &str) -> IResult<&str, Clause> {
     let (input, _) = parse_name(input)?; // formula name
     let (input, _) = char(',')(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, _) = parse_role(input)?; // formula role
+    let (input, role_str) = parse_role(input)?; // formula role
     let (input, _) = char(',')(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, clause) = parse_clause(input)?;
+    let (input, mut clause) = parse_clause(input)?;
     let (input, _) = multispace0(input)?;
 
     // Parse optional annotations
@@ -315,6 +334,9 @@ fn parse_cnf_line(input: &str) -> IResult<&str, Clause> {
 
     let (input, _) = char(')')(input)?;
     let (input, _) = char('.')(input)?;
+
+    // Set the role on the clause
+    clause.role = ClauseRole::from_tptp_role(role_str);
 
     Ok((input, clause))
 }
@@ -986,5 +1008,49 @@ mod tests {
         let (remaining, filename) = parse_include(input).unwrap();
         assert_eq!(filename, "test.ax");
         assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn test_clause_role_parsing() {
+        use crate::core::ClauseRole;
+
+        // Test CNF axiom role
+        let input = "cnf(c1, axiom, p(a)).";
+        let result = parse_tptp(input).unwrap();
+        assert_eq!(result.clauses[0].role, ClauseRole::Axiom);
+
+        // Test CNF negated_conjecture role
+        let input = "cnf(c2, negated_conjecture, ~p(a)).";
+        let result = parse_tptp(input).unwrap();
+        assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
+
+        // Test CNF hypothesis role
+        let input = "cnf(c3, hypothesis, q(X)).";
+        let result = parse_tptp(input).unwrap();
+        assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
+    }
+
+    #[test]
+    fn test_fof_role_propagation() {
+        use crate::core::ClauseRole;
+
+        // Test FOF axiom role
+        let input = "fof(ax1, axiom, p(a) & q(b)).";
+        let result = parse_tptp(input).unwrap();
+        // All clauses from an axiom should have Axiom role
+        for clause in &result.clauses {
+            assert_eq!(clause.role, ClauseRole::Axiom);
+        }
+
+        // Test FOF conjecture role (should become NegatedConjecture)
+        let input = "fof(conj, conjecture, p(a)).";
+        let result = parse_tptp(input).unwrap();
+        // Negated conjecture clauses should have NegatedConjecture role
+        assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
+
+        // Test FOF hypothesis role
+        let input = "fof(hyp1, hypothesis, r(X)).";
+        let result = parse_tptp(input).unwrap();
+        assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
     }
 }

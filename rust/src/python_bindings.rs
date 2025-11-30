@@ -56,6 +56,12 @@ pub struct ClauseInfo {
     pub weight: usize,
     #[pyo3(get)]
     pub variables: Vec<String>,
+    #[pyo3(get)]
+    pub age: usize,
+    #[pyo3(get)]
+    pub role: String,
+    #[pyo3(get)]
+    pub is_goal: bool,
 }
 
 /// Result of an inference
@@ -239,6 +245,16 @@ impl ProofState {
         let is_horn = clause.literals.iter().filter(|l| l.polarity).count() <= 1;
         let is_equality = clause.literals.iter().any(|l| l.atom.is_equality());
 
+        // Get role as string
+        let role = match clause.role {
+            crate::core::ClauseRole::Axiom => "axiom",
+            crate::core::ClauseRole::Hypothesis => "hypothesis",
+            crate::core::ClauseRole::Definition => "definition",
+            crate::core::ClauseRole::NegatedConjecture => "negated_conjecture",
+            crate::core::ClauseRole::Derived => "derived",
+        }
+        .to_string();
+
         Ok(ClauseInfo {
             clause_id,
             clause_string: clause.to_string(),
@@ -249,6 +265,9 @@ impl ProofState {
             is_equality,
             weight,
             variables,
+            age: clause.age,
+            role,
+            is_goal: clause.role.is_goal(),
         })
     }
 
@@ -461,6 +480,87 @@ impl ProofState {
         self.use_superposition = use_superposition;
     }
 
+    /// Run full saturation using the Rust saturation engine
+    ///
+    /// This is more efficient than calling generate_inferences/add_inference in a loop
+    /// because it uses demodulation and other optimizations.
+    ///
+    /// Args:
+    ///     max_iterations: Maximum number of saturation steps
+    ///     timeout_secs: Optional timeout in seconds
+    ///
+    /// Returns:
+    ///     True if proof found, False otherwise
+    pub fn run_saturation(
+        &mut self,
+        max_iterations: usize,
+        timeout_secs: Option<f64>,
+    ) -> PyResult<bool> {
+        use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
+        use std::time::Duration;
+
+        // Build config
+        let timeout = timeout_secs
+            .map(|s| Duration::from_secs_f64(s))
+            .unwrap_or(Duration::from_secs(300));
+
+        let literal_selection = match self.literal_selector.as_ref().name() {
+            "SelectMaxWeight" => LiteralSelectionStrategy::SelectMaxWeight,
+            "SelectLargestNegative" => LiteralSelectionStrategy::SelectLargestNegative,
+            _ => LiteralSelectionStrategy::SelectAll,
+        };
+
+        let config = SaturationConfig {
+            max_clauses: 100000,
+            max_iterations,
+            max_clause_size: 100,
+            timeout,
+            use_superposition: self.use_superposition,
+            literal_selection,
+            step_limit: None,
+        };
+
+        // Create saturation state from current clauses
+        let initial_clauses: Vec<Clause> = self.clauses.clone();
+        let state = SaturationState::new(initial_clauses, config);
+
+        // Run saturation
+        let result = state.saturate();
+
+        // Copy back the results
+        let (proof_found, final_clauses, proof_steps) = match result {
+            SaturationResult::Proof(proof) => {
+                (true, proof.all_clauses, proof.steps)
+            }
+            SaturationResult::Saturated(steps, clauses) => (false, clauses, steps),
+            SaturationResult::ResourceLimit(steps, clauses) => (false, clauses, steps),
+            SaturationResult::Timeout(steps, clauses) => (false, clauses, steps),
+        };
+
+        // Update our state with the results
+        self.clauses = final_clauses;
+        self.processed.clear();
+        self.unprocessed.clear();
+
+        // Rebuild processed/unprocessed from the proof steps
+        for step in &proof_steps {
+            self.processed.insert(step.clause_idx);
+        }
+
+        // Rebuild proof trace
+        self.proof_trace.clear();
+        for step in proof_steps {
+            self.proof_trace.push(ProofStep {
+                clause_id: step.clause_idx,
+                parent_ids: step.inference.premises.clone(),
+                rule_name: format!("{:?}", step.inference.rule),
+                clause_string: step.inference.conclusion.to_string(),
+            });
+        }
+
+        Ok(proof_found)
+    }
+
     /// Get statistics
     pub fn get_statistics(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();
@@ -526,12 +626,24 @@ impl ProofState {
     /// Convert clause to sparse graph representation
     #[cfg(feature = "python")]
     pub fn clause_to_graph(&self, clause_id: usize) -> PyResult<ClauseGraphData> {
+        // Use current number of clauses as max_age for normalization
+        let max_age = self.clauses.len().max(1);
+        self.clause_to_graph_with_context(clause_id, max_age)
+    }
+
+    /// Convert clause to sparse graph with specific max_age for normalization
+    #[cfg(feature = "python")]
+    pub fn clause_to_graph_with_context(
+        &self,
+        clause_id: usize,
+        max_age: usize,
+    ) -> PyResult<ClauseGraphData> {
         let clause = self
             .clauses
             .get(clause_id)
             .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", clause_id)))?;
 
-        let graph = GraphBuilder::build_from_clause(clause);
+        let graph = GraphBuilder::build_from_clause_with_context(clause, max_age);
 
         Ok(ClauseGraphData { graph })
     }
@@ -539,10 +651,12 @@ impl ProofState {
     /// Convert multiple clauses to batch of graphs
     #[cfg(feature = "python")]
     pub fn clauses_to_graphs(&self, clause_ids: Vec<usize>) -> PyResult<Vec<ClauseGraphData>> {
-        let mut graphs = Vec::new();
+        // Use current number of clauses as max_age for normalization
+        let max_age = self.clauses.len().max(1);
 
+        let mut graphs = Vec::new();
         for clause_id in clause_ids {
-            let graph_data = self.clause_to_graph(clause_id)?;
+            let graph_data = self.clause_to_graph_with_context(clause_id, max_age)?;
             graphs.push(graph_data);
         }
 

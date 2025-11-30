@@ -1,0 +1,6 @@
+=== uniqueness_of_inverse ===
+
+Default:    "PROOF" in 0.004s, 29 clauses
+ONNX p=0.3: "PROOF" in 0.005s, 30 clauses
+ONNX p=0.5: "PROOF" in 0.004s, 30 clauses
+ONNX p=0.7: "PROOF" in 0.004s, 30 clauses

@@ -7,7 +7,7 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.000s
+✓ PROOF FOUND in 0.001s
 Generated 15 clauses
 Empty clause at index: 9
 

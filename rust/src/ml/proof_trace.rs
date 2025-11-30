@@ -119,6 +119,7 @@ mod tests {
         let proof = Proof {
             steps,
             empty_clause_idx: 2,
+            all_clauses: vec![],  // Not used for proof DAG extraction
         };
 
         let proof_clauses = extract_proof_dag(&proof);
@@ -148,6 +149,7 @@ mod tests {
         let proof = Proof {
             steps,
             empty_clause_idx: 3,
+            all_clauses: vec![],  // Not used for this test
         };
 
         let examples = extract_training_data(&proof);
@@ -178,6 +180,7 @@ mod tests {
         let proof = Proof {
             steps,
             empty_clause_idx: 3,
+            all_clauses: vec![],  // Not used for statistics
         };
 
         let stats = compute_proof_statistics(&proof);
@@ -209,6 +212,7 @@ mod tests {
         let proof = Proof {
             steps,
             empty_clause_idx: 6,
+            all_clauses: vec![],  // Not used for proof DAG
         };
 
         let proof_clauses = extract_proof_dag(&proof);

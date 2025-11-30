@@ -24,43 +24,32 @@ class TrainingDataset:
     clause_ids: List[int]     # Original clause ID
 
 
-def run_saturation_loop(state: ProofState, max_iterations: int = 10000) -> bool:
+def run_saturation_loop(
+    state: ProofState,
+    max_iterations: int = 10000,
+    timeout_secs: float = 60.0,
+) -> bool:
     """
     Run saturation loop on a ProofState until proof found or limit reached.
+
+    This uses the full Rust saturation engine which includes demodulation
+    and other optimizations for better proof finding.
 
     Args:
         state: ProofState with initial clauses
         max_iterations: Maximum number of iterations
+        timeout_secs: Timeout in seconds
 
     Returns:
         True if proof found, False otherwise
     """
-    for _ in range(max_iterations):
-        # Check if we have a proof
-        if state.contains_empty_clause():
-            return True
-
-        # Select given clause
-        given_id = state.select_given_clause()
-        if given_id is None:
-            break  # Saturated
-
-        # Generate inferences
-        inferences = state.generate_inferences(given_id)
-
-        # Add non-redundant inferences
-        for inf in inferences:
-            state.add_inference(inf)
-
-        # Mark as processed
-        state.process_clause(given_id)
-
-    return state.contains_empty_clause()
+    return state.run_saturation(max_iterations, timeout_secs)
 
 
 def collect_from_problem(
     problem_file: Path,
     max_iterations: int = 10000,
+    timeout_secs: float = 60.0,
 ) -> Optional[Dict[str, Any]]:
     """
     Run prover on a problem and extract training data if proof found.
@@ -68,6 +57,7 @@ def collect_from_problem(
     Args:
         problem_file: Path to TPTP problem file
         max_iterations: Maximum saturation iterations
+        timeout_secs: Timeout in seconds
 
     Returns:
         Dictionary with training data, or None if no proof found
@@ -85,7 +75,7 @@ def collect_from_problem(
         return None
 
     # Run saturation
-    proof_found = run_saturation_loop(state, max_iterations)
+    proof_found = run_saturation_loop(state, max_iterations, timeout_secs)
 
     if not proof_found:
         return None
@@ -127,6 +117,7 @@ def collect_from_directory(
     pattern: str = "**/*.p",
     max_problems: Optional[int] = None,
     max_iterations: int = 10000,
+    timeout_secs: float = 60.0,
     verbose: bool = True,
 ) -> TrainingDataset:
     """
@@ -138,6 +129,7 @@ def collect_from_directory(
         pattern: Glob pattern for problem files
         max_problems: Maximum number of problems to process
         max_iterations: Max saturation iterations per problem
+        timeout_secs: Timeout in seconds per problem
         verbose: Print progress
 
     Returns:
@@ -161,7 +153,7 @@ def collect_from_directory(
             print(f"Processing {i + 1}/{len(problem_files)}: {problem_file.name}")
 
         try:
-            data = collect_from_problem(problem_file, max_iterations)
+            data = collect_from_problem(problem_file, max_iterations, timeout_secs)
         except Exception as e:
             if verbose:
                 print(f"Error processing {problem_file}: {e}")

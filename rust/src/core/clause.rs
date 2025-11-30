@@ -3,11 +3,61 @@
 use super::literal::Literal;
 use std::fmt;
 
+/// Role of a clause in the proof (from TPTP or derived)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClauseRole {
+    /// Axiom from the problem
+    #[default]
+    Axiom,
+    /// Hypothesis
+    Hypothesis,
+    /// Definition
+    Definition,
+    /// Negated conjecture (goal)
+    NegatedConjecture,
+    /// Derived clause (from inference)
+    Derived,
+}
+
+impl ClauseRole {
+    /// Convert to a numeric value for ML features
+    pub fn to_feature_value(&self) -> f32 {
+        match self {
+            ClauseRole::Axiom => 0.0,
+            ClauseRole::Hypothesis => 1.0,
+            ClauseRole::Definition => 2.0,
+            ClauseRole::NegatedConjecture => 3.0,
+            ClauseRole::Derived => 4.0,
+        }
+    }
+
+    /// Check if this is a goal clause (negated conjecture)
+    pub fn is_goal(&self) -> bool {
+        matches!(self, ClauseRole::NegatedConjecture)
+    }
+
+    /// Convert from a TPTP role string to ClauseRole
+    pub fn from_tptp_role(role: &str) -> Self {
+        match role {
+            "axiom" | "lemma" | "theorem" | "corollary" | "assumption" => ClauseRole::Axiom,
+            "hypothesis" => ClauseRole::Hypothesis,
+            "definition" => ClauseRole::Definition,
+            "negated_conjecture" => ClauseRole::NegatedConjecture,
+            "conjecture" => ClauseRole::NegatedConjecture, // Will be negated in processing
+            _ => ClauseRole::Axiom,
+        }
+    }
+}
+
 /// A clause (disjunction of literals)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clause {
     pub literals: Vec<Literal>,
-    pub id: Option<usize>, // Optional ID for tracking
+    pub id: Option<usize>,
+    /// Role of the clause (axiom, hypothesis, negated conjecture, derived)
+    pub role: ClauseRole,
+    /// Age of the clause (derivation step when it was created, 0 for input clauses)
+    pub age: usize,
 }
 
 /// A CNF formula (conjunction of clauses)
@@ -19,7 +69,32 @@ pub struct CNFFormula {
 impl Clause {
     /// Create a new clause from literals
     pub fn new(literals: Vec<Literal>) -> Self {
-        Clause { literals, id: None }
+        Clause {
+            literals,
+            id: None,
+            role: ClauseRole::default(),
+            age: 0,
+        }
+    }
+
+    /// Create a new clause with a specific role
+    pub fn with_role(literals: Vec<Literal>, role: ClauseRole) -> Self {
+        Clause {
+            literals,
+            id: None,
+            role,
+            age: 0,
+        }
+    }
+
+    /// Create a derived clause with age
+    pub fn derived(literals: Vec<Literal>, age: usize) -> Self {
+        Clause {
+            literals,
+            id: None,
+            role: ClauseRole::Derived,
+            age,
+        }
     }
 
     /// Check if this clause is empty (contradiction)

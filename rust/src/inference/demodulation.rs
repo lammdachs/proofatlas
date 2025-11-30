@@ -85,6 +85,8 @@ fn demodulate_clause(clause: &Clause, lhs: &Term, rhs: &Term, kbo: &KBO) -> Opti
         Some(Clause {
             literals: new_literals,
             id: clause.id,
+            role: clause.role,
+            age: clause.age,
         })
     } else {
         None

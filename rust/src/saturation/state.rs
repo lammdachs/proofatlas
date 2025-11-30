@@ -226,6 +226,7 @@ impl SaturationState {
                 return SaturationResult::Proof(Proof {
                     steps: self.proof_steps.clone(),
                     empty_clause_idx: given_idx,
+                    all_clauses: self.clauses.clone(),
                 });
             }
 
@@ -275,6 +276,7 @@ impl SaturationState {
                         return SaturationResult::Proof(Proof {
                             steps: self.proof_steps.clone(),
                             empty_clause_idx: new_idx,
+                            all_clauses: self.clauses.clone(),
                         });
                     }
                 }
@@ -508,6 +510,11 @@ impl SaturationState {
             // This will apply orientation, subsumption checking, etc.
             self.add_clause(inference_result);
         }
+    }
+
+    /// Consume the saturation state and return the clauses and proof steps
+    pub fn into_data(self) -> (Vec<Clause>, Vec<ProofStep>) {
+        (self.clauses, self.proof_steps)
     }
 }
 

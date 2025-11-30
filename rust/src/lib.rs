@@ -30,6 +30,10 @@ pub use selection::{
     AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll,
     SelectMaxWeight, SizeBasedSelector,
 };
+#[cfg(feature = "onnx")]
+pub use selection::OnnxClauseSelector;
+#[cfg(feature = "onnx")]
+pub use ml::ClauseScorer;
 
 pub use saturation::{
     saturate, saturate_with_steps, LiteralSelectionStrategy, SaturationConfig, SaturationResult,
