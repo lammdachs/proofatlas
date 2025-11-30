@@ -400,6 +400,30 @@ impl OnnxClauseSelector {
         })
     }
 
+    /// Create a new ONNX clause selector from model bytes.
+    ///
+    /// This is useful for WASM where the file system is not available
+    /// and the model must be loaded from memory.
+    ///
+    /// # Arguments
+    /// * `model_bytes` - The ONNX model as a byte slice
+    ///
+    /// # Returns
+    /// * `Ok(Self)` if the model loads successfully
+    /// * `Err(String)` with error message if loading fails
+    pub fn from_bytes(model_bytes: &[u8]) -> Result<Self, String> {
+        let mut scorer = ClauseScorer::new();
+        scorer
+            .load_model_from_bytes(model_bytes)
+            .map_err(|e| format!("Failed to load ONNX model from bytes: {}", e))?;
+
+        Ok(OnnxClauseSelector {
+            scorer,
+            max_age: 1000,
+            fallback: AgeWeightRatioSelector::default(),
+        })
+    }
+
     /// Set the maximum age for normalization.
     ///
     /// Clause ages are normalized to [0, 1] by dividing by max_age.

@@ -1,7 +1,10 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use proofatlas::{parse_tptp, saturate, SaturationConfig, SaturationResult, LiteralSelectionStrategy, Clause, Literal};
+use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal};
 use std::time::Duration;
+
+#[cfg(feature = "onnx")]
+use proofatlas::OnnxClauseSelector;
 
 #[wasm_bindgen]
 pub struct ProofAtlasWasm;
@@ -12,6 +15,8 @@ pub struct ProverOptions {
     pub max_clauses: usize,
     pub use_superposition: bool,
     pub literal_selection: Option<String>, // "all" or "max_weight"
+    pub use_onnx_selector: Option<bool>,   // Enable ML-guided clause selection
+    pub onnx_model_data: Option<Vec<u8>>,  // ONNX model bytes (if using ML selection)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -113,11 +118,42 @@ impl ProofAtlasWasm {
             literal_selection,
             step_limit: None,
         };
-        
+
         web_sys::console::log_1(&"Config created, calling saturate...".into());
-        
-        // Run saturation
-        let result = saturate(cnf, config);
+
+        // Run saturation - use ONNX selector if requested and available
+        #[cfg(feature = "onnx")]
+        let result = if options.use_onnx_selector.unwrap_or(false) {
+            if let Some(model_data) = &options.onnx_model_data {
+                // Create ONNX selector from model data
+                match OnnxClauseSelector::from_bytes(model_data) {
+                    Ok(selector) => {
+                        web_sys::console::log_1(&"Using ONNX clause selector".into());
+                        let mut state = SaturationState::new(cnf.clauses, config);
+                        state.set_clause_selector(Box::new(selector));
+                        state.saturate()
+                    }
+                    Err(e) => {
+                        web_sys::console::log_1(&format!("Failed to load ONNX model: {}, using default selector", e).into());
+                        let state = SaturationState::new(cnf.clauses, config);
+                        state.saturate()
+                    }
+                }
+            } else {
+                web_sys::console::log_1(&"No ONNX model data provided, using default selector".into());
+                let state = SaturationState::new(cnf.clauses, config);
+                state.saturate()
+            }
+        } else {
+            let state = SaturationState::new(cnf.clauses, config);
+            state.saturate()
+        };
+
+        #[cfg(not(feature = "onnx"))]
+        let result = {
+            let state = SaturationState::new(cnf.clauses, config);
+            state.saturate()
+        };
         
         web_sys::console::log_1(&"Saturation completed".into());
         

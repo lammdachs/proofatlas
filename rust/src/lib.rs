@@ -15,6 +15,9 @@ pub mod unification;
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
+#[cfg(feature = "wasm")]
+pub mod wasm_bindings;
+
 // Re-export commonly used types and functions
 pub use core::{
     Atom, CNFFormula, Clause, Constant, FunctionSymbol, KBOConfig, Literal, PredicateSymbol, Proof,

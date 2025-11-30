@@ -5,6 +5,7 @@ let exampleMetadata = [];
 let exampleContents = {}; // Store example contents by ID
 
 let prover = null;
+let onnxModelData = null; // ONNX model bytes for ML-guided clause selection
 
 async function loadExamples() {
     console.log('loadExamples: Function called');
@@ -108,6 +109,35 @@ async function loadExamples() {
     console.log('loadExamples: Function completed');
 }
 
+async function loadOnnxModel() {
+    try {
+        console.log('Loading ONNX model...');
+        const response = await fetch('models/clause_selector.onnx');
+        if (!response.ok) {
+            console.warn('ONNX model not available:', response.status);
+            return;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        onnxModelData = new Uint8Array(arrayBuffer);
+        console.log('ONNX model loaded:', onnxModelData.length, 'bytes');
+
+        // Enable the ML checkbox now that model is available
+        const onnxCheckbox = document.getElementById('use-onnx');
+        if (onnxCheckbox) {
+            onnxCheckbox.disabled = false;
+            onnxCheckbox.title = 'Use ML-based clause selection (GNN model)';
+        }
+    } catch (error) {
+        console.warn('Failed to load ONNX model:', error);
+        // Disable the ML checkbox if model couldn't be loaded
+        const onnxCheckbox = document.getElementById('use-onnx');
+        if (onnxCheckbox) {
+            onnxCheckbox.disabled = true;
+            onnxCheckbox.title = 'ML model not available';
+        }
+    }
+}
+
 async function initializeWasm() {
     console.log('initializeWasm: Starting...');
     try {
@@ -116,6 +146,9 @@ async function initializeWasm() {
         prover = new ProofAtlasWasm();
         console.log('WASM module loaded successfully');
         document.getElementById('prove-btn').disabled = false;
+
+        // Load ONNX model in the background
+        loadOnnxModel();
         
         // Small delay to ensure DOM is ready
         console.log('initializeWasm: Waiting for DOM...');
@@ -514,13 +547,20 @@ async function prove() {
     
     try {
         // Get options
+        const useOnnx = document.getElementById('use-onnx').checked && onnxModelData !== null;
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
             use_superposition: document.getElementById('superposition').checked,
-            literal_selection: document.getElementById('literal-selection').value
+            literal_selection: document.getElementById('literal-selection').value,
+            use_onnx_selector: useOnnx,
+            onnx_model_data: useOnnx ? Array.from(onnxModelData) : null
         };
-        
+
+        if (useOnnx) {
+            console.log('Using ML-guided clause selection');
+        }
+
         // Run prover with trace for inspector
         const result = await prover.prove_with_trace(input, options);
         showResult(result);

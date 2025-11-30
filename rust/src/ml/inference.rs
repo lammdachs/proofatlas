@@ -89,6 +89,28 @@ impl ClauseScorer {
         ))
     }
 
+    /// Load an ONNX model from bytes (for WASM where file system is not available)
+    #[cfg(feature = "onnx")]
+    pub fn load_model_from_bytes(&mut self, model_bytes: &[u8]) -> Result<(), InferenceError> {
+        let model = tract_onnx::onnx()
+            .model_for_read(&mut std::io::Cursor::new(model_bytes))
+            .map_err(|e| InferenceError::SessionError(e.to_string()))?
+            .into_optimized()
+            .map_err(|e| InferenceError::SessionError(e.to_string()))?
+            .into_runnable()
+            .map_err(|e| InferenceError::SessionError(e.to_string()))?;
+
+        self.model = Some(model);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "onnx"))]
+    pub fn load_model_from_bytes(&mut self, _model_bytes: &[u8]) -> Result<(), InferenceError> {
+        Err(InferenceError::SessionError(
+            "onnx feature not enabled".to_string(),
+        ))
+    }
+
     /// Check if a model is loaded
     pub fn is_model_loaded(&self) -> bool {
         #[cfg(feature = "onnx")]

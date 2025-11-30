@@ -33,11 +33,57 @@ jobs:
       - name: Build WASM module
         working-directory: ./wasm
         run: |
-          cargo build --target wasm32-unknown-unknown --release
+          cargo build --target wasm32-unknown-unknown --release --features onnx
           ~/.cargo/bin/wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
             --out-dir pkg \
             --target web \
             --no-typescript
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate ONNX model
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install onnx
+          mkdir -p wasm/models
+          python -c "
+          import torch
+          import torch.nn as nn
+
+          class AgeWeightHeuristicSimple(nn.Module):
+              def __init__(self, age_probability=0.5):
+                  super().__init__()
+                  weight_vector = torch.zeros(20, dtype=torch.float32)
+                  weight_vector[7] = -(1.0 - age_probability) / 10.0
+                  weight_vector[8] = -age_probability
+                  self.register_buffer('weight_vector', weight_vector)
+                  self.register_buffer('bias', torch.tensor([1.0], dtype=torch.float32))
+
+              def forward(self, node_features, pool_matrix):
+                  clause_features = torch.mm(pool_matrix, node_features)
+                  scores = torch.mv(clause_features, self.weight_vector) + self.bias
+                  return scores
+
+          model = AgeWeightHeuristicSimple(age_probability=0.5)
+          model.eval()
+          dummy_nodes = torch.randn(50, 20)
+          dummy_pool = torch.randn(10, 50)
+          torch.onnx.export(
+              model, (dummy_nodes, dummy_pool), 'wasm/models/clause_selector.onnx',
+              input_names=['node_features', 'pool_matrix'],
+              output_names=['scores'],
+              dynamic_axes={
+                  'node_features': {0: 'total_nodes'},
+                  'pool_matrix': {0: 'num_clauses', 1: 'total_nodes'},
+                  'scores': {0: 'num_clauses'},
+              },
+              opset_version=14,
+          )
+          print('Generated ONNX model')
+          "
 
       - name: Prepare deployment files
         working-directory: ./wasm
@@ -46,6 +92,9 @@ jobs:
           cp index.html docs.html style.css docs-style.css app.js favicon.svg benchmark_problems.json dist/
           cp -r pkg dist/
           cp -r examples dist/
+          # Copy generated ONNX model
+          mkdir -p dist/models
+          cp models/clause_selector.onnx dist/models/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
