@@ -1,13 +1,14 @@
 //! Graph representation of logical clauses for GNN training
 //!
-//! Feature layout (12 dimensions):
+//! Feature layout (13 dimensions):
 //! - 0-5: Node type one-hot (clause, literal, predicate, function, variable, constant)
 //! - 6: Arity (for predicates and functions)
-//! - 7: Depth in the clause tree
-//! - 8: Clause age (normalized, 0-1 range based on max_age parameter)
-//! - 9: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
-//! - 10: Literal polarity (1=positive, 0=negative)
-//! - 11: Is equality predicate
+//! - 7: Argument position (0-indexed position as argument to parent)
+//! - 8: Depth in the clause tree
+//! - 9: Clause age (normalized, 0-1 range based on max_age parameter)
+//! - 10: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
+//! - 11: Literal polarity (1=positive, 0=negative)
+//! - 12: Is equality predicate
 
 use crate::core::{Clause, Literal, Term};
 
@@ -29,16 +30,17 @@ pub const NODE_TYPES: [&str; 6] = [
 ];
 
 /// Feature dimension
-pub const FEATURE_DIM: usize = 12;
+pub const FEATURE_DIM: usize = 13;
 
 /// Feature indices
 pub const FEAT_NODE_TYPE_START: usize = 0;
 pub const FEAT_ARITY: usize = 6;
-pub const FEAT_DEPTH: usize = 7;
-pub const FEAT_AGE: usize = 8;
-pub const FEAT_ROLE: usize = 9;
-pub const FEAT_POLARITY: usize = 10;
-pub const FEAT_IS_EQUALITY: usize = 11;
+pub const FEAT_ARG_POSITION: usize = 7;
+pub const FEAT_DEPTH: usize = 8;
+pub const FEAT_AGE: usize = 9;
+pub const FEAT_ROLE: usize = 10;
+pub const FEAT_POLARITY: usize = 11;
+pub const FEAT_IS_EQUALITY: usize = 12;
 
 /// Sparse graph representation of a clause
 #[derive(Debug, Clone)]
@@ -197,9 +199,9 @@ impl GraphBuilder {
             features[FEAT_IS_EQUALITY] = if literal.atom.is_equality() { 1.0 } else { 0.0 };
         }
 
-        // Process arguments
-        for term in &literal.atom.args {
-            self.add_term(term, pred_node, depth + 2);
+        // Process arguments with their positions
+        for (pos, term) in literal.atom.args.iter().enumerate() {
+            self.add_term(term, pred_node, depth + 2, pos);
         }
 
         lit_node
@@ -213,17 +215,25 @@ impl GraphBuilder {
     }
 
     /// Add a term node (variable, constant, or function)
-    fn add_term(&mut self, term: &Term, parent: usize, depth: usize) -> usize {
+    ///
+    /// # Arguments
+    /// * `term` - The term to add
+    /// * `parent` - Parent node ID
+    /// * `depth` - Depth in the clause tree
+    /// * `arg_position` - 0-indexed position as argument to parent
+    fn add_term(&mut self, term: &Term, parent: usize, depth: usize, arg_position: usize) -> usize {
         match term {
             Term::Variable(var) => {
                 let node = self.add_node(NODE_TYPE_VARIABLE, &var.name, depth);
                 self.add_edge(parent, node);
+                self.features[node][FEAT_ARG_POSITION] = arg_position as f32;
                 node
             }
 
             Term::Constant(c) => {
                 let node = self.add_node(NODE_TYPE_CONSTANT, &c.name, depth);
                 self.add_edge(parent, node);
+                self.features[node][FEAT_ARG_POSITION] = arg_position as f32;
                 node
             }
 
@@ -232,10 +242,11 @@ impl GraphBuilder {
                 self.add_edge(parent, func_node);
 
                 self.features[func_node][FEAT_ARITY] = args.len() as f32;
+                self.features[func_node][FEAT_ARG_POSITION] = arg_position as f32;
 
-                // Process arguments recursively
-                for arg in args {
-                    self.add_term(arg, func_node, depth + 1);
+                // Process arguments recursively with their positions
+                for (pos, arg) in args.iter().enumerate() {
+                    self.add_term(arg, func_node, depth + 1, pos);
                 }
 
                 func_node
@@ -263,7 +274,7 @@ mod tests {
         let var = Term::Variable(Variable {
             name: "x".to_string(),
         });
-        let var_node = builder.add_term(&var, root, 1);
+        let var_node = builder.add_term(&var, root, 1, 0);
 
         assert_eq!(builder.node_types[var_node], NODE_TYPE_VARIABLE);
         assert_eq!(builder.node_names[var_node], "x");
@@ -272,6 +283,9 @@ mod tests {
         // Check edge
         assert_eq!(builder.edges.len(), 1);
         assert_eq!(builder.edges[0], (root, var_node));
+
+        // Check arg position
+        assert_eq!(builder.features[var_node][FEAT_ARG_POSITION], 0.0);
     }
 
     #[test]
@@ -294,16 +308,22 @@ mod tests {
             vec![x, a],
         );
 
-        let func_node = builder.add_term(&f, root, 1);
+        let func_node = builder.add_term(&f, root, 1, 0);
 
         assert_eq!(builder.node_types[func_node], NODE_TYPE_FUNCTION);
         assert_eq!(builder.node_names[func_node], "f");
 
         // Check arity feature
-        assert_eq!(builder.features[func_node][6], 2.0);
+        assert_eq!(builder.features[func_node][FEAT_ARITY], 2.0);
 
         // Check children (x and a)
         assert_eq!(builder.node_id, 4); // root + f + x + a
+
+        // Check arg positions: x is at position 0, a is at position 1
+        let x_node = 2;
+        let a_node = 3;
+        assert_eq!(builder.features[x_node][FEAT_ARG_POSITION], 0.0);
+        assert_eq!(builder.features[a_node][FEAT_ARG_POSITION], 1.0);
     }
 
     #[test]
@@ -330,7 +350,7 @@ mod tests {
             vec![g],
         );
 
-        builder.add_term(&f, root, 1);
+        builder.add_term(&f, root, 1, 0);
 
         // Nodes: root, f, g, x
         assert_eq!(builder.node_id, 4);
@@ -340,6 +360,11 @@ mod tests {
         assert_eq!(builder.node_depths[1], 1); // f
         assert_eq!(builder.node_depths[2], 2); // g
         assert_eq!(builder.node_depths[3], 3); // x
+
+        // Check arg positions (all are first arguments)
+        assert_eq!(builder.features[1][FEAT_ARG_POSITION], 0.0); // f
+        assert_eq!(builder.features[2][FEAT_ARG_POSITION], 0.0); // g
+        assert_eq!(builder.features[3][FEAT_ARG_POSITION], 0.0); // x
     }
 
     #[test]

@@ -12,17 +12,18 @@ Clauses → Graph Representation → ONNX Model → Logits → Softmax Sampling 
 
 ## Feature Layout
 
-Each clause is converted to a graph where nodes represent syntactic elements. Each node has a **12-dimensional feature vector**:
+Each clause is converted to a graph where nodes represent syntactic elements. Each node has a **13-dimensional feature vector**:
 
 | Index | Feature | Description |
 |-------|---------|-------------|
 | 0-5 | Node type | One-hot encoding: clause, literal, predicate, function, variable, constant |
 | 6 | Arity | Number of arguments (predicates and functions) |
-| 7 | Depth | Distance from clause root in the syntax tree |
-| 8 | Age | Clause age normalized to [0, 1] (divided by max_age) |
-| 9 | Role | Clause role: 0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived |
-| 10 | Polarity | Literal polarity: 1.0=positive, 0.0=negative |
-| 11 | Is equality | 1.0 if predicate is equality (=), 0.0 otherwise |
+| 7 | Arg position | 0-indexed position as argument to parent (e.g., first arg = 0, second = 1) |
+| 8 | Depth | Distance from clause root in the syntax tree |
+| 9 | Age | Clause age normalized to [0, 1] (divided by max_age) |
+| 10 | Role | Clause role: 0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived |
+| 11 | Polarity | Literal polarity: 1.0=positive, 0.0=negative |
+| 12 | Is equality | 1.0 if predicate is equality (=), 0.0 otherwise |
 
 ### Node Types
 
@@ -74,7 +75,7 @@ import torch
 import torch.nn as nn
 
 class MyClauseSelector(nn.Module):
-    def __init__(self, feature_dim=12, hidden_dim=64):
+    def __init__(self, feature_dim=13, hidden_dim=64):
         super().__init__()
         # Transform node features
         self.node_encoder = nn.Linear(feature_dim, hidden_dim)
@@ -97,7 +98,7 @@ class MyClauseSelector(nn.Module):
 model = MyClauseSelector()
 model.eval()
 
-dummy_nodes = torch.randn(50, 12)  # 50 nodes, 12 features
+dummy_nodes = torch.randn(50, 13)  # 50 nodes, 13 features
 dummy_pool = torch.randn(10, 50)   # 10 clauses, 50 nodes
 
 torch.onnx.export(
@@ -130,12 +131,12 @@ class AgeWeightSelector(nn.Module):
         self.register_buffer('p', torch.tensor(age_probability))
 
     def forward(self, node_features, pool_matrix):
-        # Pool to clause features: [num_clauses, 12]
+        # Pool to clause features: [num_clauses, 13]
         clause_features = torch.mm(pool_matrix, node_features)
 
-        # Extract age (index 8) and depth/weight (index 7)
-        ages = clause_features[:, 8]
-        weights = clause_features[:, 7]
+        # Extract age (index 9) and depth/weight (index 8)
+        ages = clause_features[:, 9]
+        weights = clause_features[:, 8]
 
         num_clauses = clause_features.size(0)
 
@@ -259,7 +260,7 @@ assert!(matches!(result, SaturationResult::Proof(_)));
 1. **Input shapes**: Must accept dynamic batch sizes (use `dynamic_axes` in export)
 2. **Output**: Single tensor of shape `[num_clauses]`
 3. **Opset version**: 14 or compatible (tract-onnx supports most common ops)
-4. **Feature dimension**: Must match the 12-dimensional feature layout
+4. **Feature dimension**: Must match the 13-dimensional feature layout
 
 ## Supported ONNX Operations
 
@@ -287,7 +288,7 @@ match result {
 
 ### Check Feature Dimensions
 
-If you get dimension mismatch errors like `20 != 12`, your model expects a different feature count. Ensure your model was trained with the current 12-dimensional features.
+If you get dimension mismatch errors like `20 != 13`, your model expects a different feature count. Ensure your model was trained with the current 13-dimensional features.
 
 ### Inspect Graph Features
 
@@ -298,7 +299,7 @@ let clause = Clause::new(vec![...]);
 let graph = GraphBuilder::build_from_clause(&clause);
 
 println!("Nodes: {}", graph.num_nodes);
-println!("Features shape: {} x {}", graph.node_features.len(), 12);
+println!("Features shape: {} x {}", graph.node_features.len(), 13);
 for (i, features) in graph.node_features.iter().enumerate() {
     println!("Node {}: {:?}", i, features);
 }
