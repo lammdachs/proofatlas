@@ -20,7 +20,7 @@ class ClauseGNN(nn.Module):
 
     def __init__(
         self,
-        node_feature_dim: int = 20,
+        node_feature_dim: int = 13,
         hidden_dim: int = 64,
         num_layers: int = 2,
         dropout: float = 0.1,
@@ -28,7 +28,7 @@ class ClauseGNN(nn.Module):
     ):
         """
         Args:
-            node_feature_dim: Dimension of input node features (default: 20)
+            node_feature_dim: Dimension of input node features (default: 13)
             hidden_dim: Hidden dimension for GCN layers
             num_layers: Number of GCN layers
             dropout: Dropout rate
@@ -128,7 +128,7 @@ class ClauseGNNWithAttention(nn.Module):
 
     def __init__(
         self,
-        node_feature_dim: int = 20,
+        node_feature_dim: int = 13,
         hidden_dim: int = 64,
         num_layers: int = 2,
         num_heads: int = 4,
@@ -219,7 +219,7 @@ class ClauseSetScorer(nn.Module):
 
     def __init__(
         self,
-        node_feature_dim: int = 20,
+        node_feature_dim: int = 13,
         hidden_dim: int = 64,
         num_node_layers: int = 2,
         num_interaction_layers: int = 2,
@@ -385,191 +385,38 @@ class ClauseSetScorer(nn.Module):
 
 class AgeWeightHeuristic(nn.Module):
     """
-    Hard-coded age-weight heuristic as a PyTorch model.
+    Age-weight heuristic using only basic operations for ONNX compatibility.
 
-    This model scores clauses based on a weighted combination of age and weight
-    (symbol count), without any learned parameters. It serves as a baseline
-    for comparison with learned models.
-
-    Score = p * normalized_age + (1-p) * normalized_weight
-
-    Lower scores indicate clauses that should be selected first.
-    The output is negated so that higher scores = better (matching ML convention).
-
-    Feature layout expected (20 dimensions):
-    - Index 7: Depth (used as proxy for weight/complexity)
-    - Index 8: Age (normalized)
-    - Index 14: Is unit clause
-    - Index 15: Is Horn clause
-    - Index 16: Is ground clause
-
-    This model uses the same forward_onnx interface as ClauseSetScorer
-    for compatibility with the Rust inference code.
-    """
-
-    def __init__(self, age_probability: float = 0.5):
-        """
-        Args:
-            age_probability: Weight for age component (0.0 to 1.0).
-                            0.0 = pure weight-based, 1.0 = pure age-based
-        """
-        super().__init__()
-        # Store as buffer (not parameter) so it's saved but not trained
-        self.register_buffer(
-            'age_weight',
-            torch.tensor([age_probability], dtype=torch.float32)
-        )
-        self.register_buffer(
-            'weight_weight',
-            torch.tensor([1.0 - age_probability], dtype=torch.float32)
-        )
-
-    @property
-    def age_probability(self) -> float:
-        return self.age_weight.item()
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        clause_ids: torch.Tensor,
-        num_clauses: int,
-    ) -> torch.Tensor:
-        """
-        Score clauses based on age-weight heuristic.
-
-        Args:
-            node_features: All node features [total_nodes, 20]
-            clause_ids: Which clause each node belongs to [total_nodes]
-            num_clauses: Number of clauses
-
-        Returns:
-            Scores for each clause [num_clauses] (higher = better)
-        """
-        # Extract clause root features (node type 0 = clause root)
-        # The clause root node has the age and structural features
-        clause_features = self._extract_clause_features(
-            node_features, clause_ids, num_clauses
-        )
-        return self._compute_scores(clause_features)
-
-    def forward_onnx(
-        self,
-        node_features: torch.Tensor,
-        pool_matrix: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        ONNX-compatible forward pass.
-
-        Args:
-            node_features: All node features [total_nodes, 20]
-            pool_matrix: Pooling matrix [num_clauses, total_nodes]
-
-        Returns:
-            Scores for each clause [num_clauses] (higher = better)
-        """
-        # Pool to get clause-level features (average of all nodes per clause)
-        # For the heuristic, we mainly care about clause root features,
-        # but pooling gives us a reasonable approximation
-        clause_features = pool_matrix @ node_features  # [num_clauses, 20]
-        return self._compute_scores(clause_features)
-
-    def _extract_clause_features(
-        self,
-        node_features: torch.Tensor,
-        clause_ids: torch.Tensor,
-        num_clauses: int,
-    ) -> torch.Tensor:
-        """Extract features for each clause by averaging node features."""
-        clause_features = torch.zeros(
-            num_clauses, node_features.size(1),
-            device=node_features.device, dtype=node_features.dtype
-        )
-        clause_counts = torch.zeros(num_clauses, device=node_features.device)
-
-        clause_features.scatter_add_(
-            0, clause_ids.unsqueeze(1).expand(-1, node_features.size(1)), node_features
-        )
-        clause_counts.scatter_add_(0, clause_ids, torch.ones_like(clause_ids, dtype=torch.float))
-
-        clause_counts = clause_counts.clamp(min=1)
-        clause_features = clause_features / clause_counts.unsqueeze(1)
-
-        return clause_features
-
-    def _compute_scores(self, clause_features: torch.Tensor) -> torch.Tensor:
-        """
-        Compute scores from clause features.
-
-        Args:
-            clause_features: [num_clauses, 20]
-
-        Returns:
-            Scores [num_clauses] where higher = better
-        """
-        # Feature indices (from graph.rs):
-        # 7: depth (proxy for complexity/weight)
-        # 8: age (normalized 0-1)
-        # 14: is_unit
-        # 15: is_horn
-        # 16: is_ground
-
-        # Extract relevant features
-        depth = clause_features[:, 7]      # Higher depth = more complex
-        age = clause_features[:, 8]        # 0-1 normalized age
-        is_unit = clause_features[:, 14]   # Unit clauses are often good
-        is_horn = clause_features[:, 15]   # Horn clauses
-        is_ground = clause_features[:, 16] # Ground clauses
-
-        # Normalize depth to 0-1 range (assume max depth ~10)
-        norm_depth = depth / 10.0
-        norm_depth = torch.clamp(norm_depth, 0.0, 1.0)
-
-        # Base score: weighted combination of age and weight
-        # Lower age and lower weight should give HIGHER score (better)
-        age_component = 1.0 - age           # Invert: younger = higher score
-        weight_component = 1.0 - norm_depth # Invert: simpler = higher score
-
-        base_score = (
-            self.age_weight * age_component +
-            self.weight_weight * weight_component
-        )
-
-        # Bonus for good clause properties
-        # Unit clauses are often useful
-        unit_bonus = is_unit * 0.1
-        # Ground clauses can be important
-        ground_bonus = is_ground * 0.05
-
-        scores = base_score + unit_bonus + ground_bonus
-
-        return scores.squeeze()
-
-
-class AgeWeightHeuristicSimple(nn.Module):
-    """
-    Minimal age-weight heuristic using only basic operations.
-
-    This is the simplest possible version for maximum ONNX compatibility.
     Uses only: matrix multiply, add, multiply.
 
     The computation is:
-        clause_features = pool_matrix @ node_features  # [num_clauses, 20]
+        clause_features = pool_matrix @ node_features  # [num_clauses, 13]
         score = weight_matrix @ clause_features.T      # Extract age/depth and weight them
 
-    Where weight_matrix is [1, 20] with non-zero values only at indices 7 (depth) and 8 (age).
+    Feature layout (13 dimensions):
+    - 0-5: Node type one-hot
+    - 6: Arity
+    - 7: Argument position
+    - 8: Depth (proxy for weight/complexity)
+    - 9: Age (normalized 0-1)
+    - 10: Role
+    - 11: Polarity
+    - 12: Is equality
+
+    Where weight_vector is [13] with non-zero values only at indices 8 (depth) and 9 (age).
     """
 
     def __init__(self, age_probability: float = 0.5):
         super().__init__()
-        # Create a weight matrix that extracts and weights age and depth
-        # Index 7 = depth, Index 8 = age
+        # Create a weight vector that extracts and weights age and depth
+        # Index 8 = depth, Index 9 = age
         # Score = p * (1 - age) + (1-p) * (1 - depth/10)
         #       = p - p*age + (1-p) - (1-p)*depth/10
         #       = 1 - p*age - (1-p)*depth/10
         # We want higher score for lower age and lower depth
-        weight_vector = torch.zeros(20, dtype=torch.float32)
-        weight_vector[7] = -(1.0 - age_probability) / 10.0  # depth weight (negative, normalized)
-        weight_vector[8] = -age_probability                  # age weight (negative)
+        weight_vector = torch.zeros(13, dtype=torch.float32)
+        weight_vector[8] = -(1.0 - age_probability) / 10.0  # depth weight (negative, normalized)
+        weight_vector[9] = -age_probability                  # age weight (negative)
 
         self.register_buffer('weight_vector', weight_vector)
         self.register_buffer('bias', torch.tensor([1.0], dtype=torch.float32))
@@ -580,10 +427,10 @@ class AgeWeightHeuristicSimple(nn.Module):
         pool_matrix: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Forward pass (same as forward_onnx for this simple model).
+        Forward pass (same as forward_onnx).
 
         Args:
-            node_features: [total_nodes, 20]
+            node_features: [total_nodes, 13]
             pool_matrix: [num_clauses, total_nodes]
 
         Returns:
@@ -600,18 +447,18 @@ class AgeWeightHeuristicSimple(nn.Module):
         ONNX-compatible forward pass using only MatMul and Add.
 
         Args:
-            node_features: [total_nodes, 20]
+            node_features: [total_nodes, 13]
             pool_matrix: [num_clauses, total_nodes]
 
         Returns:
             Scores [num_clauses]
         """
         # Pool node features to clause level
-        # [num_clauses, total_nodes] @ [total_nodes, 20] -> [num_clauses, 20]
+        # [num_clauses, total_nodes] @ [total_nodes, 13] -> [num_clauses, 13]
         clause_features = torch.mm(pool_matrix, node_features)
 
         # Apply weight vector to get scores
-        # [num_clauses, 20] @ [20] -> [num_clauses]
+        # [num_clauses, 13] @ [13] -> [num_clauses]
         scores = torch.mv(clause_features, self.weight_vector) + self.bias
 
         return scores
@@ -632,11 +479,11 @@ def export_age_weight_heuristic(
         num_clauses: Example number of clauses (for tracing)
         total_nodes: Example total nodes (for tracing)
     """
-    model = AgeWeightHeuristicSimple(age_probability)
+    model = AgeWeightHeuristic(age_probability)
     model.eval()
 
     # Create dummy inputs
-    dummy_node_features = torch.randn(total_nodes, 20)
+    dummy_node_features = torch.randn(total_nodes, 13)
     dummy_pool_matrix = torch.randn(num_clauses, total_nodes)
 
     # Export
@@ -671,11 +518,11 @@ def export_torchscript(
         num_clauses: Example number of clauses (for tracing)
         total_nodes: Example total nodes (for tracing)
     """
-    model = AgeWeightHeuristicSimple(age_probability)
+    model = AgeWeightHeuristic(age_probability)
     model.eval()
 
     # Create example inputs for tracing
-    example_node_features = torch.randn(total_nodes, 20)
+    example_node_features = torch.randn(total_nodes, 13)
     example_pool_matrix = torch.randn(num_clauses, total_nodes)
 
     # Use torch.jit.trace to create TorchScript module
@@ -688,7 +535,7 @@ def export_torchscript(
 
 def create_model(
     model_type: str = "clause_set",
-    node_feature_dim: int = 20,
+    node_feature_dim: int = 13,
     hidden_dim: int = 64,
     num_layers: int = 2,
     **kwargs,
@@ -701,13 +548,12 @@ def create_model(
             - "clause_set" (default): Context-aware learned model
             - "gcn": Graph Convolutional Network
             - "gcn_attention": GCN with attention pooling
-            - "age_weight": Hard-coded age-weight heuristic
-            - "age_weight_simple": Minimal age-weight for ONNX export
-        node_feature_dim: Input node feature dimension
+            - "age_weight": Age-weight heuristic for ONNX export
+        node_feature_dim: Input node feature dimension (default: 13)
         hidden_dim: Hidden layer dimension
         num_layers: Number of GNN/MLP/interaction layers
         **kwargs: Additional model-specific arguments
-            - age_probability: For age_weight models (default 0.5)
+            - age_probability: For age_weight model (default 0.5)
 
     Returns:
         PyTorch model
@@ -736,10 +582,6 @@ def create_model(
         )
     elif model_type == "age_weight":
         return AgeWeightHeuristic(
-            age_probability=kwargs.pop('age_probability', 0.5),
-        )
-    elif model_type == "age_weight_simple":
-        return AgeWeightHeuristicSimple(
             age_probability=kwargs.pop('age_probability', 0.5),
         )
     else:
