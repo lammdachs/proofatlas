@@ -3,8 +3,6 @@
 //! These tests verify that the ONNX model can be used for clause selection
 //! during theorem proving and produces correct proofs.
 
-#![cfg(feature = "onnx")]
-
 use proofatlas::{
     parse_tptp_file, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
     SaturationResult, SaturationState,

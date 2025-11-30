@@ -1,20 +1,17 @@
 //! Graph representation of logical clauses for GNN training
 //!
-//! Feature layout (20 dimensions):
+//! Feature layout (16 dimensions):
 //! - 0-5: Node type one-hot (clause, literal, predicate, function, variable, constant)
 //! - 6: Arity (for predicates and functions)
 //! - 7: Depth in the clause tree
 //! - 8: Clause age (normalized, 0-1 range based on max_age parameter)
 //! - 9: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
-//! - 10: Is goal clause (1 if negated_conjecture, 0 otherwise)
-//! - 11: (reserved)
-//! - 12: Literal polarity (1=positive, 0=negative)
-//! - 13: Is equality predicate
-//! - 14: Is unit clause
-//! - 15: Is Horn clause
-//! - 16: Is ground clause (no variables)
-//! - 17-18: Symbol hash (for predicates, functions, constants, variables)
-//! - 19: (reserved)
+//! - 10: Literal polarity (1=positive, 0=negative)
+//! - 11: Is equality predicate
+//! - 12: Is unit clause
+//! - 13: Is Horn clause
+//! - 14: Is ground clause (no variables)
+//! - 15: Symbol hash (for predicates, functions, constants, variables)
 
 use crate::core::{Clause, Literal, Term};
 
@@ -36,7 +33,7 @@ pub const NODE_TYPES: [&str; 6] = [
 ];
 
 /// Feature dimension
-pub const FEATURE_DIM: usize = 20;
+pub const FEATURE_DIM: usize = 16;
 
 /// Feature indices
 pub const FEAT_NODE_TYPE_START: usize = 0;
@@ -44,14 +41,12 @@ pub const FEAT_ARITY: usize = 6;
 pub const FEAT_DEPTH: usize = 7;
 pub const FEAT_AGE: usize = 8;
 pub const FEAT_ROLE: usize = 9;
-pub const FEAT_IS_GOAL: usize = 10;
-pub const FEAT_POLARITY: usize = 12;
-pub const FEAT_IS_EQUALITY: usize = 13;
-pub const FEAT_IS_UNIT: usize = 14;
-pub const FEAT_IS_HORN: usize = 15;
-pub const FEAT_IS_GROUND: usize = 16;
-pub const FEAT_HASH1: usize = 17;
-pub const FEAT_HASH2: usize = 18;
+pub const FEAT_POLARITY: usize = 10;
+pub const FEAT_IS_EQUALITY: usize = 11;
+pub const FEAT_IS_UNIT: usize = 12;
+pub const FEAT_IS_HORN: usize = 13;
+pub const FEAT_IS_GROUND: usize = 14;
+pub const FEAT_HASH: usize = 15;
 
 /// Sparse graph representation of a clause
 #[derive(Debug, Clone)]
@@ -177,7 +172,7 @@ impl GraphBuilder {
     fn update_clause_features(&mut self, node_id: usize, clause: &Clause, max_age: usize) {
         let features = &mut self.features[node_id];
 
-        // Age (index 8): normalized to 0-1 range
+        // Age: normalized to 0-1 range
         let normalized_age = if max_age > 0 {
             (clause.age as f32) / (max_age as f32)
         } else {
@@ -185,20 +180,17 @@ impl GraphBuilder {
         };
         features[FEAT_AGE] = normalized_age.min(1.0); // Clamp to 1.0
 
-        // Role (index 9): numeric encoding of clause role
+        // Role: numeric encoding of clause role (goal can be derived from role == 3)
         features[FEAT_ROLE] = clause.role.to_feature_value();
 
-        // Is goal (index 10): 1 if this is a negated conjecture
-        features[FEAT_IS_GOAL] = if clause.role.is_goal() { 1.0 } else { 0.0 };
-
-        // is_unit (index 14)
+        // is_unit
         features[FEAT_IS_UNIT] = if clause.literals.len() == 1 { 1.0 } else { 0.0 };
 
-        // is_horn (index 15): at most one positive literal
+        // is_horn: at most one positive literal
         let num_positive = clause.literals.iter().filter(|l| l.polarity).count();
         features[FEAT_IS_HORN] = if num_positive <= 1 { 1.0 } else { 0.0 };
 
-        // is_ground (index 16): no variables
+        // is_ground: no variables
         let has_variables = clause.literals.iter().any(|l| {
             !l.atom.args.iter().all(|t| t.variables().is_empty())
         });
@@ -225,8 +217,7 @@ impl GraphBuilder {
             let features = &mut self.features[pred_node];
             features[FEAT_ARITY] = literal.atom.args.len() as f32;
             features[FEAT_IS_EQUALITY] = if literal.atom.is_equality() { 1.0 } else { 0.0 };
-            features[FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
-            features[FEAT_HASH2] = ((hash >> 10) % 1000) as f32 / 1000.0;
+            features[FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
         }
 
         // Process arguments
@@ -252,7 +243,7 @@ impl GraphBuilder {
                 self.add_edge(parent, node);
 
                 let hash = self.simple_hash(&var.name);
-                self.features[node][FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
+                self.features[node][FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
 
                 node
             }
@@ -262,7 +253,7 @@ impl GraphBuilder {
                 self.add_edge(parent, node);
 
                 let hash = self.simple_hash(&c.name);
-                self.features[node][FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
+                self.features[node][FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
 
                 node
             }
@@ -275,8 +266,7 @@ impl GraphBuilder {
                 {
                     let features = &mut self.features[func_node];
                     features[FEAT_ARITY] = args.len() as f32;
-                    features[FEAT_HASH1] = (hash % 1000) as f32 / 1000.0;
-                    features[FEAT_HASH2] = ((hash >> 10) % 1000) as f32 / 1000.0;
+                    features[FEAT_HASH] = (hash % 1000) as f32 / 1000.0;
                 }
 
                 // Process arguments recursively
@@ -517,9 +507,6 @@ mod tests {
         // Check role feature (NegatedConjecture = 3.0)
         assert_eq!(graph.node_features[0][FEAT_ROLE], 3.0);
 
-        // Check is_goal feature (should be 1.0 for NegatedConjecture)
-        assert_eq!(graph.node_features[0][FEAT_IS_GOAL], 1.0);
-
         // Test with Axiom role
         let mut axiom_clause = Clause::new(vec![Literal {
             atom: Atom {
@@ -541,8 +528,5 @@ mod tests {
 
         // Check role feature (Axiom = 0.0)
         assert_eq!(axiom_graph.node_features[0][FEAT_ROLE], 0.0);
-
-        // Check is_goal feature (should be 0.0 for Axiom)
-        assert_eq!(axiom_graph.node_features[0][FEAT_IS_GOAL], 0.0);
     }
 }
