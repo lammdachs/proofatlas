@@ -3,26 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProofAtlas - Online Theorem Prover</title>
+    <title>ProofAtlas - Neural Clause Selection for Theorem Proving</title>
+    <meta name="description" content="Research framework for neural clause selection in automated theorem proving using graph neural networks and transformers.">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <header>
+        <header class="hero">
             <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
                 <img src="favicon.svg" alt="ProofAtlas" style="width: 48px; height: 48px;">
                 <h1>ProofAtlas</h1>
             </div>
-            <p>A client-side first-order theorem prover powered by WebAssembly</p>
+            <p class="tagline">Neural Clause Selection for Theorem Proving</p>
+            <p class="description">
+                A research framework for comparing graph embeddings and transformer/attention mechanisms
+                for clause selection in saturation-based proof search.
+            </p>
             <nav class="main-nav">
-                <a href="./docs.html">📖 Documentation</a>
+                <a href="https://github.com/apluska/proofatlas">GitHub</a>
+                <a href="./docs.html">Documentation</a>
             </nav>
         </header>
 
+        <section class="architecture-section">
+            <h2>Architecture</h2>
+            <div class="pipeline">
+                <div class="pipeline-step">
+                    <div class="step-icon">C</div>
+                    <div class="step-label">Clauses</div>
+                </div>
+                <div class="pipeline-arrow">&#10132;</div>
+                <div class="pipeline-step">
+                    <div class="step-icon">G</div>
+                    <div class="step-label">Graph</div>
+                </div>
+                <div class="pipeline-arrow">&#10132;</div>
+                <div class="pipeline-step">
+                    <div class="step-icon">NN</div>
+                    <div class="step-label">GNN/Transformer</div>
+                </div>
+                <div class="pipeline-arrow">&#10132;</div>
+                <div class="pipeline-step">
+                    <div class="step-icon">S</div>
+                    <div class="step-label">Selection</div>
+                </div>
+            </div>
+            <p class="architecture-desc">
+                Each clause is converted to a graph with <strong>13-dimensional node features</strong>
+                (type, arity, argument position, depth, age, role, polarity, equality).
+                Neural networks score clauses, and softmax sampling selects the next clause to process.
+            </p>
+        </section>
+
         <div class="tabs">
-            <button class="tab-button active" data-tab="prover">Prover</button>
+            <button class="tab-button active" data-tab="prover">Try It</button>
             <button class="tab-button" data-tab="benchmarks">Benchmarks</button>
+            <button class="tab-button" data-tab="research">Research</button>
         </div>
 
         <div id="prover-tab" class="tab-content active">
@@ -86,11 +123,11 @@ fof(goal, conjecture, p => r).</textarea>
                     <div id="clause-list"></div>
                     <div id="proof-inspector" class="proof-inspector hidden">
                         <div class="stepper-controls">
-                            <button id="step-first">⏮ First</button>
-                            <button id="step-prev">◀ Previous</button>
+                            <button id="step-first">First</button>
+                            <button id="step-prev">Previous</button>
                             <span id="step-counter">Step 0 / 0</span>
-                            <button id="step-next">Next ▶</button>
-                            <button id="step-last">Last ⏭</button>
+                            <button id="step-next">Next</button>
+                            <button id="step-last">Last</button>
                         </div>
                         <div class="stepper-content">
                             <div class="given-clause-section">
@@ -216,9 +253,73 @@ fof(goal, conjecture, p => r).</textarea>
         </main>
         </div>
 
+        <div id="research-tab" class="tab-content">
+        <main>
+            <div class="research-content">
+                <h2>Research Focus</h2>
+                <p class="research-question">
+                    <strong>How can we best represent logical clauses as graphs and learn to select useful clauses during proof search?</strong>
+                </p>
+
+                <div class="research-areas">
+                    <div class="research-card">
+                        <h3>Graph Representations</h3>
+                        <p>Clauses as syntax trees with typed nodes (clause, literal, predicate, function, variable, constant) and 13-dimensional features encoding structure and metadata.</p>
+                    </div>
+                    <div class="research-card">
+                        <h3>Graph Neural Networks</h3>
+                        <p>Learning embeddings from clause structure using GCN, GAT, GraphSAGE, and other architectures to capture logical patterns.</p>
+                    </div>
+                    <div class="research-card">
+                        <h3>Transformers/Attention</h3>
+                        <p>Using attention mechanisms over graph embeddings to score clauses based on their relevance to the proof goal.</p>
+                    </div>
+                    <div class="research-card">
+                        <h3>Learned Selection</h3>
+                        <p>Replacing hand-crafted heuristics (age-weight ratio) with neural policies trained on successful proofs.</p>
+                    </div>
+                </div>
+
+                <h2>Node Feature Layout</h2>
+                <table class="feature-table">
+                    <thead>
+                        <tr>
+                            <th>Index</th>
+                            <th>Feature</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>0-5</td><td>Node type</td><td>One-hot: clause, literal, predicate, function, variable, constant</td></tr>
+                        <tr><td>6</td><td>Arity</td><td>Number of arguments (predicates/functions)</td></tr>
+                        <tr><td>7</td><td>Arg position</td><td>0-indexed position as argument to parent</td></tr>
+                        <tr><td>8</td><td>Depth</td><td>Distance from clause root in syntax tree</td></tr>
+                        <tr><td>9</td><td>Age</td><td>Clause age normalized to [0, 1]</td></tr>
+                        <tr><td>10</td><td>Role</td><td>0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived</td></tr>
+                        <tr><td>11</td><td>Polarity</td><td>1.0=positive, 0.0=negative</td></tr>
+                        <tr><td>12</td><td>Is equality</td><td>1.0 if predicate is equality (=)</td></tr>
+                    </tbody>
+                </table>
+
+                <h2>Technical Stack</h2>
+                <ul class="tech-list">
+                    <li><strong>Rust core</strong>: High-performance saturation prover with superposition calculus</li>
+                    <li><strong>tract-onnx</strong>: Pure Rust ONNX inference (native + WASM)</li>
+                    <li><strong>PyTorch</strong>: Model training and ONNX export</li>
+                    <li><strong>WebAssembly</strong>: Client-side proving with ML selection</li>
+                </ul>
+            </div>
+        </main>
+        </div>
+
         <footer>
             <p>
                 ProofAtlas runs entirely in your browser. No data is sent to any server.
+            </p>
+            <p class="footer-links">
+                <a href="https://github.com/apluska/proofatlas">GitHub</a> |
+                <a href="./docs.html">Docs</a> |
+                BSD 0-Clause License
             </p>
         </footer>
     </div>
