@@ -34,7 +34,6 @@ fn run_with_onnx_selector(
         max_clauses: 10000,
         max_iterations: 10000,
         timeout: Duration::from_secs(timeout_secs),
-        use_superposition: true,
         literal_selection: LiteralSelectionStrategy::SelectAll,
         ..Default::default()
     };
@@ -83,7 +82,6 @@ fn run_with_default_selector(
         max_clauses: 10000,
         max_iterations: 10000,
         timeout: Duration::from_secs(timeout_secs),
-        use_superposition: true,
         literal_selection: LiteralSelectionStrategy::SelectAll,
         ..Default::default()
     };
@@ -395,7 +393,6 @@ fn test_onnx_simple_resolution() {
         max_clauses: 1000,
         max_iterations: 1000,
         timeout: Duration::from_secs(5),
-        use_superposition: true,
         literal_selection: LiteralSelectionStrategy::SelectAll,
         ..Default::default()
     };

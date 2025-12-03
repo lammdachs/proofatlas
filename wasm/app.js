@@ -539,7 +539,6 @@ async function prove() {
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
-            use_superposition: true,
             literal_selection: document.getElementById('literal-selection').value,
             use_onnx_selector: useOnnx,
             onnx_model_data: useOnnx ? Array.from(onnxModelData) : null

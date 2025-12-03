@@ -13,7 +13,6 @@ fn main() {
         eprintln!("\nOptions:");
         eprintln!("  --timeout <seconds>    Set timeout (default: 60)");
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
-        eprintln!("  --no-superposition     Disable superposition rule");
         eprintln!("  --literal-selection <strategy>");
         eprintln!("                         Literal selection: all, max_weight, largest_negative (default: all)");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
@@ -45,9 +44,6 @@ fn main() {
                     }
                     i += 1;
                 }
-            }
-            "--no-superposition" => {
-                config.use_superposition = false;
             }
             "--literal-selection" => {
                 if i + 1 < args.len() {
@@ -108,14 +104,6 @@ fn main() {
     println!("Running saturation with:");
     println!("  Max clauses: {}", config.max_clauses);
     println!("  Timeout: {:?}", config.timeout);
-    println!(
-        "  Superposition: {}",
-        if config.use_superposition {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
     println!();
 
     let start_time = Instant::now();

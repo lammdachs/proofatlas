@@ -189,7 +189,6 @@ pub struct ConfigJson {
     pub max_clauses: usize,
     pub max_iterations: usize,
     pub timeout_seconds: f64,
-    pub use_superposition: bool,
     pub literal_selection: String,
 }
 

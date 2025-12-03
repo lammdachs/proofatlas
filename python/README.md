@@ -99,9 +99,8 @@ while state.num_unprocessed() > 0:
 ### Equality Reasoning
 
 ```python
-# Enable superposition for equality
+# Equality reasoning is always enabled via superposition
 state = ProofState()
-state.set_use_superposition(True)
 
 # Prove transitivity of equality
 state.add_clauses_from_tptp("""
@@ -110,7 +109,7 @@ cnf(eq2, axiom, b = c).
 cnf(goal, negated_conjecture, a != c).
 """)
 
-# The prover will automatically handle equality
+# The prover will automatically handle equality via superposition
 ```
 
 ### Interactive Proof Exploration
@@ -161,7 +160,6 @@ The main class for managing proof search.
 
 **Configuration:**
 - `set_literal_selection(strategy: str)` - Set literal selection ("all" or "max_weight")
-- `set_use_superposition(enabled: bool)` - Enable/disable equality reasoning
 
 #### ClauseInfo
 

@@ -72,7 +72,6 @@ fn main() {
         max_iterations: 100000,
         max_clause_size: 20,
         timeout: std::time::Duration::from_secs(10),
-        use_superposition: true,
         literal_selection: LiteralSelectionStrategy::SelectAll,
         step_limit: None,
     };

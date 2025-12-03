@@ -30,8 +30,6 @@ pub struct ProofState {
     literal_selector: Box<dyn LiteralSelector + Send>,
     /// Proof trace
     proof_trace: Vec<ProofStep>,
-    /// Which inference rules to use
-    use_superposition: bool,
 }
 
 /// Information about a clause (lightweight)
@@ -170,7 +168,6 @@ impl ProofState {
             unprocessed: VecDeque::new(),
             literal_selector: Box::new(SelectAll) as Box<dyn LiteralSelector + Send>,
             proof_trace: Vec::new(),
-            use_superposition: true,
         }
     }
 
@@ -353,10 +350,8 @@ impl ProofState {
             results.push(self.convert_inference_result(rust_result));
         }
 
-        if self.use_superposition {
-            for rust_result in equality_factoring(given_clause, given_id, selector) {
-                results.push(self.convert_inference_result(rust_result));
-            }
+        for rust_result in equality_factoring(given_clause, given_id, selector) {
+            results.push(self.convert_inference_result(rust_result));
         }
 
         // Binary inferences with processed clauses
@@ -383,26 +378,24 @@ impl ProofState {
                 results.push(self.convert_inference_result(rust_result));
             }
 
-            // Superposition if enabled
-            if self.use_superposition {
-                for rust_result in superposition(
-                    given_clause,
-                    processed_clause,
-                    given_id,
-                    processed_id,
-                    selector,
-                ) {
-                    results.push(self.convert_inference_result(rust_result));
-                }
-                for rust_result in superposition(
-                    processed_clause,
-                    given_clause,
-                    processed_id,
-                    given_id,
-                    selector,
-                ) {
-                    results.push(self.convert_inference_result(rust_result));
-                }
+            // Superposition
+            for rust_result in superposition(
+                given_clause,
+                processed_clause,
+                given_id,
+                processed_id,
+                selector,
+            ) {
+                results.push(self.convert_inference_result(rust_result));
+            }
+            for rust_result in superposition(
+                processed_clause,
+                given_clause,
+                processed_id,
+                given_id,
+                selector,
+            ) {
+                results.push(self.convert_inference_result(rust_result));
             }
         }
 
@@ -475,11 +468,6 @@ impl ProofState {
         }
     }
 
-    /// Set whether to use superposition
-    pub fn set_use_superposition(&mut self, use_superposition: bool) {
-        self.use_superposition = use_superposition;
-    }
-
     /// Run full saturation using the Rust saturation engine
     ///
     /// This is more efficient than calling generate_inferences/add_inference in a loop
@@ -515,7 +503,6 @@ impl ProofState {
             max_iterations,
             max_clause_size: 100,
             timeout,
-            use_superposition: self.use_superposition,
             literal_selection,
             step_limit: None,
         };

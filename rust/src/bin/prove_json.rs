@@ -16,7 +16,6 @@ fn main() {
         eprintln!("\nOptions:");
         eprintln!("  --timeout <seconds>    Set timeout (default: 60)");
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
-        eprintln!("  --no-superposition     Disable superposition rule");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
         eprintln!("  --json <file>          Export proof attempt to JSON file");
         eprintln!("  --verbose              Show detailed progress");
@@ -48,9 +47,6 @@ fn main() {
                     }
                     i += 1;
                 }
-            }
-            "--no-superposition" => {
-                config.use_superposition = false;
             }
             "--include" => {
                 if i + 1 < args.len() {
@@ -105,14 +101,6 @@ fn main() {
     println!("Running saturation with:");
     println!("  Max clauses: {}", config.max_clauses);
     println!("  Timeout: {:?}", config.timeout);
-    println!(
-        "  Superposition: {}",
-        if config.use_superposition {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
     println!();
 
     let start_time = Instant::now();
@@ -179,7 +167,6 @@ fn main() {
                 max_clauses: config.max_clauses,
                 max_iterations: config.max_iterations,
                 timeout_seconds: config.timeout.as_secs_f64(),
-                use_superposition: config.use_superposition,
                 literal_selection: format!("{:?}", config.literal_selection),
             },
             result: result.to_json(elapsed.as_secs_f64()),

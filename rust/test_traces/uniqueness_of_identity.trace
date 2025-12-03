@@ -7,7 +7,7 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.001s
+✓ PROOF FOUND in 0.002s
 Generated 15 clauses
 Empty clause at index: 9
 
@@ -60,13 +60,13 @@ Empty clause at index: 9
     Rule: GivenClauseSelection
     Parents: []
 
-[7] X = X
-    Rule: Demodulation
-    Parents: [6, 4]
-
-[8] ~e = e
+[7] ~e = e
     Rule: Demodulation
     Parents: [6, 5]
+
+[8] X = X
+    Rule: Demodulation
+    Parents: [6, 4]
 
 [9] ⊥
     Rule: Resolution

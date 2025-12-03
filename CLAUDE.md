@@ -59,7 +59,6 @@ cargo run --bin prove -- <tptp_file> [options]
 # Common options:
 #   --timeout <seconds>     Set timeout (default: 300s)
 #   --max-clauses <n>       Set clause limit (default: 10000)
-#   --no-superposition      Disable superposition calculus
 ```
 
 ### Running Tests

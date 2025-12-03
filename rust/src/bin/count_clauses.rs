@@ -38,7 +38,6 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
             max_iterations: 10000,
             max_clause_size: 100,
             timeout: Duration::from_secs(300),
-            use_superposition: true,
             literal_selection: LiteralSelectionStrategy::SelectAll,
             step_limit: Some(steps),
         };

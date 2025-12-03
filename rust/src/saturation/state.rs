@@ -21,7 +21,6 @@ pub struct SaturationConfig {
     pub max_iterations: usize,
     pub max_clause_size: usize,
     pub timeout: Duration,
-    pub use_superposition: bool,
     pub literal_selection: LiteralSelectionStrategy,
     pub step_limit: Option<usize>,
 }
@@ -41,7 +40,6 @@ impl Default for SaturationConfig {
             max_iterations: 10000,
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
-            use_superposition: true,
             literal_selection: LiteralSelectionStrategy::SelectAll,
             step_limit: None,
         }
@@ -305,10 +303,8 @@ impl SaturationState {
         // Equality resolution on given clause
         results.extend(equality_resolution(given_clause, given_idx, selector));
 
-        // Equality factoring on given clause (if superposition is enabled)
-        if self.config.use_superposition {
-            results.extend(equality_factoring(given_clause, given_idx, selector));
-        }
+        // Equality factoring on given clause
+        results.extend(equality_factoring(given_clause, given_idx, selector));
 
         // Inferences with each processed clause
         for &processed_idx in &self.processed {
@@ -330,23 +326,21 @@ impl SaturationState {
                 selector,
             ));
 
-            // Superposition (if enabled)
-            if self.config.use_superposition {
-                results.extend(superposition(
-                    given_clause,
-                    processed_clause,
-                    given_idx,
-                    processed_idx,
-                    selector,
-                ));
-                results.extend(superposition(
-                    processed_clause,
-                    given_clause,
-                    processed_idx,
-                    given_idx,
-                    selector,
-                ));
-            }
+            // Superposition
+            results.extend(superposition(
+                given_clause,
+                processed_clause,
+                given_idx,
+                processed_idx,
+                selector,
+            ));
+            results.extend(superposition(
+                processed_clause,
+                given_clause,
+                processed_idx,
+                given_idx,
+                selector,
+            ));
         }
 
         // IMPORTANT: Also do self-inferences (given clause with itself)
@@ -358,15 +352,13 @@ impl SaturationState {
             given_idx,
             selector,
         ));
-        if self.config.use_superposition {
-            results.extend(superposition(
-                given_clause,
-                given_clause,
-                given_idx,
-                given_idx,
-                selector,
-            ));
-        }
+        results.extend(superposition(
+            given_clause,
+            given_clause,
+            given_idx,
+            given_idx,
+            selector,
+        ));
 
         results
     }

@@ -10,7 +10,6 @@ pub struct ProofAtlasWasm;
 pub struct ProverOptions {
     pub timeout_ms: u32,
     pub max_clauses: usize,
-    pub use_superposition: bool,
     pub literal_selection: Option<String>, // "all" or "max_weight"
     pub use_onnx_selector: Option<bool>,   // Enable ML-guided clause selection
     pub onnx_model_data: Option<Vec<u8>>,  // ONNX model bytes (if using ML selection)
@@ -83,8 +82,8 @@ impl ProofAtlasWasm {
         let options: ProverOptions = serde_wasm_bindgen::from_value(options_js)
             .map_err(|e| JsError::new(&format!("Invalid options: {}", e)))?;
         
-        web_sys::console::log_1(&format!("Options parsed: timeout_ms={}, max_clauses={}, use_superposition={}", 
-            options.timeout_ms, options.max_clauses, options.use_superposition).into());
+        web_sys::console::log_1(&format!("Options parsed: timeout_ms={}, max_clauses={}",
+            options.timeout_ms, options.max_clauses).into());
         
         // Parse TPTP input
         let cnf = parse_tptp(tptp_input)
@@ -111,7 +110,6 @@ impl ProofAtlasWasm {
             max_iterations: 10000,
             max_clause_size: 100,
             timeout: Duration::from_millis(options.timeout_ms as u64),
-            use_superposition: options.use_superposition,
             literal_selection,
             step_limit: None,
         };

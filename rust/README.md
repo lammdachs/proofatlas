@@ -35,8 +35,7 @@ cargo test
 ## CLI Options
 
 - `--timeout <seconds>`: Set timeout in seconds (default: 60)
-- `--max-clauses <n>`: Set maximum number of clauses (default: 10000)  
-- `--no-superposition`: Disable superposition inference rule
+- `--max-clauses <n>`: Set maximum number of clauses (default: 10000)
 - `--verbose`: Show detailed progress and proof steps
 - `--literal-selection <strategy>`: Set literal selection strategy (all, max-weight)
 - `--clause-selection <strategy>`: Set clause selection strategy (age, size, age-weight)
