@@ -1,304 +1,534 @@
-"""Training script for clause selection GNN"""
+"""
+Training infrastructure for clause selection models.
+
+Uses PyTorch Lightning for multi-GPU training with JSON logging
+for web-based visualization.
+"""
+
+import json
+import os
+import time
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch_geometric.data import Data, DataLoader
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
-import json
+import torch.nn.functional as F
 
-from .model import create_model
-from .data_collection import load_training_dataset, TrainingDataset
+try:
+    import lightning as L
+    from lightning.pytorch.callbacks import Callback, ModelCheckpoint, EarlyStopping
+    from lightning.pytorch.loggers import Logger
+    LIGHTNING_AVAILABLE = True
+except ImportError:
+    LIGHTNING_AVAILABLE = False
 
-
-@dataclass
-class TrainingConfig:
-    """Configuration for training"""
-    # Model
-    model_type: str = "gcn"
-    hidden_dim: int = 64
-    num_layers: int = 2
-    dropout: float = 0.1
-    pooling: str = "mean"
-
-    # Training
-    batch_size: int = 32
-    learning_rate: float = 0.001
-    weight_decay: float = 1e-5
-    epochs: int = 100
-    patience: int = 10  # Early stopping patience
-
-    # Data
-    train_split: float = 0.8
-    val_split: float = 0.1
-    # test_split is the remainder
-
-    # Class imbalance
-    use_class_weights: bool = True
+from .model import create_model, normalize_adjacency, edge_index_to_adjacency
+from .config import TrainingConfig
 
 
-def create_pyg_dataset(dataset: TrainingDataset) -> List[Data]:
-    """Convert TrainingDataset to list of PyTorch Geometric Data objects"""
-    pyg_data = []
-
-    for i, (graph, label) in enumerate(zip(dataset.graphs, dataset.labels)):
-        data = Data(
-            x=graph["x"],
-            edge_index=graph["edge_index"],
-            y=torch.tensor([label.item()], dtype=torch.float32),
-        )
-        pyg_data.append(data)
-
-    return pyg_data
+# =============================================================================
+# Dataset
+# =============================================================================
 
 
-def split_dataset(
-    dataset: List[Data],
-    train_split: float = 0.8,
-    val_split: float = 0.1,
-    shuffle: bool = True,
-    seed: int = 42,
-) -> Tuple[List[Data], List[Data], List[Data]]:
-    """Split dataset into train/val/test"""
-    if shuffle:
-        import random
-        random.seed(seed)
-        indices = list(range(len(dataset)))
-        random.shuffle(indices)
-        dataset = [dataset[i] for i in indices]
+class ClauseDataset(torch.utils.data.Dataset):
+    """Dataset of clause selection examples."""
 
-    n = len(dataset)
-    train_end = int(n * train_split)
-    val_end = int(n * (train_split + val_split))
+    def __init__(
+        self,
+        node_features: List[torch.Tensor],
+        edge_indices: List[torch.Tensor],
+        labels: List[int],
+        pool_matrices: Optional[List[torch.Tensor]] = None,
+    ):
+        """
+        Args:
+            node_features: List of [num_nodes, 13] tensors
+            edge_indices: List of [2, num_edges] tensors
+            labels: List of selected clause indices
+            pool_matrices: Optional pre-computed pool matrices
+        """
+        self.node_features = node_features
+        self.edge_indices = edge_indices
+        self.labels = labels
+        self.pool_matrices = pool_matrices
 
-    return dataset[:train_end], dataset[train_end:val_end], dataset[val_end:]
+    def __len__(self):
+        return len(self.node_features)
 
-
-def compute_class_weights(labels: torch.Tensor) -> torch.Tensor:
-    """Compute class weights for imbalanced data"""
-    pos = labels.sum().item()
-    neg = len(labels) - pos
-
-    if pos == 0 or neg == 0:
-        return torch.tensor([1.0])
-
-    # Weight inversely proportional to class frequency
-    pos_weight = neg / pos
-    return torch.tensor([pos_weight])
-
-
-def train_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    optimizer: optim.Optimizer,
-    criterion: nn.Module,
-    device: torch.device,
-) -> float:
-    """Train for one epoch, return average loss"""
-    model.train()
-    total_loss = 0
-
-    for batch in loader:
-        batch = batch.to(device)
-        optimizer.zero_grad()
-
-        # Forward pass
-        predictions = model(batch.x, batch.edge_index, batch.batch)
-        loss = criterion(predictions, batch.y.squeeze())
-
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item() * batch.num_graphs
-
-    return total_loss / len(loader.dataset)
+    def __getitem__(self, idx):
+        item = {
+            "node_features": self.node_features[idx],
+            "edge_index": self.edge_indices[idx],
+            "label": self.labels[idx],
+        }
+        if self.pool_matrices is not None:
+            item["pool_matrix"] = self.pool_matrices[idx]
+        return item
 
 
-def evaluate(
-    model: nn.Module,
-    loader: DataLoader,
-    criterion: nn.Module,
-    device: torch.device,
-) -> Tuple[float, float, float, float]:
-    """Evaluate model, return (loss, accuracy, precision, recall)"""
-    model.eval()
-    total_loss = 0
-    correct = 0
-    true_positives = 0
-    predicted_positives = 0
-    actual_positives = 0
+def collate_clause_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """Collate function for clause batches."""
+    # Concatenate all node features
+    node_features = torch.cat([b["node_features"] for b in batch], dim=0)
 
-    with torch.no_grad():
-        for batch in loader:
-            batch = batch.to(device)
+    # Offset edge indices and concatenate
+    edge_indices = []
+    offset = 0
+    for b in batch:
+        edge_indices.append(b["edge_index"] + offset)
+        offset += b["node_features"].size(0)
+    edge_index = torch.cat(edge_indices, dim=1)
 
-            predictions = model(batch.x, batch.edge_index, batch.batch)
-            loss = criterion(predictions, batch.y.squeeze())
+    # Build adjacency matrix
+    num_nodes = node_features.size(0)
+    adj = edge_index_to_adjacency(edge_index, num_nodes, add_self_loops=True)
+    adj_norm = normalize_adjacency(adj, add_self_loops=False)  # Already added
 
-            total_loss += loss.item() * batch.num_graphs
+    # Build pool matrix if not provided
+    if "pool_matrix" in batch[0]:
+        # Offset and concatenate pool matrices
+        pool_matrices = []
+        col_offset = 0
+        for b in batch:
+            pm = b["pool_matrix"]
+            # Create expanded matrix with correct column offset
+            expanded = torch.zeros(pm.size(0), num_nodes)
+            expanded[:, col_offset:col_offset + pm.size(1)] = pm
+            pool_matrices.append(expanded)
+            col_offset += pm.size(1)
+        pool_matrix = torch.cat(pool_matrices, dim=0)
+    else:
+        # Create simple pool matrix (one clause per example)
+        pool_matrix = torch.zeros(len(batch), num_nodes)
+        offset = 0
+        for i, b in enumerate(batch):
+            n = b["node_features"].size(0)
+            pool_matrix[i, offset:offset + n] = 1.0 / n
+            offset += n
 
-            # Binary predictions
-            pred_binary = (torch.sigmoid(predictions) > 0.5).float()
-            labels = batch.y.squeeze()
+    labels = torch.tensor([b["label"] for b in batch], dtype=torch.long)
 
-            correct += (pred_binary == labels).sum().item()
-            true_positives += ((pred_binary == 1) & (labels == 1)).sum().item()
-            predicted_positives += (pred_binary == 1).sum().item()
-            actual_positives += (labels == 1).sum().item()
+    return {
+        "node_features": node_features,
+        "adj": adj_norm,
+        "pool_matrix": pool_matrix,
+        "labels": labels,
+    }
 
-    n = len(loader.dataset)
-    accuracy = correct / n
-    precision = true_positives / predicted_positives if predicted_positives > 0 else 0
-    recall = true_positives / actual_positives if actual_positives > 0 else 0
 
-    return total_loss / n, accuracy, precision, recall
+# =============================================================================
+# Lightning Module
+# =============================================================================
+
+
+if LIGHTNING_AVAILABLE:
+
+    class ClauseSelectionModule(L.LightningModule):
+        """Lightning module for clause selection training."""
+
+        def __init__(self, config: TrainingConfig):
+            super().__init__()
+            self.config = config
+            self.save_hyperparameters(config.to_dict())
+
+            # Create model
+            self.model = create_model(
+                model_type=config.model.type,
+                hidden_dim=config.model.hidden_dim,
+                num_layers=config.model.num_layers,
+                num_heads=config.model.num_heads,
+                dropout=config.model.dropout,
+            )
+
+            # Track whether model needs adjacency matrix
+            self.needs_adj = config.model.type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+
+        def forward(self, node_features, adj, pool_matrix):
+            if self.needs_adj:
+                return self.model(node_features, adj, pool_matrix)
+            else:
+                return self.model(node_features, pool_matrix)
+
+        def training_step(self, batch, batch_idx):
+            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
+            loss = F.cross_entropy(scores, batch["labels"])
+
+            self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+            return loss
+
+        def validation_step(self, batch, batch_idx):
+            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
+            loss = F.cross_entropy(scores, batch["labels"])
+
+            # Accuracy
+            preds = scores.argmax(dim=-1)
+            acc = (preds == batch["labels"]).float().mean()
+
+            self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+            self.log("val_acc", acc, prog_bar=True, sync_dist=True)
+            return loss
+
+        def configure_optimizers(self):
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay,
+            )
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.config.training.max_epochs,
+                eta_min=self.config.training.learning_rate * self.config.scheduler.min_lr_ratio,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                },
+            }
+
+
+# =============================================================================
+# JSON Logger for Web Visualization
+# =============================================================================
+
+
+class JSONLogger:
+    """Logger that writes metrics to JSON for web visualization."""
+
+    def __init__(self, log_dir: str, run_name: str):
+        self.log_dir = Path(log_dir)
+        self.run_name = run_name
+        self.log_file = self.log_dir / run_name / "metrics.json"
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        self.metrics = {
+            "run_name": run_name,
+            "start_time": datetime.now().isoformat(),
+            "config": {},
+            "epochs": [],
+            "evaluations": [],
+        }
+
+    def log_config(self, config: TrainingConfig):
+        self.metrics["config"] = config.to_dict()
+        self._save()
+
+    def log_epoch(self, epoch: int, train_loss: float, val_loss: float, val_acc: float, lr: float):
+        self.metrics["epochs"].append({
+            "epoch": epoch,
+            "timestamp": datetime.now().isoformat(),
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_acc": val_acc,
+            "learning_rate": lr,
+        })
+        self._save()
+
+    def log_evaluation(self, epoch: int, results: Dict[str, Any]):
+        self.metrics["evaluations"].append({
+            "epoch": epoch,
+            "timestamp": datetime.now().isoformat(),
+            **results,
+        })
+        self._save()
+
+    def log_final(self, best_epoch: int, best_val_loss: float, total_time: float):
+        self.metrics["end_time"] = datetime.now().isoformat()
+        self.metrics["best_epoch"] = best_epoch
+        self.metrics["best_val_loss"] = best_val_loss
+        self.metrics["total_time_seconds"] = total_time
+        self._save()
+
+    def _save(self):
+        with open(self.log_file, "w") as f:
+            json.dump(self.metrics, f, indent=2)
+
+
+if LIGHTNING_AVAILABLE:
+
+    class JSONLoggingCallback(Callback):
+        """Lightning callback for JSON logging."""
+
+        def __init__(self, logger: JSONLogger):
+            self.logger = logger
+            self.epoch_metrics = {}
+
+        def on_train_epoch_end(self, trainer, pl_module):
+            # Collect metrics
+            metrics = {k: v.item() if torch.is_tensor(v) else v
+                       for k, v in trainer.callback_metrics.items()}
+
+            train_loss = metrics.get("train_loss", 0)
+            val_loss = metrics.get("val_loss", 0)
+            val_acc = metrics.get("val_acc", 0)
+            lr = trainer.optimizers[0].param_groups[0]["lr"]
+
+            self.logger.log_epoch(
+                epoch=trainer.current_epoch,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                val_acc=val_acc,
+                lr=lr,
+            )
+
+
+# =============================================================================
+# Proof Evaluation Callback
+# =============================================================================
+
+
+if LIGHTNING_AVAILABLE:
+
+    class ProofEvaluationCallback(Callback):
+        """Evaluate model on actual theorem proving problems."""
+
+        def __init__(
+            self,
+            problems: List[str],
+            logger: JSONLogger,
+            eval_every_n_epochs: int = 10,
+            timeout: float = 10.0,
+        ):
+            self.problems = problems
+            self.logger = logger
+            self.eval_every_n_epochs = eval_every_n_epochs
+            self.timeout = timeout
+
+        def on_train_epoch_end(self, trainer, pl_module):
+            epoch = trainer.current_epoch
+
+            # Only evaluate every N epochs
+            if (epoch + 1) % self.eval_every_n_epochs != 0:
+                return
+
+            # Only run on rank 0
+            if trainer.global_rank != 0:
+                return
+
+            if not self.problems:
+                return
+
+            results = self._evaluate_problems(pl_module)
+            self.logger.log_evaluation(epoch, results)
+
+            # Log to trainer
+            trainer.logger.log_metrics({
+                "proof_success_rate": results["success_rate"],
+                "proof_avg_time": results["avg_time"],
+            }, step=trainer.global_step)
+
+        def _evaluate_problems(self, pl_module) -> Dict[str, Any]:
+            """Run prover on evaluation problems."""
+            try:
+                from proofatlas import parse_tptp_file, SaturationState, SaturationConfig
+            except ImportError:
+                return {
+                    "success_rate": 0.0,
+                    "avg_time": 0.0,
+                    "num_problems": 0,
+                    "error": "proofatlas not available",
+                }
+
+            pl_module.eval()
+            device = pl_module.device
+
+            results = []
+            for problem_path in self.problems:
+                try:
+                    start_time = time.time()
+
+                    # Parse problem
+                    formula = parse_tptp_file(problem_path, [])
+
+                    # Create saturation state
+                    config = SaturationConfig()
+                    config.timeout = self.timeout
+                    state = SaturationState(formula.clauses, config)
+
+                    # TODO: Set learned clause selector
+                    # This requires exporting model to ONNX and loading in Rust
+
+                    # Run saturation
+                    result = state.saturate()
+                    elapsed = time.time() - start_time
+
+                    results.append({
+                        "problem": problem_path,
+                        "success": result.is_proof(),
+                        "time": elapsed,
+                    })
+                except Exception as e:
+                    results.append({
+                        "problem": problem_path,
+                        "success": False,
+                        "time": self.timeout,
+                        "error": str(e),
+                    })
+
+            # Aggregate
+            num_success = sum(1 for r in results if r["success"])
+            total_time = sum(r["time"] for r in results)
+
+            return {
+                "success_rate": num_success / len(results) if results else 0.0,
+                "num_success": num_success,
+                "num_problems": len(results),
+                "avg_time": total_time / len(results) if results else 0.0,
+                "problems": results,
+            }
+
+
+# =============================================================================
+# Training Functions
+# =============================================================================
 
 
 def train(
-    train_data: List[Data],
-    val_data: List[Data],
+    train_dataset: ClauseDataset,
+    val_dataset: ClauseDataset,
     config: TrainingConfig,
-    device: Optional[torch.device] = None,
-    verbose: bool = True,
 ) -> Tuple[nn.Module, Dict]:
     """
-    Train a clause scoring model.
+    Train a clause selection model.
 
     Args:
-        train_data: Training data
-        val_data: Validation data
+        train_dataset: Training dataset
+        val_dataset: Validation dataset
         config: Training configuration
-        device: Device to train on (default: auto-detect)
-        verbose: Print progress
 
     Returns:
-        (trained_model, training_history)
+        (trained_model, metrics_dict)
     """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not LIGHTNING_AVAILABLE:
+        raise ImportError("PyTorch Lightning required. Install with: pip install lightning")
 
-    if verbose:
-        print(f"Training on {device}")
-        print(f"Train size: {len(train_data)}, Val size: {len(val_data)}")
+    # Generate run name if not provided
+    if not config.name:
+        config.name = f"{config.model.type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    # Create dataloaders
-    train_loader = DataLoader(train_data, batch_size=config.batch_size, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=config.batch_size)
+    # Create data loaders
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=config.training.batch_size,
+        shuffle=True,
+        collate_fn=collate_clause_batch,
+        num_workers=4,
+        pin_memory=True,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=config.training.batch_size,
+        shuffle=False,
+        collate_fn=collate_clause_batch,
+        num_workers=4,
+        pin_memory=True,
+    )
 
-    # Create model
-    model = create_model(
-        model_type=config.model_type,
-        node_feature_dim=20,  # Fixed for our clause graphs
-        hidden_dim=config.hidden_dim,
-        num_layers=config.num_layers,
-        dropout=config.dropout,
-        pooling=config.pooling,
-    ).to(device)
+    # Create module
+    module = ClauseSelectionModule(config)
 
-    if verbose:
-        num_params = sum(p.numel() for p in model.parameters())
-        print(f"Model parameters: {num_params:,}")
+    # Create JSON logger
+    json_logger = JSONLogger(config.logging.log_dir, config.name)
+    json_logger.log_config(config)
 
-    # Loss function with class weights
-    if config.use_class_weights:
-        labels = torch.tensor([d.y.item() for d in train_data])
-        pos_weight = compute_class_weights(labels)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(device))
+    # Callbacks
+    callbacks = [
+        JSONLoggingCallback(json_logger),
+        ModelCheckpoint(
+            dirpath=Path(config.logging.log_dir) / config.name / "checkpoints",
+            filename="{epoch}-{val_loss:.4f}",
+            monitor=config.checkpointing.monitor,
+            mode=config.checkpointing.mode,
+            save_top_k=config.checkpointing.save_top_k,
+        ),
+        EarlyStopping(
+            monitor=config.checkpointing.monitor,
+            patience=config.training.patience,
+            mode=config.checkpointing.mode,
+        ),
+    ]
+
+    # Add proof evaluation callback if eval is configured
+    if config.evaluation.num_eval_problems > 0:
+        callbacks.append(ProofEvaluationCallback(
+            problems=[],  # TODO: Load eval problems from data config
+            logger=json_logger,
+            eval_every_n_epochs=config.evaluation.eval_every_n_epochs,
+            timeout=config.evaluation.eval_timeout,
+        ))
+
+    # Determine devices
+    if torch.cuda.is_available():
+        devices = config.distributed.num_gpus if config.distributed.num_gpus > 0 else "auto"
+        accelerator = "gpu"
     else:
-        criterion = nn.BCEWithLogitsLoss()
+        devices = 1
+        accelerator = "cpu"
 
-    # Optimizer
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
+    # Create trainer
+    trainer = L.Trainer(
+        max_epochs=config.training.max_epochs,
+        accelerator=accelerator,
+        devices=devices,
+        strategy=config.distributed.strategy if torch.cuda.device_count() > 1 else "auto",
+        callbacks=callbacks,
+        enable_progress_bar=config.logging.enable_progress_bar,
+        log_every_n_steps=config.logging.log_every_n_steps,
     )
 
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+    # Train
+    start_time = time.time()
+    trainer.fit(module, train_loader, val_loader)
+    total_time = time.time() - start_time
+
+    # Log final metrics
+    best_checkpoint = trainer.checkpoint_callback.best_model_path
+    best_val_loss = trainer.checkpoint_callback.best_model_score
+    json_logger.log_final(
+        best_epoch=trainer.current_epoch,
+        best_val_loss=float(best_val_loss) if best_val_loss else 0.0,
+        total_time=total_time,
     )
-
-    # Training loop with early stopping
-    history = {
-        "train_loss": [],
-        "val_loss": [],
-        "val_accuracy": [],
-        "val_precision": [],
-        "val_recall": [],
-    }
-
-    best_val_loss = float("inf")
-    best_model_state = None
-    patience_counter = 0
-
-    for epoch in range(config.epochs):
-        # Train
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
-
-        # Validate
-        val_loss, val_acc, val_prec, val_rec = evaluate(model, val_loader, criterion, device)
-
-        # Update scheduler
-        scheduler.step(val_loss)
-
-        # Record history
-        history["train_loss"].append(train_loss)
-        history["val_loss"].append(val_loss)
-        history["val_accuracy"].append(val_acc)
-        history["val_precision"].append(val_prec)
-        history["val_recall"].append(val_rec)
-
-        if verbose and (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch+1}: train_loss={train_loss:.4f}, "
-                  f"val_loss={val_loss:.4f}, val_acc={val_acc:.4f}, "
-                  f"prec={val_prec:.4f}, rec={val_rec:.4f}")
-
-        # Early stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model_state = model.state_dict().copy()
-            patience_counter = 0
-        else:
-            patience_counter += 1
-            if patience_counter >= config.patience:
-                if verbose:
-                    print(f"Early stopping at epoch {epoch+1}")
-                break
 
     # Load best model
-    if best_model_state is not None:
-        model.load_state_dict(best_model_state)
+    if best_checkpoint:
+        module = ClauseSelectionModule.load_from_checkpoint(best_checkpoint, config=config)
 
-    return model, history
+    return module.model, json_logger.metrics
 
 
 def save_model(model: nn.Module, path: Path, config: Optional[TrainingConfig] = None):
-    """Save model and optionally config"""
+    """Save model checkpoint."""
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
         "model_state_dict": model.state_dict(),
-        "config": config.__dict__ if config else None,
+        "config": config.to_dict() if config else None,
     }, path)
 
 
 def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
-    """Load a saved model"""
+    """Load model from checkpoint."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     checkpoint = torch.load(path, map_location=device)
+    config_dict = checkpoint.get("config", {})
 
-    config = checkpoint.get("config", {})
+    # Handle both old flat config and new nested config
+    model_config = config_dict.get("model", config_dict)
+
     model = create_model(
-        model_type=config.get("model_type", "gcn"),
-        hidden_dim=config.get("hidden_dim", 64),
-        num_layers=config.get("num_layers", 2),
-        dropout=config.get("dropout", 0.1),
-        pooling=config.get("pooling", "mean"),
+        model_type=model_config.get("type", model_config.get("model_type", "gcn")),
+        hidden_dim=model_config.get("hidden_dim", 64),
+        num_layers=model_config.get("num_layers", 3),
+        num_heads=model_config.get("num_heads", 4),
+        dropout=model_config.get("dropout", 0.1),
     )
 
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -308,52 +538,102 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
     return model
 
 
+# =============================================================================
+# Legacy compatibility
+# =============================================================================
+
+
+def create_pyg_dataset(dataset):
+    """Legacy function for PyG compatibility."""
+    raise NotImplementedError(
+        "create_pyg_dataset is deprecated. Use ClauseDataset directly."
+    )
+
+
+def split_dataset(
+    node_features: List[torch.Tensor],
+    edge_indices: List[torch.Tensor],
+    labels: List[int],
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    seed: int = 42,
+) -> Tuple[ClauseDataset, ClauseDataset, ClauseDataset]:
+    """Split data into train/val/test datasets."""
+    import random
+    random.seed(seed)
+
+    n = len(node_features)
+    indices = list(range(n))
+    random.shuffle(indices)
+
+    train_end = int(n * train_ratio)
+    val_end = int(n * (train_ratio + val_ratio))
+
+    def make_dataset(idxs):
+        return ClauseDataset(
+            node_features=[node_features[i] for i in idxs],
+            edge_indices=[edge_indices[i] for i in idxs],
+            labels=[labels[i] for i in idxs],
+        )
+
+    return (
+        make_dataset(indices[:train_end]),
+        make_dataset(indices[train_end:val_end]),
+        make_dataset(indices[val_end:]),
+    )
+
+
+# =============================================================================
 # CLI
+# =============================================================================
+
+
 if __name__ == "__main__":
     import argparse
+    from .config import ModelConfig, TrainingParams, DistributedConfig, LoggingConfig
 
-    parser = argparse.ArgumentParser(description="Train clause selection GNN")
-    parser.add_argument("data_path", type=Path, help="Path to training data (.pt file)")
-    parser.add_argument("--output", "-o", type=Path, default=Path("models/clause_gnn.pt"),
-                        help="Output model path")
+    parser = argparse.ArgumentParser(description="Train clause selection model")
+    parser.add_argument("--config", type=Path, help="Config JSON file or preset name")
+    parser.add_argument("--model-type", default="gcn", choices=["gcn", "gat", "graphsage", "transformer", "gnn_transformer", "mlp"])
     parser.add_argument("--hidden-dim", type=int, default=64)
-    parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--gpus", type=int, default=-1)
+    parser.add_argument("--log-dir", default="logs")
+    parser.add_argument("--run-name", default="")
 
     args = parser.parse_args()
 
-    # Load data
-    print(f"Loading data from {args.data_path}")
-    dataset = load_training_dataset(args.data_path)
+    if args.config:
+        # Try loading as file path first, then as preset name
+        config_path = Path(args.config)
+        if config_path.exists():
+            config = TrainingConfig.load(config_path)
+        else:
+            config = TrainingConfig.load_preset(str(args.config))
+    else:
+        # Build config from CLI args
+        config = TrainingConfig(
+            name=args.run_name,
+            model=ModelConfig(
+                type=args.model_type,
+                hidden_dim=args.hidden_dim,
+                num_layers=args.num_layers,
+            ),
+            training=TrainingParams(
+                batch_size=args.batch_size,
+                max_epochs=args.epochs,
+                learning_rate=args.lr,
+            ),
+            distributed=DistributedConfig(
+                num_gpus=args.gpus,
+            ),
+            logging=LoggingConfig(
+                log_dir=args.log_dir,
+            ),
+        )
 
-    # Convert to PyG format
-    pyg_data = create_pyg_dataset(dataset)
-    print(f"Total examples: {len(pyg_data)}")
-
-    # Split
-    train_data, val_data, test_data = split_dataset(pyg_data)
-    print(f"Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}")
-
-    # Train
-    config = TrainingConfig(
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        learning_rate=args.lr,
-    )
-
-    model, history = train(train_data, val_data, config)
-
-    # Evaluate on test set
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    test_loader = DataLoader(test_data, batch_size=config.batch_size)
-    criterion = nn.BCEWithLogitsLoss()
-    test_loss, test_acc, test_prec, test_rec = evaluate(model, test_loader, criterion, device)
-    print(f"\nTest: loss={test_loss:.4f}, acc={test_acc:.4f}, prec={test_prec:.4f}, rec={test_rec:.4f}")
-
-    # Save model
-    save_model(model, args.output, config)
-    print(f"Model saved to {args.output}")
+    print(f"Config: {config}")
+    print("\nTo train, create datasets and call train(train_dataset, val_dataset, config)")

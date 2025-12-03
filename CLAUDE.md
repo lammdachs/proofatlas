@@ -141,9 +141,21 @@ The Python interface is provided via PyO3 bindings:
 
 ```
 proofatlas/
+├── configs/                   # ML configuration files
+│   ├── data/                  # Data extraction/filtering configs
+│   │   ├── default.json
+│   │   └── unit_equality.json
+│   └── training/              # Training hyperparameter configs
+│       └── default.json
+│
 ├── python/                    # Python bindings and examples
 │   ├── proofatlas/
 │   │   ├── __init__.py
+│   │   ├── ml/                # Machine learning module
+│   │   │   ├── config.py      # Config loading/validation
+│   │   │   ├── model.py       # GNN models (pure PyTorch)
+│   │   │   ├── training.py    # Training infrastructure
+│   │   │   └── ...
 │   │   └── proofatlas.cpython-*.so  # Compiled Rust extension
 │   ├── tests/
 │   │   ├── __init__.py
@@ -291,3 +303,129 @@ When creating temporary files for testing or debugging:
 - Always create them in the current working directory (not in /tmp)
 - Clean up temporary files when done
 - Add useful test files to the appropriate tests/ or test_traces/ directories
+
+## Machine Learning Configuration
+
+The ML pipeline uses JSON configuration files stored in `configs/`.
+
+### Configuration Structure
+
+```
+configs/
+├── data/           # Data extraction and filtering
+│   ├── default.json
+│   └── unit_equality.json
+└── training/       # Model and training hyperparameters
+    └── default.json
+```
+
+### Data Configuration (`configs/data/*.json`)
+
+Controls which problems to use and how to process them:
+
+```json
+{
+  "name": "default",
+  "problem_filters": {
+    "status": ["unsatisfiable"],      // Filter by problem status
+    "format": ["cnf"],                 // cnf, fof
+    "has_equality": null,              // true, false, or null (any)
+    "is_unit_only": null,
+    "max_rating": 0.8,                 // TPTP difficulty rating
+    "min_clauses": 1,
+    "max_clauses": 1000,
+    "domains": null,                   // Include only these domains
+    "exclude_domains": ["CSR", "HWV"]  // Exclude these domains
+  },
+  "split": {
+    "train_ratio": 0.8,
+    "val_ratio": 0.1,
+    "test_ratio": 0.1,
+    "seed": 42,
+    "stratify_by": "domain"
+  },
+  "trace_collection": {
+    "prover_timeout": 60.0,
+    "max_clauses": 5000,
+    "max_steps": 10000
+  },
+  "output": {
+    "trace_dir": ".data/traces",
+    "cache_dir": ".data/cache"
+  }
+}
+```
+
+### Training Configuration (`configs/training/*.json`)
+
+Controls model architecture and training hyperparameters:
+
+```json
+{
+  "name": "default",
+  "model": {
+    "type": "gcn",           // gcn, gat, graphsage, transformer, mlp
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "num_heads": 4,          // For GAT/transformer
+    "dropout": 0.1
+  },
+  "training": {
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "weight_decay": 1e-5,
+    "max_epochs": 100,
+    "patience": 10
+  },
+  "distributed": {
+    "num_gpus": -1,          // -1 = all available
+    "strategy": "ddp",
+    "precision": "32-true"   // or "16-mixed"
+  },
+  "evaluation": {
+    "eval_every_n_epochs": 10,
+    "num_eval_problems": 100,
+    "eval_timeout": 10.0
+  }
+}
+```
+
+### Using Configurations in Python
+
+```python
+from proofatlas.ml import DataConfig, TrainingConfig, list_configs
+
+# List available presets
+print(list_configs())
+# {'data': ['default', 'unit_equality'], 'training': ['default']}
+
+# Load preset by name
+data_cfg = DataConfig.load_preset("unit_equality")
+train_cfg = TrainingConfig.load_preset("default")
+
+# Load from file path
+data_cfg = DataConfig.load("configs/data/custom.json")
+
+# Access nested config values
+print(train_cfg.model.type)           # "gcn"
+print(train_cfg.training.batch_size)  # 32
+print(data_cfg.problem_filters.status)  # ["unsatisfiable"]
+
+# Save config
+train_cfg.save("configs/training/my_experiment.json")
+```
+
+### Problem Metadata
+
+Problem metadata is extracted from TPTP and stored in `.data/problem_metadata.json`:
+
+```bash
+# Generate/update problem metadata
+python scripts/extract_problem_metadata.py
+```
+
+This creates a JSON file with metadata for all CNF/FOF problems:
+- path, domain, status (unsatisfiable/satisfiable/unknown)
+- format (cnf/fof), has_equality, is_unit_only
+- rating, num_clauses, num_axioms, num_conjectures
+- num_predicates, num_functions, num_constants, max_term_depth

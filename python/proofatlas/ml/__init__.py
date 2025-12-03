@@ -3,7 +3,7 @@
 This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
 - Data collection: extract training data from proofs
-- Models: GNN architectures for clause scoring
+- Models: GNN architectures for clause scoring (pure PyTorch, no PyG dependency)
 - Training: training loop and utilities
 """
 
@@ -28,18 +28,58 @@ from .data_collection import (
 )
 
 from .model import (
-    ClauseGNN,
-    ClauseGNNWithAttention,
+    # GNN layers
+    GCNLayer,
+    GATLayer,
+    GraphSAGELayer,
+    # Utility functions
+    normalize_adjacency,
+    edge_index_to_adjacency,
+    # GNN models
+    ClauseGCN,
+    ClauseGAT,
+    ClauseGraphSAGE,
+    # Transformer models
+    ClauseTransformer,
+    ClauseGNNTransformer,
+    # Baseline models
+    NodeMLP,
+    AgeWeightHeuristic,
+    # Factory and export
     create_model,
+    export_to_onnx,
 )
 
 from .training import (
-    TrainingConfig,
-    create_pyg_dataset,
+    ClauseDataset,
+    collate_clause_batch,
+    JSONLogger,
     split_dataset,
     train,
     save_model,
     load_model,
+)
+
+from .config import (
+    # Data config
+    DataConfig,
+    ProblemFilters,
+    SplitConfig,
+    TraceCollectionConfig,
+    OutputConfig,
+    # Training config
+    TrainingConfig,
+    ModelConfig,
+    TrainingParams,
+    OptimizerConfig,
+    SchedulerConfig,
+    DistributedConfig,
+    EvaluationConfig,
+    CheckpointConfig,
+    LoggingConfig,
+    # Utilities
+    list_configs,
+    merge_configs,
 )
 
 __all__ = [
@@ -59,15 +99,51 @@ __all__ = [
     "collect_from_problem",
     "collect_from_directory",
     "load_training_dataset",
-    # Models
-    "ClauseGNN",
-    "ClauseGNNWithAttention",
+    # GNN layers
+    "GCNLayer",
+    "GATLayer",
+    "GraphSAGELayer",
+    # Utility functions
+    "normalize_adjacency",
+    "edge_index_to_adjacency",
+    # GNN models
+    "ClauseGCN",
+    "ClauseGAT",
+    "ClauseGraphSAGE",
+    # Transformer models
+    "ClauseTransformer",
+    "ClauseGNNTransformer",
+    # Baseline models
+    "NodeMLP",
+    "AgeWeightHeuristic",
+    # Factory and export
     "create_model",
+    "export_to_onnx",
     # Training
-    "TrainingConfig",
-    "create_pyg_dataset",
+    "ClauseDataset",
+    "collate_clause_batch",
+    "JSONLogger",
     "split_dataset",
     "train",
     "save_model",
     "load_model",
+    # Config - Data
+    "DataConfig",
+    "ProblemFilters",
+    "SplitConfig",
+    "TraceCollectionConfig",
+    "OutputConfig",
+    # Config - Training
+    "TrainingConfig",
+    "ModelConfig",
+    "TrainingParams",
+    "OptimizerConfig",
+    "SchedulerConfig",
+    "DistributedConfig",
+    "EvaluationConfig",
+    "CheckpointConfig",
+    "LoggingConfig",
+    # Config utilities
+    "list_configs",
+    "merge_configs",
 ]

@@ -1,101 +1,168 @@
 #!/usr/bin/env python3
 """
 Generate benchmark problem data for the web interface.
-Outputs JSON with problem information for interactive display.
+Uses the unified problem_metadata.json for filtering.
 """
 
 import json
 import random
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
-def get_tptp_base() -> Path:
-    """Get the TPTP base directory."""
-    return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
 
-def get_problem_status(problem_path: Path) -> str:
-    """Get the status of a TPTP problem."""
-    try:
-        with open(problem_path, 'r') as f:
-            for line in f.readlines()[:50]:
-                if 'Status' in line and ':' in line:
-                    import re
-                    match = re.search(r'Status\s*:\s*(\w+)', line)
-                    if match:
-                        return match.group(1).strip()
-        return "Unknown"
-    except:
-        return "Unknown"
+def load_problem_metadata() -> Dict:
+    """Load the unified problem metadata JSON."""
+    metadata_path = Path(__file__).parent.parent / ".data/problem_metadata.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(
+            f"Problem metadata not found: {metadata_path}\n"
+            "Run: python scripts/extract_problem_metadata.py"
+        )
+    with open(metadata_path, 'r') as f:
+        return json.load(f)
 
-def load_problem_list(category: str, filename: str, count: int = 50, seed: int = 42) -> List[Dict]:
-    """Load and sample problems from a category."""
-    lists_dir = Path(__file__).parent.parent / ".data/benchmark_lists"
-    tptp_base = get_tptp_base()
 
-    filepath = lists_dir / filename
-    problems = []
+def filter_problems(
+    problems: List[Dict],
+    status: Optional[str] = None,
+    format: Optional[str] = None,
+    has_equality: Optional[bool] = None,
+    is_unit_only: Optional[bool] = None,
+    max_rating: Optional[float] = None,
+    min_clauses: Optional[int] = None,
+    max_clauses: Optional[int] = None,
+    domains: Optional[List[str]] = None,
+) -> List[Dict]:
+    """Filter problems based on criteria."""
+    result = []
+    for p in problems:
+        if status and p['status'] != status:
+            continue
+        if format and p['format'] != format:
+            continue
+        if has_equality is not None and p['has_equality'] != has_equality:
+            continue
+        if is_unit_only is not None and p['is_unit_only'] != is_unit_only:
+            continue
+        if max_rating is not None and p['rating'] > max_rating:
+            continue
+        if min_clauses is not None and p['num_clauses'] < min_clauses:
+            continue
+        if max_clauses is not None and p['num_clauses'] > max_clauses:
+            continue
+        if domains and p['domain'] not in domains:
+            continue
+        result.append(p)
+    return result
 
-    if not filepath.exists():
-        print(f"Warning: {filepath} not found")
-        return problems
 
-    with open(filepath, 'r') as f:
-        lines = f.readlines()
-        all_problems = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
-
-    # Filter for Unsatisfiable problems only
-    unsatisfiable_problems = []
-    for problem in all_problems:
-        problem_path = tptp_base / problem
-        if problem_path.exists():
-            status = get_problem_status(problem_path)
-            if status in ['Unsatisfiable', 'Theorem']:
-                unsatisfiable_problems.append(problem)
-
-    # Sample problems
+def sample_problems(problems: List[Dict], count: int, seed: int = 42) -> List[Dict]:
+    """Randomly sample problems."""
     random.seed(seed)
-    sampled = random.sample(unsatisfiable_problems, min(count, len(unsatisfiable_problems)))
+    return random.sample(problems, min(count, len(problems)))
 
-    # Create problem data
-    for problem in sampled:
-        domain, filename = problem.split('/')
+
+def format_for_web(problems: List[Dict], category: str) -> List[Dict]:
+    """Format problems for web interface."""
+    result = []
+    for p in problems:
+        domain = p['domain']
+        filename = Path(p['path']).name
         problem_name = filename.replace('.p', '')
-
-        # Generate TPTP URL
         tptp_url = f"https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain={domain}&File={filename}"
 
-        problems.append({
+        result.append({
             'name': problem_name,
-            'file': problem,
+            'file': p['path'],
             'domain': domain,
             'category': category,
-            'tptp_url': tptp_url
+            'status': p['status'],
+            'rating': p['rating'],
+            'has_equality': p['has_equality'],
+            'num_clauses': p['num_clauses'],
+            'tptp_url': tptp_url,
         })
+    return result
 
-    return problems
 
 def main():
     """Generate benchmark data."""
-    categories = {
-        "Unit Equalities": "unit_equalities_problems.txt",
-        "CNF Without Equality": "cnf_without_equality_problems.txt",
-        "CNF With Equality": "cnf_with_equality_problems.txt",
-    }
+    print("Loading problem metadata...")
+    metadata = load_problem_metadata()
+    all_problems = metadata['problems']
+    print(f"Loaded {len(all_problems)} problems")
 
-    all_problems = []
+    # Define benchmark categories
+    categories = [
+        {
+            'name': 'Unit Equalities (CNF)',
+            'filters': {
+                'status': 'unsatisfiable',
+                'format': 'cnf',
+                'is_unit_only': True,
+                'has_equality': True,
+            },
+            'count': 50,
+        },
+        {
+            'name': 'CNF Without Equality',
+            'filters': {
+                'status': 'unsatisfiable',
+                'format': 'cnf',
+                'has_equality': False,
+            },
+            'count': 50,
+        },
+        {
+            'name': 'CNF With Equality',
+            'filters': {
+                'status': 'unsatisfiable',
+                'format': 'cnf',
+                'has_equality': True,
+                'is_unit_only': False,
+            },
+            'count': 50,
+        },
+        {
+            'name': 'FOF Without Equality',
+            'filters': {
+                'status': 'unsatisfiable',
+                'format': 'fof',
+                'has_equality': False,
+            },
+            'count': 50,
+        },
+        {
+            'name': 'FOF With Equality',
+            'filters': {
+                'status': 'unsatisfiable',
+                'format': 'fof',
+                'has_equality': True,
+            },
+            'count': 50,
+        },
+    ]
 
-    for category, filename in categories.items():
-        print(f"Loading {category}...")
-        problems = load_problem_list(category, filename, count=50, seed=42)
-        all_problems.extend(problems)
-        print(f"  Loaded {len(problems)} problems")
+    benchmark_problems = []
+
+    for cat in categories:
+        print(f"\nProcessing: {cat['name']}")
+        filtered = filter_problems(all_problems, **cat['filters'])
+        print(f"  Found {len(filtered)} matching problems")
+
+        sampled = sample_problems(filtered, cat['count'])
+        print(f"  Sampled {len(sampled)} problems")
+
+        formatted = format_for_web(sampled, cat['name'])
+        benchmark_problems.extend(formatted)
 
     # Output JSON
     output = {
-        'problems': all_problems,
+        'problems': benchmark_problems,
         'summary': {
-            'total': len(all_problems),
-            'categories': list(categories.keys())
+            'total': len(benchmark_problems),
+            'categories': [cat['name'] for cat in categories],
+            'source': 'problem_metadata.json',
         }
     }
 
@@ -103,8 +170,15 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(output, f, indent=2)
 
-    print(f"\nGenerated {len(all_problems)} problems")
+    print(f"\nGenerated {len(benchmark_problems)} benchmark problems")
     print(f"Output: {output_file}")
+
+    # Print category breakdown
+    print("\nCategory breakdown:")
+    for cat in categories:
+        count = sum(1 for p in benchmark_problems if p['category'] == cat['name'])
+        print(f"  {cat['name']}: {count}")
+
 
 if __name__ == "__main__":
     main()
