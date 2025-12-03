@@ -54,6 +54,13 @@ class SplitConfig:
 
 
 @dataclass
+class SolverConfig:
+    """Solver configuration for data collection."""
+    literal_selection: str = "all"  # all, max_weight, largest_negative
+    clause_selector: str = "age_weight_p05.onnx"  # ONNX model in .selectors/
+
+
+@dataclass
 class TraceCollectionConfig:
     """Configuration for proof trace collection."""
     prover_timeout: float = 60.0
@@ -76,6 +83,7 @@ class DataConfig:
     """Complete data configuration."""
     name: str = "default"
     description: str = ""
+    solver: SolverConfig = field(default_factory=SolverConfig)
     problem_filters: ProblemFilters = field(default_factory=ProblemFilters)
     split: SplitConfig = field(default_factory=SplitConfig)
     trace_collection: TraceCollectionConfig = field(default_factory=TraceCollectionConfig)
@@ -89,6 +97,7 @@ class DataConfig:
         return cls(
             name=d.get("name", "default"),
             description=d.get("description", ""),
+            solver=SolverConfig(**d.get("solver", {})),
             problem_filters=ProblemFilters(**d.get("problem_filters", {})),
             split=SplitConfig(**d.get("split", {})),
             trace_collection=TraceCollectionConfig(**d.get("trace_collection", {})),

@@ -27,6 +27,11 @@ def get_tptp_base() -> Path:
     return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
 
 
+def get_selectors_dir() -> Path:
+    """Get the selectors directory."""
+    return Path(__file__).parent.parent / ".selectors"
+
+
 def load_problem_metadata() -> Dict[str, Any]:
     """Load the problem metadata JSON."""
     metadata_path = Path(__file__).parent.parent / ".data/problem_metadata.json"
@@ -71,6 +76,8 @@ def collect_from_problem(
     problem_path: Path,
     max_iterations: int,
     timeout_secs: float,
+    literal_selection: str = "all",
+    onnx_model_path: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run prover on a problem and extract training data."""
     from proofatlas import ProofState
@@ -88,9 +95,13 @@ def collect_from_problem(
     except Exception as e:
         return {"error": f"Parse error: {e}"}
 
+    # Configure literal selection
+    state.set_literal_selection(literal_selection)
+
     start = time.time()
     try:
-        proof_found = state.run_saturation(max_iterations, timeout_secs)
+        onnx_path = str(onnx_model_path) if onnx_model_path else None
+        proof_found = state.run_saturation(max_iterations, timeout_secs, onnx_path)
     except Exception as e:
         return {"error": f"Saturation error: {e}"}
     elapsed = time.time() - start
@@ -168,12 +179,21 @@ def main():
     output_path = args.output or Path(config.output.trace_dir) / f"{config.name}_data.pt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Resolve ONNX model path
+    onnx_model_path = get_selectors_dir() / config.solver.clause_selector
+    if not onnx_model_path.exists():
+        print(f"Warning: ONNX model not found: {onnx_model_path}")
+        onnx_model_path = None
+    else:
+        print(f"Using clause selector: {onnx_model_path}")
+
     all_graphs, all_labels, all_problem_names, all_clause_ids = [], [], [], []
     successful, failed, no_proof = 0, 0, 0
     total_time = 0
 
     print(f"\nCollecting from {len(filtered)} problems...")
-    print(f"Timeout: {config.trace_collection.prover_timeout}s, Max steps: {config.trace_collection.max_steps}\n")
+    print(f"Timeout: {config.trace_collection.prover_timeout}s, Max steps: {config.trace_collection.max_steps}")
+    print(f"Literal selection: {config.solver.literal_selection}\n")
 
     for i, problem in enumerate(filtered):
         problem_path = tptp_base / problem["path"]
@@ -184,6 +204,8 @@ def main():
             problem_path,
             max_iterations=config.trace_collection.max_steps,
             timeout_secs=config.trace_collection.prover_timeout,
+            literal_selection=config.solver.literal_selection,
+            onnx_model_path=onnx_model_path,
         )
 
         if "error" in result:
