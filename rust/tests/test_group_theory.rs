@@ -1,10 +1,18 @@
 //! End-to-end tests for group theory problems
 
 use proofatlas::{
-    parse_tptp_file, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,
+    parse_tptp_file, ClauseSelector, LiteralSelectionStrategy, OnnxClauseSelector,
+    SaturationConfig, SaturationResult, SaturationState,
 };
 use std::io::Write;
 use std::time::Duration;
+
+/// Path to the test ONNX model (relative to rust/ directory)
+const MODEL_PATH: &str = "../.selectors/age_weight_p05.onnx";
+
+fn create_selector() -> Box<dyn ClauseSelector> {
+    Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
+}
 
 /// Run a group theory problem and return the result with trace
 fn run_group_problem(
@@ -33,8 +41,8 @@ fn run_group_problem(
     }
     trace.push("".to_string());
 
-    // Run saturation
-    let state = SaturationState::new(formula.clauses, config);
+    // Run saturation with ONNX selector
+    let state = SaturationState::new(formula.clauses, config, create_selector());
     let start_time = std::time::Instant::now();
     let result = state.saturate();
     let elapsed = start_time.elapsed();

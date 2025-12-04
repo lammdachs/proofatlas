@@ -1,13 +1,21 @@
 //! Full trace showing all proof steps for right identity problem
 
-use proofatlas::{parse_tptp_file, LiteralSelectionStrategy, SaturationConfig, SaturationState};
+use proofatlas::{
+    parse_tptp_file, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
+    SaturationState,
+};
 use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 2 {
-        eprintln!("Usage: {} <tptp_file> [options]", args[0]);
+    if args.len() < 3 {
+        eprintln!(
+            "Usage: {} <tptp_file> --model <onnx_model> [options]",
+            args[0]
+        );
+        eprintln!("\nRequired:");
+        eprintln!("  --model <path>         Path to ONNX clause selector model");
         eprintln!("\nOptions:");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
         std::process::exit(1);
@@ -15,6 +23,7 @@ fn main() {
 
     let filename = &args[1];
     let mut include_dirs: Vec<String> = Vec::new();
+    let mut model_path: Option<String> = None;
 
     // Parse command line options
     let mut i = 2;
@@ -26,12 +35,36 @@ fn main() {
                     i += 1;
                 }
             }
+            "--model" => {
+                if i + 1 < args.len() {
+                    model_path = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
             _ => {
                 eprintln!("Unknown option: {}", args[i]);
             }
         }
         i += 1;
     }
+
+    // Check required model path
+    let model_path = match model_path {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: --model <path> is required");
+            std::process::exit(1);
+        }
+    };
+
+    // Load ONNX clause selector
+    let clause_selector = match OnnxClauseSelector::new(&model_path) {
+        Ok(s) => Box::new(s),
+        Err(e) => {
+            eprintln!("Failed to load ONNX model: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Parse TPTP with include support
     let include_dir_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
@@ -61,7 +94,7 @@ fn main() {
     println!("\nRunning saturation for {} steps...\n", step_limit);
 
     // Create saturation state and run
-    let state = SaturationState::new(formula.clauses, config);
+    let state = SaturationState::new(formula.clauses, config, clause_selector);
 
     let start = Instant::now();
     let result = state.saturate();

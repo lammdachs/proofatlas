@@ -11,8 +11,7 @@ pub struct ProverOptions {
     pub timeout_ms: u32,
     pub max_clauses: usize,
     pub literal_selection: Option<String>, // "all" or "max_weight"
-    pub use_onnx_selector: Option<bool>,   // Enable ML-guided clause selection
-    pub onnx_model_data: Option<Vec<u8>>,  // ONNX model bytes (if using ML selection)
+    pub onnx_model_data: Vec<u8>,          // ONNX model bytes (required)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -114,34 +113,22 @@ impl ProofAtlasWasm {
             step_limit: None,
         };
 
-        web_sys::console::log_1(&"Config created, calling saturate...".into());
+        web_sys::console::log_1(&"Config created, loading ONNX selector...".into());
 
-        // Run saturation - use ONNX selector if requested
-        let result = if options.use_onnx_selector.unwrap_or(false) {
-            if let Some(model_data) = &options.onnx_model_data {
-                // Create ONNX selector from model data
-                match OnnxClauseSelector::from_bytes(model_data) {
-                    Ok(selector) => {
-                        web_sys::console::log_1(&"Using ONNX clause selector".into());
-                        let mut state = SaturationState::new(cnf.clauses, config);
-                        state.set_clause_selector(Box::new(selector));
-                        state.saturate()
-                    }
-                    Err(e) => {
-                        web_sys::console::log_1(&format!("Failed to load ONNX model: {}, using default selector", e).into());
-                        let state = SaturationState::new(cnf.clauses, config);
-                        state.saturate()
-                    }
-                }
-            } else {
-                web_sys::console::log_1(&"No ONNX model data provided, using default selector".into());
-                let state = SaturationState::new(cnf.clauses, config);
-                state.saturate()
+        // Create ONNX selector from model data (required)
+        let clause_selector = match OnnxClauseSelector::from_bytes(&options.onnx_model_data) {
+            Ok(selector) => {
+                web_sys::console::log_1(&"ONNX clause selector loaded".into());
+                Box::new(selector)
             }
-        } else {
-            let state = SaturationState::new(cnf.clauses, config);
-            state.saturate()
+            Err(e) => {
+                return Err(JsError::new(&format!("Failed to load ONNX model: {}", e)));
+            }
         };
+
+        // Run saturation
+        let state = SaturationState::new(cnf.clauses, config, clause_selector);
+        let result = state.saturate();
         
         web_sys::console::log_1(&"Saturation completed".into());
         

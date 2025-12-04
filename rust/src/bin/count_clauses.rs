@@ -1,13 +1,30 @@
 //! Count clauses generated over time
 
 use proofatlas::{
-    parse_tptp_file, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,
+    parse_tptp_file, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
+    SaturationResult, SaturationState,
 };
+use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::time::Duration;
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let model_path = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        eprintln!("Usage: {} <onnx_model>", args[0]);
+        std::process::exit(1);
+    };
+
+    // Verify ONNX model can be loaded
+    if let Err(e) = OnnxClauseSelector::new(&model_path) {
+        eprintln!("Failed to load ONNX model: {}", e);
+        std::process::exit(1);
+    }
+
     // Write right identity problem to temp file
     let tptp_content = r#"
 cnf(right_identity, axiom, mult(e,X) = X).
@@ -29,10 +46,12 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
         }
     };
 
-    println!("Testing clause generation with improved subsumption...\n");
+    println!("Testing clause generation with ONNX selector...\n");
 
     // Test different step limits
     for &steps in &[10, 20, 50, 100, 200] {
+        let selector = OnnxClauseSelector::new(&model_path).unwrap();
+
         let config = SaturationConfig {
             max_clauses: 10000,
             max_iterations: 10000,
@@ -42,7 +61,7 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
             step_limit: Some(steps),
         };
 
-        let state = SaturationState::new(formula.clauses.clone(), config);
+        let state = SaturationState::new(formula.clauses.clone(), config, Box::new(selector));
 
         match state.saturate() {
             SaturationResult::ResourceLimit(proof_steps, _) => {

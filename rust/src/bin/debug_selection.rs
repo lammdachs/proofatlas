@@ -1,6 +1,6 @@
 //! Debug what literals get selected by different strategies
 
-use proofatlas::{parse_tptp_file, LiteralSelectionStrategy};
+use proofatlas::parse_tptp_file;
 use proofatlas::selection::{LiteralSelector, SelectAll, SelectMaxWeight, SelectLargestNegative};
 use std::env;
 

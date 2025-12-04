@@ -476,7 +476,7 @@ impl ProofState {
     /// Args:
     ///     max_iterations: Maximum number of saturation steps
     ///     timeout_secs: Optional timeout in seconds
-    ///     onnx_model_path: Optional path to ONNX clause selector model
+    ///     onnx_model_path: Path to ONNX clause selector model (required)
     ///
     /// Returns:
     ///     True if proof found, False otherwise
@@ -484,11 +484,22 @@ impl ProofState {
         &mut self,
         max_iterations: usize,
         timeout_secs: Option<f64>,
-        onnx_model_path: Option<String>,
+        onnx_model_path: String,
     ) -> PyResult<bool> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selection::OnnxClauseSelector;
         use std::time::Duration;
+
+        // Load ONNX clause selector (required)
+        let clause_selector = match OnnxClauseSelector::new(&onnx_model_path) {
+            Ok(selector) => Box::new(selector),
+            Err(e) => {
+                return Err(PyValueError::new_err(format!(
+                    "Failed to load ONNX model '{}': {}",
+                    onnx_model_path, e
+                )));
+            }
+        };
 
         // Build config
         let timeout = timeout_secs
@@ -512,22 +523,7 @@ impl ProofState {
 
         // Create saturation state from current clauses
         let initial_clauses: Vec<Clause> = self.clauses.clone();
-        let mut state = SaturationState::new(initial_clauses, config);
-
-        // Set ONNX clause selector if provided
-        if let Some(model_path) = onnx_model_path {
-            match OnnxClauseSelector::new(&model_path) {
-                Ok(selector) => {
-                    state.set_clause_selector(Box::new(selector));
-                }
-                Err(e) => {
-                    return Err(PyValueError::new_err(format!(
-                        "Failed to load ONNX model '{}': {}",
-                        model_path, e
-                    )));
-                }
-            }
-        }
+        let state = SaturationState::new(initial_clauses, config, clause_selector);
 
         // Run saturation
         let result = state.saturate();

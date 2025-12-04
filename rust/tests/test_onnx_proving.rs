@@ -4,8 +4,8 @@
 //! during theorem proving and produces correct proofs.
 
 use proofatlas::{
-    parse_tptp_file, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
-    SaturationResult, SaturationState,
+    parse_tptp_file, ClauseSelector, LiteralSelectionStrategy, OnnxClauseSelector,
+    SaturationConfig, SaturationResult, SaturationState,
 };
 use std::io::Write;
 use std::time::Duration;
@@ -14,6 +14,10 @@ use std::time::Duration;
 const MODEL_P03: &str = "../.selectors/age_weight_p03.onnx";
 const MODEL_P05: &str = "../.selectors/age_weight_p05.onnx";
 const MODEL_P07: &str = "../.selectors/age_weight_p07.onnx";
+
+fn create_selector(model_path: &str) -> Box<dyn ClauseSelector> {
+    Box::new(OnnxClauseSelector::new(model_path).expect("Failed to load ONNX model"))
+}
 
 /// Run a problem with the ONNX-based clause selector
 fn run_with_onnx_selector(
@@ -25,10 +29,6 @@ fn run_with_onnx_selector(
     // Parse the problem
     let formula = parse_tptp_file(problem_file, &[]).expect("Failed to parse TPTP file");
 
-    // Create ONNX selector
-    let onnx_selector =
-        OnnxClauseSelector::new(model_path).expect("Failed to load ONNX model");
-
     // Configure saturation
     let config = SaturationConfig {
         max_clauses: 10000,
@@ -39,8 +39,7 @@ fn run_with_onnx_selector(
     };
 
     // Run saturation with ONNX selector
-    let mut state = SaturationState::new(formula.clauses.clone(), config);
-    state.set_clause_selector(Box::new(onnx_selector));
+    let state = SaturationState::new(formula.clauses.clone(), config, create_selector(model_path));
 
     let start_time = std::time::Instant::now();
     let result = state.saturate();
@@ -70,57 +69,9 @@ fn run_with_onnx_selector(
     (result, elapsed, clause_count)
 }
 
-/// Run a problem with the default clause selector for comparison
-fn run_with_default_selector(
-    problem_name: &str,
-    problem_file: &str,
-    timeout_secs: u64,
-) -> (SaturationResult, Duration, usize) {
-    let formula = parse_tptp_file(problem_file, &[]).expect("Failed to parse TPTP file");
-
-    let config = SaturationConfig {
-        max_clauses: 10000,
-        max_iterations: 10000,
-        timeout: Duration::from_secs(timeout_secs),
-        literal_selection: LiteralSelectionStrategy::SelectAll,
-        ..Default::default()
-    };
-
-    let state = SaturationState::new(formula.clauses.clone(), config);
-
-    let start_time = std::time::Instant::now();
-    let result = state.saturate();
-    let elapsed = start_time.elapsed();
-
-    let clause_count = match &result {
-        SaturationResult::Proof(proof) => proof.steps.len(),
-        SaturationResult::Saturated(steps, _) => steps.len(),
-        SaturationResult::ResourceLimit(steps, _) => steps.len(),
-        SaturationResult::Timeout(steps, _) => steps.len(),
-    };
-
-    println!(
-        "{} with default selector: {:?} in {:.3}s, {} clauses",
-        problem_name,
-        match &result {
-            SaturationResult::Proof(_) => "PROOF",
-            SaturationResult::Saturated(_, _) => "SATURATED",
-            SaturationResult::ResourceLimit(_, _) => "RESOURCE_LIMIT",
-            SaturationResult::Timeout(_, _) => "TIMEOUT",
-        },
-        elapsed.as_secs_f64(),
-        clause_count
-    );
-
-    (result, elapsed, clause_count)
-}
-
-/// Compare ONNX selector with default selector
-fn compare_selectors(problem_name: &str, problem_file: &str, timeout_secs: u64) {
+/// Compare different ONNX model configurations
+fn compare_models(problem_name: &str, problem_file: &str, timeout_secs: u64) {
     println!("\n=== {} ===", problem_name);
-
-    let (default_result, default_time, default_clauses) =
-        run_with_default_selector(problem_name, problem_file, timeout_secs);
 
     let (onnx_result_p03, onnx_time_p03, onnx_clauses_p03) =
         run_with_onnx_selector(problem_name, problem_file, MODEL_P03, timeout_secs);
@@ -136,14 +87,6 @@ fn compare_selectors(problem_name: &str, problem_file: &str, timeout_secs: u64) 
     if let Ok(mut f) = std::fs::File::create(&trace_file) {
         writeln!(f, "=== {} ===", problem_name).ok();
         writeln!(f, "").ok();
-        writeln!(
-            f,
-            "Default:    {:?} in {:.3}s, {} clauses",
-            result_type(&default_result),
-            default_time.as_secs_f64(),
-            default_clauses
-        )
-        .ok();
         writeln!(
             f,
             "ONNX p=0.3: {:?} in {:.3}s, {} clauses",
@@ -301,17 +244,17 @@ fn test_onnx_p07_right_identity() {
 }
 
 // ============================================================================
-// Comparison tests - run both selectors and compare
+// Comparison tests - compare different ONNX models
 // ============================================================================
 
 #[test]
-fn test_compare_selectors_right_identity() {
-    compare_selectors("right_identity", "tests/problems/right_identity.p", 10);
+fn test_compare_models_right_identity() {
+    compare_models("right_identity", "tests/problems/right_identity.p", 10);
 }
 
 #[test]
-fn test_compare_selectors_uniqueness_of_inverse() {
-    compare_selectors(
+fn test_compare_models_uniqueness_of_inverse() {
+    compare_models(
         "uniqueness_of_inverse",
         "tests/problems/uniqueness_of_inverse.p",
         10,
@@ -386,9 +329,6 @@ fn test_onnx_simple_resolution() {
         })]),
     ];
 
-    // Create ONNX selector
-    let onnx_selector = OnnxClauseSelector::new(MODEL_P05).expect("Failed to load model");
-
     let config = SaturationConfig {
         max_clauses: 1000,
         max_iterations: 1000,
@@ -397,8 +337,7 @@ fn test_onnx_simple_resolution() {
         ..Default::default()
     };
 
-    let mut state = SaturationState::new(clauses, config);
-    state.set_clause_selector(Box::new(onnx_selector));
+    let state = SaturationState::new(clauses, config, create_selector(MODEL_P05));
 
     let result = state.saturate();
 

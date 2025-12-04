@@ -519,36 +519,34 @@ async function prove() {
         showError('Prover not initialized');
         return;
     }
-    
+
+    if (!onnxModelData) {
+        showError('ONNX clause selector model not loaded. Please ensure models/clause_selector.onnx exists.');
+        return;
+    }
+
     const proveBtn = document.getElementById('prove-btn');
     const input = document.getElementById('tptp-input').value.trim();
-    
+
     if (!input) {
         showError('Please enter a TPTP problem');
         return;
     }
-    
+
     // Disable button and show loading
     proveBtn.disabled = true;
     proveBtn.textContent = 'Proving...';
-    
+
     try {
-        // Get options
-        // Always use ONNX if model is loaded
-        const useOnnx = onnxModelData !== null;
+        // Get options - ONNX model is required
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
             literal_selection: document.getElementById('literal-selection').value,
-            use_onnx_selector: useOnnx,
-            onnx_model_data: useOnnx ? Array.from(onnxModelData) : null
+            onnx_model_data: Array.from(onnxModelData)
         };
 
-        if (useOnnx) {
-            console.log('Using ML-guided clause selection');
-        } else {
-            console.log('ONNX model not loaded, using default selection');
-        }
+        console.log('Using ML-guided clause selection');
 
         // Run prover with trace for inspector
         const result = await prover.prove_with_trace(input, options);

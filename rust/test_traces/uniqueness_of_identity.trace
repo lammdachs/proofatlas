@@ -7,9 +7,9 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.002s
-Generated 15 clauses
-Empty clause at index: 9
+✓ PROOF FOUND in 0.026s
+Generated 23 clauses
+Empty clause at index: 13
 
 === All Proof Steps ===
 [0] mult(e,X) = X
@@ -48,28 +48,60 @@ Empty clause at index: 9
     Rule: GivenClauseSelection
     Parents: []
 
+[2] mult(inv(X),X) = e
+    Rule: GivenClauseSelection
+    Parents: []
+
+[6] inv(e) = e
+    Rule: Superposition
+    Parents: [2, 1]
+
+[6] inv(e) = e
+    Rule: GivenClauseSelection
+    Parents: []
+
+[7] e = e
+    Rule: Superposition
+    Parents: [6, 2]
+
+[3] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
+    Rule: GivenClauseSelection
+    Parents: []
+
+[8] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
+    Rule: Superposition
+    Parents: [2, 3]
+
+[9] mult(Y_2,Z_2) = mult(Y_2,Z_2)
+    Rule: Superposition
+    Parents: [0, 3]
+
+[7] e = e
+    Rule: GivenClauseSelection
+    Parents: []
+
 [4] mult(e1,X) = X
     Rule: GivenClauseSelection
     Parents: []
 
-[6] e1 = e
+[10] e1 = e
     Rule: Superposition
     Parents: [4, 1]
 
-[6] e1 = e
+[10] e1 = e
     Rule: GivenClauseSelection
     Parents: []
 
-[7] ~e = e
+[11] X = X
     Rule: Demodulation
-    Parents: [6, 5]
+    Parents: [10, 4]
 
-[8] X = X
+[12] ~e = e
     Rule: Demodulation
-    Parents: [6, 4]
+    Parents: [10, 5]
 
-[9] ⊥
+[13] ⊥
     Rule: Resolution
-    Parents: [6, 5]
+    Parents: [10, 5]
 
 

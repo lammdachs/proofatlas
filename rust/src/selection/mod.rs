@@ -18,21 +18,12 @@
 //! # Clause Selection
 //!
 //! Clause selection determines the order of clause processing in the
-//! given-clause algorithm. Good selection can dramatically improve
-//! proof search performance.
+//! given-clause algorithm. ONNX-based ML selection is used exclusively.
 //!
-//! Available strategies:
-//! - [`AgeBasedSelector`] - FIFO, oldest clause first (fair)
-//! - [`SizeBasedSelector`] - Smallest clause first
-//! - [`AgeWeightRatioSelector`] - Alternates between age and weight
-//!
-//! See `docs/selection_strategies.md` for detailed documentation.
+//! - [`OnnxClauseSelector`] - ML-based clause selection using ONNX model
 
 pub mod clause;
 pub mod literal;
 
-pub use clause::{
-    AgeBasedSelector, AgeWeightRatioSelector, ClauseSelector, OnnxClauseSelector,
-    ProbabilisticAgeWeightSelector, SizeBasedSelector,
-};
+pub use clause::{ClauseSelector, OnnxClauseSelector};
 pub use literal::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};

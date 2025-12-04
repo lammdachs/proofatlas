@@ -100,8 +100,9 @@ def collect_from_problem(
 
     start = time.time()
     try:
-        onnx_path = str(onnx_model_path) if onnx_model_path else None
-        proof_found = state.run_saturation(max_iterations, timeout_secs, onnx_path)
+        if onnx_model_path is None:
+            return {"error": "ONNX model path is required"}
+        proof_found = state.run_saturation(max_iterations, timeout_secs, str(onnx_model_path))
     except Exception as e:
         return {"error": f"Saturation error: {e}"}
     elapsed = time.time() - start

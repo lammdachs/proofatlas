@@ -1,6 +1,13 @@
 //! Integration tests for the theorem prover
 
-use proofatlas::{parse_tptp, saturate, SaturationConfig, SaturationResult};
+use proofatlas::{parse_tptp, saturate, ClauseSelector, OnnxClauseSelector, SaturationConfig, SaturationResult};
+
+/// Path to the test ONNX model (relative to rust/ directory)
+const MODEL_PATH: &str = "../.selectors/age_weight_p05.onnx";
+
+fn create_selector() -> Box<dyn ClauseSelector> {
+    Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
+}
 
 #[test]
 fn test_simple_resolution() {
@@ -12,7 +19,7 @@ fn test_simple_resolution() {
 
     let formula = parse_tptp(tptp).unwrap();
     let config = SaturationConfig::default();
-    let result = saturate(formula, config);
+    let result = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Proof(_) => {
@@ -30,7 +37,7 @@ fn test_equality_reflexivity() {
 
     let formula = parse_tptp(tptp).unwrap();
     let config = SaturationConfig::default();
-    let result = saturate(formula, config);
+    let result = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Proof(_) => {
@@ -50,7 +57,7 @@ fn test_satisfiable_formula() {
     let formula = parse_tptp(tptp).unwrap();
     let mut config = SaturationConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
-    let result = saturate(formula, config);
+    let result = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Saturated(_, _) => {

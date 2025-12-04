@@ -8,7 +8,7 @@ use crate::inference::{
 };
 use crate::parser::orient_equalities::orient_clause_equalities;
 use crate::selection::{
-    AgeWeightRatioSelector, ClauseSelector, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
+    ClauseSelector, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
 };
 use crate::time_compat::Instant;
 use std::collections::{HashSet, VecDeque};
@@ -113,7 +113,16 @@ pub struct SaturationState {
 
 impl SaturationState {
     /// Create new saturation state from initial clauses
-    pub fn new(initial_clauses: Vec<Clause>, config: SaturationConfig) -> Self {
+    ///
+    /// # Arguments
+    /// * `initial_clauses` - The initial clause set
+    /// * `config` - Saturation configuration
+    /// * `clause_selector` - ONNX-based clause selector
+    pub fn new(
+        initial_clauses: Vec<Clause>,
+        config: SaturationConfig,
+        clause_selector: Box<dyn ClauseSelector>,
+    ) -> Self {
         let mut clauses = Vec::new();
         let mut unprocessed = VecDeque::new();
         let mut subsumption_checker = SubsumptionChecker::new();
@@ -159,7 +168,7 @@ impl SaturationState {
             subsumption_checker,
             proof_steps,
             config,
-            clause_selector: Box::new(AgeWeightRatioSelector::default()),
+            clause_selector,
             literal_selector,
         }
     }
@@ -514,6 +523,14 @@ impl SaturationState {
 mod tests {
     use super::*;
     use crate::core::{Atom, CNFFormula, Constant, Literal, PredicateSymbol, Term, Variable};
+    use crate::selection::OnnxClauseSelector;
+
+    /// Path to the test ONNX model (relative to rust/ directory)
+    const MODEL_PATH: &str = "../.selectors/age_weight_p05.onnx";
+
+    fn create_selector() -> Box<dyn ClauseSelector> {
+        Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
+    }
 
     #[test]
     fn test_simple_proof() {
@@ -559,7 +576,7 @@ mod tests {
         ];
 
         let formula = CNFFormula { clauses };
-        let result = crate::saturation::saturate(formula, SaturationConfig::default());
+        let result = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
 
         match result {
             SaturationResult::Proof(_) => {} // Expected
