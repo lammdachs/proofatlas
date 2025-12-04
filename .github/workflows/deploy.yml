@@ -21,8 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v2
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
         with:
           micromamba-version: '2.0.5-0'
           environment-name: build
@@ -36,7 +36,6 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.100 --locked
 
       - name: Build WASM module
-        shell: bash -el {0}
         working-directory: ./wasm
         run: |
           cargo build --target wasm32-unknown-unknown --release
