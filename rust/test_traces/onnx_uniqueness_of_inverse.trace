@@ -1,5 +1,5 @@
 === uniqueness_of_inverse ===
 
-ONNX p=0.3: "PROOF" in 0.034s, 37 clauses
-ONNX p=0.5: "PROOF" in 0.111s, 64 clauses
-ONNX p=0.7: "PROOF" in 0.261s, 117 clauses
+age_weight: "PROOF" in 0.145s, 64 clauses
+gcn: "PROOF" in 2.153s, 290 clauses
+mlp: "TIMEOUT" in 11.333s, 1099 clauses

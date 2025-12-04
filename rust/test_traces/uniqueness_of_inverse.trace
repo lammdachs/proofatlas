@@ -9,8 +9,8 @@ Initial clauses:
 [6] ~inv(a) = b
 
 ✓ PROOF FOUND in 0.052s
-Generated 51 clauses
-Empty clause at index: 31
+Generated 37 clauses
+Empty clause at index: 22
 
 === All Proof Steps ===
 [0] mult(e,X) = X
@@ -85,136 +85,80 @@ Empty clause at index: 31
     Rule: GivenClauseSelection
     Parents: []
 
-[9] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
-    Rule: Superposition
-    Parents: [2, 4]
-
-[10] mult(Y_2,Z_2) = mult(Y_2,Z_2)
-    Rule: Superposition
-    Parents: [0, 4]
-
-[11] mult(X_1,mult(Y_1,inv(mult(X_1,Y_1)))) = e
-    Rule: Superposition
-    Parents: [4, 3]
-
-[12] mult(X_2,mult(inv(X_2),Z_2)) = Z_2
-    Rule: Superposition
-    Parents: [3, 4]
-
-[13] mult(b,mult(a,Z_2)) = Z_2
+[9] mult(b,mult(a,Z_2)) = Z_2
     Rule: Superposition
     Parents: [5, 4]
 
-[10] mult(Y_2,Z_2) = mult(Y_2,Z_2)
+[10] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
+    Rule: Superposition
+    Parents: [2, 4]
+
+[11] mult(X_1,Y_1) = mult(X_1,Y_1)
+    Rule: Superposition
+    Parents: [4, 1]
+
+[12] mult(X_1,mult(Y_1,inv(mult(X_1,Y_1)))) = e
+    Rule: Superposition
+    Parents: [4, 3]
+
+[13] mult(X_2,mult(inv(X_2),Z_2)) = Z_2
+    Rule: Superposition
+    Parents: [3, 4]
+
+[11] mult(X_1,Y_1) = mult(X_1,Y_1)
     Rule: GivenClauseSelection
     Parents: []
 
-[9] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
+[9] mult(b,mult(a,Z_2)) = Z_2
     Rule: GivenClauseSelection
     Parents: []
 
-[14] inv(inv(Z_2_2)) = Z_2_2
+[14] b = inv(a)
     Rule: Superposition
-    Parents: [2, 9]
+    Parents: [3, 9]
 
-[15] Z_2_2 = Z_2_2
-    Rule: Superposition
-    Parents: [0, 9]
+[14] b = inv(a)
+    Rule: GivenClauseSelection
+    Parents: []
+
+[15] ~b = b
+    Rule: Demodulation
+    Parents: [14, 6]
+
+[10] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
+    Rule: GivenClauseSelection
+    Parents: []
 
 [16] inv(b) = a
     Rule: Superposition
-    Parents: [5, 9]
+    Parents: [5, 10]
 
 [17] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = Z_2_2
     Rule: Superposition
-    Parents: [4, 9]
+    Parents: [4, 10]
 
-[18] mult(inv(inv(Y_2_1)),Z_2_1) = mult(Y_2_1,Z_2_1)
+[18] inv(inv(Z_2_2)) = Z_2_2
     Rule: Superposition
-    Parents: [9, 9]
+    Parents: [2, 10]
 
-[15] Z_2_2 = Z_2_2
+[19] Z_2_2 = Z_2_2
+    Rule: Superposition
+    Parents: [7, 10]
+
+[20] mult(inv(b),Z_2_1) = mult(a,Z_2_1)
+    Rule: Superposition
+    Parents: [9, 10]
+
+[21] mult(inv(inv(Y_2_1)),Z_2_1) = mult(Y_2_1,Z_2_1)
+    Rule: Superposition
+    Parents: [10, 10]
+
+[15] ~b = b
     Rule: GivenClauseSelection
     Parents: []
 
-[11] mult(X_1,mult(Y_1,inv(mult(X_1,Y_1)))) = e
-    Rule: GivenClauseSelection
-    Parents: []
-
-[19] mult(X_2,mult(Y_2,mult(Y_1_1,inv(mult(X_2,mult(Y_2,Y_1_1)))))) = e
-    Rule: Superposition
-    Parents: [11, 4]
-
-[20] mult(X_2,mult(Y_1_1,mult(inv(mult(X_2,Y_1_1)),Z_2))) = Z_2
-    Rule: Superposition
-    Parents: [11, 4]
-
-[21] mult(Y_1_1,inv(mult(Y_2_2,Y_1_1))) = inv(Y_2_2)
-    Rule: Superposition
-    Parents: [11, 9]
-
-[16] inv(b) = a
-    Rule: GivenClauseSelection
-    Parents: []
-
-[22] mult(a,b) = e
-    Rule: Superposition
-    Parents: [16, 2]
-
-[23] mult(a,mult(b,Z_2_2)) = Z_2_2
-    Rule: Superposition
-    Parents: [16, 9]
-
-[12] mult(X_2,mult(inv(X_2),Z_2)) = Z_2
-    Rule: GivenClauseSelection
-    Parents: []
-
-[24] mult(Y_1_1,inv(mult(inv(X_2_2),Y_1_1))) = X_2_2
-    Rule: Superposition
-    Parents: [11, 12]
-
-[25] X_2_2 = inv(inv(X_2_2))
-    Rule: Superposition
-    Parents: [3, 12]
-
-[13] mult(b,mult(a,Z_2)) = Z_2
-    Rule: GivenClauseSelection
-    Parents: []
-
-[26] mult(Y_1_1,inv(mult(a,Y_1_1))) = b
-    Rule: Superposition
-    Parents: [11, 13]
-
-[27] mult(inv(a),Z_2_1) = mult(b,Z_2_1)
-    Rule: Superposition
-    Parents: [12, 13]
-
-[28] b = inv(a)
-    Rule: Superposition
-    Parents: [3, 13]
-
-[14] inv(inv(Z_2_2)) = Z_2_2
-    Rule: GivenClauseSelection
-    Parents: []
-
-[29] inv(a) = b
-    Rule: Superposition
-    Parents: [16, 14]
-
-[28] b = inv(a)
-    Rule: GivenClauseSelection
-    Parents: []
-
-[30] ~b = b
-    Rule: Demodulation
-    Parents: [28, 6]
-
-[30] ~b = b
-    Rule: GivenClauseSelection
-    Parents: []
-
-[31] ⊥
+[22] ⊥
     Rule: EqualityResolution
-    Parents: [30]
+    Parents: [15]
 
 

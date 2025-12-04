@@ -14,7 +14,7 @@ fn main() {
     let model_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        "../.selectors/age_weight_p05.onnx".to_string()
+        "../.selectors/age_weight.onnx".to_string()
     };
     println!("Loading model from: {}", model_path);
 

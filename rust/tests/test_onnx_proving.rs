@@ -11,9 +11,9 @@ use std::io::Write;
 use std::time::Duration;
 
 /// Path to the test ONNX models (relative to rust/ directory)
-const MODEL_P03: &str = "../.selectors/age_weight_p03.onnx";
-const MODEL_P05: &str = "../.selectors/age_weight_p05.onnx";
-const MODEL_P07: &str = "../.selectors/age_weight_p07.onnx";
+const MODEL_AGE_WEIGHT: &str = "../.selectors/age_weight.onnx";
+const MODEL_GCN: &str = "../.selectors/gcn.onnx";
+const MODEL_MLP: &str = "../.selectors/mlp.onnx";
 
 fn create_selector(model_path: &str) -> Box<dyn ClauseSelector> {
     Box::new(OnnxClauseSelector::new(model_path).expect("Failed to load ONNX model"))
@@ -73,14 +73,14 @@ fn run_with_onnx_selector(
 fn compare_models(problem_name: &str, problem_file: &str, timeout_secs: u64) {
     println!("\n=== {} ===", problem_name);
 
-    let (onnx_result_p03, onnx_time_p03, onnx_clauses_p03) =
-        run_with_onnx_selector(problem_name, problem_file, MODEL_P03, timeout_secs);
+    let (result_age_weight, time_age_weight, clauses_age_weight) =
+        run_with_onnx_selector(problem_name, problem_file, MODEL_AGE_WEIGHT, timeout_secs);
 
-    let (onnx_result_p05, onnx_time_p05, onnx_clauses_p05) =
-        run_with_onnx_selector(problem_name, problem_file, MODEL_P05, timeout_secs);
+    let (result_gcn, time_gcn, clauses_gcn) =
+        run_with_onnx_selector(problem_name, problem_file, MODEL_GCN, timeout_secs);
 
-    let (onnx_result_p07, onnx_time_p07, onnx_clauses_p07) =
-        run_with_onnx_selector(problem_name, problem_file, MODEL_P07, timeout_secs);
+    let (result_mlp, time_mlp, clauses_mlp) =
+        run_with_onnx_selector(problem_name, problem_file, MODEL_MLP, timeout_secs);
 
     // Write comparison to trace file
     let trace_file = format!("test_traces/onnx_{}.trace", problem_name);
@@ -89,26 +89,26 @@ fn compare_models(problem_name: &str, problem_file: &str, timeout_secs: u64) {
         writeln!(f, "").ok();
         writeln!(
             f,
-            "ONNX p=0.3: {:?} in {:.3}s, {} clauses",
-            result_type(&onnx_result_p03),
-            onnx_time_p03.as_secs_f64(),
-            onnx_clauses_p03
+            "age_weight: {:?} in {:.3}s, {} clauses",
+            result_type(&result_age_weight),
+            time_age_weight.as_secs_f64(),
+            clauses_age_weight
         )
         .ok();
         writeln!(
             f,
-            "ONNX p=0.5: {:?} in {:.3}s, {} clauses",
-            result_type(&onnx_result_p05),
-            onnx_time_p05.as_secs_f64(),
-            onnx_clauses_p05
+            "gcn: {:?} in {:.3}s, {} clauses",
+            result_type(&result_gcn),
+            time_gcn.as_secs_f64(),
+            clauses_gcn
         )
         .ok();
         writeln!(
             f,
-            "ONNX p=0.7: {:?} in {:.3}s, {} clauses",
-            result_type(&onnx_result_p07),
-            onnx_time_p07.as_secs_f64(),
-            onnx_clauses_p07
+            "mlp: {:?} in {:.3}s, {} clauses",
+            result_type(&result_mlp),
+            time_mlp.as_secs_f64(),
+            clauses_mlp
         )
         .ok();
     }
@@ -132,7 +132,7 @@ fn test_onnx_right_identity() {
     let (result, _, _) = run_with_onnx_selector(
         "right_identity",
         "tests/problems/right_identity.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -146,7 +146,7 @@ fn test_onnx_uniqueness_of_identity() {
     let (result, _, _) = run_with_onnx_selector(
         "uniqueness_of_identity",
         "tests/problems/uniqueness_of_identity.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -160,7 +160,7 @@ fn test_onnx_right_inverse() {
     let (result, _, _) = run_with_onnx_selector(
         "right_inverse",
         "tests/problems/right_inverse.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -174,7 +174,7 @@ fn test_onnx_uniqueness_of_inverse() {
     let (result, _, _) = run_with_onnx_selector(
         "uniqueness_of_inverse",
         "tests/problems/uniqueness_of_inverse.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -188,7 +188,7 @@ fn test_onnx_inverse_of_identity() {
     let (result, _, _) = run_with_onnx_selector(
         "inverse_of_identity",
         "tests/problems/inverse_of_identity.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -202,7 +202,7 @@ fn test_onnx_inverse_of_inverse() {
     let (result, _, _) = run_with_onnx_selector(
         "inverse_of_inverse",
         "tests/problems/inverse_of_inverse.p",
-        MODEL_P05,
+        MODEL_AGE_WEIGHT,
         10,
     );
     assert!(
@@ -212,34 +212,34 @@ fn test_onnx_inverse_of_inverse() {
 }
 
 // ============================================================================
-// Tests with different model configurations (p values)
+// Tests with different model types
 // ============================================================================
 
 #[test]
-fn test_onnx_p03_right_identity() {
+fn test_onnx_gcn_right_identity() {
     let (result, _, _) = run_with_onnx_selector(
         "right_identity",
         "tests/problems/right_identity.p",
-        MODEL_P03,
+        MODEL_GCN,
         10,
     );
     assert!(
         matches!(result, SaturationResult::Proof(_)),
-        "ONNX p=0.3 selector should find proof for right_identity"
+        "GCN selector should find proof for right_identity"
     );
 }
 
 #[test]
-fn test_onnx_p07_right_identity() {
+fn test_onnx_mlp_right_identity() {
     let (result, _, _) = run_with_onnx_selector(
         "right_identity",
         "tests/problems/right_identity.p",
-        MODEL_P07,
+        MODEL_MLP,
         10,
     );
     assert!(
         matches!(result, SaturationResult::Proof(_)),
-        "ONNX p=0.7 selector should find proof for right_identity"
+        "MLP selector should find proof for right_identity"
     );
 }
 
@@ -268,14 +268,14 @@ fn test_compare_models_uniqueness_of_inverse() {
 #[test]
 fn test_onnx_model_loading() {
     // Test that all models can be loaded
-    let selector_p03 = OnnxClauseSelector::new(MODEL_P03);
-    assert!(selector_p03.is_ok(), "Should load p=0.3 model");
+    let selector_age_weight = OnnxClauseSelector::new(MODEL_AGE_WEIGHT);
+    assert!(selector_age_weight.is_ok(), "Should load age_weight model");
 
-    let selector_p05 = OnnxClauseSelector::new(MODEL_P05);
-    assert!(selector_p05.is_ok(), "Should load p=0.5 model");
+    let selector_gcn = OnnxClauseSelector::new(MODEL_GCN);
+    assert!(selector_gcn.is_ok(), "Should load gcn model");
 
-    let selector_p07 = OnnxClauseSelector::new(MODEL_P07);
-    assert!(selector_p07.is_ok(), "Should load p=0.7 model");
+    let selector_mlp = OnnxClauseSelector::new(MODEL_MLP);
+    assert!(selector_mlp.is_ok(), "Should load mlp model");
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn test_onnx_simple_resolution() {
         ..Default::default()
     };
 
-    let state = SaturationState::new(clauses, config, create_selector(MODEL_P05));
+    let state = SaturationState::new(clauses, config, create_selector(MODEL_AGE_WEIGHT));
 
     let result = state.saturate();
 
@@ -375,7 +375,7 @@ fn test_clause_scorer_integration() {
 
     // Load model and score clauses
     let mut scorer = ClauseScorer::new();
-    scorer.load_model(MODEL_P05).expect("Failed to load model");
+    scorer.load_model(MODEL_AGE_WEIGHT).expect("Failed to load model");
 
     let clause_refs: Vec<&Clause> = clauses.iter().collect();
     let scores = scorer

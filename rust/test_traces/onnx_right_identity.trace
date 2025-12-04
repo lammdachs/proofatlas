@@ -1,5 +1,5 @@
 === right_identity ===
 
-ONNX p=0.3: "PROOF" in 0.039s, 45 clauses
-ONNX p=0.5: "PROOF" in 0.043s, 49 clauses
-ONNX p=0.7: "PROOF" in 0.034s, 45 clauses
+age_weight: "PROOF" in 0.103s, 66 clauses
+gcn: "PROOF" in 0.179s, 122 clauses
+mlp: "TIMEOUT" in 11.118s, 969 clauses

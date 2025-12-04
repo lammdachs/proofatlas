@@ -59,7 +59,7 @@ class SplitConfig:
 class SolverConfig:
     """Solver configuration for data collection."""
     literal_selection: str = "all"  # all, max_weight, largest_negative
-    clause_selector: str = "age_weight_p05.onnx"  # ONNX model in .selectors/
+    clause_selector: str = "age_weight.onnx"  # ONNX model in .selectors/
 
 
 @dataclass

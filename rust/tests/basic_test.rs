@@ -3,7 +3,7 @@
 use proofatlas::{parse_tptp, saturate, ClauseSelector, OnnxClauseSelector, SaturationConfig, SaturationResult};
 
 /// Path to the test ONNX model (relative to rust/ directory)
-const MODEL_PATH: &str = "../.selectors/age_weight_p05.onnx";
+const MODEL_PATH: &str = "../.selectors/age_weight.onnx";
 
 fn create_selector() -> Box<dyn ClauseSelector> {
     Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
