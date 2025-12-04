@@ -21,27 +21,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v2
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
         with:
-          micromamba-version: '2.0.5-0'
-          environment-name: build
-          create-args: >-
-            python=3.11
-            rust=1.85
-            rust-std-wasm32-unknown-unknown=1.85
-            pytorch-cpu
-            onnx
-            onnxscript
-          init-shell: bash
+          targets: wasm32-unknown-unknown
 
       - name: Install wasm-bindgen-cli
-        shell: bash -el {0}
-        run: |
-          cargo install wasm-bindgen-cli --version 0.2.100 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.100 --locked
 
       - name: Build WASM module
-        shell: bash -el {0}
         working-directory: ./wasm
         run: |
           cargo build --target wasm32-unknown-unknown --release
@@ -50,89 +38,6 @@ jobs:
             --target web \
             --no-typescript
 
-      - name: Generate ONNX model
-        shell: bash -el {0}
-        run: |
-          mkdir -p wasm/models
-          python -c "
-          import torch
-          import torch.nn as nn
-
-          class AgeWeightSelector(nn.Module):
-              '''
-              Mimics age-weight ratio selection:
-              - With probability p, select the OLDEST clause (highest age)
-              - With probability 1-p, select the LIGHTEST clause (lowest weight/depth)
-
-              Feature layout (13 dimensions):
-              - 0-5: Node type one-hot
-              - 6: Arity
-              - 7: Argument position (0-indexed)
-              - 8: Depth (proxy for weight)
-              - 9: Age (normalized 0-1)
-              - 10: Role
-              - 11: Polarity
-              - 12: Is equality
-              '''
-              def __init__(self, age_probability=0.5):
-                  super().__init__()
-                  self.register_buffer('p', torch.tensor(age_probability, dtype=torch.float32))
-
-              def forward(self, node_features, pool_matrix):
-                  # Pool to get clause-level features: [num_clauses, 13]
-                  clause_features = torch.mm(pool_matrix, node_features)
-
-                  # Extract age (feature 9) and weight/depth (feature 8)
-                  ages = clause_features[:, 9]      # Higher = older
-                  weights = clause_features[:, 8]   # Higher = heavier
-
-                  num_clauses = clause_features.size(0)
-
-                  # Find oldest clause (max age)
-                  oldest_idx = torch.argmax(ages)
-
-                  # Find lightest clause (min weight)
-                  lightest_idx = torch.argmin(weights)
-
-                  # Create one-hot masks for oldest and lightest
-                  indices = torch.arange(num_clauses, device=clause_features.device)
-                  oldest_mask = (indices == oldest_idx).float()
-                  lightest_mask = (indices == lightest_idx).float()
-
-                  # Compute log probabilities
-                  log_p = torch.log(self.p + 1e-10)
-                  log_1mp = torch.log(1 - self.p + 1e-10)
-
-                  # Logits when oldest != lightest: oldest gets log_p, lightest gets log_1mp, rest get -inf
-                  logits_diff = oldest_mask * log_p + lightest_mask * log_1mp + (1 - oldest_mask) * (1 - lightest_mask) * (-1e9)
-
-                  # Logits when oldest == lightest: that clause gets 0, rest get -inf
-                  logits_same = oldest_mask * 0.0 + (1 - oldest_mask) * (-1e9)
-
-                  # Select based on whether oldest and lightest are the same
-                  same_clause = (oldest_idx == lightest_idx)
-                  logits = torch.where(same_clause, logits_same, logits_diff)
-
-                  return logits
-
-          model = AgeWeightSelector(age_probability=0.5)
-          model.eval()
-          dummy_nodes = torch.randn(50, 13)
-          dummy_pool = torch.randn(10, 50)
-          torch.onnx.export(
-              model, (dummy_nodes, dummy_pool), 'wasm/models/clause_selector.onnx',
-              input_names=['node_features', 'pool_matrix'],
-              output_names=['scores'],
-              dynamic_axes={
-                  'node_features': {0: 'total_nodes'},
-                  'pool_matrix': {0: 'num_clauses', 1: 'total_nodes'},
-                  'scores': {0: 'num_clauses'},
-              },
-              opset_version=14,
-          )
-          print('Generated ONNX model')
-          "
-
       - name: Prepare deployment files
         working-directory: ./wasm
         run: |
@@ -140,8 +45,6 @@ jobs:
           cp index.html docs.html style.css docs-style.css app.js favicon.svg benchmark_problems.json dist/
           cp -r pkg dist/
           cp -r examples dist/
-          mkdir -p dist/models
-          cp models/clause_selector.onnx dist/models/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

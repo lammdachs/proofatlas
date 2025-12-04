@@ -28,7 +28,7 @@ jobs:
               - 'rust/src/saturation/**'
               - 'rust/src/parser/**'
               - 'rust/src/unification/**'
-              - 'rust/src/selection/**'
+              - 'rust/src/selectors/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
             rust_ml:
