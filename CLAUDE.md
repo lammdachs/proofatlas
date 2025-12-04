@@ -177,11 +177,9 @@ ML selectors are implemented in both Rust/Burn (inference) and Python/PyTorch (t
 
 | Selector | Rust/Burn | PyTorch | Notes |
 |----------|-----------|---------|-------|
-| age_weight | ✓ | - | Heuristic only |
+| age_weight | ✓ | - | Heuristic only, no training needed |
 | gcn | ✓ | ✓ | Graph Convolutional Network |
-| gat | ✓ | ✓ | Graph Attention Network |
 | mlp | ✓ | ✓ | MLP baseline |
-| transformer | ✓ | ✓ | Transformer-based |
 
 **Workflow:** Train in PyTorch → Export to safetensors → Load in Rust/Burn
 

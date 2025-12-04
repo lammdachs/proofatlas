@@ -27,7 +27,8 @@ pub use inference::{
 };
 
 pub use selection::{
-    ClauseSelector, LiteralSelector, OnnxClauseSelector, SelectAll, SelectMaxWeight,
+    AgeWeightSelector, ClauseSelector, LiteralSelector, OnnxClauseSelector, SelectAll,
+    SelectMaxWeight,
 };
 pub use ml::ClauseScorer;
 

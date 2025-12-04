@@ -27,6 +27,11 @@ numpy = { version = "0.20", optional = true }
 # ML inference with tract (pure Rust ONNX runtime, WASM compatible)
 tract-onnx = "0.21"
 
+# Burn ML framework (for native inference with safetensors weights)
+burn = "0.19"
+burn-ndarray = "0.19"
+burn-import = "0.19"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Performance", "Window"] }
 

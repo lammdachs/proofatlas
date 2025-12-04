@@ -523,13 +523,10 @@ impl SaturationState {
 mod tests {
     use super::*;
     use crate::core::{Atom, CNFFormula, Constant, Literal, PredicateSymbol, Term, Variable};
-    use crate::selection::OnnxClauseSelector;
-
-    /// Path to the test ONNX model (relative to rust/ directory)
-    const MODEL_PATH: &str = "../.selectors/age_weight.onnx";
+    use crate::selection::AgeWeightSelector;
 
     fn create_selector() -> Box<dyn ClauseSelector> {
-        Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
+        Box::new(AgeWeightSelector::default())
     }
 
     #[test]

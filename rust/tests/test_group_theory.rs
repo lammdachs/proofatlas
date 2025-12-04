@@ -1,17 +1,14 @@
 //! End-to-end tests for group theory problems
 
 use proofatlas::{
-    parse_tptp_file, ClauseSelector, LiteralSelectionStrategy, OnnxClauseSelector,
+    parse_tptp_file, AgeWeightSelector, ClauseSelector, LiteralSelectionStrategy,
     SaturationConfig, SaturationResult, SaturationState,
 };
 use std::io::Write;
 use std::time::Duration;
 
-/// Path to the test ONNX model (relative to rust/ directory)
-const MODEL_PATH: &str = "../.selectors/age_weight.onnx";
-
 fn create_selector() -> Box<dyn ClauseSelector> {
-    Box::new(OnnxClauseSelector::new(MODEL_PATH).expect("Failed to load ONNX model"))
+    Box::new(AgeWeightSelector::default())
 }
 
 /// Run a group theory problem and return the result with trace

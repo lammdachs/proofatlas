@@ -8,7 +8,10 @@ use std::collections::VecDeque;
 use std::path::Path;
 
 /// Trait for clause selection strategies
-pub trait ClauseSelector: Send + Sync {
+///
+/// Note: `Send` is required for passing selectors across thread boundaries.
+/// `Sync` is not required since selectors are used mutably in a single-threaded context.
+pub trait ClauseSelector: Send {
     /// Select the next clause from the unprocessed set
     /// Returns the index of the selected clause, or None if empty
     fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize>;

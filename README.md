@@ -100,15 +100,39 @@ wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
     --out-dir pkg --target web
 ```
 
-## Using ONNX Models
+## Using Clause Selectors
 
-### From File Path (Rust)
+### Heuristic Selectors (Rust)
 
 ```rust
-use proofatlas::OnnxClauseSelector;
+use proofatlas::AgeWeightSelector;
 
-let selector = OnnxClauseSelector::new("path/to/model.onnx")?;
+// Age-weight heuristic (classic, no ML)
+let selector = AgeWeightSelector::new(0.5); // 50% age, 50% weight
 state.set_clause_selector(Box::new(selector));
+```
+
+### ML Selectors with Burn (Rust)
+
+```rust
+use proofatlas::selection::{load_ndarray_gcn_selector, load_ndarray_mlp_selector};
+
+// Load a GCN selector from trained weights (safetensors format)
+let selector = load_ndarray_gcn_selector(
+    ".weights/gcn.safetensors",
+    13,  // input_dim
+    64,  // hidden_dim
+    3,   // num_layers
+).expect("Failed to load GCN weights");
+state.set_clause_selector(Box::new(selector));
+
+// Or load an MLP selector
+let selector = load_ndarray_mlp_selector(
+    ".weights/mlp.safetensors",
+    13,  // input_dim
+    64,  // hidden_dim
+    2,   // num_layers
+).expect("Failed to load MLP weights");
 ```
 
 ### Training Custom Models (Python)
@@ -129,11 +153,7 @@ python scripts/train.py --data .data/traces/default_data.pt --training gcn
 
 Available model architectures (in `configs/training/`):
 - **gcn**: Graph Convolutional Network
-- **gat**: Graph Attention Network
 - **mlp**: Multi-Layer Perceptron baseline
-- **transformer**: Transformer-based selector
-
-See [docs/onnx_interface.md](docs/onnx_interface.md) for the complete feature specification.
 
 ## Node Feature Layout
 

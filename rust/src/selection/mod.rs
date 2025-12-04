@@ -18,12 +18,32 @@
 //! # Clause Selection
 //!
 //! Clause selection determines the order of clause processing in the
-//! given-clause algorithm. ONNX-based ML selection is used exclusively.
+//! given-clause algorithm. Available strategies:
 //!
+//! ## Heuristic selectors:
+//! - [`AgeWeightSelector`] - Classic age-weight ratio heuristic
+//!
+//! ## ML-based selectors (Burn framework):
+//! - [`burn_gcn::BurnGcnSelector`] - GCN-based clause selection
+//! - [`burn_mlp::BurnMlpSelector`] - MLP-based clause selection
+//!
+//! ## Legacy ML selectors (ONNX):
 //! - [`OnnxClauseSelector`] - ML-based clause selection using ONNX model
 
+pub mod age_weight;
+pub mod burn_gcn;
+pub mod burn_mlp;
 pub mod clause;
 pub mod literal;
 
+pub use age_weight::AgeWeightSelector;
+pub use burn_gcn::{
+    create_ndarray_gcn_selector, load_ndarray_gcn_selector, BurnGcnSelector, GcnModel,
+    NdarrayGcnSelector,
+};
+pub use burn_mlp::{
+    create_ndarray_mlp_selector, load_ndarray_mlp_selector, BurnMlpSelector, MlpModel,
+    NdarrayMlpSelector,
+};
 pub use clause::{ClauseSelector, OnnxClauseSelector};
 pub use literal::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};
