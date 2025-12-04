@@ -40,7 +40,7 @@ class ProblemMetadata:
 
 def get_tptp_path() -> Path:
     """Get the TPTP directory path."""
-    base_path = Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
+    base_path = Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0/Problems"
     if not base_path.exists():
         raise FileNotFoundError(f"TPTP directory not found: {base_path}")
     return base_path

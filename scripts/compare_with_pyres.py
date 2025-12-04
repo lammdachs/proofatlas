@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 
 def get_tptp_base() -> Path:
     """Get the TPTP base directory."""
-    return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
+    return Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0/Problems"
 
 def get_problem_status(problem_path: Path) -> str:
     """Get the status of a TPTP problem."""
@@ -72,7 +72,7 @@ def run_proofatlas(problem_path: Path, timeout: int = 5) -> Tuple[bool, float]:
     os.chdir(rust_dir)
 
     try:
-        tptp_root = Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0"
+        tptp_root = Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0"
         cmd = ["cargo", "run", "--release", "--bin", "prove", "--",
                str(problem_path), "--timeout", str(timeout), "--include", str(tptp_root)]
 

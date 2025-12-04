@@ -1,0 +1,66 @@
+{
+  "version": "5.0.0",
+  "source": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Linux-X64.zip",
+
+  "paths": {
+    "binary": ".vampire/vampire"
+  },
+
+  "presets": {
+    "time_sel0": {
+      "description": "Time limit 10s, literal selection 0, no AVATAR",
+      "time_limit": 10,
+      "selection": 0,
+      "avatar": "off"
+    },
+
+    "time_sel20": {
+      "description": "Time limit 10s, literal selection 20, no AVATAR",
+      "time_limit": 10,
+      "selection": 20,
+      "avatar": "off"
+    },
+
+    "time_sel21": {
+      "description": "Time limit 10s, literal selection 21, no AVATAR",
+      "time_limit": 10,
+      "selection": 21,
+      "avatar": "off"
+    },
+
+    "time_sel1010": {
+      "description": "Time limit 10s, literal selection 1010, no AVATAR",
+      "time_limit": 10,
+      "selection": 1010,
+      "avatar": "off"
+    },
+
+    "activation_sel0": {
+      "description": "Activation limit 1000, literal selection 0, no AVATAR",
+      "activation_limit": 1000,
+      "selection": 0,
+      "avatar": "off"
+    },
+
+    "activation_sel20": {
+      "description": "Activation limit 1000, literal selection 20, no AVATAR",
+      "activation_limit": 1000,
+      "selection": 20,
+      "avatar": "off"
+    },
+
+    "activation_sel21": {
+      "description": "Activation limit 1000, literal selection 21, no AVATAR",
+      "activation_limit": 1000,
+      "selection": 21,
+      "avatar": "off"
+    },
+
+    "activation_sel1010": {
+      "description": "Activation limit 1000, literal selection 1010, no AVATAR",
+      "activation_limit": 1000,
+      "selection": 1010,
+      "avatar": "off"
+    }
+  }
+}

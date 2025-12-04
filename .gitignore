@@ -3,6 +3,8 @@
 /.logs/
 /.selectors/
 /.claude/
+/.tptp/
+/.spass/
 
 # Legacy directories
 /problems/
@@ -23,6 +25,7 @@
 !tests/.data/**/*.json
 !wasm/examples/*.json
 !wasm/benchmark_problems.json
+!configs/**/*.json
 
 # Node.js
 node_modules/

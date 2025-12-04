@@ -1,0 +1,61 @@
+{
+  "output": {
+    "weights_dir": ".weights",
+    "logs_dir": ".logs"
+  },
+
+  "models": {
+    "gcn": {
+      "description": "Graph Convolutional Network clause selector",
+      "type": "gcn",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "dropout": 0.1,
+      "input_dim": 13
+    },
+
+    "gat": {
+      "description": "Graph Attention Network clause selector",
+      "type": "gat",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "num_heads": 4,
+      "dropout": 0.1,
+      "input_dim": 13
+    },
+
+    "mlp": {
+      "description": "MLP baseline clause selector",
+      "type": "mlp",
+      "hidden_dim": 128,
+      "num_layers": 3,
+      "dropout": 0.1,
+      "input_dim": 13
+    },
+
+    "transformer": {
+      "description": "Transformer-based clause selector",
+      "type": "transformer",
+      "hidden_dim": 64,
+      "num_layers": 4,
+      "num_heads": 4,
+      "dropout": 0.1,
+      "input_dim": 13
+    }
+  },
+
+  "training": {
+    "default": {
+      "data_config": "default",
+      "batch_size": 32,
+      "learning_rate": 0.001,
+      "weight_decay": 1e-5,
+      "max_epochs": 100,
+      "patience": 10,
+      "gradient_clip": 1.0,
+      "optimizer": "adamw",
+      "scheduler": "cosine",
+      "warmup_epochs": 5
+    }
+  }
+}

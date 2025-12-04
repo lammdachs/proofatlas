@@ -1,0 +1,22 @@
+{
+  "version": "3.9",
+  "source": "http://www.spass-prover.org/download/sources/spass39.tgz",
+
+  "paths": {
+    "binary": ".spass/SPASS"
+  },
+
+  "presets": {
+    "time_sel0": {
+      "description": "Time limit 10s, selection 0 (equivalent to vampire selection 20)",
+      "TimeLimit": 10,
+      "Select": 0
+    },
+
+    "time_sel1": {
+      "description": "Time limit 10s, selection 1 (equivalent to vampire selection 21)",
+      "TimeLimit": 10,
+      "Select": 1
+    }
+  }
+}

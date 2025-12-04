@@ -10,10 +10,10 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Check if TPTP directory exists
-TPTP_DIR="$BASE_DIR/.data/problems/tptp/TPTP-v9.0.0/Problems"
+TPTP_DIR="$BASE_DIR/.tptp/TPTP-v9.0.0/Problems"
 if [ ! -d "$TPTP_DIR" ]; then
     echo "Error: TPTP directory not found at $TPTP_DIR"
-    echo "Please ensure TPTP is installed in .data/problems/tptp/"
+    echo "Please ensure TPTP is installed in .tptp/"
     exit 1
 fi
 

@@ -16,7 +16,7 @@ TPTP Problems → Run Prover → Extract Training Data → Train GNN → Integra
 from proofatlas import parse_tptp_file, saturate, SaturationConfig
 import json
 
-problems_dir = ".data/problems/tptp/TPTP-v9.0.0/Problems/"
+problems_dir = ".tptp/TPTP-v9.0.0/Problems/"
 output_dir = "data/proofs/"
 
 config = SaturationConfig()

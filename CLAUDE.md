@@ -9,7 +9,7 @@ ProofAtlas is a high-performance theorem prover implemented in Rust with Python 
 ## Testing the Theorem Prover
 
 When asked to test the theorem prover:
-- Use actual TPTP problems from `.data/problems/tptp/TPTP-v9.0.0/Problems/`
+- Use actual TPTP problems from `.tptp/TPTP-v9.0.0/Problems/`
 - Start with simpler problems (e.g., PUZ, SYN with small numbers)
 - Check problem status in the file header (Unsatisfiable = should find proof, Satisfiable = should saturate/timeout)
 - Test problems from different domains to ensure broad coverage
@@ -93,7 +93,7 @@ python -m pytest tests/ -v
 - Rust unit tests: Colocated with source files
 - Rust integration tests: `rust/tests/`
 - Python tests: `python/tests/`
-- TPTP test problems: `.data/problems/tptp/TPTP-v9.0.0/Problems/`
+- TPTP test problems: `.tptp/TPTP-v9.0.0/Problems/`
 
 
 ## Codebase Architecture

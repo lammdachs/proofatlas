@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 
 def get_tptp_base() -> Path:
     """Get the TPTP base directory."""
-    return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
+    return Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0/Problems"
 
 def get_problem_status(problem_path: Path) -> str:
     """Get the status of a TPTP problem."""
@@ -71,7 +71,7 @@ def run_compare_selection(problem_path: Path, timeout: int = 5) -> Dict[str, Tup
     os.chdir(rust_dir)
 
     try:
-        tptp_root = Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0"
+        tptp_root = Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0"
         cmd = ["cargo", "run", "--release", "--bin", "compare_selection", "--",
                str(problem_path), "--include", str(tptp_root)]
 

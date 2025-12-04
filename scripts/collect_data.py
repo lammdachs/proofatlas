@@ -24,7 +24,7 @@ from proofatlas.ml.config import DataConfig, ProblemFilters
 
 def get_tptp_base() -> Path:
     """Get the TPTP problems base directory."""
-    return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
+    return Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0/Problems"
 
 
 def get_weights_dir() -> Path:

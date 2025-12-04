@@ -1,0 +1,98 @@
+{
+  "output": {
+    "trace_dir": ".data/traces",
+    "cache_dir": ".data/cache"
+  },
+
+  "presets": {
+    "time_default": {
+      "description": "Default with 10s time limit",
+      "problem_set": "default",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "prover_timeout": 10.0,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    },
+
+    "time_test": {
+      "description": "Test set with 10s time limit",
+      "problem_set": "test",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "prover_timeout": 10.0,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    },
+
+    "time_unit_equality": {
+      "description": "Unit equality with 10s time limit",
+      "problem_set": "unit_equality",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "prover_timeout": 10.0,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    },
+
+    "activation_default": {
+      "description": "Default with 1000 activation limit",
+      "problem_set": "default",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "activation_limit": 1000,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    },
+
+    "activation_test": {
+      "description": "Test set with 1000 activation limit",
+      "problem_set": "test",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "activation_limit": 1000,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    },
+
+    "activation_unit_equality": {
+      "description": "Unit equality with 1000 activation limit",
+      "problem_set": "unit_equality",
+      "selector": "age_weight",
+      "literal_selection": "all",
+      "activation_limit": 1000,
+      "split": {
+        "train": 0.8,
+        "val": 0.1,
+        "test": 0.1,
+        "seed": 42,
+        "stratify_by": "domain"
+      }
+    }
+  }
+}
