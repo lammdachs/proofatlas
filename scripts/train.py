@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Train clause selection models and export to ONNX.
+Train clause selection models and export weights for Burn.
 
-This script trains a model using collected data and exports it to ONNX format
-for use by the theorem prover.
+This script trains a model using collected data and exports weights to safetensors
+format for use by the Rust/Burn theorem prover.
 
 Usage:
-    python scripts/train.py --data data.pt --selector gcn
-    python scripts/train.py --data data.pt --selector configs/selectors/gat.json
-    python scripts/train.py --data data.pt --selector gcn --run-name my_experiment
+    python scripts/train.py --data data.pt --training gcn
+    python scripts/train.py --data data.pt --training configs/training/gat.json
+    python scripts/train.py --data data.pt --training gcn --run-name my_experiment
 """
 
 import argparse
@@ -20,14 +20,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 import torch
-from proofatlas.ml.config import SelectorConfig
+from proofatlas.ml.config import TrainingConfig
 from proofatlas.ml.training import (
     ClauseDataset,
     collate_clause_batch,
     train,
     save_model,
 )
-from proofatlas.selectors import export_to_onnx
 
 
 def load_data(data_path: Path):
@@ -71,37 +70,56 @@ def split_data(data, train_ratio=0.8, val_ratio=0.1, seed=42):
     return train_ds, val_ds, test_ds
 
 
-def get_selectors_dir() -> Path:
-    """Get the selectors directory."""
-    return Path(__file__).parent.parent / ".selectors"
+def get_weights_dir() -> Path:
+    """Get the weights directory."""
+    return Path(__file__).parent.parent / ".weights"
+
+
+def export_to_safetensors(model: torch.nn.Module, path: Path, config: TrainingConfig):
+    """Export model weights to safetensors format for Burn."""
+    try:
+        from safetensors.torch import save_file
+    except ImportError:
+        print("WARNING: safetensors not installed. Install with: pip install safetensors")
+        print("Skipping safetensors export.")
+        return
+
+    # Get state dict and convert to safetensors format
+    state_dict = model.state_dict()
+
+    # Save metadata about the model architecture
+    metadata = {
+        "model_type": config.model.type,
+        "hidden_dim": str(config.model.hidden_dim),
+        "num_layers": str(config.model.num_layers),
+        "num_heads": str(config.model.num_heads),
+        "input_dim": str(config.model.input_dim),
+    }
+
+    save_file(state_dict, path, metadata=metadata)
+    print(f"Weights exported to: {path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train clause selection model and export to ONNX")
+    parser = argparse.ArgumentParser(description="Train clause selection model and export weights")
     parser.add_argument("--data", "-d", type=Path, required=True, help="Training data file (.pt)")
-    parser.add_argument("--selector", "-s", default="gcn", help="Selector config name or path")
+    parser.add_argument("--training", "-t", default="gcn", help="Training config name or path")
     parser.add_argument("--run-name", help="Run name (default: auto-generated)")
     parser.add_argument("--epochs", type=int, help="Override max epochs")
     parser.add_argument("--batch-size", type=int, help="Override batch size")
     parser.add_argument("--lr", type=float, help="Override learning rate")
     parser.add_argument("--gpus", type=int, help="Override number of GPUs")
-    parser.add_argument("--output", "-o", type=Path, help="Output ONNX model path (default: .selectors/<name>.onnx)")
+    parser.add_argument("--output", "-o", type=Path, help="Output weights path (default: .weights/<name>.safetensors)")
     parser.add_argument("--checkpoint-dir", type=Path, help="Checkpoint directory (default: logs/<run_name>)")
 
     args = parser.parse_args()
 
     # Load config
-    config_path = Path(args.selector)
+    config_path = Path(args.training)
     if config_path.exists():
-        config = SelectorConfig.load(config_path)
+        config = TrainingConfig.load(config_path)
     else:
-        config = SelectorConfig.load_preset(args.selector)
-
-    # Check that this selector requires training
-    if not config.requires_training:
-        print(f"ERROR: Selector '{config.name}' does not require training (no training section in config)")
-        print("This selector is a heuristic that can be exported directly without training.")
-        sys.exit(1)
+        config = TrainingConfig.load_preset(args.training)
 
     # Override with CLI args
     if args.run_name:
@@ -112,9 +130,6 @@ def main():
         config.training.batch_size = args.batch_size
     if args.lr:
         config.training.learning_rate = args.lr
-    if args.gpus is not None:
-        config.distributed.num_gpus = args.gpus
-
     # Generate run name if not set
     if not config.name:
         config.name = f"{config.model.type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -124,7 +139,6 @@ def main():
     print("=" * 60)
     print(f"Model: {config.model.type}, hidden={config.model.hidden_dim}, layers={config.model.num_layers}")
     print(f"Training: epochs={config.training.max_epochs}, batch={config.training.batch_size}, lr={config.training.learning_rate}")
-    print(f"Distributed: gpus={config.distributed.num_gpus}, strategy={config.distributed.strategy}")
     print()
 
     # Load data
@@ -144,21 +158,16 @@ def main():
     model, metrics = train(train_ds, val_ds, config)
 
     # Save PyTorch checkpoint
-    checkpoint_dir = args.checkpoint_dir or Path(config.logging.log_dir) / config.name
+    checkpoint_dir = args.checkpoint_dir or Path(".logs") / config.name
     checkpoint_path = checkpoint_dir / "model.pt"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     save_model(model, checkpoint_path, config)
     print(f"\nCheckpoint saved to: {checkpoint_path}")
 
-    # Export to ONNX
-    onnx_path = args.output or get_selectors_dir() / f"{config.name}.onnx"
-    onnx_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Determine if model needs adjacency matrix
-    needs_adj = config.model.type in ["gcn", "gat", "graphsage", "gnn_transformer"]
-
-    export_to_onnx(model, str(onnx_path), include_adj=needs_adj)
-    print(f"ONNX model exported to: {onnx_path}")
+    # Export to safetensors for Burn
+    weights_path = args.output or get_weights_dir() / f"{config.name}.safetensors"
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    export_to_safetensors(model, weights_path, config)
 
     # Summary
     print("\n" + "=" * 60)
@@ -168,7 +177,8 @@ def main():
     if best_val_loss is not None:
         print(f"  Best val loss: {best_val_loss:.4f}")
     print(f"  Total time: {metrics.get('total_time_seconds', 0):.1f}s")
-    print(f"\nTo use this selector, reference: {onnx_path.name}")
+    print(f"\nTo use this selector in data config:")
+    print(f'  "selector": {{"name": "{config.model.type}", "weights": "{weights_path.name}"}}')
 
 
 if __name__ == "__main__":

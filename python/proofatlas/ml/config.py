@@ -2,8 +2,15 @@
 Configuration loading and validation for ML training and data pipelines.
 
 Configs are stored in:
-- configs/data/ - Data collection and filtering
-- configs/selectors/ - Selector model definitions and training params
+- configs/data/ - Data collection and filtering (references Rust selectors)
+- configs/training/ - ML model definitions and training params (PyTorch)
+
+Selectors are implemented in:
+- rust/src/selection/ - Rust/Burn implementations (used at runtime)
+- python/proofatlas/selectors/ - PyTorch implementations (used for training)
+
+ML selectors (gcn, gat, mlp, transformer) are mirrored between Rust and Python.
+Heuristic selectors (age_weight) only have Rust implementations.
 """
 
 import json
@@ -56,10 +63,16 @@ class SplitConfig:
 
 
 @dataclass
+class SelectorSpec:
+    """Specification for which selector to use."""
+    name: str = "age_weight"  # Selector name (maps to Rust implementation)
+    weights: Optional[str] = None  # Weights file in .weights/ (for ML selectors)
+
+
+@dataclass
 class SolverConfig:
     """Solver configuration for data collection."""
     literal_selection: str = "all"  # all, max_weight, largest_negative
-    clause_selector: str = "age_weight.onnx"  # ONNX model in .selectors/
 
 
 @dataclass
@@ -85,6 +98,7 @@ class DataConfig:
     """Complete data configuration."""
     name: str = "default"
     description: str = ""
+    selector: SelectorSpec = field(default_factory=SelectorSpec)
     solver: SolverConfig = field(default_factory=SolverConfig)
     problem_filters: ProblemFilters = field(default_factory=ProblemFilters)
     split: SplitConfig = field(default_factory=SplitConfig)
@@ -99,6 +113,7 @@ class DataConfig:
         return cls(
             name=d.get("name", "default"),
             description=d.get("description", ""),
+            selector=SelectorSpec(**d.get("selector", {})),
             solver=SolverConfig(**d.get("solver", {})),
             problem_filters=ProblemFilters(**d.get("problem_filters", {})),
             split=SplitConfig(**d.get("split", {})),
@@ -131,20 +146,19 @@ class DataConfig:
 
 
 # =============================================================================
-# Selector Configuration
+# Training Configuration (for ML selectors)
 # =============================================================================
 
 
 @dataclass
 class ModelConfig:
-    """Model architecture configuration."""
-    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp, age_weight
+    """Model architecture configuration (PyTorch implementation)."""
+    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp
     hidden_dim: int = 64
     num_layers: int = 3
     num_heads: int = 4
     dropout: float = 0.1
     input_dim: int = 13
-    age_probability: float = 0.5  # For age_weight heuristic
 
 
 @dataclass
@@ -178,52 +192,67 @@ class SchedulerConfig:
 
 
 @dataclass
-class SelectorConfig:
-    """Complete selector configuration."""
+class DistributedConfig:
+    """Distributed training configuration."""
+    num_gpus: int = -1  # -1 = all available
+    strategy: str = "auto"  # auto, ddp, ddp_spawn
+    precision: str = "32-true"  # 32-true, 16-mixed, bf16-mixed
+
+
+@dataclass
+class LoggingConfig:
+    """Logging configuration."""
+    log_dir: str = ".logs"
+    log_every_n_steps: int = 10
+    enable_progress_bar: bool = True
+
+
+@dataclass
+class CheckpointingConfig:
+    """Checkpointing configuration."""
+    monitor: str = "val_loss"
+    mode: str = "min"
+    save_top_k: int = 3
+
+
+@dataclass
+class EvaluationConfig:
+    """Evaluation configuration."""
+    eval_every_n_epochs: int = 10
+    num_eval_problems: int = 0  # 0 = disable
+    eval_timeout: float = 10.0
+
+
+@dataclass
+class TrainingConfig:
+    """Complete training configuration for ML selectors."""
     name: str = "default"
     description: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
-    training: Optional[TrainingParams] = None  # None for heuristics that don't need training
-    optimizer: Optional[OptimizerConfig] = None
-    scheduler: Optional[SchedulerConfig] = None
-
-    @property
-    def requires_training(self) -> bool:
-        """Check if this selector requires training."""
-        return self.training is not None
+    training: TrainingParams = field(default_factory=TrainingParams)
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    distributed: DistributedConfig = field(default_factory=DistributedConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    checkpointing: CheckpointingConfig = field(default_factory=CheckpointingConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        # Remove None values for cleaner output
-        if self.training is None:
-            del d["training"]
-        if self.optimizer is None:
-            del d["optimizer"]
-        if self.scheduler is None:
-            del d["scheduler"]
-        return d
+        return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SelectorConfig":
-        training = None
-        if "training" in d and d["training"]:
-            training = TrainingParams(**d["training"])
-
-        optimizer = None
-        if "optimizer" in d and d["optimizer"]:
-            optimizer = OptimizerConfig(**d["optimizer"])
-
-        scheduler = None
-        if "scheduler" in d and d["scheduler"]:
-            scheduler = SchedulerConfig(**d["scheduler"])
-
+    def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
         return cls(
             name=d.get("name", "default"),
             description=d.get("description", ""),
             model=ModelConfig(**d.get("model", {})),
-            training=training,
-            optimizer=optimizer,
-            scheduler=scheduler,
+            training=TrainingParams(**d.get("training", {})),
+            optimizer=OptimizerConfig(**d.get("optimizer", {})),
+            scheduler=SchedulerConfig(**d.get("scheduler", {})),
+            distributed=DistributedConfig(**d.get("distributed", {})),
+            logging=LoggingConfig(**d.get("logging", {})),
+            checkpointing=CheckpointingConfig(**d.get("checkpointing", {})),
+            evaluation=EvaluationConfig(**d.get("evaluation", {})),
         )
 
     def save(self, path: Union[str, Path]):
@@ -233,19 +262,19 @@ class SelectorConfig:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load(cls, path: Union[str, Path]) -> "SelectorConfig":
+    def load(cls, path: Union[str, Path]) -> "TrainingConfig":
         with open(path) as f:
             return cls.from_dict(json.load(f))
 
     @classmethod
-    def load_preset(cls, name: str) -> "SelectorConfig":
-        """Load a preset selector config by name."""
-        config_dir = get_config_dir() / "selectors"
+    def load_preset(cls, name: str) -> "TrainingConfig":
+        """Load a preset training config by name."""
+        config_dir = get_config_dir() / "training"
         path = config_dir / f"{name}.json"
         if not path.exists():
             available = [p.stem for p in config_dir.glob("*.json")]
             raise FileNotFoundError(
-                f"Selector config '{name}' not found. Available: {available}"
+                f"Training config '{name}' not found. Available: {available}"
             )
         return cls.load(path)
 
@@ -254,6 +283,10 @@ class SelectorConfig:
         if self.training and self.training.data_config:
             return DataConfig.load_preset(self.training.data_config)
         return None
+
+
+# Keep SelectorConfig as alias for backwards compatibility
+SelectorConfig = TrainingConfig
 
 
 # =============================================================================
@@ -265,7 +298,7 @@ def list_configs(config_type: str = "all") -> Dict[str, List[str]]:
     """List available configuration presets.
 
     Args:
-        config_type: "data", "selectors", or "all"
+        config_type: "data", "training", or "all"
 
     Returns:
         Dictionary mapping config type to list of available names
@@ -278,10 +311,10 @@ def list_configs(config_type: str = "all") -> Dict[str, List[str]]:
         if data_dir.exists():
             result["data"] = [p.stem for p in data_dir.glob("*.json")]
 
-    if config_type in ("all", "selectors"):
-        selectors_dir = config_dir / "selectors"
-        if selectors_dir.exists():
-            result["selectors"] = [p.stem for p in selectors_dir.glob("*.json")]
+    if config_type in ("all", "training"):
+        training_dir = config_dir / "training"
+        if training_dir.exists():
+            result["training"] = [p.stem for p in training_dir.glob("*.json")]
 
     return result
 

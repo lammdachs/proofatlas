@@ -136,90 +136,58 @@ The Python interface is provided via PyO3 bindings:
 - Simple interface in `python/proofatlas/`
 - Examples in `python/examples/`
 
-### Current Project Structure
+### Project Structure
 
 ```
 proofatlas/
-├── configs/                   # ML configuration files
-│   ├── data/                  # Data extraction/filtering configs
-│   │   ├── default.json
-│   │   └── unit_equality.json
-│   └── training/              # Training hyperparameter configs
-│       └── default.json
+├── rust/src/                  # Core Rust theorem prover
+│   ├── core/                  # Terms, literals, clauses, substitutions, KBO
+│   ├── inference/             # Resolution, factoring, superposition, demodulation
+│   ├── saturation/            # Saturation loop, subsumption
+│   ├── parser/                # TPTP parser, CNF conversion
+│   ├── unification/           # MGU computation
+│   ├── selection/             # Clause/literal selection (Rust/Burn)
+│   └── ml/                    # Graph building, inference
 │
-├── python/                    # Python bindings and examples
-│   ├── proofatlas/
-│   │   ├── __init__.py
-│   │   ├── ml/                # Machine learning module
-│   │   │   ├── config.py      # Config loading/validation
-│   │   │   ├── model.py       # GNN models (pure PyTorch)
-│   │   │   ├── training.py    # Training infrastructure
-│   │   │   └── ...
-│   │   └── proofatlas.cpython-*.so  # Compiled Rust extension
-│   ├── tests/
-│   │   ├── __init__.py
-│   │   └── test_interface.py
-│   └── examples/
-│       ├── basic_usage.py
-│       ├── group_theory.py
-│       └── interactive_demo.py
+├── python/proofatlas/         # Python bindings and ML
+│   ├── ml/                    # Config, training infrastructure
+│   └── selectors/             # PyTorch model implementations
 │
-├── rust/                     # Core Rust implementation
-│   ├── src/
-│   │   ├── core/            # Core data structures
-│   │   │   ├── clause.rs
-│   │   │   ├── literal.rs
-│   │   │   ├── term.rs
-│   │   │   ├── substitution.rs
-│   │   │   ├── ordering.rs  # KBO ordering
-│   │   │   ├── proof.rs
-│   │   │   └── mod.rs
-│   │   ├── inference/       # Inference rules
-│   │   │   ├── resolution.rs
-│   │   │   ├── factoring.rs
-│   │   │   ├── superposition.rs
-│   │   │   ├── equality_resolution.rs
-│   │   │   ├── equality_factoring.rs
-│   │   │   ├── common.rs
-│   │   │   └── mod.rs
-│   │   ├── saturation/      # Saturation loop
-│   │   │   ├── state.rs
-│   │   │   ├── subsumption.rs
-│   │   │   ├── simplification.rs
-│   │   │   └── mod.rs
-│   │   ├── parser/          # TPTP parser
-│   │   │   ├── tptp.rs
-│   │   │   ├── cnf_conversion.rs
-│   │   │   ├── fof.rs
-│   │   │   └── mod.rs
-│   │   ├── unification/     # Unification
-│   │   │   ├── mgu.rs
-│   │   │   └── mod.rs
-│   │   ├── selection/       # Literal selection
-│   │   │   ├── clause.rs
-│   │   │   ├── literal.rs
-│   │   │   ├── max_weight.rs
-│   │   │   └── mod.rs
-│   │   ├── lib.rs
-│   │   └── python_bindings.rs  # PyO3 bindings
-│   ├── tests/               # Integration tests
-│   │   ├── basic_test.rs
-│   │   ├── test_calculus_compliance.rs
-│   │   └── test_selection_behavior.rs
-│   └── bin/                 # Binary executables
-│       ├── prove.rs         # Main prover binary
-│       ├── debug_ordering.rs
-│       └── test_grp001.rs
+├── configs/
+│   ├── data/                  # Data collection configs (Rust selector + problem filters)
+│   └── training/              # ML training configs (gcn, gat, mlp, transformer)
 │
-├── docs/                    # Documentation
-│   ├── python_interface_design.md
-│   └── python_proofstate_api.md
+├── scripts/                   # train.py, collect_data.py, compare_with_vampire.py
+├── wasm/                      # WebAssembly frontend (index.html, models/)
+├── docs/                      # Documentation
 │
-├── setup.py                 # Python package setup
-├── requirements.txt         # Python dependencies
-├── INSTALL.md              # Installation guide
-└── CLAUDE.md               # This file
+│ # External tools (gitignored):
+├── .vampire/                  # Vampire theorem prover binary
+├── .pyres/                    # PyRes theorem prover (Python reference)
+│
+│ # Generated/data (gitignored):
+├── .weights/                  # Trained model weights (safetensors)
+├── .data/                     # TPTP problems, traces, problem_metadata.json
+└── .logs/                     # Training logs and checkpoints
 ```
+
+### Selector Architecture
+
+ML selectors are implemented in both Rust/Burn (inference) and Python/PyTorch (training):
+
+| Selector | Rust/Burn | PyTorch | Notes |
+|----------|-----------|---------|-------|
+| age_weight | ✓ | - | Heuristic only |
+| gcn | ✓ | ✓ | Graph Convolutional Network |
+| gat | ✓ | ✓ | Graph Attention Network |
+| mlp | ✓ | ✓ | MLP baseline |
+| transformer | ✓ | ✓ | Transformer-based |
+
+**Workflow:** Train in PyTorch → Export to safetensors → Load in Rust/Burn
+
+**Config types:**
+- `configs/data/`: Rust selector for data collection
+- `configs/training/`: PyTorch model architecture and hyperparameters
 
 
 ### Key Implementation Notes
@@ -311,43 +279,53 @@ The ML pipeline uses JSON configuration files stored in `configs/`.
 
 ```
 configs/
-├── data/           # Data extraction and filtering
+├── data/           # Data collection configs (specify Rust selectors)
 │   ├── default.json
+│   ├── test.json
 │   └── unit_equality.json
-└── training/       # Model and training hyperparameters
-    └── default.json
+└── training/       # Training configs (specify PyTorch model architecture)
+    ├── gcn.json
+    ├── gat.json
+    ├── mlp.json
+    └── transformer.json
 ```
 
 ### Data Configuration (`configs/data/*.json`)
 
-Controls which problems to use and how to process them:
+Controls which problems to use, which selector to run, and how to process data:
 
 ```json
 {
   "name": "default",
+  "description": "Default data configuration",
+
+  "selector": {
+    "name": "age_weight",           // Rust selector name
+    "weights": null                  // Weights file in .weights/ (for ML selectors)
+  },
+
+  "solver": {
+    "literal_selection": "all"
+  },
+
   "problem_filters": {
-    "status": ["unsatisfiable"],      // Filter by problem status
-    "format": ["cnf"],                 // cnf, fof
-    "has_equality": null,              // true, false, or null (any)
+    "status": ["unsatisfiable"],
+    "format": ["cnf"],
+    "has_equality": null,
     "is_unit_only": null,
-    "max_rating": 0.8,                 // TPTP difficulty rating
+    "max_rating": 0.8,
     "min_clauses": 1,
     "max_clauses": 1000,
-    "domains": null,                   // Include only these domains
-    "exclude_domains": ["CSR", "HWV"]  // Exclude these domains
+    "domains": null,
+    "exclude_domains": ["CSR", "HWV", "SWV"]
   },
-  "split": {
-    "train_ratio": 0.8,
-    "val_ratio": 0.1,
-    "test_ratio": 0.1,
-    "seed": 42,
-    "stratify_by": "domain"
-  },
+
   "trace_collection": {
     "prover_timeout": 60.0,
     "max_clauses": 5000,
     "max_steps": 10000
   },
+
   "output": {
     "trace_dir": ".data/traces",
     "cache_dir": ".data/cache"
@@ -357,34 +335,41 @@ Controls which problems to use and how to process them:
 
 ### Training Configuration (`configs/training/*.json`)
 
-Controls model architecture and training hyperparameters:
+Controls PyTorch model architecture and training hyperparameters:
 
 ```json
 {
-  "name": "default",
+  "name": "gcn",
+  "description": "Graph Convolutional Network clause selector",
+
   "model": {
-    "type": "gcn",           // gcn, gat, graphsage, transformer, mlp
+    "type": "gcn",
     "hidden_dim": 64,
     "num_layers": 3,
-    "num_heads": 4,          // For GAT/transformer
-    "dropout": 0.1
+    "num_heads": 4,
+    "dropout": 0.1,
+    "input_dim": 13
   },
+
   "training": {
+    "data_config": "default",
     "batch_size": 32,
     "learning_rate": 0.001,
     "weight_decay": 1e-5,
     "max_epochs": 100,
-    "patience": 10
+    "patience": 10,
+    "gradient_clip": 1.0
   },
-  "distributed": {
-    "num_gpus": -1,          // -1 = all available
-    "strategy": "ddp",
-    "precision": "32-true"   // or "16-mixed"
+
+  "optimizer": {
+    "type": "adamw",
+    "betas": [0.9, 0.999]
   },
-  "evaluation": {
-    "eval_every_n_epochs": 10,
-    "num_eval_problems": 100,
-    "eval_timeout": 10.0
+
+  "scheduler": {
+    "type": "cosine",
+    "min_lr_ratio": 0.01,
+    "warmup_epochs": 5
   }
 }
 ```
@@ -396,22 +381,35 @@ from proofatlas.ml import DataConfig, TrainingConfig, list_configs
 
 # List available presets
 print(list_configs())
-# {'data': ['default', 'unit_equality'], 'training': ['default']}
+# {'data': ['default', 'test', 'unit_equality'], 'training': ['gcn', 'gat', 'mlp', 'transformer']}
 
 # Load preset by name
-data_cfg = DataConfig.load_preset("unit_equality")
-train_cfg = TrainingConfig.load_preset("default")
+data_cfg = DataConfig.load_preset("default")
+train_cfg = TrainingConfig.load_preset("gcn")
 
-# Load from file path
-data_cfg = DataConfig.load("configs/data/custom.json")
-
-# Access nested config values
+# Access config values
+print(data_cfg.selector.name)         # "age_weight"
 print(train_cfg.model.type)           # "gcn"
 print(train_cfg.training.batch_size)  # 32
-print(data_cfg.problem_filters.status)  # ["unsatisfiable"]
 
 # Save config
 train_cfg.save("configs/training/my_experiment.json")
+```
+
+### Training Workflow
+
+```bash
+# 1. Extract problem metadata (one-time)
+python scripts/extract_problem_metadata.py
+
+# 2. Collect training data using a selector
+python scripts/collect_data.py --data-config default --max-problems 100
+
+# 3. Train a model and export to safetensors
+python scripts/train.py --data .data/traces/default_data.pt --training gcn
+
+# 4. Use trained model in data config:
+# "selector": {"name": "gcn", "weights": "gcn.safetensors"}
 ```
 
 ### Problem Metadata
@@ -419,7 +417,6 @@ train_cfg.save("configs/training/my_experiment.json")
 Problem metadata is extracted from TPTP and stored in `.data/problem_metadata.json`:
 
 ```bash
-# Generate/update problem metadata
 python scripts/extract_problem_metadata.py
 ```
 

@@ -27,9 +27,9 @@ def get_tptp_base() -> Path:
     return Path(__file__).parent.parent / ".data/problems/tptp/TPTP-v9.0.0/Problems"
 
 
-def get_selectors_dir() -> Path:
-    """Get the selectors directory."""
-    return Path(__file__).parent.parent / ".selectors"
+def get_weights_dir() -> Path:
+    """Get the weights directory."""
+    return Path(__file__).parent.parent / ".weights"
 
 
 def load_problem_metadata() -> Dict[str, Any]:
@@ -77,9 +77,19 @@ def collect_from_problem(
     max_iterations: int,
     timeout_secs: float,
     literal_selection: str = "all",
-    onnx_model_path: Optional[Path] = None,
+    selector_name: str = "age_weight",
+    weights_path: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Run prover on a problem and extract training data."""
+    """Run prover on a problem and extract training data.
+
+    Args:
+        problem_path: Path to TPTP problem file
+        max_iterations: Maximum saturation steps
+        timeout_secs: Timeout in seconds
+        literal_selection: Literal selection strategy
+        selector_name: Name of selector (maps to Rust implementation)
+        weights_path: Path to weights file for ML selectors (in .weights/)
+    """
     from proofatlas import ProofState
     from proofatlas.ml.graph_utils import to_torch_tensors
 
@@ -100,9 +110,10 @@ def collect_from_problem(
 
     start = time.time()
     try:
-        if onnx_model_path is None:
-            return {"error": "ONNX model path is required"}
-        proof_found = state.run_saturation(max_iterations, timeout_secs, str(onnx_model_path))
+        # TODO: Update Rust API to accept selector_name + weights_path
+        # For now, still using the old ONNX path interface
+        weights_str = str(weights_path) if weights_path else ""
+        proof_found = state.run_saturation(max_iterations, timeout_secs, selector_name, weights_str)
     except Exception as e:
         return {"error": f"Saturation error: {e}"}
     elapsed = time.time() - start
@@ -180,13 +191,18 @@ def main():
     output_path = args.output or Path(config.output.trace_dir) / f"{config.name}_data.pt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Resolve ONNX model path
-    onnx_model_path = get_selectors_dir() / config.solver.clause_selector
-    if not onnx_model_path.exists():
-        print(f"Warning: ONNX model not found: {onnx_model_path}")
-        onnx_model_path = None
-    else:
-        print(f"Using clause selector: {onnx_model_path}")
+    # Resolve selector and weights
+    selector_name = config.selector.name
+    weights_path = None
+    if config.selector.weights:
+        weights_path = get_weights_dir() / config.selector.weights
+        if not weights_path.exists():
+            print(f"Warning: Weights file not found: {weights_path}")
+            weights_path = None
+        else:
+            print(f"Using weights: {weights_path}")
+
+    print(f"Using selector: {selector_name}")
 
     all_graphs, all_labels, all_problem_names, all_clause_ids = [], [], [], []
     successful, failed, no_proof = 0, 0, 0
@@ -206,7 +222,8 @@ def main():
             max_iterations=config.trace_collection.max_steps,
             timeout_secs=config.trace_collection.prover_timeout,
             literal_selection=config.solver.literal_selection,
-            onnx_model_path=onnx_model_path,
+            selector_name=selector_name,
+            weights_path=weights_path,
         )
 
         if "error" in result:

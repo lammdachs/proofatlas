@@ -39,25 +39,34 @@ The web demo runs entirely client-side using WebAssembly with ONNX-based neural 
 
 ```
 proofatlas/
-├── rust/                     # Core Rust implementation
-│   ├── src/
-│   │   ├── core/            # Terms, literals, clauses, substitutions
-│   │   ├── inference/       # Resolution, factoring, superposition
-│   │   ├── saturation/      # Saturation loop, subsumption
-│   │   ├── ml/              # Graph building, ONNX inference
-│   │   ├── parser/          # TPTP parser
-│   │   └── selection/       # Clause/literal selection strategies
-│   └── tests/
-├── python/                   # Python bindings and ML training
-│   ├── proofatlas/
-│   │   └── ml/              # PyTorch models, training pipeline
-│   └── tests/
-├── wasm/                     # WebAssembly frontend
-│   ├── index.html           # Web prover interface
-│   └── models/              # ONNX models for web
-├── docs/                     # Documentation
-│   └── onnx_interface.md    # ONNX model specification
-└── .selectors/              # Pre-trained ONNX selectors
+├── rust/src/                  # Core Rust theorem prover
+│   ├── core/                  # Terms, literals, clauses, substitutions, KBO
+│   ├── inference/             # Resolution, factoring, superposition, demodulation
+│   ├── saturation/            # Saturation loop, subsumption
+│   ├── parser/                # TPTP parser
+│   ├── selection/             # Clause/literal selection (Rust/Burn)
+│   └── ml/                    # Graph building, inference
+│
+├── python/proofatlas/         # Python bindings and ML training
+│   ├── ml/                    # Config, training infrastructure
+│   └── selectors/             # PyTorch model implementations (GCN, GAT, MLP, Transformer)
+│
+├── configs/
+│   ├── data/                  # Data collection configs (Rust selector + problem filters)
+│   └── training/              # ML training configs (model architecture + hyperparameters)
+│
+├── scripts/                   # train.py, collect_data.py, compare_with_vampire.py
+├── wasm/                      # WebAssembly frontend
+├── docs/                      # Documentation
+│
+│ # External tools (gitignored):
+├── .vampire/                  # Vampire prover binary (for benchmarking)
+├── .pyres/                    # PyRes prover (Python reference implementation)
+│
+│ # Generated/data (gitignored):
+├── .weights/                  # Trained model weights (safetensors)
+├── .data/                     # TPTP problems, traces, metadata
+└── .logs/                     # Training logs
 ```
 
 ## Installation
@@ -104,39 +113,25 @@ state.set_clause_selector(Box::new(selector));
 
 ### Training Custom Models (Python)
 
-```python
-import torch
-import torch.nn as nn
+```bash
+# 1. Extract problem metadata (one-time setup)
+python scripts/extract_problem_metadata.py
 
-class MyClauseSelector(nn.Module):
-    def __init__(self, feature_dim=13, hidden_dim=64):
-        super().__init__()
-        self.encoder = nn.Linear(feature_dim, hidden_dim)
-        self.scorer = nn.Linear(hidden_dim, 1)
+# 2. Collect training data
+python scripts/collect_data.py --data-config default --max-problems 100
 
-    def forward(self, node_features, pool_matrix):
-        # node_features: [total_nodes, 13]
-        # pool_matrix: [num_clauses, total_nodes]
-        node_emb = torch.relu(self.encoder(node_features))
-        clause_emb = torch.mm(pool_matrix, node_emb)
-        return self.scorer(clause_emb).squeeze(-1)
+# 3. Train a GCN model and export to safetensors
+python scripts/train.py --data .data/traces/default_data.pt --training gcn
 
-# Export to ONNX
-model = MyClauseSelector()
-torch.onnx.export(
-    model,
-    (torch.randn(50, 13), torch.randn(10, 50)),
-    "selector.onnx",
-    input_names=["node_features", "pool_matrix"],
-    output_names=["scores"],
-    dynamic_axes={
-        "node_features": {0: "total_nodes"},
-        "pool_matrix": {0: "num_clauses", 1: "total_nodes"},
-        "scores": {0: "num_clauses"},
-    },
-    opset_version=14,
-)
+# 4. Use trained model by updating data config:
+# "selector": {"name": "gcn", "weights": "gcn.safetensors"}
 ```
+
+Available model architectures (in `configs/training/`):
+- **gcn**: Graph Convolutional Network
+- **gat**: Graph Attention Network
+- **mlp**: Multi-Layer Perceptron baseline
+- **transformer**: Transformer-based selector
 
 See [docs/onnx_interface.md](docs/onnx_interface.md) for the complete feature specification.
 
