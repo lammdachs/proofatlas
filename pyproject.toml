@@ -53,10 +53,9 @@ examples = [
 # Legacy dependencies from the old Python implementation (optional)
 legacy = [
     "lark",
-    "networkx", 
+    "networkx",
     "numpy",
     "tqdm",
-    "python-dotenv",
     "pyyaml",
     "torch>=2.0.0",
 ]

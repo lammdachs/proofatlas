@@ -24,10 +24,6 @@
 !wasm/examples/*.json
 !wasm/benchmark_problems.json
 
-# Environment files
-.env
-.env.backup
-
 # Node.js
 node_modules/
 
