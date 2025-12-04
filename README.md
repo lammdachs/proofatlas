@@ -22,7 +22,7 @@ Each clause is converted to a graph where nodes represent syntactic elements (cl
 
 ## Live Demo
 
-Try ProofAtlas in your browser: **[apluska.github.io/proofatlas](https://apluska.github.io/proofatlas)**
+Try ProofAtlas in your browser: **[lexpk.github.io/proofatlas](https://lexpk.github.io/proofatlas)**
 
 The web demo runs entirely client-side using WebAssembly with ONNX-based neural clause selection.
 
