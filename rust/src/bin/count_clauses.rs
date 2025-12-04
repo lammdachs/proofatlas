@@ -1,7 +1,7 @@
 //! Count clauses generated over time
 
 use proofatlas::{
-    parse_tptp_file, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
+    parse_tptp_file, AgeWeightSelector, ClauseSelector, LiteralSelectionStrategy, SaturationConfig,
     SaturationResult, SaturationState,
 };
 use std::env;
@@ -12,18 +12,20 @@ use std::time::Duration;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let model_path = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        eprintln!("Usage: {} <onnx_model>", args[0]);
-        std::process::exit(1);
-    };
+    // Parse age-weight ratio from args (optional)
+    let age_weight_ratio: f64 = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.5);
 
-    // Verify ONNX model can be loaded
-    if let Err(e) = OnnxClauseSelector::new(&model_path) {
-        eprintln!("Failed to load ONNX model: {}", e);
-        std::process::exit(1);
-    }
+    println!(
+        "Using AgeWeightSelector with ratio {}",
+        age_weight_ratio
+    );
+
+    // Create selector factory
+    let create_selector: Box<dyn Fn() -> Box<dyn ClauseSelector>> =
+        Box::new(move || Box::new(AgeWeightSelector::new(age_weight_ratio)) as Box<dyn ClauseSelector>);
 
     // Write right identity problem to temp file
     let tptp_content = r#"
@@ -33,7 +35,7 @@ cnf(associativity, axiom, mult(mult(X,Y),Z) = mult(X,mult(Y,Z))).
 cnf(goal, negated_conjecture, mult(c,e) != c).
 "#;
 
-    let temp_filename = "/tmp/right_identity.p";
+    let temp_filename = "right_identity_test.p";
     let mut file = File::create(temp_filename).expect("Failed to create temp file");
     writeln!(file, "{}", tptp_content).expect("Failed to write temp file");
 
@@ -46,11 +48,11 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
         }
     };
 
-    println!("Testing clause generation with ONNX selector...\n");
+    println!("Testing clause generation...\n");
 
     // Test different step limits
     for &steps in &[10, 20, 50, 100, 200] {
-        let selector = OnnxClauseSelector::new(&model_path).unwrap();
+        let selector = create_selector();
 
         let config = SaturationConfig {
             max_clauses: 10000,
@@ -61,7 +63,7 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
             step_limit: Some(steps),
         };
 
-        let state = SaturationState::new(formula.clauses.clone(), config, Box::new(selector));
+        let state = SaturationState::new(formula.clauses.clone(), config, selector);
 
         match state.saturate() {
             SaturationResult::ResourceLimit(proof_steps, _) => {
@@ -74,9 +76,15 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
             SaturationResult::Proof(proof) => {
                 println!("PROOF FOUND after {} steps!", proof.steps.len());
                 println!("Empty clause at index: {}", proof.empty_clause_idx);
+
+                // Clean up temp file
+                let _ = std::fs::remove_file(temp_filename);
                 return;
             }
             _ => {}
         }
     }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(temp_filename);
 }

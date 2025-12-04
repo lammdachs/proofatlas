@@ -26,9 +26,6 @@
 //! ## ML-based selectors (Burn framework):
 //! - [`burn_gcn::BurnGcnSelector`] - GCN-based clause selection
 //! - [`burn_mlp::BurnMlpSelector`] - MLP-based clause selection
-//!
-//! ## Legacy ML selectors (ONNX):
-//! - [`OnnxClauseSelector`] - ML-based clause selection using ONNX model
 
 pub mod age_weight;
 pub mod burn_gcn;
@@ -45,5 +42,5 @@ pub use burn_mlp::{
     create_ndarray_mlp_selector, load_ndarray_mlp_selector, BurnMlpSelector, MlpModel,
     NdarrayMlpSelector,
 };
-pub use clause::{ClauseSelector, OnnxClauseSelector};
+pub use clause::ClauseSelector;
 pub use literal::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};

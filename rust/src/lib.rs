@@ -27,10 +27,11 @@ pub use inference::{
 };
 
 pub use selection::{
-    AgeWeightSelector, ClauseSelector, LiteralSelector, OnnxClauseSelector, SelectAll,
-    SelectMaxWeight,
+    create_ndarray_gcn_selector, create_ndarray_mlp_selector, load_ndarray_gcn_selector,
+    load_ndarray_mlp_selector, AgeWeightSelector, BurnGcnSelector, BurnMlpSelector, ClauseSelector,
+    GcnModel, LiteralSelector, MlpModel, NdarrayGcnSelector, NdarrayMlpSelector, SelectAll,
+    SelectLargestNegative, SelectMaxWeight,
 };
-pub use ml::ClauseScorer;
 
 pub use saturation::{
     saturate, saturate_with_steps, LiteralSelectionStrategy, SaturationConfig, SaturationResult,

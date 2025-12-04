@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal, OnnxClauseSelector};
+use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal, AgeWeightSelector, ClauseSelector};
 use std::time::Duration;
 
 #[wasm_bindgen]
@@ -10,8 +10,10 @@ pub struct ProofAtlasWasm;
 pub struct ProverOptions {
     pub timeout_ms: u32,
     pub max_clauses: usize,
-    pub literal_selection: Option<String>, // "all" or "max_weight"
-    pub onnx_model_data: Vec<u8>,          // ONNX model bytes (required)
+    pub literal_selection: Option<String>, // "all", "max_weight", or "largest_negative"
+    pub selector_type: Option<String>,     // "age_weight", "gcn", or "mlp" (default: "age_weight")
+    pub selector_weights: Option<Vec<u8>>, // Safetensors weights for ML selectors (optional)
+    pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.5)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -113,16 +115,31 @@ impl ProofAtlasWasm {
             step_limit: None,
         };
 
-        web_sys::console::log_1(&"Config created, loading ONNX selector...".into());
+        web_sys::console::log_1(&"Config created, creating clause selector...".into());
 
-        // Create ONNX selector from model data (required)
-        let clause_selector = match OnnxClauseSelector::from_bytes(&options.onnx_model_data) {
-            Ok(selector) => {
-                web_sys::console::log_1(&"ONNX clause selector loaded".into());
-                Box::new(selector)
+        // Create clause selector based on options
+        let clause_selector: Box<dyn ClauseSelector> = match options.selector_type.as_deref() {
+            Some("gcn") => {
+                // GCN selector requires weights
+                let _weights = options.selector_weights.as_ref()
+                    .ok_or_else(|| JsError::new("GCN selector requires selector_weights"))?;
+
+                // TODO: Add load_from_bytes method to Burn selectors for WASM support
+                return Err(JsError::new("GCN selector with safetensors not yet supported in WASM. Use age_weight instead."));
             }
-            Err(e) => {
-                return Err(JsError::new(&format!("Failed to load ONNX model: {}", e)));
+            Some("mlp") => {
+                // MLP selector requires weights
+                let _weights = options.selector_weights.as_ref()
+                    .ok_or_else(|| JsError::new("MLP selector requires selector_weights"))?;
+
+                // TODO: Add load_from_bytes method to Burn selectors for WASM support
+                return Err(JsError::new("MLP selector with safetensors not yet supported in WASM. Use age_weight instead."));
+            }
+            _ => {
+                // Default to age_weight selector (no model needed)
+                let ratio = options.age_weight_ratio.unwrap_or(0.5);
+                web_sys::console::log_1(&format!("Using AgeWeight selector with ratio {}", ratio).into());
+                Box::new(AgeWeightSelector::new(ratio))
             }
         };
 

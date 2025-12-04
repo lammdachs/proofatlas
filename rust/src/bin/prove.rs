@@ -4,23 +4,22 @@ use std::env;
 use std::time::Instant;
 
 use proofatlas::{
-    parse_tptp_file, saturate, LiteralSelectionStrategy, OnnxClauseSelector, SaturationConfig,
-    SaturationResult,
+    parse_tptp_file, saturate, AgeWeightSelector, ClauseSelector, LiteralSelectionStrategy,
+    SaturationConfig, SaturationResult,
 };
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <tptp_file> --model <onnx_model> [options]", args[0]);
-        eprintln!("\nRequired:");
-        eprintln!("  --model <path>         Path to ONNX clause selector model");
+        eprintln!("Usage: {} <tptp_file> [options]", args[0]);
         eprintln!("\nOptions:");
         eprintln!("  --timeout <seconds>    Set timeout (default: 60)");
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
         eprintln!("  --literal-selection <strategy>");
         eprintln!("                         Literal selection: all, max_weight, largest_negative (default: all)");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
+        eprintln!("  --age-weight <ratio>   Age probability for age-weight selector (default: 0.5)");
         eprintln!("  --verbose              Show detailed progress");
         std::process::exit(1);
     }
@@ -29,7 +28,7 @@ fn main() {
     let mut config = SaturationConfig::default();
     let mut verbose = false;
     let mut include_dirs: Vec<String> = Vec::new();
-    let mut model_path: Option<String> = None;
+    let mut age_weight_ratio: f64 = 0.5;
 
     // Parse command line options
     let mut i = 2;
@@ -75,9 +74,11 @@ fn main() {
             "--verbose" => {
                 verbose = true;
             }
-            "--model" => {
+            "--age-weight" => {
                 if i + 1 < args.len() {
-                    model_path = Some(args[i + 1].clone());
+                    if let Ok(ratio) = args[i + 1].parse::<f64>() {
+                        age_weight_ratio = ratio;
+                    }
                     i += 1;
                 }
             }
@@ -88,24 +89,8 @@ fn main() {
         i += 1;
     }
 
-    // Check required model path
-    let model_path = match model_path {
-        Some(p) => p,
-        None => {
-            eprintln!("Error: --model <path> is required");
-            eprintln!("Specify path to ONNX clause selector model");
-            std::process::exit(1);
-        }
-    };
-
-    // Load ONNX clause selector
-    let clause_selector = match OnnxClauseSelector::new(&model_path) {
-        Ok(s) => Box::new(s),
-        Err(e) => {
-            eprintln!("Failed to load ONNX model '{}': {}", model_path, e);
-            std::process::exit(1);
-        }
-    };
+    // Create clause selector (age-weight heuristic)
+    let clause_selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(age_weight_ratio));
 
     // Parse TPTP with include support
     let include_dir_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();

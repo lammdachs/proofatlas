@@ -476,7 +476,7 @@ impl ProofState {
     /// Args:
     ///     max_iterations: Maximum number of saturation steps
     ///     timeout_secs: Optional timeout in seconds
-    ///     onnx_model_path: Path to ONNX clause selector model (required)
+    ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
     ///
     /// Returns:
     ///     True if proof found, False otherwise
@@ -484,22 +484,16 @@ impl ProofState {
         &mut self,
         max_iterations: usize,
         timeout_secs: Option<f64>,
-        onnx_model_path: String,
+        age_weight_ratio: Option<f64>,
     ) -> PyResult<bool> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
-        use crate::selection::OnnxClauseSelector;
+        use crate::selection::AgeWeightSelector;
         use std::time::Duration;
 
-        // Load ONNX clause selector (required)
-        let clause_selector = match OnnxClauseSelector::new(&onnx_model_path) {
-            Ok(selector) => Box::new(selector),
-            Err(e) => {
-                return Err(PyValueError::new_err(format!(
-                    "Failed to load ONNX model '{}': {}",
-                    onnx_model_path, e
-                )));
-            }
-        };
+        // Create clause selector (age-weight heuristic)
+        let ratio = age_weight_ratio.unwrap_or(0.5);
+        let clause_selector: Box<dyn crate::selection::ClauseSelector> =
+            Box::new(AgeWeightSelector::new(ratio));
 
         // Build config
         let timeout = timeout_secs

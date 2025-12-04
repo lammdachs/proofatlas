@@ -14,7 +14,8 @@ proofatlas = { path = "../rust", features = ["wasm"] }
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["Performance", "Window", "console"] }
 js-sys = "=0.3.77"
-getrandom = { version = "0.2", features = ["js"] }
+# Required for Burn's dependency chain in WASM
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 # Optimize for small code size
 [profile.release]

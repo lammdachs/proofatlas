@@ -24,9 +24,6 @@ serde_json = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 numpy = { version = "0.20", optional = true }
 
-# ML inference with tract (pure Rust ONNX runtime, WASM compatible)
-tract-onnx = "0.21"
-
 # Burn ML framework (for native inference with safetensors weights)
 burn = "0.19"
 burn-ndarray = "0.19"
@@ -38,8 +35,7 @@ web-sys = { version = "0.3", features = ["Performance", "Window"] }
 [features]
 default = []
 python = ["pyo3", "numpy"]
-# WASM needs getrandom-js for tract's random number generation
-wasm = ["tract-onnx/getrandom-js"]
+wasm = []
 
 [dev-dependencies]
 # criterion = "0.5"  # Commented out due to rustc version requirements
@@ -51,7 +47,3 @@ path = "src/bin/prove.rs"
 [[bin]]
 name = "prove_json"
 path = "src/bin/prove_json.rs"
-
-[[bin]]
-name = "test_onnx"
-path = "src/bin/test_onnx.rs"

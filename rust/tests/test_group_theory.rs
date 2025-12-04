@@ -38,7 +38,7 @@ fn run_group_problem(
     }
     trace.push("".to_string());
 
-    // Run saturation with ONNX selector
+    // Run saturation
     let state = SaturationState::new(formula.clauses, config, create_selector());
     let start_time = std::time::Instant::now();
     let result = state.saturate();
