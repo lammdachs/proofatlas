@@ -8,7 +8,7 @@ pub mod inference;
 pub mod ml;
 pub mod parser;
 pub mod saturation;
-pub mod selection;
+pub mod selectors;
 pub mod time_compat;
 pub mod unification;
 
@@ -23,14 +23,13 @@ pub use core::{
 
 pub use inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition, InferenceResult,
-    InferenceRule,
+    InferenceRule, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
 };
 
-pub use selection::{
+pub use selectors::{
     create_ndarray_gcn_selector, create_ndarray_mlp_selector, load_ndarray_gcn_selector,
     load_ndarray_mlp_selector, AgeWeightSelector, BurnGcnSelector, BurnMlpSelector, ClauseSelector,
-    GcnModel, LiteralSelector, MlpModel, NdarrayGcnSelector, NdarrayMlpSelector, SelectAll,
-    SelectLargestNegative, SelectMaxWeight,
+    GcnModel, MlpModel, NdarrayGcnSelector, NdarrayMlpSelector,
 };
 
 pub use saturation::{

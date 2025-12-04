@@ -6,7 +6,7 @@ use super::common::{
 use crate::core::{
     Atom, Clause, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
 };
-use crate::selection::LiteralSelector;
+use super::LiteralSelector;
 use crate::unification::unify;
 
 /// Position in a term/atom where unification can occur
@@ -279,7 +279,7 @@ fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
 mod tests {
     use super::*;
     use crate::core::{Constant, FunctionSymbol, PredicateSymbol, Variable};
-    use crate::selection::SelectAll;
+    use crate::inference::SelectAll;
 
     #[test]
     fn test_superposition_with_selection() {

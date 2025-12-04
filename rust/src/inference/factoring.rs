@@ -2,7 +2,7 @@
 
 use super::common::{remove_duplicate_literals, unify_atoms, InferenceResult, InferenceRule};
 use crate::core::Clause;
-use crate::selection::LiteralSelector;
+use super::LiteralSelector;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -68,7 +68,7 @@ pub fn factoring(
 mod tests {
     use super::*;
     use crate::core::{Atom, Literal, PredicateSymbol, Term, Variable};
-    use crate::selection::SelectAll;
+    use crate::inference::SelectAll;
 
     #[test]
     fn test_factoring_with_select_all() {

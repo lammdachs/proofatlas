@@ -7,9 +7,8 @@ use crate::inference::{
     InferenceResult, InferenceRule,
 };
 use crate::parser::orient_equalities::orient_clause_equalities;
-use crate::selection::{
-    ClauseSelector, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
-};
+use crate::inference::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};
+use crate::selectors::ClauseSelector;
 use crate::time_compat::Instant;
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
@@ -523,7 +522,7 @@ impl SaturationState {
 mod tests {
     use super::*;
     use crate::core::{Atom, CNFFormula, Constant, Literal, PredicateSymbol, Term, Variable};
-    use crate::selection::AgeWeightSelector;
+    use crate::selectors::AgeWeightSelector;
 
     fn create_selector() -> Box<dyn ClauseSelector> {
         Box::new(AgeWeightSelector::default())

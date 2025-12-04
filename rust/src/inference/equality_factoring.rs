@@ -4,7 +4,7 @@ use super::common::{InferenceResult, InferenceRule};
 use crate::core::{
     Atom, Clause, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
 };
-use crate::selection::LiteralSelector;
+use super::LiteralSelector;
 use crate::unification::unify;
 
 /// Apply equality factoring rule

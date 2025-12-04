@@ -4,7 +4,7 @@ use super::common::{
     remove_duplicate_literals, rename_clause_variables, unify_atoms, InferenceResult, InferenceRule,
 };
 use crate::core::Clause;
-use crate::selection::LiteralSelector;
+use super::LiteralSelector;
 
 /// Apply binary resolution between two clauses using literal selection
 pub fn resolution(
@@ -81,7 +81,7 @@ pub fn resolution(
 mod tests {
     use super::*;
     use crate::core::{Atom, Constant, Literal, PredicateSymbol, Term, Variable};
-    use crate::selection::SelectAll;
+    use crate::inference::SelectAll;
 
     #[test]
     fn test_resolution_with_select_all() {

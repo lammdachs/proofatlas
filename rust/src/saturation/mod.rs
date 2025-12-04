@@ -6,7 +6,7 @@ pub mod subsumption;
 pub use state::{LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState};
 
 use crate::core::CNFFormula;
-use crate::selection::ClauseSelector;
+use crate::selectors::ClauseSelector;
 
 /// Run saturation on a CNF formula
 pub fn saturate(

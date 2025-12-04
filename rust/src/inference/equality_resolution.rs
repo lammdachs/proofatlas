@@ -2,7 +2,7 @@
 
 use super::common::{InferenceResult, InferenceRule};
 use crate::core::Clause;
-use crate::selection::LiteralSelector;
+use super::LiteralSelector;
 use crate::unification::unify;
 
 /// Apply equality resolution rule using literal selection
@@ -59,7 +59,7 @@ pub fn equality_resolution(
 mod tests {
     use super::*;
     use crate::core::{Atom, Constant, Literal, PredicateSymbol, Term};
-    use crate::selection::SelectAll;
+    use crate::inference::SelectAll;
 
     #[test]
     fn test_equality_resolution_with_select_all() {

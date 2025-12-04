@@ -15,7 +15,7 @@ use crate::inference::{
 use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
-use crate::selection::{LiteralSelector, SelectAll, SelectMaxWeight};
+use crate::inference::{LiteralSelector, SelectAll, SelectMaxWeight};
 
 /// Python-accessible proof state
 #[pyclass]
@@ -487,12 +487,12 @@ impl ProofState {
         age_weight_ratio: Option<f64>,
     ) -> PyResult<bool> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
-        use crate::selection::AgeWeightSelector;
+        use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
 
         // Create clause selector (age-weight heuristic)
         let ratio = age_weight_ratio.unwrap_or(0.5);
-        let clause_selector: Box<dyn crate::selection::ClauseSelector> =
+        let clause_selector: Box<dyn crate::selectors::ClauseSelector> =
             Box::new(AgeWeightSelector::new(ratio));
 
         // Build config
