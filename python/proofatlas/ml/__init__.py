@@ -3,8 +3,10 @@
 This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
 - Data collection: extract training data from proofs
-- Models: GNN architectures for clause scoring (pure PyTorch, no PyG dependency)
 - Training: training loop and utilities
+- Config: configuration loading for data and selectors
+
+For selector models, use proofatlas.selectors directly.
 """
 
 from .graph_utils import (
@@ -27,29 +29,6 @@ from .data_collection import (
     load_training_dataset,
 )
 
-from .model import (
-    # GNN layers
-    GCNLayer,
-    GATLayer,
-    GraphSAGELayer,
-    # Utility functions
-    normalize_adjacency,
-    edge_index_to_adjacency,
-    # GNN models
-    ClauseGCN,
-    ClauseGAT,
-    ClauseGraphSAGE,
-    # Transformer models
-    ClauseTransformer,
-    ClauseGNNTransformer,
-    # Baseline models
-    NodeMLP,
-    AgeWeightHeuristic,
-    # Factory and export
-    create_model,
-    export_to_onnx,
-)
-
 from .training import (
     ClauseDataset,
     collate_clause_batch,
@@ -65,18 +44,15 @@ from .config import (
     DataConfig,
     ProblemFilters,
     SplitConfig,
+    SolverConfig,
     TraceCollectionConfig,
     OutputConfig,
-    # Training config
-    TrainingConfig,
+    # Selector config
+    SelectorConfig,
     ModelConfig,
     TrainingParams,
     OptimizerConfig,
     SchedulerConfig,
-    DistributedConfig,
-    EvaluationConfig,
-    CheckpointConfig,
-    LoggingConfig,
     # Utilities
     list_configs,
     merge_configs,
@@ -99,26 +75,6 @@ __all__ = [
     "collect_from_problem",
     "collect_from_directory",
     "load_training_dataset",
-    # GNN layers
-    "GCNLayer",
-    "GATLayer",
-    "GraphSAGELayer",
-    # Utility functions
-    "normalize_adjacency",
-    "edge_index_to_adjacency",
-    # GNN models
-    "ClauseGCN",
-    "ClauseGAT",
-    "ClauseGraphSAGE",
-    # Transformer models
-    "ClauseTransformer",
-    "ClauseGNNTransformer",
-    # Baseline models
-    "NodeMLP",
-    "AgeWeightHeuristic",
-    # Factory and export
-    "create_model",
-    "export_to_onnx",
     # Training
     "ClauseDataset",
     "collate_clause_batch",
@@ -131,18 +87,15 @@ __all__ = [
     "DataConfig",
     "ProblemFilters",
     "SplitConfig",
+    "SolverConfig",
     "TraceCollectionConfig",
     "OutputConfig",
-    # Config - Training
-    "TrainingConfig",
+    # Config - Selector
+    "SelectorConfig",
     "ModelConfig",
     "TrainingParams",
     "OptimizerConfig",
     "SchedulerConfig",
-    "DistributedConfig",
-    "EvaluationConfig",
-    "CheckpointConfig",
-    "LoggingConfig",
     # Config utilities
     "list_configs",
     "merge_configs",

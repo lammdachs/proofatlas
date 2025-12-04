@@ -25,8 +25,8 @@ try:
 except ImportError:
     LIGHTNING_AVAILABLE = False
 
-from .model import create_model, normalize_adjacency, edge_index_to_adjacency
-from .config import TrainingConfig
+from ..selectors import create_model, normalize_adjacency, edge_index_to_adjacency
+from .config import SelectorConfig
 
 
 # =============================================================================
@@ -130,7 +130,7 @@ if LIGHTNING_AVAILABLE:
     class ClauseSelectionModule(L.LightningModule):
         """Lightning module for clause selection training."""
 
-        def __init__(self, config: TrainingConfig):
+        def __init__(self, config: SelectorConfig):
             super().__init__()
             self.config = config
             self.save_hyperparameters(config.to_dict())
@@ -214,7 +214,7 @@ class JSONLogger:
             "evaluations": [],
         }
 
-    def log_config(self, config: TrainingConfig):
+    def log_config(self, config: SelectorConfig):
         self.metrics["config"] = config.to_dict()
         self._save()
 
@@ -391,7 +391,7 @@ if LIGHTNING_AVAILABLE:
 def train(
     train_dataset: ClauseDataset,
     val_dataset: ClauseDataset,
-    config: TrainingConfig,
+    config: SelectorConfig,
 ) -> Tuple[nn.Module, Dict]:
     """
     Train a clause selection model.
@@ -502,7 +502,7 @@ def train(
     return module.model, json_logger.metrics
 
 
-def save_model(model: nn.Module, path: Path, config: Optional[TrainingConfig] = None):
+def save_model(model: nn.Module, path: Path, config: Optional[SelectorConfig] = None):
     """Save model checkpoint."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -610,12 +610,12 @@ if __name__ == "__main__":
         # Try loading as file path first, then as preset name
         config_path = Path(args.config)
         if config_path.exists():
-            config = TrainingConfig.load(config_path)
+            config = SelectorConfig.load(config_path)
         else:
-            config = TrainingConfig.load_preset(str(args.config))
+            config = SelectorConfig.load_preset(str(args.config))
     else:
         # Build config from CLI args
-        config = TrainingConfig(
+        config = SelectorConfig(
             name=args.run_name,
             model=ModelConfig(
                 type=args.model_type,

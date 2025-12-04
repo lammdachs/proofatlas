@@ -1,7 +1,9 @@
 """
 Configuration loading and validation for ML training and data pipelines.
 
-Configs are stored in configs/data/ and configs/training/ as JSON files.
+Configs are stored in:
+- configs/data/ - Data collection and filtering
+- configs/selectors/ - Selector model definitions and training params
 """
 
 import json
@@ -129,31 +131,32 @@ class DataConfig:
 
 
 # =============================================================================
-# Training Configuration
+# Selector Configuration
 # =============================================================================
 
 
 @dataclass
 class ModelConfig:
     """Model architecture configuration."""
-    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp
+    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp, age_weight
     hidden_dim: int = 64
     num_layers: int = 3
     num_heads: int = 4
     dropout: float = 0.1
     input_dim: int = 13
+    age_probability: float = 0.5  # For age_weight heuristic
 
 
 @dataclass
 class TrainingParams:
     """Training hyperparameters."""
+    data_config: Optional[str] = None  # Reference to data config name
     batch_size: int = 32
     learning_rate: float = 0.001
     weight_decay: float = 1e-5
     max_epochs: int = 100
     patience: int = 10
     gradient_clip: float = 1.0
-    warmup_epochs: int = 5
 
 
 @dataclass
@@ -175,68 +178,52 @@ class SchedulerConfig:
 
 
 @dataclass
-class DistributedConfig:
-    """Distributed training configuration."""
-    num_gpus: int = -1  # -1 = all available
-    strategy: str = "ddp"  # ddp, ddp_spawn, fsdp
-    precision: str = "32-true"  # 32-true, 16-mixed, bf16-mixed
-
-
-@dataclass
-class EvaluationConfig:
-    """Evaluation configuration."""
-    eval_every_n_epochs: int = 10
-    num_eval_problems: int = 100
-    eval_timeout: float = 10.0
-    eval_max_clauses: int = 5000
-
-
-@dataclass
-class CheckpointConfig:
-    """Checkpointing configuration."""
-    save_top_k: int = 3
-    monitor: str = "val_loss"
-    mode: str = "min"
-
-
-@dataclass
-class LoggingConfig:
-    """Logging configuration."""
-    log_dir: str = "logs"
-    log_every_n_steps: int = 10
-    enable_progress_bar: bool = True
-
-
-@dataclass
-class TrainingConfig:
-    """Complete training configuration."""
+class SelectorConfig:
+    """Complete selector configuration."""
     name: str = "default"
     description: str = ""
     model: ModelConfig = field(default_factory=ModelConfig)
-    training: TrainingParams = field(default_factory=TrainingParams)
-    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
-    distributed: DistributedConfig = field(default_factory=DistributedConfig)
-    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
-    checkpointing: CheckpointConfig = field(default_factory=CheckpointConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    training: Optional[TrainingParams] = None  # None for heuristics that don't need training
+    optimizer: Optional[OptimizerConfig] = None
+    scheduler: Optional[SchedulerConfig] = None
+
+    @property
+    def requires_training(self) -> bool:
+        """Check if this selector requires training."""
+        return self.training is not None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # Remove None values for cleaner output
+        if self.training is None:
+            del d["training"]
+        if self.optimizer is None:
+            del d["optimizer"]
+        if self.scheduler is None:
+            del d["scheduler"]
+        return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
+    def from_dict(cls, d: Dict[str, Any]) -> "SelectorConfig":
+        training = None
+        if "training" in d and d["training"]:
+            training = TrainingParams(**d["training"])
+
+        optimizer = None
+        if "optimizer" in d and d["optimizer"]:
+            optimizer = OptimizerConfig(**d["optimizer"])
+
+        scheduler = None
+        if "scheduler" in d and d["scheduler"]:
+            scheduler = SchedulerConfig(**d["scheduler"])
+
         return cls(
             name=d.get("name", "default"),
             description=d.get("description", ""),
             model=ModelConfig(**d.get("model", {})),
-            training=TrainingParams(**d.get("training", {})),
-            optimizer=OptimizerConfig(**d.get("optimizer", {})),
-            scheduler=SchedulerConfig(**d.get("scheduler", {})),
-            distributed=DistributedConfig(**d.get("distributed", {})),
-            evaluation=EvaluationConfig(**d.get("evaluation", {})),
-            checkpointing=CheckpointConfig(**d.get("checkpointing", {})),
-            logging=LoggingConfig(**d.get("logging", {})),
+            training=training,
+            optimizer=optimizer,
+            scheduler=scheduler,
         )
 
     def save(self, path: Union[str, Path]):
@@ -246,21 +233,27 @@ class TrainingConfig:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load(cls, path: Union[str, Path]) -> "TrainingConfig":
+    def load(cls, path: Union[str, Path]) -> "SelectorConfig":
         with open(path) as f:
             return cls.from_dict(json.load(f))
 
     @classmethod
-    def load_preset(cls, name: str) -> "TrainingConfig":
-        """Load a preset training config by name."""
-        config_dir = get_config_dir() / "training"
+    def load_preset(cls, name: str) -> "SelectorConfig":
+        """Load a preset selector config by name."""
+        config_dir = get_config_dir() / "selectors"
         path = config_dir / f"{name}.json"
         if not path.exists():
             available = [p.stem for p in config_dir.glob("*.json")]
             raise FileNotFoundError(
-                f"Training config '{name}' not found. Available: {available}"
+                f"Selector config '{name}' not found. Available: {available}"
             )
         return cls.load(path)
+
+    def get_data_config(self) -> Optional[DataConfig]:
+        """Load the referenced data config, if any."""
+        if self.training and self.training.data_config:
+            return DataConfig.load_preset(self.training.data_config)
+        return None
 
 
 # =============================================================================
@@ -272,7 +265,7 @@ def list_configs(config_type: str = "all") -> Dict[str, List[str]]:
     """List available configuration presets.
 
     Args:
-        config_type: "data", "training", or "all"
+        config_type: "data", "selectors", or "all"
 
     Returns:
         Dictionary mapping config type to list of available names
@@ -285,10 +278,10 @@ def list_configs(config_type: str = "all") -> Dict[str, List[str]]:
         if data_dir.exists():
             result["data"] = [p.stem for p in data_dir.glob("*.json")]
 
-    if config_type in ("all", "training"):
-        training_dir = config_dir / "training"
-        if training_dir.exists():
-            result["training"] = [p.stem for p in training_dir.glob("*.json")]
+    if config_type in ("all", "selectors"):
+        selectors_dir = config_dir / "selectors"
+        if selectors_dir.exists():
+            result["selectors"] = [p.stem for p in selectors_dir.glob("*.json")]
 
     return result
 
