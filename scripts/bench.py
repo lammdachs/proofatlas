@@ -18,6 +18,12 @@ USAGE:
 
     Output: .logs/eval_TIMESTAMP/ containing results.csv, summary.json, comparison_matrix.csv
 
+CACHING:
+    Results are cached in .data/runs/{prover}/{preset}/{problem}.json
+    Re-running with the same problem set reuses cached results.
+
+    proofatlas-bench --force     # Ignore cache, rerun all problems
+
 JOB MANAGEMENT:
     Jobs run in the background and survive disconnection.
 
@@ -38,9 +44,10 @@ import csv
 import os
 import signal
 import sys
+import hashlib
 from pathlib import Path
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 try:
@@ -258,6 +265,55 @@ class BenchResult:
     time_s: float
     stdout: str = ""
     stderr: str = ""
+
+
+# Result caching
+CACHE_DIR = ".data/runs"
+
+
+def get_cache_path(base_dir: Path, prover: str, preset: str, problem: str) -> Path:
+    """Get the cache file path for a result."""
+    # Use problem name without extension as filename
+    problem_name = Path(problem).stem
+    return base_dir / CACHE_DIR / prover / preset / f"{problem_name}.json"
+
+
+def load_cached_result(base_dir: Path, prover: str, preset: str, problem: str) -> Optional[BenchResult]:
+    """Load a cached result if it exists."""
+    cache_path = get_cache_path(base_dir, prover, preset, problem)
+    if not cache_path.exists():
+        return None
+    try:
+        with open(cache_path) as f:
+            data = json.load(f)
+        return BenchResult(
+            problem=data["problem"],
+            status=data["status"],
+            time_s=data["time_s"],
+            stdout=data.get("stdout", ""),
+            stderr=data.get("stderr", ""),
+        )
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def save_cached_result(base_dir: Path, prover: str, preset: str, result: BenchResult):
+    """Save a result to the cache."""
+    cache_path = get_cache_path(base_dir, prover, preset, result.problem)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data = {
+        "problem": result.problem,
+        "status": result.status,
+        "time_s": result.time_s,
+        "prover": prover,
+        "preset": preset,
+        "timestamp": datetime.now().isoformat(),
+    }
+    # Don't cache stdout/stderr to save space (can be large)
+
+    with open(cache_path, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 def load_config(config_path: Path) -> dict:
@@ -505,21 +561,43 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
                tptp_root: Path, configs: dict, verbose: bool = False,
                quiet: bool = False, use_progress: bool = False,
                progress_desc: str = None, log_file = None,
-               config_idx: int = 0, total_configs: int = 0) -> tuple[list[BenchResult], dict]:
-    """Run a single prover/preset on a list of problems."""
+               config_idx: int = 0, total_configs: int = 0,
+               force: bool = False) -> tuple[list[BenchResult], dict]:
+    """Run a single prover/preset on a list of problems.
+
+    Results are cached in .data/runs/{prover}/{preset}/{problem}.json.
+    Cached results are reused unless force=True.
+    """
     results = []
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "unknown": 0}
+    cached_count = 0
 
     desc = progress_desc or f"{prover}/{preset}"
     problems_iter = tqdm(problems, desc=desc, unit="prob", leave=False) if use_progress else problems
 
     for i, problem in enumerate(problems_iter if use_progress else problems, 1):
-        if prover == "vampire":
-            result = run_vampire(problem, base_dir, configs["vampire"], preset, tptp_root)
-        elif prover == "spass":
-            result = run_spass(problem, base_dir, configs["spass"], preset)
+        # Check cache first
+        if not force:
+            cached = load_cached_result(base_dir, prover, preset, problem.name)
+            if cached:
+                result = cached
+                cached_count += 1
+            else:
+                cached = None
         else:
-            result = run_proofatlas(problem, base_dir, configs["proofatlas"], preset, tptp_root)
+            cached = None
+
+        if cached is None:
+            # Run the prover
+            if prover == "vampire":
+                result = run_vampire(problem, base_dir, configs["vampire"], preset, tptp_root)
+            elif prover == "spass":
+                result = run_spass(problem, base_dir, configs["spass"], preset)
+            else:
+                result = run_proofatlas(problem, base_dir, configs["proofatlas"], preset, tptp_root)
+
+            # Cache the result
+            save_cached_result(base_dir, prover, preset, result)
 
         results.append(result)
         stats[result.status] = stats.get(result.status, 0) + 1
@@ -531,11 +609,15 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
             log_file.flush()
 
         if use_progress:
-            problems_iter.set_postfix_str(f"+{stats['proof']} ~{stats['saturated']} T{stats['timeout']}")
+            cache_info = f" (c:{cached_count})" if cached_count > 0 else ""
+            problems_iter.set_postfix_str(f"+{stats['proof']} ~{stats['saturated']} T{stats['timeout']}{cache_info}")
         elif not quiet:
             symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!", "unknown": "?"}.get(result.status, "?")
+            if cached:
+                symbol = symbol.lower()  # lowercase for cached
             if verbose:
-                print(f"[{i}/{len(problems)}] {symbol} {result.problem}: {result.status} ({result.time_s:.2f}s)")
+                cached_str = " (cached)" if cached else ""
+                print(f"[{i}/{len(problems)}] {symbol} {result.problem}: {result.status} ({result.time_s:.2f}s){cached_str}")
             else:
                 print(symbol, end="", flush=True)
                 if i % 50 == 0:
@@ -549,8 +631,11 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
 
 def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_dir: Path,
              tptp_root: Path, configs: dict, output_dir: Path, verbose: bool = False,
-             log_file = None):
-    """Run evaluation across multiple provers and presets."""
+             log_file = None, force: bool = False):
+    """Run evaluation across multiple provers and presets.
+
+    Results are cached in .data/runs/ and reused unless force=True.
+    """
     # Collect all runs
     runs = []
     for prover in provers:
@@ -564,6 +649,7 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
     print(f"========================")
     print(f"Problems: {len(problems)}")
     print(f"Output dir: {output_dir}")
+    print(f"Cache: .data/runs/ {'(--force: ignoring cache)' if force else '(reusing cached results)'}")
     print(f"Configurations: {len(runs)}")
     for prover, preset in runs:
         print(f"  - {prover} / {preset}")
@@ -578,7 +664,8 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
         desc = f"[{idx}/{len(runs)}] {prover}/{preset}"
         results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs,
                                     verbose=False, quiet=True, use_progress=use_progress, progress_desc=desc,
-                                    log_file=log_file, config_idx=idx, total_configs=len(runs))
+                                    log_file=log_file, config_idx=idx, total_configs=len(runs),
+                                    force=force)
 
         for r in results:
             all_results.append({"prover": prover, "preset": preset, **r.__dict__})
@@ -654,6 +741,8 @@ def main():
                        help="Problem set from tptp.json")
     parser.add_argument("--max-problems", type=int, help="Maximum number of problems")
     parser.add_argument("--output-dir", type=str, help="Output directory")
+    parser.add_argument("--force", action="store_true",
+                       help="Ignore cached results and rerun all problems")
 
     # Job management
     parser.add_argument("--track", action="store_true",
@@ -742,7 +831,7 @@ def main():
 
         try:
             run_eval(provers, presets, problems, base_dir, tptp_root, configs,
-                     output_dir, verbose=True, log_file=sys.stdout)
+                     output_dir, verbose=True, log_file=sys.stdout, force=args.force)
         finally:
             clear_job_status(base_dir)
             sys.stdout.close()

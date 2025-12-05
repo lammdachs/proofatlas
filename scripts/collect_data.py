@@ -2,10 +2,14 @@
 """
 Collect training data from TPTP problems using the config system.
 
+Results are cached per-problem in .data/traces/{config_name}/{problem}.pt
+Re-running reuses cached results unless --force is specified.
+
 Usage:
     python scripts/collect_data.py --data-config default
     python scripts/collect_data.py --data-config unit_equality --max-problems 100
     python scripts/collect_data.py --data-config configs/data/custom.json
+    python scripts/collect_data.py --data-config default --force  # ignore cache
 """
 
 import argparse
@@ -20,6 +24,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 import torch
 from proofatlas.ml.config import DataConfig, ProblemFilters
+
+
+# Caching
+TRACE_CACHE_DIR = ".data/traces"
+
+
+def get_trace_cache_path(config_name: str, problem_path: str) -> Path:
+    """Get cache path for a problem trace."""
+    # Use problem path without extension, replace / with _
+    problem_name = problem_path.replace("/", "_").replace(".p", "")
+    base = Path(__file__).parent.parent
+    return base / TRACE_CACHE_DIR / config_name / f"{problem_name}.pt"
+
+
+def load_cached_trace(config_name: str, problem_path: str) -> Optional[Dict[str, Any]]:
+    """Load cached trace if it exists."""
+    cache_path = get_trace_cache_path(config_name, problem_path)
+    if not cache_path.exists():
+        return None
+    try:
+        return torch.load(cache_path, weights_only=False)
+    except Exception:
+        return None
+
+
+def save_trace_cache(config_name: str, problem_path: str, result: Dict[str, Any]):
+    """Save trace to cache."""
+    cache_path = get_trace_cache_path(config_name, problem_path)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(result, cache_path)
 
 
 def get_tptp_base() -> Path:
@@ -152,6 +186,7 @@ def main():
     parser.add_argument("--max-problems", type=int, help="Maximum problems to process")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be collected")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--force", action="store_true", help="Ignore cached results")
 
     args = parser.parse_args()
 
@@ -203,9 +238,10 @@ def main():
             print(f"Using weights: {weights_path}")
 
     print(f"Using selector: {selector_name}")
+    print(f"Cache: {TRACE_CACHE_DIR}/{config.name}/ {'(--force: ignoring)' if args.force else '(reusing cached)'}")
 
     all_graphs, all_labels, all_problem_names, all_clause_ids = [], [], [], []
-    successful, failed, no_proof = 0, 0, 0
+    successful, failed, no_proof, cached_count = 0, 0, 0, 0
     total_time = 0
 
     print(f"\nCollecting from {len(filtered)} problems...")
@@ -217,14 +253,25 @@ def main():
         pct = 100 * (i + 1) / len(filtered)
         print(f"\r[{pct:5.1f}%] {problem['path']:<40}", end="", flush=True)
 
-        result = collect_from_problem(
-            problem_path,
-            max_iterations=config.trace_collection.max_steps,
-            timeout_secs=config.trace_collection.prover_timeout,
-            literal_selection=config.solver.literal_selection,
-            selector_name=selector_name,
-            weights_path=weights_path,
-        )
+        # Check cache first
+        cached = None
+        if not args.force:
+            cached = load_cached_trace(config.name, problem["path"])
+
+        if cached is not None:
+            result = cached
+            cached_count += 1
+        else:
+            result = collect_from_problem(
+                problem_path,
+                max_iterations=config.trace_collection.max_steps,
+                timeout_secs=config.trace_collection.prover_timeout,
+                literal_selection=config.solver.literal_selection,
+                selector_name=selector_name,
+                weights_path=weights_path,
+            )
+            # Cache the result (even errors/no-proof, to avoid re-running)
+            save_trace_cache(config.name, problem["path"], result)
 
         if "error" in result:
             failed += 1
@@ -244,6 +291,8 @@ def main():
 
     print("\n\n" + "=" * 50)
     print(f"Successful: {successful}, No proof: {no_proof}, Errors: {failed}")
+    if cached_count > 0:
+        print(f"Cached: {cached_count} (reused from previous runs)")
     print(f"Total time: {total_time:.1f}s")
     print(f"Training examples: {len(all_labels)}")
 
