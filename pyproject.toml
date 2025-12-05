@@ -42,6 +42,12 @@ Repository = "https://github.com/lexpk/proofatlas"
 Issues = "https://github.com/lexpk/proofatlas/issues"
 
 [project.optional-dependencies]
+# For ML model training (not needed for inference - weights downloaded automatically)
+ml = [
+    "torch>=2.0.0",
+    "safetensors",
+]
+
 dev = [
     "pytest>=6.0",
     "pytest-cov",
@@ -51,18 +57,9 @@ dev = [
     "types-setuptools",
     "ruff",
 ]
+
 examples = [
     "matplotlib>=3.0",
-    "tqdm",
-]
-# Legacy dependencies from the old Python implementation (optional)
-legacy = [
-    "lark",
-    "networkx",
-    "numpy",
-    "tqdm",
-    "pyyaml",
-    "torch>=2.0.0",
 ]
 
 [tool.setuptools]

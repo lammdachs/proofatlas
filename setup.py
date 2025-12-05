@@ -31,6 +31,11 @@ setup(
     ],
 
     extras_require={
+        # For ML model training (not needed for inference)
+        "ml": [
+            "torch>=2.0.0",
+            "safetensors",
+        ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov",
@@ -42,7 +47,6 @@ setup(
         ],
         "examples": [
             "matplotlib>=3.0",
-            "tqdm",
         ],
     },
 

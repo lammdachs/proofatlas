@@ -1,6 +1,13 @@
 {
   "input_dim": 13,
 
+  "weights": {
+    "_comment": "Pre-trained model weights available for download from GitHub Releases",
+    "base_url": "https://github.com/lexpk/proofatlas/releases/download",
+    "version": "v0.2.0",
+    "models": {}
+  },
+
   "architectures": {
     "gcn": {
       "description": "Graph Convolutional Network clause selector",
