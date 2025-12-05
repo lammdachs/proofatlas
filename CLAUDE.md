@@ -157,7 +157,7 @@ proofatlas/
 │   ├── data/                  # Data collection configs (Rust selector + problem filters)
 │   └── training/              # ML training configs (gcn, gat, mlp, transformer)
 │
-├── scripts/                   # train.py, collect_data.py, compare_with_vampire.py
+├── scripts/                   # train.py, bench.py, compare_with_vampire.py
 ├── wasm/                      # WebAssembly frontend (index.html, models/)
 ├── docs/                      # Documentation
 │
@@ -398,17 +398,13 @@ train_cfg.save("configs/training/my_experiment.json")
 ### Training Workflow
 
 ```bash
-# 1. Extract problem metadata (one-time)
-python scripts/extract_problem_metadata.py
+# 1. Run benchmark with trace collection
+proofatlas-bench --prover proofatlas --preset time_sel21 --trace
 
-# 2. Collect training data using a selector
-python scripts/collect_data.py --data-config default --max-problems 100
+# 2. Train a model (aggregates traces automatically)
+python scripts/train.py --preset time_sel21 --training gcn
 
-# 3. Train a model and export to safetensors
-python scripts/train.py --data .data/traces/default_data.pt --training gcn
-
-# 4. Use trained model in data config:
-# "selector": {"name": "gcn", "weights": "gcn.safetensors"}
+# 3. Use trained model in prover config
 ```
 
 ### Problem Metadata

@@ -6,9 +6,14 @@ This script trains a model using collected data and exports weights to safetenso
 format for use by the Rust/Burn theorem prover.
 
 Usage:
+    # Train from bench.py traces (aggregates automatically)
+    python scripts/train.py --preset time_sel21 --training gcn
+
+    # Train from pre-aggregated data file
     python scripts/train.py --data data.pt --training gcn
-    python scripts/train.py --data data.pt --training configs/training/gat.json
-    python scripts/train.py --data data.pt --training gcn --run-name my_experiment
+
+    # With custom options
+    python scripts/train.py --preset time_sel21 --training gcn --run-name my_experiment
 """
 
 import argparse
@@ -29,10 +34,72 @@ from proofatlas.ml.training import (
 )
 
 
+def get_traces_dir() -> Path:
+    """Get the traces directory."""
+    return Path(__file__).parent.parent / ".data" / "traces"
+
+
+def load_traces_from_preset(preset: str):
+    """Load and aggregate traces from a bench.py preset.
+
+    Traces are stored as individual .pt files in .data/traces/{preset}/
+    """
+    traces_dir = get_traces_dir() / preset
+    if not traces_dir.exists():
+        raise FileNotFoundError(
+            f"No traces found for preset '{preset}' at {traces_dir}\n"
+            f"Run: proofatlas-bench --prover proofatlas --preset {preset} --trace"
+        )
+
+    trace_files = list(traces_dir.glob("*.pt"))
+    if not trace_files:
+        raise FileNotFoundError(f"No trace files in {traces_dir}")
+
+    print(f"Loading traces from {traces_dir}...")
+    print(f"  Found {len(trace_files)} trace files")
+
+    all_graphs = []
+    all_labels = []
+    all_problem_names = []
+    successful = 0
+    skipped = 0
+
+    for trace_file in sorted(trace_files):
+        try:
+            trace = torch.load(trace_file, weights_only=False)
+        except Exception:
+            skipped += 1
+            continue
+
+        # Skip non-proof traces
+        if not trace.get("proof_found") or not trace.get("graphs"):
+            skipped += 1
+            continue
+
+        problem_name = trace_file.stem
+        all_graphs.extend(trace["graphs"])
+        all_labels.extend(trace["labels"])
+        all_problem_names.extend([problem_name] * len(trace["labels"]))
+        successful += 1
+
+    print(f"  Loaded: {successful} problems, Skipped: {skipped}")
+    print(f"  Examples: {len(all_labels)}")
+
+    if all_labels:
+        pos = sum(all_labels)
+        print(f"  Positive: {pos} ({100*pos/len(all_labels):.1f}%)")
+
+    return {
+        "graphs": all_graphs,
+        "labels": all_labels,
+        "problem_names": all_problem_names,
+    }
+
+
 def load_data(data_path: Path):
-    """Load collected training data."""
+    """Load pre-aggregated training data from a .pt file."""
     print(f"Loading data from {data_path}...")
-    data = torch.load(data_path)
+    data = torch.load(data_path, weights_only=False)
 
     print(f"  Examples: {len(data['labels'])}")
     print(f"  Problems: {len(set(data['problem_names']))}")
@@ -102,7 +169,9 @@ def export_to_safetensors(model: torch.nn.Module, path: Path, config: TrainingCo
 
 def main():
     parser = argparse.ArgumentParser(description="Train clause selection model and export weights")
-    parser.add_argument("--data", "-d", type=Path, required=True, help="Training data file (.pt)")
+    data_group = parser.add_mutually_exclusive_group(required=True)
+    data_group.add_argument("--preset", "-p", help="Load traces from bench.py preset (e.g., time_sel21)")
+    data_group.add_argument("--data", "-d", type=Path, help="Pre-aggregated training data file (.pt)")
     parser.add_argument("--training", "-t", default="gcn", help="Training config name or path")
     parser.add_argument("--run-name", help="Run name (default: auto-generated)")
     parser.add_argument("--epochs", type=int, help="Override max epochs")
@@ -142,7 +211,10 @@ def main():
     print()
 
     # Load data
-    data = load_data(args.data)
+    if args.preset:
+        data = load_traces_from_preset(args.preset)
+    else:
+        data = load_data(args.data)
 
     if not data['labels']:
         print("ERROR: No training examples in data file")

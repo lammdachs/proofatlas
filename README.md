@@ -55,7 +55,7 @@ proofatlas/
 │   ├── data/                  # Data collection configs (Rust selector + problem filters)
 │   └── training/              # ML training configs (model architecture + hyperparameters)
 │
-├── scripts/                   # train.py, collect_data.py, compare_with_vampire.py
+├── scripts/                   # train.py, bench.py, compare_with_vampire.py
 ├── wasm/                      # WebAssembly frontend
 ├── docs/                      # Documentation
 │
@@ -138,17 +138,11 @@ let selector = load_ndarray_mlp_selector(
 ### Training Custom Models (Python)
 
 ```bash
-# 1. Extract problem metadata (one-time setup)
-python scripts/extract_problem_metadata.py
+# 1. Run benchmark with trace collection
+proofatlas-bench --prover proofatlas --preset time_sel21 --trace
 
-# 2. Collect training data
-python scripts/collect_data.py --data-config default --max-problems 100
-
-# 3. Train a GCN model and export to safetensors
-python scripts/train.py --data .data/traces/default_data.pt --training gcn
-
-# 4. Use trained model by updating data config:
-# "selector": {"name": "gcn", "weights": "gcn.safetensors"}
+# 2. Train a GCN model (aggregates traces automatically)
+python scripts/train.py --preset time_sel21 --training gcn
 ```
 
 Available model architectures (in `configs/training/`):
