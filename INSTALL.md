@@ -74,20 +74,6 @@ proofatlas-bench --track
 proofatlas-bench --status
 ```
 
-## Using Make
-
-Common development tasks:
-
-```bash
-make help           # Show all commands
-make install        # Install in development mode
-make build-release  # Build Rust prover (release)
-make test           # Run all tests
-make format         # Format code
-make lint           # Run linters
-make bench          # Run benchmarks
-```
-
 ## Common Issues
 
 1. **Rust not found**

@@ -83,15 +83,6 @@ cargo test -- --nocapture     # With output
 python -m pytest python/tests/ -v
 ```
 
-### Using Make
-
-```bash
-make test           # Run all tests
-make format         # Format code
-make lint           # Run linters
-make bench          # Run benchmarks
-```
-
 ### Commit Messages
 
 - Use clear, descriptive commit messages
