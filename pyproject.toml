@@ -73,6 +73,12 @@ namespaces = false
 [tool.setuptools.package-data]
 proofatlas = ["*.so", "*.pyd", "*.dylib"]
 
+[[tool.setuptools-rust.ext-modules]]
+target = "proofatlas.proofatlas"
+path = "rust/Cargo.toml"
+binding = "PyO3"
+features = ["python"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py37"
