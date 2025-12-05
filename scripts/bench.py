@@ -501,17 +501,35 @@ def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: st
                           time_s=time.time() - start, stderr=str(e))
 
 
+# Trace caching for ML data collection
+TRACE_CACHE_DIR = ".data/traces"
+
+
+def get_trace_cache_path(base_dir: Path, preset: str, problem: str) -> Path:
+    """Get cache path for a proof trace."""
+    problem_name = Path(problem).stem
+    return base_dir / TRACE_CACHE_DIR / preset / f"{problem_name}.pt"
+
+
+def save_proof_trace(base_dir: Path, preset: str, problem: str, trace_data: dict):
+    """Save proof trace for ML data collection."""
+    try:
+        import torch
+        cache_path = get_trace_cache_path(base_dir, preset, problem)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(trace_data, cache_path)
+    except Exception:
+        pass  # Trace saving is best-effort, don't fail the benchmark
+
+
 def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
                    preset_name: str, tptp_root: Path) -> BenchResult:
-    """Run ProofAtlas on a problem."""
-    binary = base_dir / proofatlas_config["paths"]["binary"]
-    if not binary.exists():
-        print("Building ProofAtlas...")
-        subprocess.run(["cargo", "build", "--release"], cwd=base_dir / "rust", check=True)
+    """Run ProofAtlas on a problem using Python bindings.
 
-    if not binary.exists():
-        raise FileNotFoundError(f"ProofAtlas not found: {binary}\n"
-                               "Run: cd rust && cargo build --release")
+    Uses Python bindings instead of subprocess to enable trace extraction
+    for ML training data. Traces are saved to .data/traces/{preset}/{problem}.pt
+    """
+    from proofatlas import ProofState
 
     presets = proofatlas_config.get("presets", {})
     defaults = proofatlas_config.get("defaults", {})
@@ -522,39 +540,71 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
 
     preset = {**defaults, **presets[preset_name]}
 
-    cmd = [str(binary), str(problem), "--include", str(tptp_root)]
-    if "timeout" in preset:
-        cmd.extend(["--timeout", str(preset["timeout"])])
-    if "max_clauses" in preset:
-        cmd.extend(["--max-clauses", str(preset["max_clauses"])])
-    if "literal_selection" in preset:
-        cmd.extend(["--literal-selection", str(preset["literal_selection"])])
-    if "age_weight_ratio" in preset and preset.get("selector") == "age_weight":
-        cmd.extend(["--age-weight", str(preset["age_weight_ratio"])])
+    # Read problem file
+    try:
+        with open(problem) as f:
+            content = f.read()
+    except Exception as e:
+        return BenchResult(problem=problem.name, status="error", time_s=0, stderr=f"Read error: {e}")
 
+    # Initialize prover state
+    state = ProofState()
+    try:
+        state.add_clauses_from_tptp(content)
+    except Exception as e:
+        return BenchResult(problem=problem.name, status="error", time_s=0, stderr=f"Parse error: {e}")
+
+    # Configure literal selection
+    literal_selection = str(preset.get("literal_selection", "0"))
+    state.set_literal_selection(literal_selection)
+
+    # Get timeout and max clauses
     timeout = preset.get("timeout", 60)
+    max_clauses = preset.get("max_clauses", 10000)
 
+    # Run saturation (timed)
     start = time.time()
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
-        elapsed = time.time() - start
-
-        if "THEOREM PROVED" in result.stdout or "Proof found" in result.stdout or "SZS status Theorem" in result.stdout:
-            status = "proof"
-        elif "Saturated" in result.stdout or "SZS status Satisfiable" in result.stdout:
-            status = "saturated"
-        elif "Timeout" in result.stdout or "SZS status Timeout" in result.stdout:
-            status = "timeout"
-        else:
-            status = "unknown"
-
-        return BenchResult(problem=problem.name, status=status, time_s=elapsed,
-                          stdout=result.stdout, stderr=result.stderr)
-    except subprocess.TimeoutExpired:
-        return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
+        proof_found = state.run_saturation(max_clauses, float(timeout), "age_weight", "")
     except Exception as e:
         return BenchResult(problem=problem.name, status="error",
-                          time_s=time.time() - start, stderr=str(e))
+                          time_s=time.time() - start, stderr=f"Saturation error: {e}")
+    elapsed = time.time() - start
+
+    # Determine status
+    if proof_found:
+        status = "proof"
+    elif elapsed >= timeout:
+        status = "timeout"
+    else:
+        status = "saturated"
+
+    # Extract and save trace for ML (after timing, doesn't affect benchmark)
+    if proof_found:
+        try:
+            from proofatlas.ml.graph_utils import to_torch_tensors
+
+            examples = state.extract_training_examples()
+            if examples:
+                clause_ids = [e.clause_idx for e in examples]
+                graphs = state.clauses_to_graphs(clause_ids)
+                graph_tensors = [to_torch_tensors(g) for g in graphs]
+                labels = [e.label for e in examples]
+
+                trace_data = {
+                    "proof_found": True,
+                    "time": elapsed,
+                    "examples": len(examples),
+                    "graphs": graph_tensors,
+                    "labels": labels,
+                    "clause_ids": clause_ids,
+                    "preset": preset_name,
+                }
+                save_proof_trace(base_dir, preset_name, problem.name, trace_data)
+        except Exception:
+            pass  # Trace extraction is best-effort
+
+    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
 
 def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,

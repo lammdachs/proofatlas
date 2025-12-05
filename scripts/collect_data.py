@@ -182,6 +182,8 @@ def collect_from_problem(
 def main():
     parser = argparse.ArgumentParser(description="Collect training data from TPTP problems")
     parser.add_argument("--data-config", "-d", default="default", help="Data config name or path")
+    parser.add_argument("--from-preset", type=str,
+                       help="Use traces from bench.py preset (e.g., time_sel21)")
     parser.add_argument("--output", "-o", type=Path, help="Output file (overrides config)")
     parser.add_argument("--max-problems", type=int, help="Maximum problems to process")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be collected")
@@ -238,7 +240,13 @@ def main():
             print(f"Using weights: {weights_path}")
 
     print(f"Using selector: {selector_name}")
-    print(f"Cache: {TRACE_CACHE_DIR}/{config.name}/ {'(--force: ignoring)' if args.force else '(reusing cached)'}")
+
+    # Determine cache name (use preset if --from-preset, else config name)
+    cache_name = args.from_preset if args.from_preset else config.name
+    if args.from_preset:
+        print(f"Cache: {TRACE_CACHE_DIR}/{cache_name}/ (from bench.py preset)")
+    else:
+        print(f"Cache: {TRACE_CACHE_DIR}/{cache_name}/ {'(--force: ignoring)' if args.force else '(reusing cached)'}")
 
     all_graphs, all_labels, all_problem_names, all_clause_ids = [], [], [], []
     successful, failed, no_proof, cached_count = 0, 0, 0, 0
@@ -253,10 +261,13 @@ def main():
         pct = 100 * (i + 1) / len(filtered)
         print(f"\r[{pct:5.1f}%] {problem['path']:<40}", end="", flush=True)
 
-        # Check cache first
+        # Check cache first (check preset cache first if specified, then config cache)
         cached = None
         if not args.force:
-            cached = load_cached_trace(config.name, problem["path"])
+            cached = load_cached_trace(cache_name, problem["path"])
+            # Also check config cache if using preset and not found
+            if cached is None and args.from_preset:
+                cached = load_cached_trace(config.name, problem["path"])
 
         if cached is not None:
             result = cached
