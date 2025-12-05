@@ -1,0 +1,72 @@
+{
+  "input_dim": 13,
+
+  "architectures": {
+    "gcn": {
+      "description": "Graph Convolutional Network clause selector",
+      "type": "gcn",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "dropout": 0.1
+    },
+
+    "gcn_small": {
+      "description": "Small GCN for faster inference",
+      "type": "gcn",
+      "hidden_dim": 32,
+      "num_layers": 2,
+      "dropout": 0.1
+    },
+
+    "gcn_large": {
+      "description": "Large GCN for better accuracy",
+      "type": "gcn",
+      "hidden_dim": 128,
+      "num_layers": 4,
+      "dropout": 0.1
+    },
+
+    "gat": {
+      "description": "Graph Attention Network clause selector",
+      "type": "gat",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "num_heads": 4,
+      "dropout": 0.1
+    },
+
+    "gat_small": {
+      "description": "Small GAT for faster inference",
+      "type": "gat",
+      "hidden_dim": 32,
+      "num_layers": 2,
+      "num_heads": 2,
+      "dropout": 0.1
+    },
+
+    "mlp": {
+      "description": "MLP baseline clause selector",
+      "type": "mlp",
+      "hidden_dim": 128,
+      "num_layers": 3,
+      "dropout": 0.1
+    },
+
+    "mlp_small": {
+      "description": "Small MLP for faster inference",
+      "type": "mlp",
+      "hidden_dim": 64,
+      "num_layers": 2,
+      "dropout": 0.1
+    },
+
+    "transformer": {
+      "description": "Transformer-based clause selector",
+      "type": "transformer",
+      "hidden_dim": 64,
+      "num_layers": 4,
+      "num_heads": 4,
+      "dropout": 0.1
+    }
+  }
+}

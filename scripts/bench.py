@@ -251,25 +251,45 @@ def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: st
         )
 
 
-def run_proofatlas(problem: Path, base_dir: Path, timeout: int = 10) -> BenchResult:
+def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict, preset_name: str, tptp_root: Path) -> BenchResult:
     """Run ProofAtlas on a problem."""
-    binary = base_dir / "rust" / "target" / "release" / "prove"
+    binary = base_dir / proofatlas_config["paths"]["binary"]
     if not binary.exists():
         # Try to build
         print("Building ProofAtlas...")
         subprocess.run(["cargo", "build", "--release"], cwd=base_dir / "rust", check=True)
 
     if not binary.exists():
-        raise FileNotFoundError(f"ProofAtlas not found: {binary}")
+        raise FileNotFoundError(f"ProofAtlas not found: {binary}\n"
+                               "Run: cd rust && cargo build --release")
 
-    tptp_root = base_dir / ".tptp" / "TPTP-v9.0.0"
+    presets = proofatlas_config.get("presets", {})
+    defaults = proofatlas_config.get("defaults", {})
 
+    if preset_name not in presets:
+        available = list(presets.keys())
+        raise ValueError(f"Unknown preset: {preset_name}. Available: {available}")
+
+    preset = {**defaults, **presets[preset_name]}  # Merge defaults with preset
+
+    # Build command
     cmd = [
         str(binary),
         str(problem),
-        "--timeout", str(timeout),
         "--include", str(tptp_root)
     ]
+
+    # Add options from preset
+    if "timeout" in preset:
+        cmd.extend(["--timeout", str(preset["timeout"])])
+    if "max_clauses" in preset:
+        cmd.extend(["--max-clauses", str(preset["max_clauses"])])
+    if "literal_selection" in preset:
+        cmd.extend(["--literal-selection", preset["literal_selection"]])
+    if "age_weight_ratio" in preset and preset.get("selector") == "age_weight":
+        cmd.extend(["--age-weight", str(preset["age_weight_ratio"])])
+
+    timeout = preset.get("timeout", 60)
 
     start = time.time()
     try:
@@ -353,11 +373,8 @@ def main():
             spass_config = load_config(base_dir / "configs" / "spass.json")
             result = run_spass(problem, base_dir, spass_config, args.preset)
         else:
-            data_config = load_config(base_dir / "configs" / "data.json")
-            presets = data_config.get("presets", {})
-            preset = presets.get(args.preset, {})
-            timeout = int(preset.get("prover_timeout", 10))
-            result = run_proofatlas(problem, base_dir, timeout=timeout)
+            proofatlas_config = load_config(base_dir / "configs" / "proofatlas.json")
+            result = run_proofatlas(problem, base_dir, proofatlas_config, args.preset, tptp_root)
 
         results.append(result)
         stats[result.status] = stats.get(result.status, 0) + 1

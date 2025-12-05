@@ -1,0 +1,87 @@
+{
+  "paths": {
+    "binary": "rust/target/release/prove"
+  },
+
+  "defaults": {
+    "timeout": 10,
+    "max_clauses": 10000,
+    "literal_selection": "all",
+    "selector": "age_weight",
+    "age_weight_ratio": 0.5
+  },
+
+  "presets": {
+    "time_default": {
+      "description": "Default with 10s time limit",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "all",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.5
+    },
+
+    "time_max_weight": {
+      "description": "10s with max weight literal selection",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "max_weight",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.5
+    },
+
+    "time_largest_negative": {
+      "description": "10s with largest negative literal selection",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "largest_negative",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.5
+    },
+
+    "time_age_heavy": {
+      "description": "10s with age-biased clause selection (0.7)",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "all",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.7
+    },
+
+    "time_weight_heavy": {
+      "description": "10s with weight-biased clause selection (0.3)",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "all",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.3
+    },
+
+    "time_gcn": {
+      "description": "10s with GCN clause selector",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "all",
+      "selector": "gcn",
+      "weights": "gcn.safetensors"
+    },
+
+    "time_mlp": {
+      "description": "10s with MLP clause selector",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": "all",
+      "selector": "mlp",
+      "weights": "mlp.safetensors"
+    },
+
+    "activation_default": {
+      "description": "Default with 1000 clause limit (simulates activation limit)",
+      "timeout": 300,
+      "max_clauses": 1000,
+      "literal_selection": "all",
+      "selector": "age_weight",
+      "age_weight_ratio": 0.5
+    }
+  }
+}
