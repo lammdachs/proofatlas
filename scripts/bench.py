@@ -2,14 +2,31 @@
 """
 Benchmark script for theorem provers.
 
-Usage:
-    # Single prover/preset run
-    python scripts/bench.py --prover vampire --preset time_sel21 --problem-set test
-    python scripts/bench.py --prover proofatlas --problem-set default --max-problems 100
+USAGE:
+    Runs prover/preset combinations in the background with live progress tracking.
+    By default runs ALL provers (proofatlas, vampire, spass) with ALL their presets.
 
-    # Evaluation mode (multiple provers/presets)
-    python scripts/bench.py --eval --problem-set test
-    python scripts/bench.py --eval --provers proofatlas vampire --presets time_sel21 time_sel22
+    proofatlas-bench                                  # All provers, all presets
+    proofatlas-bench --prover proofatlas              # One prover, all its presets
+    proofatlas-bench --preset time_sel21              # All provers, one preset each
+    proofatlas-bench --prover proofatlas vampire --preset activation_sel21
+
+    Filtering:
+        --prover    Restrict to specific prover(s): proofatlas, vampire, spass
+        --preset    Restrict to specific preset(s): time_sel21, activation_sel20, etc.
+
+    Output: .logs/eval_TIMESTAMP/ containing results.csv, summary.json, comparison_matrix.csv
+
+JOB MANAGEMENT:
+    Jobs run in the background. Ctrl+C detaches but the job continues.
+
+    proofatlas-bench --track     # Attach to running job
+    proofatlas-bench --status    # One-shot status check
+    proofatlas-bench --kill      # Stop running job
+
+COMMON OPTIONS:
+    --problem-set NAME    Problem set from configs/tptp.json (default: test)
+    --max-problems N      Limit number of problems to run
 """
 
 import argparse
@@ -17,6 +34,9 @@ import json
 import subprocess
 import time
 import csv
+import os
+import signal
+import sys
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -27,6 +47,207 @@ try:
 except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
+
+
+def find_project_root() -> Path:
+    """Find the proofatlas project root by looking for marker files."""
+    # Try current directory first
+    candidates = [
+        Path.cwd(),
+        Path(__file__).parent.parent,  # scripts/ -> project root
+    ]
+
+    for candidate in candidates:
+        if (candidate / "configs" / "tptp.json").exists():
+            return candidate.resolve()
+
+    # Walk up from current directory
+    path = Path.cwd()
+    while path != path.parent:
+        if (path / "configs" / "tptp.json").exists():
+            return path.resolve()
+        path = path.parent
+
+    raise FileNotFoundError(
+        "Could not find proofatlas project root. "
+        "Run from the project directory or set PROOFATLAS_ROOT."
+    )
+
+
+# Job management
+JOB_FILE = ".logs/bench_job.json"
+
+
+def get_job_file(base_dir: Path) -> Path:
+    return base_dir / JOB_FILE
+
+
+def is_process_running(pid: int) -> bool:
+    """Check if a process with the given PID is running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def get_job_status(base_dir: Path) -> Optional[dict]:
+    """Get the current job status, or None if no job is running."""
+    job_file = get_job_file(base_dir)
+    if not job_file.exists():
+        return None
+
+    try:
+        with open(job_file) as f:
+            job = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+    # Check if process is still running
+    if not is_process_running(job["pid"]):
+        return None
+
+    # Read progress from log file
+    log_file = Path(job.get("log_file", ""))
+    if log_file.exists():
+        try:
+            with open(log_file) as f:
+                lines = f.readlines()
+            # Find last progress line
+            for line in reversed(lines):
+                if line.startswith("PROGRESS:"):
+                    parts = line.strip().split(":")
+                    if len(parts) >= 5:
+                        job["current_config"] = int(parts[1])
+                        job["total_configs"] = int(parts[2])
+                        job["current_problem"] = int(parts[3])
+                        job["total_problems"] = int(parts[4])
+                    if len(parts) >= 8:
+                        job["proofs"] = int(parts[5])
+                        job["saturated"] = int(parts[6])
+                        job["timeout"] = int(parts[7])
+                    break
+        except IOError:
+            pass
+
+    return job
+
+
+def save_job_status(base_dir: Path, pid: int, args: list, output_dir: Path, log_file: Path):
+    """Save the current job status."""
+    job_file = get_job_file(base_dir)
+    job_file.parent.mkdir(parents=True, exist_ok=True)
+
+    job = {
+        "pid": pid,
+        "args": args,
+        "output_dir": str(output_dir),
+        "log_file": str(log_file),
+        "start_time": datetime.now().isoformat(),
+    }
+
+    with open(job_file, "w") as f:
+        json.dump(job, f, indent=2)
+
+
+def clear_job_status(base_dir: Path):
+    """Remove the job status file."""
+    job_file = get_job_file(base_dir)
+    if job_file.exists():
+        job_file.unlink()
+
+
+def kill_job(base_dir: Path) -> bool:
+    """Kill the running job. Returns True if a job was killed."""
+    job = get_job_status(base_dir)
+    if not job:
+        return False
+
+    try:
+        os.kill(job["pid"], signal.SIGTERM)
+        clear_job_status(base_dir)
+        return True
+    except (OSError, ProcessLookupError):
+        clear_job_status(base_dir)
+        return False
+
+
+def format_job_status(job: dict) -> str:
+    """Format job status as a single line."""
+    if not job:
+        return "No job running"
+
+    start = datetime.fromisoformat(job["start_time"])
+    elapsed = datetime.now() - start
+    hours = elapsed.seconds // 3600
+    minutes = (elapsed.seconds % 3600) // 60
+
+    parts = [f"[{hours}h{minutes:02d}m]"]
+
+    if "current_config" in job:
+        parts.append(f"cfg {job['current_config']}/{job['total_configs']}")
+        parts.append(f"prob {job['current_problem']}/{job['total_problems']}")
+
+    if "proofs" in job:
+        total = job["proofs"] + job["saturated"] + job["timeout"]
+        if total > 0:
+            rate = 100 * job["proofs"] / total
+            parts.append(f"+{job['proofs']} ~{job['saturated']} T{job['timeout']} ({rate:.1f}%)")
+
+    return " | ".join(parts)
+
+
+def print_job_status(base_dir: Path):
+    """Print the current job status."""
+    job = get_job_status(base_dir)
+    if not job:
+        print("No job currently running.")
+        return
+
+    start = datetime.fromisoformat(job["start_time"])
+    elapsed = datetime.now() - start
+    hours = elapsed.seconds // 3600
+    minutes = (elapsed.seconds % 3600) // 60
+
+    print(f"Job running (PID: {job['pid']})")
+    print(f"  Started:  {start.strftime('%Y-%m-%d %H:%M:%S')} ({hours}h {minutes}m ago)")
+    print(f"  Output:   {job['output_dir']}")
+
+    if "current_config" in job:
+        print(f"  Progress: config {job['current_config']}/{job['total_configs']}, "
+              f"problem {job['current_problem']}/{job['total_problems']}")
+
+    if "proofs" in job:
+        total = job["proofs"] + job["saturated"] + job["timeout"]
+        if total > 0:
+            rate = 100 * job["proofs"] / total
+            print(f"  Results:  +{job['proofs']} ~{job['saturated']} T{job['timeout']} ({rate:.1f}% proofs)")
+
+    print(f"\nTo stop: proofatlas-bench --kill")
+
+
+def track_job(base_dir: Path, poll_interval: float = 1.0):
+    """Continuously display job status until it completes."""
+    import sys
+
+    last_status = ""
+    while True:
+        job = get_job_status(base_dir)
+        if not job:
+            # Clear line and print final message
+            sys.stdout.write("\r" + " " * len(last_status) + "\r")
+            sys.stdout.flush()
+            print("Job completed.")
+            break
+
+        status = format_job_status(job)
+        # Clear previous line and print new status
+        sys.stdout.write("\r" + " " * len(last_status) + "\r")
+        sys.stdout.write(status)
+        sys.stdout.flush()
+        last_status = status
+
+        time.sleep(poll_interval)
 
 
 @dataclass
@@ -281,12 +502,17 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
 
 def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
                tptp_root: Path, configs: dict, verbose: bool = False,
-               quiet: bool = False) -> tuple[list[BenchResult], dict]:
+               quiet: bool = False, use_progress: bool = False,
+               progress_desc: str = None, log_file = None,
+               config_idx: int = 0, total_configs: int = 0) -> tuple[list[BenchResult], dict]:
     """Run a single prover/preset on a list of problems."""
     results = []
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "unknown": 0}
 
-    for i, problem in enumerate(problems, 1):
+    desc = progress_desc or f"{prover}/{preset}"
+    problems_iter = tqdm(problems, desc=desc, unit="prob", leave=False) if use_progress else problems
+
+    for i, problem in enumerate(problems_iter if use_progress else problems, 1):
         if prover == "vampire":
             result = run_vampire(problem, base_dir, configs["vampire"], preset, tptp_root)
         elif prover == "spass":
@@ -297,7 +523,15 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
         results.append(result)
         stats[result.status] = stats.get(result.status, 0) + 1
 
-        if not quiet:
+        if log_file:
+            # Write progress for background job monitoring
+            log_file.write(f"PROGRESS:{config_idx}:{total_configs}:{i}:{len(problems)}:"
+                          f"{stats['proof']}:{stats['saturated']}:{stats['timeout']}\n")
+            log_file.flush()
+
+        if use_progress:
+            problems_iter.set_postfix_str(f"+{stats['proof']} ~{stats['saturated']} T{stats['timeout']}")
+        elif not quiet:
             symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!", "unknown": "?"}.get(result.status, "?")
             if verbose:
                 print(f"[{i}/{len(problems)}] {symbol} {result.problem}: {result.status} ({result.time_s:.2f}s)")
@@ -306,14 +540,15 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
                 if i % 50 == 0:
                     print(f" [{i}/{len(problems)}]")
 
-    if not quiet and not verbose:
+    if not quiet and not verbose and not use_progress:
         print()
 
     return results, stats
 
 
 def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_dir: Path,
-             tptp_root: Path, configs: dict, output_dir: Path, verbose: bool = False):
+             tptp_root: Path, configs: dict, output_dir: Path, verbose: bool = False,
+             log_file = None):
     """Run evaluation across multiple provers and presets."""
     # Collect all runs
     runs = []
@@ -337,13 +572,12 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
     summary = []
 
     use_progress = not verbose
-    runs_iter = tqdm(runs, desc="Configurations", unit="cfg") if use_progress else runs
 
-    for prover, preset in runs_iter:
-        if use_progress:
-            runs_iter.set_postfix_str(f"{prover}/{preset}")
-
-        results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs, verbose=False, quiet=True)
+    for idx, (prover, preset) in enumerate(runs, 1):
+        desc = f"[{idx}/{len(runs)}] {prover}/{preset}"
+        results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs,
+                                    verbose=False, quiet=True, use_progress=use_progress, progress_desc=desc,
+                                    log_file=log_file, config_idx=idx, total_configs=len(runs))
 
         for r in results:
             all_results.append({"prover": prover, "preset": preset, **r.__dict__})
@@ -357,8 +591,6 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
                 "saturated": stats["saturated"], "timeout": stats["timeout"],
                 "error": stats["error"], "unknown": stats["unknown"],
             })
-            if use_progress:
-                runs_iter.set_postfix_str(f"{prover}/{preset} [{stats['proof']}/{total}]")
 
     # Save detailed results
     results_file = output_dir / "results.csv"
@@ -413,24 +645,53 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark theorem provers")
-    parser.add_argument("--eval", action="store_true",
-                       help="Evaluation mode: run multiple provers/presets")
-    parser.add_argument("--prover", choices=["vampire", "spass", "proofatlas"],
-                       help="Prover to run (single mode)")
-    parser.add_argument("--provers", nargs="+", choices=["vampire", "spass", "proofatlas"],
-                       help="Provers to run (eval mode, default: all)")
-    parser.add_argument("--preset", help="Preset to use (single mode)")
-    parser.add_argument("--presets", nargs="+", help="Presets to run (eval mode)")
+    parser.add_argument("--prover", nargs="+", choices=["vampire", "spass", "proofatlas"],
+                       help="Prover(s) to run (default: all)")
+    parser.add_argument("--preset", nargs="+",
+                       help="Preset(s) to run (default: all)")
     parser.add_argument("--problem-set", default="test",
                        help="Problem set from tptp.json")
     parser.add_argument("--max-problems", type=int, help="Maximum number of problems")
-    parser.add_argument("--output", type=str, help="Output CSV file (single mode)")
-    parser.add_argument("--output-dir", type=str, help="Output directory (eval mode)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--output-dir", type=str, help="Output directory")
+
+    # Job management
+    parser.add_argument("--track", action="store_true",
+                       help="Attach to a running job")
+    parser.add_argument("--status", action="store_true",
+                       help="Check status of running job (one-shot)")
+    parser.add_argument("--kill", action="store_true",
+                       help="Stop running job")
 
     args = parser.parse_args()
 
-    base_dir = Path(__file__).parent.parent
+    base_dir = find_project_root()
+
+    # Handle job management commands first
+    if args.status:
+        print_job_status(base_dir)
+        return
+
+    if args.track:
+        job = get_job_status(base_dir)
+        if job:
+            track_job(base_dir)
+        else:
+            print("No job currently running.")
+        return
+
+    if args.kill:
+        if kill_job(base_dir):
+            print("Job killed.")
+        else:
+            print("No job currently running.")
+        return
+
+    # Check if a job is already running (for any job-starting command)
+    existing = get_job_status(base_dir)
+    if existing:
+        print(f"Error: A job is already running (PID: {existing['pid']})")
+        print(f"Use --status to check progress, --track to monitor, or --kill to stop it.")
+        sys.exit(1)
 
     # Load configs
     tptp_config = load_config(base_dir / "configs" / "tptp.json")
@@ -447,53 +708,43 @@ def main():
     if args.max_problems:
         problems = problems[:args.max_problems]
 
-    if args.eval or args.provers:
-        # Evaluation mode
-        provers = args.provers or ["proofatlas", "vampire", "spass"]
-        presets = args.presets
+    # Determine provers and presets
+    provers = args.prover or ["proofatlas", "vampire", "spass"]
+    presets = args.preset  # None means all presets
 
-        if args.output_dir:
-            output_dir = Path(args.output_dir)
-        else:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = base_dir / ".logs" / f"eval_{timestamp}"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        run_eval(provers, presets, problems, base_dir, tptp_root, configs, output_dir, args.verbose)
-
-    elif args.prover:
-        # Single mode
-        prover = args.prover
-        preset = args.preset or configs[prover].get("default_preset", "time_sel21")
-
-        print(f"Running {prover} ({preset}) on {len(problems)} problems\n")
-
-        results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs, args.verbose)
-
-        total_time = sum(r.time_s for r in results)
-        print()
-        print("=" * 50)
-        print(f"Results: {len(problems)} problems, {total_time:.1f}s total")
-        print(f"  Proofs:    {stats['proof']:4d} ({100*stats['proof']/len(problems):.1f}%)")
-        print(f"  Saturated: {stats['saturated']:4d} ({100*stats['saturated']/len(problems):.1f}%)")
-        print(f"  Timeout:   {stats['timeout']:4d} ({100*stats['timeout']/len(problems):.1f}%)")
-        print(f"  Error:     {stats['error']:4d} ({100*stats['error']/len(problems):.1f}%)")
-        print(f"  Unknown:   {stats['unknown']:4d} ({100*stats['unknown']/len(problems):.1f}%)")
-
-        if args.output:
-            output_path = Path(args.output)
-            with open(output_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["problem", "status", "time_s"])
-                for r in results:
-                    writer.writerow([r.problem, r.status, f"{r.time_s:.3f}"])
-            print(f"\nResults saved to: {output_path}")
-
+    # Setup output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
     else:
-        parser.print_help()
-        print("\nExamples:")
-        print("  python scripts/bench.py --prover vampire --preset time_sel21 --problem-set test")
-        print("  python scripts/bench.py --eval --problem-set test")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = base_dir / ".logs" / f"eval_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fork to background and track
+    log_file_path = output_dir / "bench.log"
+
+    pid = os.fork()
+    if pid > 0:
+        # Parent process
+        save_job_status(base_dir, pid, sys.argv, output_dir, log_file_path)
+        print(f"Started background job (PID: {pid})")
+        print(f"Output: {output_dir}")
+        print(f"Note: Ctrl+C detaches but job continues. Use 'proofatlas-bench --kill' to stop.\n")
+        time.sleep(0.5)  # Give child time to start
+        track_job(base_dir)
+    else:
+        # Child process - detach and run
+        os.setsid()
+        sys.stdout = open(log_file_path, "w")
+        sys.stderr = sys.stdout
+
+        try:
+            run_eval(provers, presets, problems, base_dir, tptp_root, configs,
+                     output_dir, verbose=True, log_file=sys.stdout)
+        finally:
+            clear_job_status(base_dir)
+            sys.stdout.close()
+        os._exit(0)
 
 
 if __name__ == "__main__":

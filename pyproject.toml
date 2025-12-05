@@ -28,7 +28,12 @@ classifiers = [
 ]
 
 # Core dependencies (minimal for the theorem prover)
-dependencies = []
+dependencies = [
+    "tqdm",
+]
+
+[project.scripts]
+proofatlas-bench = "proofatlas.cli.bench:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/proofatlas"
