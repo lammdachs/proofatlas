@@ -6,17 +6,49 @@
     "binary": ".spass/SPASS"
   },
 
+  "notes": {
+    "selection_mapping": "SPASS Select=0 ~ Vampire sel20, Select=1 ~ sel21, Select=2 ~ sel22",
+    "no_sel0": "SPASS does not support selecting all literals (Vampire sel0)",
+    "activation_limit": "Use -Loops=N to limit main loop iterations (activation limit)"
+  },
+
+  "default_preset": "time_sel21",
+
   "presets": {
-    "time_sel0": {
-      "description": "Time limit 10s, selection 0 (equivalent to vampire selection 20)",
+    "time_sel20": {
+      "description": "10s with Select=0 (all maximal, like Vampire sel20)",
       "TimeLimit": 10,
       "Select": 0
     },
 
-    "time_sel1": {
-      "description": "Time limit 10s, selection 1 (equivalent to vampire selection 21)",
+    "time_sel21": {
+      "description": "10s with Select=1 (prefer negative, like Vampire sel21)",
       "TimeLimit": 10,
       "Select": 1
+    },
+
+    "time_sel22": {
+      "description": "10s with Select=2 (neg max-weight, like Vampire sel22)",
+      "TimeLimit": 10,
+      "Select": 2
+    },
+
+    "activation_sel20": {
+      "description": "1000 activations with Select=0 (all maximal, like Vampire sel20)",
+      "Loops": 1000,
+      "Select": 0
+    },
+
+    "activation_sel21": {
+      "description": "1000 activations with Select=1 (prefer negative, like Vampire sel21)",
+      "Loops": 1000,
+      "Select": 1
+    },
+
+    "activation_sel22": {
+      "description": "1000 activations with Select=2 (neg max-weight, like Vampire sel22)",
+      "Loops": 1000,
+      "Select": 2
     }
   }
 }

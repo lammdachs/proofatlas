@@ -206,17 +206,21 @@ def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: st
 
     # Add options from preset
     if "TimeLimit" in preset:
-        cmd.extend(["-TimeLimit=" + str(preset["TimeLimit"])])
+        cmd.append("-TimeLimit=" + str(preset["TimeLimit"]))
+    if "Loops" in preset:
+        cmd.append("-Loops=" + str(preset["Loops"]))
     if "Select" in preset:
-        cmd.extend(["-Select=" + str(preset["Select"])])
+        cmd.append("-Select=" + str(preset["Select"]))
 
     cmd.append(str(problem))
+
+    # Timeout: use TimeLimit if set, otherwise 300s for activation-limited runs
+    timeout = preset.get("TimeLimit", 300) + 5
 
     # Run
     start = time.time()
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                               timeout=preset.get("TimeLimit", 60) + 5)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         elapsed = time.time() - start
 
         # Parse result
@@ -240,7 +244,7 @@ def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: st
         return BenchResult(
             problem=problem.name,
             status="timeout",
-            time_s=preset.get("TimeLimit", 60)
+            time_s=timeout - 5  # Remove the +5 buffer
         )
     except Exception as e:
         return BenchResult(
@@ -285,7 +289,7 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict, prese
     if "max_clauses" in preset:
         cmd.extend(["--max-clauses", str(preset["max_clauses"])])
     if "literal_selection" in preset:
-        cmd.extend(["--literal-selection", preset["literal_selection"]])
+        cmd.extend(["--literal-selection", str(preset["literal_selection"])])
     if "age_weight_ratio" in preset and preset.get("selector") == "age_weight":
         cmd.extend(["--age-weight", str(preset["age_weight_ratio"])])
 

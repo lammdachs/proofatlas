@@ -6,60 +6,62 @@
     "binary": ".vampire/vampire"
   },
 
+  "default_preset": "time_sel21",
+
   "presets": {
     "time_sel0": {
-      "description": "Time limit 10s, literal selection 0, no AVATAR",
+      "description": "10s with selection 0 (all literals)",
       "time_limit": 10,
       "selection": 0,
       "avatar": "off"
     },
 
     "time_sel20": {
-      "description": "Time limit 10s, literal selection 20, no AVATAR",
+      "description": "10s with selection 20 (all maximal literals)",
       "time_limit": 10,
       "selection": 20,
       "avatar": "off"
     },
 
     "time_sel21": {
-      "description": "Time limit 10s, literal selection 21, no AVATAR",
+      "description": "10s with selection 21 (unique maximal, else neg max-weight, else all maximal)",
       "time_limit": 10,
       "selection": 21,
       "avatar": "off"
     },
 
-    "time_sel1010": {
-      "description": "Time limit 10s, literal selection 1010, no AVATAR",
+    "time_sel22": {
+      "description": "10s with selection 22 (neg max-weight, else all maximal)",
       "time_limit": 10,
-      "selection": 1010,
+      "selection": 22,
       "avatar": "off"
     },
 
     "activation_sel0": {
-      "description": "Activation limit 1000, literal selection 0, no AVATAR",
+      "description": "1000 activations with selection 0",
       "activation_limit": 1000,
       "selection": 0,
       "avatar": "off"
     },
 
     "activation_sel20": {
-      "description": "Activation limit 1000, literal selection 20, no AVATAR",
+      "description": "1000 activations with selection 20",
       "activation_limit": 1000,
       "selection": 20,
       "avatar": "off"
     },
 
     "activation_sel21": {
-      "description": "Activation limit 1000, literal selection 21, no AVATAR",
+      "description": "1000 activations with selection 21",
       "activation_limit": 1000,
       "selection": 21,
       "avatar": "off"
     },
 
-    "activation_sel1010": {
-      "description": "Activation limit 1000, literal selection 1010, no AVATAR",
+    "activation_sel22": {
+      "description": "1000 activations with selection 22",
       "activation_limit": 1000,
-      "selection": 1010,
+      "selection": 22,
       "avatar": "off"
     }
   }

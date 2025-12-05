@@ -3,17 +3,11 @@
     "binary": "rust/target/release/prove"
   },
 
-  "defaults": {
-    "timeout": 10,
-    "max_clauses": 10000,
-    "literal_selection": 0,
-    "selector": "age_weight",
-    "age_weight_ratio": 0.167
-  },
+  "default_preset": "time_sel21",
 
   "presets": {
-    "time_default": {
-      "description": "Default with 10s time limit",
+    "time_sel0": {
+      "description": "10s with sel0 (all literals)",
       "timeout": 10,
       "max_clauses": 10000,
       "literal_selection": 0,
@@ -40,7 +34,7 @@
     },
 
     "time_sel22": {
-      "description": "10s with sel22 (max-weight negative, else all maximal)",
+      "description": "10s with sel22 (neg max-weight, else all maximal)",
       "timeout": 10,
       "max_clauses": 10000,
       "literal_selection": 22,
@@ -48,47 +42,38 @@
       "age_weight_ratio": 0.167
     },
 
-    "time_age_heavy": {
-      "description": "10s with age-biased clause selection (0.7)",
-      "timeout": 10,
-      "max_clauses": 10000,
-      "literal_selection": 0,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.7
-    },
-
-    "time_weight_heavy": {
-      "description": "10s with weight-biased clause selection (0.3)",
-      "timeout": 10,
-      "max_clauses": 10000,
-      "literal_selection": 0,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.3
-    },
-
-    "time_gcn": {
-      "description": "10s with GCN clause selector",
-      "timeout": 10,
-      "max_clauses": 10000,
-      "literal_selection": 0,
-      "selector": "gcn",
-      "weights": "gcn.safetensors"
-    },
-
-    "time_mlp": {
-      "description": "10s with MLP clause selector",
-      "timeout": 10,
-      "max_clauses": 10000,
-      "literal_selection": 0,
-      "selector": "mlp",
-      "weights": "mlp.safetensors"
-    },
-
-    "activation_default": {
-      "description": "Default with 1000 clause limit (simulates activation limit)",
+    "activation_sel0": {
+      "description": "1000 clause limit with sel0",
       "timeout": 300,
       "max_clauses": 1000,
       "literal_selection": 0,
+      "selector": "age_weight",
+      "age_weight_ratio": 0.167
+    },
+
+    "activation_sel20": {
+      "description": "1000 clause limit with sel20",
+      "timeout": 300,
+      "max_clauses": 1000,
+      "literal_selection": 20,
+      "selector": "age_weight",
+      "age_weight_ratio": 0.167
+    },
+
+    "activation_sel21": {
+      "description": "1000 clause limit with sel21",
+      "timeout": 300,
+      "max_clauses": 1000,
+      "literal_selection": 21,
+      "selector": "age_weight",
+      "age_weight_ratio": 0.167
+    },
+
+    "activation_sel22": {
+      "description": "1000 clause limit with sel22",
+      "timeout": 300,
+      "max_clauses": 1000,
+      "literal_selection": 22,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
     }
