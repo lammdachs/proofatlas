@@ -5,7 +5,6 @@ let exampleMetadata = [];
 let exampleContents = {}; // Store example contents by ID
 
 let prover = null;
-let onnxModelData = null; // ONNX model bytes for ML-guided clause selection
 
 async function loadExamples() {
     console.log('loadExamples: Function called');
@@ -109,21 +108,6 @@ async function loadExamples() {
     console.log('loadExamples: Function completed');
 }
 
-async function loadOnnxModel() {
-    try {
-        console.log('Loading ONNX model...');
-        const response = await fetch('models/clause_selector.onnx');
-        if (!response.ok) {
-            console.warn('ONNX model not available:', response.status);
-            return;
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        onnxModelData = new Uint8Array(arrayBuffer);
-        console.log('ONNX model loaded:', onnxModelData.length, 'bytes');
-    } catch (error) {
-        console.warn('Failed to load ONNX model:', error);
-    }
-}
 
 async function initializeWasm() {
     console.log('initializeWasm: Starting...');
@@ -134,9 +118,6 @@ async function initializeWasm() {
         console.log('WASM module loaded successfully');
         document.getElementById('prove-btn').disabled = false;
 
-        // Load ONNX model in the background
-        loadOnnxModel();
-        
         // Small delay to ensure DOM is ready
         console.log('initializeWasm: Waiting for DOM...');
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -520,11 +501,6 @@ async function prove() {
         return;
     }
 
-    if (!onnxModelData) {
-        showError('ONNX clause selector model not loaded. Please ensure models/clause_selector.onnx exists.');
-        return;
-    }
-
     const proveBtn = document.getElementById('prove-btn');
     const input = document.getElementById('tptp-input').value.trim();
 
@@ -538,15 +514,16 @@ async function prove() {
     proveBtn.textContent = 'Proving...';
 
     try {
-        // Get options - ONNX model is required
+        // Get options - uses age_weight selector by default
         const options = {
             timeout_ms: parseInt(document.getElementById('timeout').value),
             max_clauses: parseInt(document.getElementById('max-clauses').value),
             literal_selection: document.getElementById('literal-selection').value,
-            onnx_model_data: Array.from(onnxModelData)
+            selector_type: 'age_weight',
+            age_weight_ratio: 0.5
         };
 
-        console.log('Using ML-guided clause selection');
+        console.log('Using age-weight clause selection');
 
         // Run prover with trace for inspector
         const result = await prover.prove_with_trace(input, options);
