@@ -2,95 +2,110 @@
 
 ## Quick Start
 
-From the top-level directory:
-
 ```bash
+# Clone the repository
+git clone https://github.com/lexpk/proofatlas.git
+cd proofatlas
+
 # Install in development mode
 pip install -e .
 
-# Or with development dependencies
-pip install -e ".[dev]"
+# Build the Rust prover
+cd rust && cargo build --release && cd ..
 
-# Or with example dependencies
-pip install -e ".[examples]"
+# Verify installation
+./rust/target/release/prove --help
 ```
 
 ## Prerequisites
 
 - Python 3.7 or later
 - Rust toolchain (install from https://rustup.rs/)
-- C compiler (for Python extensions)
 
-## Build from Source
+## Installation Options
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/lexpk/proofatlas.git
-   cd proofatlas
-   ```
+### Basic Installation
 
-2. Install build dependencies:
-   ```bash
-   pip install setuptools wheel setuptools-rust
-   ```
-
-3. Install the package:
-   ```bash
-   pip install -e .
-   ```
-
-## Verify Installation
-
-Run the test script:
 ```bash
-python test_install.py
+pip install -e .
 ```
 
-Or test manually:
-```python
-from proofatlas import ProofState
-state = ProofState()
-print("ProofAtlas is working!")
-```
+### With Development Dependencies
 
-## Development Setup
-
-For development, install with extra dependencies:
 ```bash
 pip install -e ".[dev]"
 ```
 
-This includes:
-- pytest (testing)
-- black (code formatting)
-- ruff (linting)
-- mypy (type checking)
+This includes pytest, black, ruff, mypy for development.
 
-## Common Issues
+## Building the Prover
 
-1. **ImportError: No module named 'proofatlas.proofatlas'**
-   - The Rust extension hasn't been built. Run: `python setup.py build_ext --inplace`
+The core theorem prover is written in Rust:
 
-2. **Rust not found**
-   - Install Rust from https://rustup.rs/
+```bash
+cd rust
+cargo build --release
+```
 
-3. **setuptools-rust not found**
-   - Install it: `pip install setuptools-rust`
+The binary will be at `rust/target/release/prove`.
 
-## Project Structure
+## Running the Prover
 
-- `proofatlas/` - Main Python package (in `python/proofatlas/`)
-- `rust/` - Rust implementation with Python bindings
-- `tests/` - Test suite (in `python/tests/`)
-- `examples/` - Example scripts (in `python/examples/`)
+```bash
+# Run on a TPTP problem
+./rust/target/release/prove path/to/problem.p
+
+# With options
+./rust/target/release/prove problem.p --timeout 60 --literal-selection 21
+```
+
+## Benchmarking
+
+After installation, use the benchmark tool:
+
+```bash
+# Start benchmark job (runs in background)
+proofatlas-bench --prover proofatlas --problem-set test
+
+# Start with live tracking
+proofatlas-bench --track
+
+# Check status of running job
+proofatlas-bench --status
+```
 
 ## Using Make
 
 Common development tasks:
+
 ```bash
-make install      # Install in development mode
-make test         # Run tests
-make format       # Format code
-make lint         # Run linters
-make clean        # Clean build artifacts
+make help           # Show all commands
+make install        # Install in development mode
+make build-release  # Build Rust prover (release)
+make test           # Run all tests
+make format         # Format code
+make lint           # Run linters
+make bench          # Run benchmarks
+```
+
+## Common Issues
+
+1. **Rust not found**
+   - Install Rust from https://rustup.rs/
+
+2. **setuptools-rust not found**
+   - Run: `pip install setuptools-rust`
+
+3. **Build fails on older Python**
+   - Ensure Python 3.7+ is installed
+
+## Project Structure
+
+```
+proofatlas/
+├── rust/           # Core theorem prover (Rust)
+├── python/         # Python package and bindings
+├── configs/        # Prover and benchmark configurations
+├── scripts/        # Utility scripts
+└── .tptp/          # TPTP problem library (after setup)
 ```

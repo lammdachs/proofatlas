@@ -36,10 +36,10 @@ dependencies = [
 proofatlas-bench = "proofatlas.cli.bench:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/proofatlas"
-Documentation = "https://github.com/yourusername/proofatlas/blob/main/README.md"
-Repository = "https://github.com/yourusername/proofatlas"
-Issues = "https://github.com/yourusername/proofatlas/issues"
+Homepage = "https://github.com/lexpk/proofatlas"
+Documentation = "https://github.com/lexpk/proofatlas/blob/main/README.md"
+Repository = "https://github.com/lexpk/proofatlas"
+Issues = "https://github.com/lexpk/proofatlas/issues"
 
 [project.optional-dependencies]
 dev = [

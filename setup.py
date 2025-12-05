@@ -8,11 +8,11 @@ setup(
     author="ProofAtlas Contributors",
     author_email="",
     url="https://github.com/lexpk/proofatlas",
-    
+
     # Find packages in the python/ directory
     packages=find_packages(where="python"),
     package_dir={"": "python"},
-    
+
     # Rust extension configuration
     rust_extensions=[
         RustExtension(
@@ -22,18 +22,19 @@ setup(
             features=["python"],
         )
     ],
-    
+
     zip_safe=False,
     python_requires=">=3.7",
-    
+
     install_requires=[
-        # Core dependencies can be added here
+        "tqdm",
     ],
-    
+
     extras_require={
         "dev": [
             "pytest>=6.0",
             "pytest-cov",
+            "pytest-benchmark",
             "black",
             "mypy",
             "types-setuptools",
@@ -41,9 +42,10 @@ setup(
         ],
         "examples": [
             "matplotlib>=3.0",
+            "tqdm",
         ],
     },
-    
+
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -59,11 +61,10 @@ setup(
         "Programming Language :: Rust",
         "License :: OSI Approved :: MIT License",
     ],
-    
-    # Entry points if needed
+
     entry_points={
-        # 'console_scripts': [
-        #     'proofatlas=proofatlas.cli:main',
-        # ],
+        "console_scripts": [
+            "proofatlas-bench=proofatlas.cli.bench:main",
+        ],
     },
 )

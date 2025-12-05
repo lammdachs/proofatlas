@@ -1,21 +1,34 @@
 # ProofAtlas Makefile for common development tasks
 
-.PHONY: help setup test test-python test-rust build build-rust clean format lint install install-dev
+.PHONY: help install install-dev build build-release test test-python test-rust clean format lint bench
 
 # Default target
 help:
 	@echo "ProofAtlas Development Commands"
 	@echo "=============================="
+	@echo ""
+	@echo "Setup:"
 	@echo "  make install      - Install package in development mode"
 	@echo "  make install-dev  - Install with development dependencies"
-	@echo "  make build        - Build Rust extension"
+	@echo ""
+	@echo "Build:"
+	@echo "  make build        - Build Rust prover (debug)"
+	@echo "  make build-release - Build Rust prover (release)"
+	@echo ""
+	@echo "Test:"
 	@echo "  make test         - Run all tests"
 	@echo "  make test-python  - Run Python tests only"
 	@echo "  make test-rust    - Run Rust tests only"
-	@echo "  make clean        - Clean build artifacts"
+	@echo ""
+	@echo "Quality:"
 	@echo "  make format       - Format Python and Rust code"
 	@echo "  make lint         - Run linters"
-	@echo "  make examples     - Run example scripts"
+	@echo ""
+	@echo "Benchmark:"
+	@echo "  make bench        - Run benchmarks (proofatlas-bench)"
+	@echo ""
+	@echo "Other:"
+	@echo "  make clean        - Clean build artifacts"
 
 # Install package in development mode
 install:
@@ -25,16 +38,20 @@ install:
 install-dev:
 	pip install -e ".[dev]"
 
-# Build Rust extension
+# Build Rust prover (debug)
 build:
-	python setup.py build_ext --inplace
+	cd rust && cargo build
+
+# Build Rust prover (release)
+build-release:
+	cd rust && cargo build --release
 
 # Run all tests
-test: test-python test-rust
+test: test-rust test-python
 
 # Run Python tests
 test-python:
-	pytest python/tests/ -v
+	python -m pytest python/tests/ -v
 
 # Run Rust tests
 test-rust:
@@ -44,12 +61,12 @@ test-rust:
 clean:
 	rm -rf build/ dist/ *.egg-info .pytest_cache/
 	rm -rf rust/target/
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find python -name "*.so" -delete
-	find python -name "*.pyd" -delete
-	find python -name "*.dylib" -delete
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+	find python -name "*.so" -delete 2>/dev/null || true
+	find python -name "*.pyd" -delete 2>/dev/null || true
+	find python -name "*.dylib" -delete 2>/dev/null || true
 
 # Format code
 format:
@@ -66,17 +83,14 @@ lint:
 type-check:
 	mypy python/
 
-# Run examples
-examples:
-	@echo "Running basic usage example..."
-	python python/examples/basic_usage.py
-	@echo "\nRunning group theory example..."
-	python python/examples/group_theory.py
+# Run benchmarks
+bench:
+	proofatlas-bench --track
 
-# Build distribution packages
-dist: clean
-	python -m build
-
-# Test coverage
-test-cov:
-	pytest python/tests/ --cov=proofatlas --cov-report=html --cov-report=term
+# Run prover on a problem
+prove:
+	@echo "Usage: make prove PROBLEM=path/to/problem.p"
+	@echo "Example: make prove PROBLEM=.tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p"
+ifdef PROBLEM
+	./rust/target/release/prove $(PROBLEM)
+endif

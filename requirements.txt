@@ -1,14 +1,16 @@
+# Core dependencies
+tqdm
+
 # Build requirements
 setuptools>=45.0
 setuptools-rust>=1.0
 wheel>=0.36
 
-# Development requirements  
-pytest>=6.0
-pytest-cov>=2.12
-black>=22.0
-mypy>=0.950
-types-setuptools
-
-# Optional: for examples
-matplotlib>=3.0  # For plotting statistics
+# Development requirements (install with: pip install -e ".[dev]")
+# pytest>=6.0
+# pytest-cov
+# pytest-benchmark
+# black
+# mypy
+# types-setuptools
+# ruff
