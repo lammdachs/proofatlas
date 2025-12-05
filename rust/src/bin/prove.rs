@@ -16,8 +16,11 @@ fn main() {
         eprintln!("\nOptions:");
         eprintln!("  --timeout <seconds>    Set timeout (default: 60)");
         eprintln!("  --max-clauses <n>      Set max clauses (default: 10000)");
-        eprintln!("  --literal-selection <strategy>");
-        eprintln!("                         Literal selection: all, max_weight, largest_negative (default: all)");
+        eprintln!("  --literal-selection <n>  Literal selection strategy (default: 0):");
+        eprintln!("                           0  = select all literals");
+        eprintln!("                           20 = select all maximal literals");
+        eprintln!("                           21 = unique maximal, else max-weight negative, else all maximal");
+        eprintln!("                           22 = max-weight negative, else all maximal");
         eprintln!("  --include <dir>        Add include directory (can be used multiple times)");
         eprintln!("  --age-weight <ratio>   Age probability for age-weight selector (default: 0.5)");
         eprintln!("  --verbose              Show detailed progress");
@@ -53,12 +56,13 @@ fn main() {
             "--literal-selection" => {
                 if i + 1 < args.len() {
                     config.literal_selection = match args[i + 1].as_str() {
-                        "all" => LiteralSelectionStrategy::SelectAll,
-                        "max_weight" => LiteralSelectionStrategy::SelectMaxWeight,
-                        "largest_negative" => LiteralSelectionStrategy::SelectLargestNegative,
+                        "0" => LiteralSelectionStrategy::Sel0,
+                        "20" => LiteralSelectionStrategy::Sel20,
+                        "21" => LiteralSelectionStrategy::Sel21,
+                        "22" => LiteralSelectionStrategy::Sel22,
                         _ => {
                             eprintln!("Unknown literal selection strategy: {}", args[i + 1]);
-                            eprintln!("Valid options: all, max_weight, largest_negative");
+                            eprintln!("Valid options: 0, 20, 21, 22");
                             std::process::exit(1);
                         }
                     };

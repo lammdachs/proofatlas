@@ -1,13 +1,15 @@
-//! Literal selection strategies
+//! Literal selection strategies based on Hoder et al. "Selecting the selection" (2016)
 //!
 //! These strategies determine which literals in a clause are eligible
 //! for inference rules like resolution and superposition.
 //!
-//! In resolution-based theorem proving, not all literals need to participate
-//! in every inference. By restricting which literals can be used, we can
-//! dramatically reduce the number of generated clauses while still finding proofs.
+//! Selection strategies from the paper:
+//! - Selection 0: Select all literals
+//! - Selection 20: Select all maximal literals
+//! - Selection 21: Select unique maximal, else negative with max weight, else all maximal
+//! - Selection 22: Select negative literal with max weight, else all maximal
 
-use crate::core::Clause;
+use crate::core::{Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
 use std::collections::HashSet;
 
 /// Trait for literal selection strategies
@@ -20,13 +22,125 @@ pub trait LiteralSelector: Send + Sync {
     fn name(&self) -> &str;
 }
 
+/// Calculate the weight of a literal (symbol count)
+fn literal_weight(literal: &Literal) -> usize {
+    1 + literal
+        .atom
+        .args
+        .iter()
+        .map(|term| term_symbol_count(term))
+        .sum::<usize>()
+}
+
+/// Count the number of symbols in a term
+fn term_symbol_count(term: &Term) -> usize {
+    match term {
+        Term::Variable(_) => 1,
+        Term::Constant(_) => 1,
+        Term::Function(_, args) => 1 + args.iter().map(|t| term_symbol_count(t)).sum::<usize>(),
+    }
+}
+
+/// Compare two literals using KBO
+/// Returns true if lit1 > lit2 in the literal ordering
+fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
+    // Compare atoms first using multiset extension of KBO
+    // For simplicity, we compare based on the maximum term in each atom
+    let max_term1 = lit1.atom.args.iter().max_by(|a, b| {
+        match kbo.compare(a, b) {
+            TermOrdering::Greater => std::cmp::Ordering::Greater,
+            TermOrdering::Less => std::cmp::Ordering::Less,
+            _ => std::cmp::Ordering::Equal,
+        }
+    });
+    let max_term2 = lit2.atom.args.iter().max_by(|a, b| {
+        match kbo.compare(a, b) {
+            TermOrdering::Greater => std::cmp::Ordering::Greater,
+            TermOrdering::Less => std::cmp::Ordering::Less,
+            _ => std::cmp::Ordering::Equal,
+        }
+    });
+
+    match (max_term1, max_term2) {
+        (Some(t1), Some(t2)) => {
+            match kbo.compare(t1, t2) {
+                TermOrdering::Greater => true,
+                TermOrdering::Less => false,
+                _ => {
+                    // If terms are equal/incomparable, use weight as tiebreaker
+                    literal_weight(lit1) > literal_weight(lit2)
+                }
+            }
+        }
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => literal_weight(lit1) > literal_weight(lit2),
+    }
+}
+
+/// Find all maximal literals in a clause
+fn find_maximal_literals(clause: &Clause, kbo: &KBO) -> HashSet<usize> {
+    if clause.literals.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut maximal = HashSet::new();
+
+    for i in 0..clause.literals.len() {
+        let mut is_maximal = true;
+        for j in 0..clause.literals.len() {
+            if i != j && literal_greater(&clause.literals[j], &clause.literals[i], kbo) {
+                is_maximal = false;
+                break;
+            }
+        }
+        if is_maximal {
+            maximal.insert(i);
+        }
+    }
+
+    maximal
+}
+
+/// Check if there is exactly one maximal literal
+fn has_unique_maximal(clause: &Clause, kbo: &KBO) -> Option<usize> {
+    let maximal = find_maximal_literals(clause, kbo);
+    if maximal.len() == 1 {
+        maximal.into_iter().next()
+    } else {
+        None
+    }
+}
+
+/// Find negative literal with maximum weight (if any)
+fn find_max_weight_negative(clause: &Clause) -> Option<usize> {
+    let negative_literals: Vec<(usize, usize)> = clause
+        .literals
+        .iter()
+        .enumerate()
+        .filter(|(_, lit)| !lit.polarity)
+        .map(|(idx, lit)| (idx, literal_weight(lit)))
+        .collect();
+
+    if negative_literals.is_empty() {
+        return None;
+    }
+
+    let max_weight = negative_literals.iter().map(|(_, w)| w).max().unwrap();
+    negative_literals
+        .iter()
+        .filter(|(_, w)| w == max_weight)
+        .map(|(idx, _)| *idx)
+        .next()
+}
+
+// ============================================================================
+// Selection 0: Select all literals
+// ============================================================================
+
 /// Select all literals - all literals are eligible for inference
 ///
-/// With this strategy, any literal in a clause can be resolved upon.
-/// For example, in the clause `P(x) ∨ Q(y) ∨ R(z)`, all three literals
-/// can participate in resolution with complementary literals from other clauses.
-///
-/// This preserves completeness but generates many inferences.
+/// Vampire selection 0: no literal selection, all literals participate.
 pub struct SelectAll;
 
 impl LiteralSelector for SelectAll {
@@ -35,419 +149,298 @@ impl LiteralSelector for SelectAll {
     }
 
     fn name(&self) -> &str {
-        "SelectAll"
+        "sel0"
     }
 }
 
-use crate::core::{Literal, Term};
+// ============================================================================
+// Selection 20: Select all maximal literals
+// ============================================================================
 
-/// Select literals with maximum weight (symbol count)
+/// Select all maximal literals in the clause
 ///
-/// Only the "largest" literals in a clause can be used for inference.
-/// For example, in `P(x) ∨ Q(f(g(a)))`, only `Q(f(g(a)))` would be selected
-/// because it contains more symbols.
-///
-/// The intuition: complex literals often contain the "meat" of the problem,
-/// while simpler literals may be auxiliary. This dramatically reduces the
-/// search space but is incomplete - some theorems may require resolving
-/// on the smaller literals.
-pub struct SelectMaxWeight;
+/// Vampire selection 20: select all literals that are maximal in the ordering.
+pub struct SelectMaximal {
+    kbo: KBO,
+}
 
-impl SelectMaxWeight {
+impl SelectMaximal {
     pub fn new() -> Self {
-        SelectMaxWeight
-    }
-
-    /// Calculate the weight of a literal (predicate + argument symbols)
-    fn literal_weight(&self, literal: &Literal) -> usize {
-        // Count predicate symbol + all symbols in arguments
-        1 + literal
-            .atom
-            .args
-            .iter()
-            .map(|term| Self::term_symbol_count(term))
-            .sum::<usize>()
-    }
-
-    /// Count the number of symbols in a term
-    fn term_symbol_count(term: &Term) -> usize {
-        match term {
-            Term::Variable(_) => 1,
-            Term::Constant(_) => 1,
-            Term::Function(_, args) => {
-                1 + args
-                    .iter()
-                    .map(|t| Self::term_symbol_count(t))
-                    .sum::<usize>()
-            }
+        SelectMaximal {
+            kbo: KBO::new(KBOConfig::default()),
         }
+    }
+
+    pub fn with_kbo(kbo: KBO) -> Self {
+        SelectMaximal { kbo }
     }
 }
 
-impl LiteralSelector for SelectMaxWeight {
+impl Default for SelectMaximal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LiteralSelector for SelectMaximal {
     fn select(&self, clause: &Clause) -> HashSet<usize> {
-        if clause.literals.is_empty() {
-            return HashSet::new();
-        }
-
-        // Calculate weight of each literal
-        let weights: Vec<usize> = clause
-            .literals
-            .iter()
-            .map(|lit| self.literal_weight(lit))
-            .collect();
-
-        // Find the maximum weight
-        let max_weight = *weights.iter().max().unwrap();
-
-        // Select all literals with maximum weight
-        weights
-            .iter()
-            .enumerate()
-            .filter(|(_, &weight)| weight == max_weight)
-            .map(|(idx, _)| idx)
-            .collect()
+        find_maximal_literals(clause, &self.kbo)
     }
 
     fn name(&self) -> &str {
-        "SelectMaxWeight"
+        "sel20"
     }
 }
 
-/// Select the largest negative literal (by weight)
-///
-/// This strategy selects the negative literal with the maximum symbol count.
-/// If there are no negative literals (i.e., the clause is purely positive),
-/// all literals are selected to maintain completeness.
-///
-/// This is a common and effective strategy because:
-/// - It restricts the search space by selecting fewer literals
-/// - Negative literals are often good candidates for resolution
-/// - Larger literals tend to contain more information about the problem
-/// - Maintains completeness through the "all positive" fallback rule
-pub struct SelectLargestNegative;
+// ============================================================================
+// Selection 22: Select max-weight negative literal, else all maximal
+// ============================================================================
 
-impl SelectLargestNegative {
+/// Select a negative literal with maximum weight if one exists,
+/// otherwise select all maximal literals.
+///
+/// Vampire selection 22.
+pub struct SelectNegMaxWeightOrMaximal {
+    kbo: KBO,
+}
+
+impl SelectNegMaxWeightOrMaximal {
     pub fn new() -> Self {
-        SelectLargestNegative
-    }
-
-    /// Calculate the weight of a literal (predicate + argument symbols)
-    fn literal_weight(&self, literal: &Literal) -> usize {
-        // Count predicate symbol + all symbols in arguments
-        1 + literal
-            .atom
-            .args
-            .iter()
-            .map(|term| Self::term_symbol_count(term))
-            .sum::<usize>()
-    }
-
-    /// Count the number of symbols in a term
-    fn term_symbol_count(term: &Term) -> usize {
-        match term {
-            Term::Variable(_) => 1,
-            Term::Constant(_) => 1,
-            Term::Function(_, args) => {
-                1 + args
-                    .iter()
-                    .map(|t| Self::term_symbol_count(t))
-                    .sum::<usize>()
-            }
+        SelectNegMaxWeightOrMaximal {
+            kbo: KBO::new(KBOConfig::default()),
         }
+    }
+
+    pub fn with_kbo(kbo: KBO) -> Self {
+        SelectNegMaxWeightOrMaximal { kbo }
     }
 }
 
-impl LiteralSelector for SelectLargestNegative {
+impl Default for SelectNegMaxWeightOrMaximal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LiteralSelector for SelectNegMaxWeightOrMaximal {
     fn select(&self, clause: &Clause) -> HashSet<usize> {
-        if clause.literals.is_empty() {
-            return HashSet::new();
+        // First try to select negative literal with max weight
+        if let Some(idx) = find_max_weight_negative(clause) {
+            let mut selected = HashSet::new();
+            selected.insert(idx);
+            return selected;
         }
 
-        // Find all negative literals
-        let negative_literals: Vec<(usize, usize)> = clause
-            .literals
-            .iter()
-            .enumerate()
-            .filter(|(_, lit)| !lit.polarity)
-            .map(|(idx, lit)| (idx, self.literal_weight(lit)))
-            .collect();
-
-        // If there are no negative literals, select all (for completeness)
-        if negative_literals.is_empty() {
-            return (0..clause.literals.len()).collect();
-        }
-
-        // Find the maximum weight among negative literals
-        let max_weight = negative_literals
-            .iter()
-            .map(|(_, weight)| weight)
-            .max()
-            .unwrap();
-
-        // Select all negative literals with maximum weight
-        negative_literals
-            .iter()
-            .filter(|(_, weight)| weight == max_weight)
-            .map(|(idx, _)| *idx)
-            .collect()
+        // Fall back to all maximal literals
+        find_maximal_literals(clause, &self.kbo)
     }
 
     fn name(&self) -> &str {
-        "SelectLargestNegative"
+        "sel22"
     }
 }
+
+// ============================================================================
+// Selection 21: Unique maximal, else max-weight negative, else all maximal
+// ============================================================================
+
+/// Select a unique maximal literal if one exists,
+/// otherwise select a negative literal with maximum weight if one exists,
+/// otherwise select all maximal literals.
+///
+/// Vampire selection 21.
+pub struct SelectUniqueMaximalOrNegOrMaximal {
+    kbo: KBO,
+}
+
+impl SelectUniqueMaximalOrNegOrMaximal {
+    pub fn new() -> Self {
+        SelectUniqueMaximalOrNegOrMaximal {
+            kbo: KBO::new(KBOConfig::default()),
+        }
+    }
+
+    pub fn with_kbo(kbo: KBO) -> Self {
+        SelectUniqueMaximalOrNegOrMaximal { kbo }
+    }
+}
+
+impl Default for SelectUniqueMaximalOrNegOrMaximal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LiteralSelector for SelectUniqueMaximalOrNegOrMaximal {
+    fn select(&self, clause: &Clause) -> HashSet<usize> {
+        // First try unique maximal
+        if let Some(idx) = has_unique_maximal(clause, &self.kbo) {
+            let mut selected = HashSet::new();
+            selected.insert(idx);
+            return selected;
+        }
+
+        // Then try negative literal with max weight
+        if let Some(idx) = find_max_weight_negative(clause) {
+            let mut selected = HashSet::new();
+            selected.insert(idx);
+            return selected;
+        }
+
+        // Fall back to all maximal literals
+        find_maximal_literals(clause, &self.kbo)
+    }
+
+    fn name(&self) -> &str {
+        "sel21"
+    }
+}
+
+// ============================================================================
+// Legacy aliases for backwards compatibility
+// ============================================================================
+
+/// Alias for SelectAll (legacy name)
+pub type SelectMaxWeight = SelectMaximal;
+
+/// Alias for SelectNegMaxWeightOrMaximal (legacy name)
+pub type SelectLargestNegative = SelectNegMaxWeightOrMaximal;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{
-        Atom, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable,
-    };
+    use crate::core::{Atom, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
 
-    #[test]
-    fn test_select_max_weight() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 2,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 1,
-        };
-        let fa = Term::Function(f, vec![a.clone()]);
-
-        // P(X, a) - weight 2 (X=1, a=1)
-        // Q(f(a)) - weight 2 (f=1, a=1)
-        let clause = Clause::new(vec![
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![x.clone(), a.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: q.clone(),
-                args: vec![fa.clone()],
-            }),
-        ]);
-
-        let selector = SelectMaxWeight::new();
-        let selected = selector.select(&clause);
-
-        // Both literals have weight 2, so both should be selected
-        assert_eq!(selected.len(), 2);
-        assert!(selected.contains(&0));
-        assert!(selected.contains(&1));
+    fn make_clause(literals: Vec<Literal>) -> Clause {
+        Clause::new(literals)
     }
 
-    #[test]
-    fn test_select_largest_negative() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
+    fn make_literal(pred: &str, args: Vec<Term>, positive: bool) -> Literal {
+        let atom = Atom {
+            predicate: PredicateSymbol {
+                name: pred.to_string(),
+                arity: args.len(),
+            },
+            args,
         };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 1,
-        };
-        let fa = Term::Function(f, vec![a.clone()]);
-
-        // ~P(X) ∨ ~Q(f(a)) ∨ P(a)
-        // Should select ~Q(f(a)) because it's the largest negative literal
-        let clause = Clause::new(vec![
-            Literal::negative(Atom {
-                predicate: p.clone(),
-                args: vec![x.clone()],
-            }),
-            Literal::negative(Atom {
-                predicate: q.clone(),
-                args: vec![fa.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }),
-        ]);
-
-        let selector = SelectLargestNegative::new();
-        let selected = selector.select(&clause);
-
-        // Should select only ~Q(f(a)) (index 1) as it's the largest negative
-        assert_eq!(selected.len(), 1);
-        assert!(selected.contains(&1));
-    }
-
-    #[test]
-    fn test_select_largest_negative_all_positive() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-
-        // P(X) ∨ P(a) - all positive, should select all for completeness
-        let clause = Clause::new(vec![
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![x.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }),
-        ]);
-
-        let selector = SelectLargestNegative::new();
-        let selected = selector.select(&clause);
-
-        // Should select all literals (completeness for all-positive clauses)
-        assert_eq!(selected.len(), 2);
-        assert!(selected.contains(&0));
-        assert!(selected.contains(&1));
-    }
-
-    #[test]
-    fn test_select_largest_negative_equal_weight_negatives() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-
-        let x = Term::Variable(Variable { name: "X".to_string() });
-        let y = Term::Variable(Variable { name: "Y".to_string() });
-        let a = Term::Constant(Constant { name: "a".to_string() });
-
-        // ~P(X) ∨ ~Q(Y) ∨ R(a) - two negatives with equal weight
-        let clause = Clause::new(vec![
-            Literal::negative(Atom {
-                predicate: p.clone(),
-                args: vec![x.clone()],
-            }),
-            Literal::negative(Atom {
-                predicate: q.clone(),
-                args: vec![y.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }),
-        ]);
-
-        let selector = SelectLargestNegative::new();
-        let selected = selector.select(&clause);
-
-        // Should select both negative literals (same weight)
-        assert_eq!(selected.len(), 2);
-        assert!(selected.contains(&0));
-        assert!(selected.contains(&1));
-        assert!(!selected.contains(&2)); // Should NOT select positive literal
-    }
-
-    #[test]
-    fn test_select_largest_negative_subset_of_select_all() {
-        // Verify that SelectLargestNegative selects a subset of SelectAll
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-
-        let x = Term::Variable(Variable { name: "X".to_string() });
-        let a = Term::Constant(Constant { name: "a".to_string() });
-
-        // ~P(X) ∨ P(a)
-        let clause = Clause::new(vec![
-            Literal::negative(Atom {
-                predicate: p.clone(),
-                args: vec![x.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }),
-        ]);
-
-        let select_all = SelectAll;
-        let select_largest_neg = SelectLargestNegative::new();
-
-        let all_selected = select_all.select(&clause);
-        let neg_selected = select_largest_neg.select(&clause);
-
-        // SelectLargestNegative should be a subset of SelectAll
-        for &idx in &neg_selected {
-            assert!(all_selected.contains(&idx));
+        if positive {
+            Literal::positive(atom)
+        } else {
+            Literal::negative(atom)
         }
+    }
 
-        // In this case, should select only the negative literal
-        assert_eq!(neg_selected.len(), 1);
-        assert!(neg_selected.contains(&0));
+    fn var(name: &str) -> Term {
+        Term::Variable(Variable { name: name.to_string() })
+    }
+
+    fn const_(name: &str) -> Term {
+        Term::Constant(Constant { name: name.to_string() })
+    }
+
+    fn func(name: &str, args: Vec<Term>) -> Term {
+        Term::Function(
+            FunctionSymbol { name: name.to_string(), arity: args.len() },
+            args,
+        )
     }
 
     #[test]
-    fn test_select_largest_negative_unit_clause() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant { name: "a".to_string() });
-
-        // Unit positive clause: P(a)
-        let clause_pos = Clause::new(vec![
-            Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }),
+    fn test_select_all() {
+        let clause = make_clause(vec![
+            make_literal("P", vec![var("X")], true),
+            make_literal("Q", vec![const_("a")], false),
+            make_literal("R", vec![func("f", vec![var("Y")])], true),
         ]);
 
-        let selector = SelectLargestNegative::new();
-        let selected = selector.select(&clause_pos);
+        let selector = SelectAll;
+        let selected = selector.select(&clause);
 
-        // Should select the only literal (all-positive rule)
-        assert_eq!(selected.len(), 1);
+        assert_eq!(selected.len(), 3);
         assert!(selected.contains(&0));
+        assert!(selected.contains(&1));
+        assert!(selected.contains(&2));
+    }
 
-        // Unit negative clause: ~P(a)
-        let clause_neg = Clause::new(vec![
-            Literal::negative(Atom {
-                predicate: p,
-                args: vec![a],
-            }),
+    #[test]
+    fn test_select_maximal() {
+        // P(X) ∨ Q(f(g(a))) - Q should be maximal due to higher weight
+        let clause = make_clause(vec![
+            make_literal("P", vec![var("X")], true),
+            make_literal("Q", vec![func("f", vec![func("g", vec![const_("a")])])], true),
         ]);
 
-        let selected = selector.select(&clause_neg);
+        let selector = SelectMaximal::new();
+        let selected = selector.select(&clause);
 
-        // Should select the negative literal
+        // Q(f(g(a))) should be selected as maximal
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_neg_max_weight_or_maximal() {
+        // P(X) ∨ ~Q(f(a)) ∨ ~R(a) - should select ~Q(f(a)) as largest negative
+        let clause = make_clause(vec![
+            make_literal("P", vec![var("X")], true),
+            make_literal("Q", vec![func("f", vec![const_("a")])], false),
+            make_literal("R", vec![const_("a")], false),
+        ]);
+
+        let selector = SelectNegMaxWeightOrMaximal::new();
+        let selected = selector.select(&clause);
+
+        // Should select ~Q(f(a)) (index 1) as it's the largest negative
         assert_eq!(selected.len(), 1);
-        assert!(selected.contains(&0));
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_neg_max_weight_fallback() {
+        // P(X) ∨ Q(f(a)) - all positive, should fall back to maximal
+        let clause = make_clause(vec![
+            make_literal("P", vec![var("X")], true),
+            make_literal("Q", vec![func("f", vec![const_("a")])], true),
+        ]);
+
+        let selector = SelectNegMaxWeightOrMaximal::new();
+        let selected = selector.select(&clause);
+
+        // Should select maximal (Q(f(a))) since no negatives
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_unique_maximal() {
+        // P(X) ∨ Q(f(g(h(a)))) - Q is uniquely maximal
+        let clause = make_clause(vec![
+            make_literal("P", vec![var("X")], true),
+            make_literal("Q", vec![func("f", vec![func("g", vec![func("h", vec![const_("a")])])])], true),
+        ]);
+
+        let selector = SelectUniqueMaximalOrNegOrMaximal::new();
+        let selected = selector.select(&clause);
+
+        // Should select Q as unique maximal
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_unique_maximal_fallback_to_negative() {
+        // P(f(X)) ∨ Q(f(Y)) ∨ ~R(c) - P and Q have incomparable terms due to different variables,
+        // so both are maximal. Should fall back to selecting the negative literal.
+        let clause = make_clause(vec![
+            make_literal("P", vec![func("f", vec![var("X")])], true),
+            make_literal("Q", vec![func("f", vec![var("Y")])], true),
+            make_literal("R", vec![const_("c")], false),
+        ]);
+
+        let selector = SelectUniqueMaximalOrNegOrMaximal::new();
+        let selected = selector.select(&clause);
+
+        // P(f(X)) and Q(f(Y)) should both be maximal (incomparable due to different variables)
+        // so we fall back to selecting the negative literal ~R(c) at index 2
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&2));
     }
 }

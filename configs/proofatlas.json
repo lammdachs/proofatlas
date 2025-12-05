@@ -6,7 +6,7 @@
   "defaults": {
     "timeout": 10,
     "max_clauses": 10000,
-    "literal_selection": "all",
+    "literal_selection": 0,
     "selector": "age_weight",
     "age_weight_ratio": 0.167
   },
@@ -16,25 +16,34 @@
       "description": "Default with 10s time limit",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
 
-    "time_max_weight": {
-      "description": "10s with max weight literal selection",
+    "time_sel20": {
+      "description": "10s with sel20 (all maximal literals)",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "max_weight",
+      "literal_selection": 20,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
 
-    "time_largest_negative": {
-      "description": "10s with largest negative literal selection",
+    "time_sel21": {
+      "description": "10s with sel21 (unique maximal, else neg max-weight, else all maximal)",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "largest_negative",
+      "literal_selection": 21,
+      "selector": "age_weight",
+      "age_weight_ratio": 0.167
+    },
+
+    "time_sel22": {
+      "description": "10s with sel22 (max-weight negative, else all maximal)",
+      "timeout": 10,
+      "max_clauses": 10000,
+      "literal_selection": 22,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
@@ -43,7 +52,7 @@
       "description": "10s with age-biased clause selection (0.7)",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "age_weight",
       "age_weight_ratio": 0.7
     },
@@ -52,7 +61,7 @@
       "description": "10s with weight-biased clause selection (0.3)",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "age_weight",
       "age_weight_ratio": 0.3
     },
@@ -61,7 +70,7 @@
       "description": "10s with GCN clause selector",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "gcn",
       "weights": "gcn.safetensors"
     },
@@ -70,7 +79,7 @@
       "description": "10s with MLP clause selector",
       "timeout": 10,
       "max_clauses": 10000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "mlp",
       "weights": "mlp.safetensors"
     },
@@ -79,7 +88,7 @@
       "description": "Default with 1000 clause limit (simulates activation limit)",
       "timeout": 300,
       "max_clauses": 1000,
-      "literal_selection": "all",
+      "literal_selection": 0,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
     }

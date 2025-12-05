@@ -1,7 +1,10 @@
 //! Debug what literals get selected by different strategies
 
 use proofatlas::parse_tptp_file;
-use proofatlas::{LiteralSelector, SelectAll, SelectMaxWeight, SelectLargestNegative};
+use proofatlas::{
+    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectUniqueMaximalOrNegOrMaximal,
+};
 use std::env;
 
 fn main() {
@@ -39,8 +42,9 @@ fn main() {
     println!();
 
     let select_all = SelectAll;
-    let select_max_weight = SelectMaxWeight::new();
-    let select_largest_neg = SelectLargestNegative::new();
+    let select_maximal = SelectMaximal::new();
+    let select_neg_max_weight = SelectNegMaxWeightOrMaximal::new();
+    let select_unique_max = SelectUniqueMaximalOrNegOrMaximal::new();
 
     // Analyze first 10 clauses
     for (idx, clause) in cnf_formula.clauses.iter().take(10).enumerate() {
@@ -48,16 +52,20 @@ fn main() {
         println!("  Literals: {}", clause.literals.len());
 
         let all_selected = select_all.select(clause);
-        let max_weight_selected = select_max_weight.select(clause);
-        let largest_neg_selected = select_largest_neg.select(clause);
+        let maximal_selected = select_maximal.select(clause);
+        let neg_max_weight_selected = select_neg_max_weight.select(clause);
+        let unique_max_selected = select_unique_max.select(clause);
 
-        println!("  SelectAll: {} literals", all_selected.len());
-        println!("  SelectMaxWeight: {} literals ({}%)",
-                 max_weight_selected.len(),
-                 (max_weight_selected.len() * 100) / clause.literals.len());
-        println!("  SelectLargestNegative: {} literals ({}%)",
-                 largest_neg_selected.len(),
-                 (largest_neg_selected.len() * 100) / clause.literals.len());
+        println!("  Sel0 (all): {} literals", all_selected.len());
+        println!("  Sel20 (maximal): {} literals ({}%)",
+                 maximal_selected.len(),
+                 (maximal_selected.len() * 100) / clause.literals.len().max(1));
+        println!("  Sel21 (neg max weight): {} literals ({}%)",
+                 neg_max_weight_selected.len(),
+                 (neg_max_weight_selected.len() * 100) / clause.literals.len().max(1));
+        println!("  Sel22 (unique max): {} literals ({}%)",
+                 unique_max_selected.len(),
+                 (unique_max_selected.len() * 100) / clause.literals.len().max(1));
 
         // Show weights
         print!("  Literal weights: [");

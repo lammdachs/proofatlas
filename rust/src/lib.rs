@@ -23,7 +23,8 @@ pub use core::{
 
 pub use inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition, InferenceResult,
-    InferenceRule, LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight,
+    InferenceRule, LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectUniqueMaximalOrNegOrMaximal,
 };
 
 pub use selectors::{

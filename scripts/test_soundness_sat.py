@@ -75,7 +75,7 @@ def test_problem(problem_path: Path, timeout: int = 1) -> Tuple[bool, str]:
         "cargo", "run", "--release", "--bin", "prove", "--",
         str(problem_path),
         "--timeout", str(timeout),
-        "--literal-selection", "largest_negative",
+        "--literal-selection", "22",
         "--include", str(tptp_root)
     ]
 

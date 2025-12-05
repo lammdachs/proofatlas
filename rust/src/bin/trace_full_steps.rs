@@ -75,7 +75,7 @@ fn main() {
     let mut config = SaturationConfig::default();
     config.step_limit = Some(100);
     config.max_clauses = 1000; // Allow more clauses to see what happens
-    config.literal_selection = LiteralSelectionStrategy::SelectAll;
+    config.literal_selection = LiteralSelectionStrategy::Sel0;
     config.max_clauses = 10000;
     config.timeout = std::time::Duration::from_secs(60);
 

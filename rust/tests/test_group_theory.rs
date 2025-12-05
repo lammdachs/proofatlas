@@ -25,7 +25,7 @@ fn run_group_problem(
         max_clauses: 10000,
         max_iterations: 10000,
         timeout: Duration::from_secs(timeout_secs),
-        literal_selection: LiteralSelectionStrategy::SelectAll,
+        literal_selection: LiteralSelectionStrategy::Sel0,
         ..Default::default()
     };
 

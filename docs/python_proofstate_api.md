@@ -139,7 +139,7 @@ inferences = generate_inferences(
     state, 
     given_clause_id,
     rules=["resolution", "factoring", "superposition"],
-    literal_selection="max_weight"
+    literal_selection="20"  # 0=all, 20=maximal, 21=unique, 22=neg_max_weight
 )
 
 # Add generated clauses to state
@@ -239,8 +239,8 @@ restored_state = ProofState.from_dict(state_dict)
 from proofatlas import KBO
 state.set_term_ordering(KBO(variable_weight=1))
 
-# Configure literal selection
-state.set_literal_selector("max_weight")
+# Configure literal selection (0=all, 20=maximal, 21=unique, 22=neg_max_weight)
+state.set_literal_selector("20")
 
 # Enable/disable simplification
 state.enable_tautology_deletion = True
@@ -268,8 +268,8 @@ from proofatlas import generate_inferences
 problem = parse_tptp_file("problem.p")
 state = ProofState.from_problem(problem)
 
-# Configure
-state.set_literal_selector("max_weight")
+# Configure literal selection
+state.set_literal_selector("20")  # Select maximal literals
 
 # Main loop
 steps = 0

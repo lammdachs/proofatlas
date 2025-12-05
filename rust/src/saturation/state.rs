@@ -7,7 +7,10 @@ use crate::inference::{
     InferenceResult, InferenceRule,
 };
 use crate::parser::orient_equalities::orient_clause_equalities;
-use crate::inference::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};
+use crate::inference::{
+    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectUniqueMaximalOrNegOrMaximal,
+};
 use crate::selectors::ClauseSelector;
 use crate::time_compat::Instant;
 use std::collections::{HashSet, VecDeque};
@@ -24,12 +27,23 @@ pub struct SaturationConfig {
     pub step_limit: Option<usize>,
 }
 
-/// Literal selection strategies
+/// Literal selection strategies (numbers match Vampire's --selection option)
+///
+/// From Hoder et al. "Selecting the selection" (2016):
+/// - Sel0: Select all literals
+/// - Sel20: Select all maximal literals
+/// - Sel21: Select unique maximal, else max-weight negative, else all maximal
+/// - Sel22: Select max-weight negative literal, else all maximal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiteralSelectionStrategy {
-    SelectAll,
-    SelectMaxWeight,
-    SelectLargestNegative,
+    /// Selection 0: Select all literals (no selection)
+    Sel0,
+    /// Selection 20: Select all maximal literals
+    Sel20,
+    /// Selection 21: Unique maximal, else max-weight negative, else all maximal
+    Sel21,
+    /// Selection 22: Max-weight negative literal, else all maximal
+    Sel22,
 }
 
 impl Default for SaturationConfig {
@@ -39,7 +53,7 @@ impl Default for SaturationConfig {
             max_iterations: 10000,
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
-            literal_selection: LiteralSelectionStrategy::SelectAll,
+            literal_selection: LiteralSelectionStrategy::Sel0,
             step_limit: None,
         }
     }
@@ -155,9 +169,10 @@ impl SaturationState {
 
         // Create literal selector based on configuration
         let literal_selector: Box<dyn LiteralSelector> = match config.literal_selection {
-            LiteralSelectionStrategy::SelectAll => Box::new(SelectAll),
-            LiteralSelectionStrategy::SelectMaxWeight => Box::new(SelectMaxWeight::new()),
-            LiteralSelectionStrategy::SelectLargestNegative => Box::new(SelectLargestNegative::new()),
+            LiteralSelectionStrategy::Sel0 => Box::new(SelectAll),
+            LiteralSelectionStrategy::Sel20 => Box::new(SelectMaximal::new()),
+            LiteralSelectionStrategy::Sel21 => Box::new(SelectUniqueMaximalOrNegOrMaximal::new()),
+            LiteralSelectionStrategy::Sel22 => Box::new(SelectNegMaxWeightOrMaximal::new()),
         };
 
         SaturationState {

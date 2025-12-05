@@ -25,7 +25,7 @@ pip install -e ".[examples]"
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/proofatlas.git
+   git clone https://github.com/lexpk/proofatlas.git
    cd proofatlas
    ```
 

@@ -76,12 +76,16 @@ l ≈ r ∨ s ≈ t ∨ C
 - Remove clauses containing `P ∨ ¬P`
 - Remove clauses containing `t ≈ t`
 
-## Selection Strategies
+## Literal Selection Strategies
 
-1. **No Selection**: All literals are selected
-2. **Select Negative**: All negative literals eligible
-3. **Select First Negative**: First negative literal only
-4. **Select Smallest**: Negative literals with minimal size
+Based on Hoder et al. "Selecting the selection" (2016), matching Vampire's numbering:
+
+| # | Strategy | Description |
+|---|----------|-------------|
+| **0** | Select All | All literals are selected (no restriction) |
+| **20** | Select Maximal | Select all maximal literals (using KBO) |
+| **21** | Unique Maximal | Select unique maximal if exists, else max-weight negative, else all maximal |
+| **22** | Neg Max-Weight | Select max-weight negative if exists, else all maximal |
 
 ## Term Orderings
 

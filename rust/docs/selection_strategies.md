@@ -20,10 +20,12 @@ Literal selection determines which literals in a clause can participate in infer
 
 ### Available Strategies
 
-#### `SelectAll`
+Based on Hoder et al. "Selecting the selection" (2016), matching Vampire's numbering:
+
+#### Selection 0: `SelectAll`
 - **What it does**: All literals in a clause can participate in inference rules
 - **Example**: In `P(x) ∨ Q(y) ∨ R(z)`, all three literals can be resolved upon
-- **When to use**: 
+- **When to use**:
   - When you need completeness (guaranteed to find proof if one exists)
   - Small problems where the search space is manageable
   - When other strategies fail to find a proof
@@ -34,24 +36,47 @@ use proofatlas::SelectAll;
 let selector = SelectAll;
 ```
 
-#### `SelectMaxWeight`
-- **What it does**: Only the "heaviest" literals (most symbols) can be used for inference
-- **Example**: In `P(x) ∨ Q(f(g(a)))`, only `Q(f(g(a)))` is selected (4 symbols vs 1)
+#### Selection 20: `SelectMaximal`
+- **What it does**: Select all maximal literals (using KBO ordering)
+- **Example**: In `P(x) ∨ Q(f(g(a)))`, only `Q(f(g(a)))` is selected as maximal
 - **When to use**:
   - Problems where complex terms contain the essential information
   - When you're willing to trade completeness for efficiency
   - Equality problems where complex terms need to be simplified
 - **Trade-off**: Incomplete - may miss proofs that require resolving on simple literals
-- **Symbol counting**: 
-  - Variable: 1 symbol
-  - Constant: 1 symbol  
-  - Function: 1 + symbols in all arguments
-  - Predicate: 1 + symbols in all arguments
 
 ```rust
-use proofatlas::SelectMaxWeight;
-let selector = SelectMaxWeight::new();
+use proofatlas::SelectMaximal;
+let selector = SelectMaximal::new();
 ```
+
+#### Selection 21: `SelectUniqueMaximalOrNegOrMaximal`
+- **What it does**: Select unique maximal literal if exists, else select max-weight negative, else all maximal
+- **Example**: In `P(f(g(a))) ∨ Q(x) ∨ ¬R(b)`, selects `P(f(g(a)))` if uniquely maximal
+- **When to use**: Good balance between restriction and completeness
+- **Trade-off**: More complex fallback logic
+
+```rust
+use proofatlas::SelectUniqueMaximalOrNegOrMaximal;
+let selector = SelectUniqueMaximalOrNegOrMaximal::new();
+```
+
+#### Selection 22: `SelectNegMaxWeightOrMaximal`
+- **What it does**: Select max-weight negative literal if exists, else all maximal
+- **Example**: In `P(x) ∨ ¬Q(f(a)) ∨ ¬R(a)`, selects `¬Q(f(a))` (heaviest negative)
+- **When to use**: Prioritizes eliminating negative literals efficiently
+- **Trade-off**: Falls back to all maximal if no negative literals
+
+```rust
+use proofatlas::SelectNegMaxWeightOrMaximal;
+let selector = SelectNegMaxWeightOrMaximal::new();
+```
+
+### Symbol Counting for Weight
+- Variable: 1 symbol
+- Constant: 1 symbol
+- Function: 1 + symbols in all arguments
+- Predicate: 1 + symbols in all arguments
 
 ### How Literal Selection Affects Inference
 
@@ -66,9 +91,9 @@ With **SelectAll**:
 - Can resolve on Q(f(a,b))/¬Q(f(a,b)) → produces: P(x) ∨ R(g(h(c))) ∨ ¬P(y) ∨ S(z)
 - Both resolvents are generated
 
-With **SelectMaxWeight**:
-- Clause 1: Only R(g(h(c))) selected (5 symbols)
-- Clause 2: Only ¬Q(f(a,b)) selected (4 symbols)  
+With **Selection 20 (SelectMaximal)**:
+- Clause 1: Only R(g(h(c))) selected (5 symbols, maximal)
+- Clause 2: Only ¬Q(f(a,b)) selected (4 symbols, maximal)
 - Cannot resolve - no complementary pair among selected literals
 - No resolvents generated
 
@@ -159,26 +184,26 @@ On a typical group theory problem (GRP001-1):
 
 | Strategy Combination | Clauses Generated | Time to Proof | Memory Used |
 |---------------------|-------------------|---------------|-------------|
-| SelectAll + AgeBased | 45,000+ | 12s | 800MB |
-| SelectAll + SizeBased | 8,000 | 2s | 150MB |
-| SelectMaxWeight + SizeBased | 3,000 | 1s | 50MB |
-| SelectMaxWeight + AgeBased | 15,000 | 5s | 300MB |
+| Sel0 + AgeBased | 45,000+ | 12s | 800MB |
+| Sel0 + SizeBased | 8,000 | 2s | 150MB |
+| Sel20 + SizeBased | 3,000 | 1s | 50MB |
+| Sel20 + AgeBased | 15,000 | 5s | 300MB |
 
 ### Key Insights
 1. **Literal selection** has the biggest impact on clause generation rate
 2. **Clause selection** affects how quickly you find the "right" clauses
 3. **Memory usage** correlates directly with clauses generated
-4. **Incompleteness risk**: SelectMaxWeight may fail on some problems
+4. **Incompleteness risk**: Selection 20/21/22 may fail on some problems
 
 ## Combining Strategies
 
 The real power comes from combining literal and clause selection:
 
 ```rust
-use proofatlas::{SelectMaxWeight, AgeWeightRatioSelector};
+use proofatlas::{SelectMaximal, AgeWeightRatioSelector};
 
 // Conservative literal selection with balanced clause selection
-let literal_selector = SelectMaxWeight::new();
+let literal_selector = SelectMaximal::new();
 let clause_selector = AgeWeightRatioSelector::default();
 ```
 
@@ -198,10 +223,10 @@ let clause_selector = AgeWeightRatioSelector::default();
 
 ### Using Literal Selection in Custom Code
 ```rust
-use proofatlas::{Clause, SelectMaxWeight};
+use proofatlas::{Clause, SelectMaximal};
 
 let clause = /* ... */;
-let selector = SelectMaxWeight::new();
+let selector = SelectMaximal::new();
 let selected_indices = selector.select(&clause);
 
 // Only use literals at selected indices for inference
@@ -231,11 +256,11 @@ let config = SaturationConfig {
 - No variables, so fewer inferences anyway
 
 **First-Order with Equality**:
-- Consider `SelectMaxWeight` - equality chains often involve complex terms
+- Consider `SelectMaximal` (selection 20) - equality chains often involve complex terms
 - `AgeWeightRatioSelector` helps process both simple and complex clauses
 
 **Large Knowledge Bases**:
-- Must use literal selection (`SelectMaxWeight`) to control growth
+- Must use literal selection (selection 20/21/22) to control growth
 - `AgeWeightRatioSelector` prevents starvation of important axioms
 
 **Interactive/Time-Limited**:

@@ -31,7 +31,7 @@ def interactive_proof_search():
     
     # Enable superposition for equality
     state.set_use_superposition(True)
-    state.set_literal_selection("max_weight")
+    state.set_literal_selection("20")  # Select maximal literals
     
     print("\nInitial clause set:")
     for i in range(state.num_clauses()):

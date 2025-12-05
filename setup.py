@@ -7,7 +7,7 @@ setup(
     description="High-performance theorem prover for first-order logic",
     author="ProofAtlas Contributors",
     author_email="",
-    url="https://github.com/yourusername/proofatlas",
+    url="https://github.com/lexpk/proofatlas",
     
     # Find packages in the python/ directory
     packages=find_packages(where="python"),

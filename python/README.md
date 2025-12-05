@@ -159,7 +159,7 @@ The main class for managing proof search.
 - `get_proof_trace() -> List[ProofStep]` - Get proof derivation
 
 **Configuration:**
-- `set_literal_selection(strategy: str)` - Set literal selection ("all" or "max_weight")
+- `set_literal_selection(strategy: str)` - Set literal selection ("0"=all, "20"=maximal, "21"=unique, "22"=neg_max_weight)
 
 #### ClauseInfo
 
@@ -233,7 +233,7 @@ See the `examples/` directory for complete examples:
 
 ## Performance Tips
 
-1. **Literal Selection**: Use "max_weight" for problems with many literals
+1. **Literal Selection**: Use "20" (maximal) or "21"/"22" for problems with many literals
 2. **Clause Selection**: Use "smallest" for problems generating many clauses
 3. **Superposition**: Only enable for problems with equality
 4. **Early Termination**: Check `contains_empty_clause()` frequently

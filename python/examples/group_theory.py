@@ -19,7 +19,7 @@ def prove_right_identity():
     
     state = ProofState()
     state.set_use_superposition(True)
-    state.set_literal_selection("max_weight")
+    state.set_literal_selection("20")  # Select maximal literals
     
     # Group axioms
     axioms = """
@@ -83,7 +83,7 @@ def prove_right_inverse():
     
     state = ProofState()
     state.set_use_superposition(True)
-    state.set_literal_selection("max_weight")
+    state.set_literal_selection("20")  # Select maximal literals
     
     axioms = """
     % Standard group axioms

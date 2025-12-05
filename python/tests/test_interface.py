@@ -86,9 +86,9 @@ def test_literal_selection():
     inferences = state.generate_inferences(0)
     # With no selection, all literals are eligible
     
-    # Test with max weight selection
+    # Test with selection 20 (maximal literals)
     state2 = ProofState()
-    state2.set_literal_selection("max_weight")
+    state2.set_literal_selection("20")
     state2.add_clauses_from_tptp("""
     cnf(c1, axiom, p(a)).
     cnf(c2, axiom, ~p(X) | q(f(X))).

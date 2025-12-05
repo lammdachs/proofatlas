@@ -173,30 +173,43 @@
                     <h2>Literal Selection Strategies</h2>
                     <p>
                         Literal selection determines which literals in a clause are eligible for inference.
-                        ProofAtlas supports three strategies:
+                        Based on <a href="https://link.springer.com/chapter/10.1007/978-3-319-40229-1_21">Hoder et al. "Selecting the selection" (2016)</a>,
+                        ProofAtlas supports four strategies matching Vampire's numbering:
                     </p>
 
                     <div class="strategy-box">
-                        <h3>Select All</h3>
+                        <h3>Selection 0: Select All</h3>
                         <p>All literals are selected for inference.</p>
                         <p class="strategy-note">
-                            <strong>Use case:</strong> Maximum inference potential, but can generate many clauses.
+                            <strong>Use case:</strong> Maximum inference potential, guarantees completeness but can generate many clauses.
                         </p>
                     </div>
 
                     <div class="strategy-box">
-                        <h3>Select Max Weight</h3>
-                        <p>Selects the literal(s) with the maximum weight (based on symbol count).</p>
+                        <h3>Selection 20: Select Maximal</h3>
+                        <p>Selects all maximal literals based on Knuth-Bendix Ordering (KBO).</p>
                         <p class="strategy-note">
                             <strong>Use case:</strong> Focuses on "heavy" literals that might be easier to resolve.
                         </p>
                     </div>
 
                     <div class="strategy-box">
-                        <h3>Select Largest Negative</h3>
+                        <h3>Selection 21: Unique Maximal</h3>
                         <p>
-                            Selects the largest negative literal. If no negative literals exist,
-                            selects all positive literals.
+                            Selects the unique maximal literal if one exists.
+                            Otherwise, selects max-weight negative literal if one exists.
+                            Otherwise, selects all maximal literals.
+                        </p>
+                        <p class="strategy-note">
+                            <strong>Use case:</strong> Good balance between restriction and completeness.
+                        </p>
+                    </div>
+
+                    <div class="strategy-box">
+                        <h3>Selection 22: Neg Max-Weight</h3>
+                        <p>
+                            Selects the max-weight negative literal if one exists.
+                            Otherwise, selects all maximal literals.
                         </p>
                         <p class="strategy-note">
                             <strong>Use case:</strong> Prioritizes eliminating negative literals, which often
@@ -209,9 +222,10 @@
                         The choice of literal selection strategy significantly affects which inferences are performed:
                     </p>
                     <ul>
-                        <li><strong>Select All</strong>: Generates the most inferences, exploring the search space broadly</li>
-                        <li><strong>Select Max Weight</strong>: Focuses on "heavy" literals, reducing the number of inferences</li>
-                        <li><strong>Select Largest Negative</strong>: Prioritizes negative literals when available</li>
+                        <li><strong>Selection 0</strong>: Generates the most inferences, exploring the search space broadly</li>
+                        <li><strong>Selection 20</strong>: Focuses on maximal literals, reducing the number of inferences</li>
+                        <li><strong>Selection 21</strong>: Best single-literal restriction when possible, with fallbacks</li>
+                        <li><strong>Selection 22</strong>: Prioritizes negative literals when available</li>
                     </ul>
                     <p class="note">
                         <strong>Note:</strong> No single strategy is universally best. Performance varies significantly

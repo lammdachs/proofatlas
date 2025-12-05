@@ -10,7 +10,7 @@ pub struct ProofAtlasWasm;
 pub struct ProverOptions {
     pub timeout_ms: u32,
     pub max_clauses: usize,
-    pub literal_selection: Option<String>, // "all", "max_weight", or "largest_negative"
+    pub literal_selection: Option<String>, // "0", "20", "21", or "22" (Vampire-compatible numbering)
     pub selector_type: Option<String>,     // "age_weight", "gcn", or "mlp" (default: "age_weight")
     pub selector_weights: Option<Vec<u8>>, // Safetensors weights for ML selectors (optional)
     pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.5)
@@ -101,9 +101,10 @@ impl ProofAtlasWasm {
         
         // Create saturation config with configurable literal selection
         let literal_selection = match options.literal_selection.as_deref() {
-            Some("max_weight") => LiteralSelectionStrategy::SelectMaxWeight,
-            Some("largest_negative") => LiteralSelectionStrategy::SelectLargestNegative,
-            _ => LiteralSelectionStrategy::SelectAll, // Default to SelectAll
+            Some("20") => LiteralSelectionStrategy::Sel20,
+            Some("21") => LiteralSelectionStrategy::Sel21,
+            Some("22") => LiteralSelectionStrategy::Sel22,
+            _ => LiteralSelectionStrategy::Sel0, // Default to Sel0 (all)
         };
 
         let config = SaturationConfig {

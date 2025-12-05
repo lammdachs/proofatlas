@@ -94,9 +94,10 @@ fof(goal, conjecture, p => r).</textarea>
                     <label>
                         Literal Selection:
                         <select id="literal-selection">
-                            <option value="all">Select All</option>
-                            <option value="max_weight">Select Max Weight</option>
-                            <option value="largest_negative">Select Largest Negative</option>
+                            <option value="0">0: Select All</option>
+                            <option value="20">20: Select Maximal</option>
+                            <option value="21">21: Unique Maximal</option>
+                            <option value="22">22: Neg Max-Weight</option>
                         </select>
                     </label>
                 </div>
@@ -213,7 +214,7 @@ fof(goal, conjecture, p => r).</textarea>
                 <div class="benchmark-notes">
                     <h4>Notes</h4>
                     <ul>
-                        <li>Both provers use SelectLargestNegative literal selection strategy</li>
+                        <li>Both provers use selection 22 (neg max-weight, else all maximal)</li>
                         <li>Vampire uses clause selection strategy 22 (-s 22) with avatar disabled</li>
                         <li>All problems are Unsatisfiable (should have proofs)</li>
                         <li>Average solve time: ProofAtlas 1.15s, Vampire 0.71s</li>

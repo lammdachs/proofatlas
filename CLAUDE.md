@@ -199,10 +199,11 @@ ML selectors are implemented in both Rust/Burn (inference) and Python/PyTorch (t
    - Respects term ordering (KBO)
    - Requires proper literal collection from parent clauses
 
-4. **Literal Selection**: Multiple strategies available:
-   - First literal (default)
-   - Max weight literal
-   - Custom selection functions
+4. **Literal Selection**: Four strategies from Hoder et al. "Selecting the selection" (2016):
+   - Selection 0: Select all literals (default)
+   - Selection 20: Select all maximal literals
+   - Selection 21: Unique maximal, else neg max-weight, else all maximal
+   - Selection 22: Neg max-weight, else all maximal
 
 5. **Subsumption**: Both forward and backward subsumption are implemented with a pragmatic tiered approach.
 
@@ -303,7 +304,7 @@ Controls which problems to use, which selector to run, and how to process data:
   },
 
   "solver": {
-    "literal_selection": "all"
+    "literal_selection": "0"  // 0=all, 20=maximal, 21=unique, 22=neg max-weight
   },
 
   "problem_filters": {

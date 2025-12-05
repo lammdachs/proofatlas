@@ -13,7 +13,10 @@ pub mod superposition;
 pub use common::{InferenceResult, InferenceRule};
 
 // Re-export literal selection strategies
-pub use literal_selection::{LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight};
+pub use literal_selection::{
+    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectUniqueMaximalOrNegOrMaximal,
+};
 
 // Note: The inference rules now require a LiteralSelector parameter
 // Use them like: resolution(clause1, clause2, idx1, idx2, &selector)

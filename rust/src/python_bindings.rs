@@ -15,7 +15,7 @@ use crate::inference::{
 use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
-use crate::inference::{LiteralSelector, SelectAll, SelectMaxWeight};
+use crate::inference::{LiteralSelector, SelectAll, SelectMaximal};
 
 /// Python-accessible proof state
 #[pyclass]
@@ -452,17 +452,27 @@ impl ProofState {
     /// Set literal selection strategy
     pub fn set_literal_selection(&mut self, strategy: &str) -> PyResult<()> {
         match strategy {
-            "all" | "select_all" => {
+            "all" | "select_all" | "0" => {
                 self.literal_selector = Box::new(SelectAll) as Box<dyn LiteralSelector + Send>;
                 Ok(())
             }
-            "max_weight" => {
+            "maximal" | "20" => {
                 self.literal_selector =
-                    Box::new(SelectMaxWeight::new()) as Box<dyn LiteralSelector + Send>;
+                    Box::new(SelectMaximal::new()) as Box<dyn LiteralSelector + Send>;
+                Ok(())
+            }
+            "unique" | "21" => {
+                self.literal_selector =
+                    Box::new(crate::inference::SelectUniqueMaximalOrNegOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
+                Ok(())
+            }
+            "neg_max_weight" | "22" => {
+                self.literal_selector =
+                    Box::new(crate::inference::SelectNegMaxWeightOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
                 Ok(())
             }
             _ => Err(PyValueError::new_err(format!(
-                "Unknown literal selection: {}",
+                "Unknown literal selection: {}. Use 0/20/21/22 or all/maximal/unique/neg_max_weight",
                 strategy
             ))),
         }
@@ -501,9 +511,10 @@ impl ProofState {
             .unwrap_or(Duration::from_secs(300));
 
         let literal_selection = match self.literal_selector.as_ref().name() {
-            "SelectMaxWeight" => LiteralSelectionStrategy::SelectMaxWeight,
-            "SelectLargestNegative" => LiteralSelectionStrategy::SelectLargestNegative,
-            _ => LiteralSelectionStrategy::SelectAll,
+            "sel20" => LiteralSelectionStrategy::Sel20,
+            "sel21" => LiteralSelectionStrategy::Sel21,  // unique maximal, else neg max-weight, else all maximal
+            "sel22" => LiteralSelectionStrategy::Sel22,  // max-weight negative, else all maximal
+            _ => LiteralSelectionStrategy::Sel0,
         };
 
         let config = SaturationConfig {

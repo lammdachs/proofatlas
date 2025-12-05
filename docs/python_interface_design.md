@@ -65,8 +65,8 @@ for term in lit.arguments:
 from proofatlas import Resolution, Factoring, Superposition
 from proofatlas import LiteralSelector, ClauseSelector
 
-# Configure literal selection
-literal_selector = LiteralSelector.max_weight()  # or .no_selection()
+# Configure literal selection (0=all, 20=maximal, 21=unique, 22=neg max-weight)
+literal_selector = LiteralSelector.sel20()  # or .sel0() for no selection
 
 # Apply resolution between two clauses
 resolution = Resolution(literal_selector)
@@ -92,7 +92,7 @@ from proofatlas import SaturationConfig, saturate_step
 
 # Configure saturation
 config = SaturationConfig(
-    literal_selection="max_weight",
+    literal_selection="20",  # 0=all, 20=maximal, 21=unique, 22=neg_max_weight
     clause_selection="age_weight_ratio",
     age_weight_ratio=(1, 5),
     simplify_generated=True,
@@ -217,7 +217,7 @@ state = ProofState.from_problem(problem)
 
 # Configure saturation
 config = SaturationConfig(
-    literal_selection="max_weight",
+    literal_selection="20",  # 0=all, 20=maximal, 21=unique, 22=neg_max_weight
     clause_selection="age_weight_ratio",
     age_weight_ratio=(1, 5)
 )
