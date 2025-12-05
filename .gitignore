@@ -85,4 +85,3 @@ problem.p
 benchmark*.txt
 large_benchmark.txt
 .vampire/
-.pyres/

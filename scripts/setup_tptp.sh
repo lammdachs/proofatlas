@@ -1,12 +1,12 @@
 #!/bin/bash
-# Setup Vampire theorem prover
-# Downloads and extracts Vampire to .vampire/
+# Setup TPTP library
+# Downloads and extracts TPTP to .tptp/
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG_FILE="$BASE_DIR/configs/vampire.json"
+CONFIG_FILE="$BASE_DIR/configs/tptp.json"
 
 # Read config
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -16,20 +16,18 @@ fi
 
 VERSION=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['version'])")
 SOURCE=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['source'])")
-TARGET_DIR="$BASE_DIR/.vampire"
+TARGET_DIR="$BASE_DIR/.tptp"
 
-echo "Vampire Setup"
-echo "============="
+echo "TPTP Setup"
+echo "=========="
 echo "Version: $VERSION"
 echo "Source:  $SOURCE"
 echo "Target:  $TARGET_DIR"
 echo ""
 
 # Check if already installed
-if [ -x "$TARGET_DIR/vampire" ]; then
-    echo "Vampire is already installed at $TARGET_DIR/vampire"
-    "$TARGET_DIR/vampire" --version 2>/dev/null | head -1 || true
-    echo ""
+if [ -d "$TARGET_DIR/TPTP-v$VERSION" ]; then
+    echo "TPTP v$VERSION is already installed at $TARGET_DIR/TPTP-v$VERSION"
     echo "To reinstall, remove the directory first: rm -rf $TARGET_DIR"
     exit 0
 fi
@@ -39,9 +37,9 @@ mkdir -p "$TARGET_DIR"
 cd "$TARGET_DIR"
 
 # Download
-ARCHIVE="vampire-Linux-X64.zip"
+ARCHIVE="TPTP-v$VERSION.tgz"
 if [ ! -f "$ARCHIVE" ]; then
-    echo "Downloading Vampire v$VERSION..."
+    echo "Downloading TPTP v$VERSION..."
     curl -L -o "$ARCHIVE" "$SOURCE"
 else
     echo "Archive already exists, skipping download"
@@ -49,23 +47,25 @@ fi
 
 # Extract
 echo "Extracting..."
-python3 -m zipfile -e "$ARCHIVE" .
-
-# Find and rename binary (vampire releases have versioned names)
-BINARY=$(find . -maxdepth 1 -type f -name "vampire*" ! -name "*.zip" | head -1)
-if [ -n "$BINARY" ] && [ "$BINARY" != "./vampire" ]; then
-    mv "$BINARY" vampire
-fi
-
-# Make executable
-chmod +x vampire
+tar -xzf "$ARCHIVE"
 
 # Verify
-if [ -x "vampire" ]; then
+if [ -d "TPTP-v$VERSION/Problems" ]; then
     echo ""
-    echo "Vampire v$VERSION installed successfully!"
-    ./vampire --version 2>/dev/null | head -1 || true
+    echo "TPTP v$VERSION installed successfully!"
+    echo "Problems directory: $TARGET_DIR/TPTP-v$VERSION/Problems"
+
+    # Count problems
+    PROBLEM_COUNT=$(find "TPTP-v$VERSION/Problems" -name "*.p" | wc -l)
+    echo "Total problems: $PROBLEM_COUNT"
 else
     echo "Error: Installation verification failed"
     exit 1
 fi
+
+# Extract problem metadata
+echo ""
+echo "Extracting problem metadata..."
+cd "$BASE_DIR"
+python3 "$SCRIPT_DIR/extract_problem_metadata.py"
+echo "Problem metadata saved to .data/problem_metadata.json"

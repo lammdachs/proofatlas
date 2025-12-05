@@ -44,7 +44,7 @@ proofatlas/
 │   ├── inference/             # Resolution, factoring, superposition, demodulation
 │   ├── saturation/            # Saturation loop, subsumption
 │   ├── parser/                # TPTP parser
-│   ├── selection/             # Clause/literal selection (Rust/Burn)
+│   ├── selectors/             # Clause/literal selection (Rust/Burn)
 │   └── ml/                    # Graph building, inference
 │
 ├── python/proofatlas/         # Python bindings and ML training
@@ -61,7 +61,7 @@ proofatlas/
 │
 │ # External tools (gitignored):
 ├── .vampire/                  # Vampire prover binary (for benchmarking)
-├── .pyres/                    # PyRes prover (Python reference implementation)
+├── .spass/                    # SPASS prover (for benchmarking)
 │
 │ # Generated/data (gitignored):
 ├── .weights/                  # Trained model weights (safetensors)

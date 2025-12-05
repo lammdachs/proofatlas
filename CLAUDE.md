@@ -146,7 +146,7 @@ proofatlas/
 │   ├── saturation/            # Saturation loop, subsumption
 │   ├── parser/                # TPTP parser, CNF conversion
 │   ├── unification/           # MGU computation
-│   ├── selection/             # Clause/literal selection (Rust/Burn)
+│   ├── selectors/             # Clause/literal selection (Rust/Burn)
 │   └── ml/                    # Graph building, inference
 │
 ├── python/proofatlas/         # Python bindings and ML
@@ -163,7 +163,7 @@ proofatlas/
 │
 │ # External tools (gitignored):
 ├── .vampire/                  # Vampire theorem prover binary
-├── .pyres/                    # PyRes theorem prover (Python reference)
+├── .spass/                    # SPASS theorem prover
 │
 │ # Generated/data (gitignored):
 ├── .weights/                  # Trained model weights (safetensors)
