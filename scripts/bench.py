@@ -3,10 +3,11 @@
 Benchmark script for theorem provers.
 
 USAGE:
-    Runs prover/preset combinations in the background with live progress tracking.
+    Runs prover/preset combinations in the background.
     By default runs ALL provers (proofatlas, vampire, spass) with ALL their presets.
 
-    proofatlas-bench                                  # All provers, all presets
+    proofatlas-bench                                  # Start job, return immediately
+    proofatlas-bench --track                          # Start job and track progress
     proofatlas-bench --prover proofatlas              # One prover, all its presets
     proofatlas-bench --preset time_sel21              # All provers, one preset each
     proofatlas-bench --prover proofatlas vampire --preset activation_sel21
@@ -18,9 +19,9 @@ USAGE:
     Output: .logs/eval_TIMESTAMP/ containing results.csv, summary.json, comparison_matrix.csv
 
 JOB MANAGEMENT:
-    Jobs run in the background. Ctrl+C detaches but the job continues.
+    Jobs run in the background and survive disconnection.
 
-    proofatlas-bench --track     # Attach to running job
+    proofatlas-bench --track     # Attach to running job (or start new with tracking)
     proofatlas-bench --status    # One-shot status check
     proofatlas-bench --kill      # Stop running job
 
@@ -656,7 +657,7 @@ def main():
 
     # Job management
     parser.add_argument("--track", action="store_true",
-                       help="Attach to a running job")
+                       help="Track progress (attach to running job or start with tracking)")
     parser.add_argument("--status", action="store_true",
                        help="Check status of running job (one-shot)")
     parser.add_argument("--kill", action="store_true",
@@ -675,9 +676,8 @@ def main():
         job = get_job_status(base_dir)
         if job:
             track_job(base_dir)
-        else:
-            print("No job currently running.")
-        return
+            return
+        # No job running - fall through to start a new one with tracking
 
     if args.kill:
         if kill_job(base_dir):
@@ -720,7 +720,7 @@ def main():
         output_dir = base_dir / ".logs" / f"eval_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Fork to background and track
+    # Fork to background
     log_file_path = output_dir / "bench.log"
 
     pid = os.fork()
@@ -729,9 +729,11 @@ def main():
         save_job_status(base_dir, pid, sys.argv, output_dir, log_file_path)
         print(f"Started background job (PID: {pid})")
         print(f"Output: {output_dir}")
-        print(f"Note: Ctrl+C detaches but job continues. Use 'proofatlas-bench --kill' to stop.\n")
-        time.sleep(0.5)  # Give child time to start
-        track_job(base_dir)
+        print(f"Use --track to monitor, --status to check, --kill to stop.")
+        if args.track:
+            time.sleep(0.5)  # Give child time to start
+            print()
+            track_job(base_dir)
     else:
         # Child process - detach and run
         os.setsid()
