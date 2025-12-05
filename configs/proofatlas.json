@@ -8,7 +8,7 @@
     "max_clauses": 10000,
     "literal_selection": "all",
     "selector": "age_weight",
-    "age_weight_ratio": 0.5
+    "age_weight_ratio": 0.167
   },
 
   "presets": {
@@ -18,7 +18,7 @@
       "max_clauses": 10000,
       "literal_selection": "all",
       "selector": "age_weight",
-      "age_weight_ratio": 0.5
+      "age_weight_ratio": 0.167
     },
 
     "time_max_weight": {
@@ -27,7 +27,7 @@
       "max_clauses": 10000,
       "literal_selection": "max_weight",
       "selector": "age_weight",
-      "age_weight_ratio": 0.5
+      "age_weight_ratio": 0.167
     },
 
     "time_largest_negative": {
@@ -36,7 +36,7 @@
       "max_clauses": 10000,
       "literal_selection": "largest_negative",
       "selector": "age_weight",
-      "age_weight_ratio": 0.5
+      "age_weight_ratio": 0.167
     },
 
     "time_age_heavy": {
@@ -81,7 +81,7 @@
       "max_clauses": 1000,
       "literal_selection": "all",
       "selector": "age_weight",
-      "age_weight_ratio": 0.5
+      "age_weight_ratio": 0.167
     }
   }
 }
