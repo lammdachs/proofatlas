@@ -24,6 +24,12 @@ CACHING:
 
     proofatlas-bench --force     # Ignore cache, rerun all problems
 
+ML TRAINING DATA:
+    Use --trace to save proof traces for ML training (proofatlas only).
+    Traces are saved to .data/traces/{preset}/{problem}.pt
+
+    proofatlas-bench --prover proofatlas --trace  # Collect traces
+
 JOB MANAGEMENT:
     Jobs run in the background and survive disconnection.
 
@@ -523,11 +529,11 @@ def save_proof_trace(base_dir: Path, preset: str, problem: str, trace_data: dict
 
 
 def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
-                   preset_name: str, tptp_root: Path) -> BenchResult:
+                   preset_name: str, tptp_root: Path, trace: bool = False) -> BenchResult:
     """Run ProofAtlas on a problem using Python bindings.
 
     Uses Python bindings instead of subprocess to enable trace extraction
-    for ML training data. Traces are saved to .data/traces/{preset}/{problem}.pt
+    for ML training data. When trace=True, saves traces to .data/traces/{preset}/{problem}.pt
     """
     from proofatlas import ProofState
 
@@ -580,7 +586,7 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
         status = "saturated"
 
     # Extract and save trace for ML (after timing, doesn't affect benchmark)
-    if proof_found:
+    if trace and proof_found:
         try:
             from proofatlas.ml.graph_utils import to_torch_tensors
 
@@ -612,7 +618,7 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
                quiet: bool = False, use_progress: bool = False,
                progress_desc: str = None, log_file = None,
                config_idx: int = 0, total_configs: int = 0,
-               force: bool = False) -> tuple[list[BenchResult], dict]:
+               force: bool = False, trace: bool = False) -> tuple[list[BenchResult], dict]:
     """Run a single prover/preset on a list of problems.
 
     Results are cached in .data/runs/{prover}/{preset}/{problem}.json.
@@ -644,7 +650,7 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
             elif prover == "spass":
                 result = run_spass(problem, base_dir, configs["spass"], preset)
             else:
-                result = run_proofatlas(problem, base_dir, configs["proofatlas"], preset, tptp_root)
+                result = run_proofatlas(problem, base_dir, configs["proofatlas"], preset, tptp_root, trace=trace)
 
             # Cache the result
             save_cached_result(base_dir, prover, preset, result)
@@ -681,10 +687,11 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
 
 def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_dir: Path,
              tptp_root: Path, configs: dict, output_dir: Path, verbose: bool = False,
-             log_file = None, force: bool = False):
+             log_file = None, force: bool = False, trace: bool = False):
     """Run evaluation across multiple provers and presets.
 
     Results are cached in .data/runs/ and reused unless force=True.
+    When trace=True, saves proof traces for proofatlas (for ML training).
     """
     # Collect all runs
     runs = []
@@ -700,6 +707,8 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
     print(f"Problems: {len(problems)}")
     print(f"Output dir: {output_dir}")
     print(f"Cache: .data/runs/ {'(--force: ignoring cache)' if force else '(reusing cached results)'}")
+    if trace:
+        print(f"Traces: .data/traces/ (saving for ML training)")
     print(f"Configurations: {len(runs)}")
     for prover, preset in runs:
         print(f"  - {prover} / {preset}")
@@ -715,7 +724,7 @@ def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_
         results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs,
                                     verbose=False, quiet=True, use_progress=use_progress, progress_desc=desc,
                                     log_file=log_file, config_idx=idx, total_configs=len(runs),
-                                    force=force)
+                                    force=force, trace=trace)
 
         for r in results:
             all_results.append({"prover": prover, "preset": preset, **r.__dict__})
@@ -793,6 +802,8 @@ def main():
     parser.add_argument("--output-dir", type=str, help="Output directory")
     parser.add_argument("--force", action="store_true",
                        help="Ignore cached results and rerun all problems")
+    parser.add_argument("--trace", action="store_true",
+                       help="Save proof traces for ML training (proofatlas only)")
 
     # Job management
     parser.add_argument("--track", action="store_true",
@@ -881,7 +892,8 @@ def main():
 
         try:
             run_eval(provers, presets, problems, base_dir, tptp_root, configs,
-                     output_dir, verbose=True, log_file=sys.stdout, force=args.force)
+                     output_dir, verbose=True, log_file=sys.stdout, force=args.force,
+                     trace=args.trace)
         finally:
             clear_job_status(base_dir)
             sys.stdout.close()
