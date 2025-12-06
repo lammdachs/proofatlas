@@ -24,7 +24,6 @@
 !environment.json
 !tests/.data/**/*.json
 !wasm/examples/*.json
-!wasm/data/benchmarks.json
 !configs/**/*.json
 
 # Node.js
@@ -42,6 +41,8 @@ __pycache__/
 # Rust build artifacts
 rust/target/
 target/
+wasm/pkg/
+wasm/dist/
 rust/Cargo.lock
 *.so
 *.dylib

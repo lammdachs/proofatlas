@@ -13,7 +13,7 @@ use crate::inference::{
     InferenceResult as RustInferenceResult, InferenceRule,
 };
 use crate::ml::{ClauseGraph, GraphBuilder};
-use crate::parser::parse_tptp;
+use crate::parser::{parse_tptp, parse_tptp_with_includes};
 use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
 use crate::inference::{LiteralSelector, SelectAll, SelectMaximal};
 
@@ -172,9 +172,16 @@ impl ProofState {
     }
 
     /// Parse TPTP content and add clauses, return clause IDs
-    pub fn add_clauses_from_tptp(&mut self, content: &str) -> PyResult<Vec<usize>> {
-        let cnf = parse_tptp(content)
-            .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+    ///
+    /// Args:
+    ///     content: TPTP file content as string
+    ///     include_dir: Optional directory to search for included files (e.g., TPTP root)
+    #[pyo3(signature = (content, include_dir=None))]
+    pub fn add_clauses_from_tptp(&mut self, content: &str, include_dir: Option<&str>) -> PyResult<Vec<usize>> {
+        let cnf = match include_dir {
+            Some(dir) => parse_tptp_with_includes(content, &[dir]),
+            None => parse_tptp(content),
+        }.map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
 
         let mut ids = Vec::new();
         for mut clause in cnf.clauses {

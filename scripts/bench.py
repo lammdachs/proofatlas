@@ -554,7 +554,7 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
     # Initialize prover state
     state = ProofState()
     try:
-        state.add_clauses_from_tptp(content)
+        state.add_clauses_from_tptp(content, str(tptp_root))
     except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=0, stderr=f"Parse error: {e}")
 

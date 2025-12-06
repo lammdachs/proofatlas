@@ -9,4 +9,4 @@ pub mod tptp;
 pub use cnf_conversion::fof_to_cnf;
 pub use fof::{FOFFormula, Quantifier};
 pub use orient_equalities::{orient_all_equalities, orient_clause_equalities};
-pub use tptp::{parse_tptp, parse_tptp_file};
+pub use tptp::{parse_tptp, parse_tptp_file, parse_tptp_with_includes};
