@@ -536,6 +536,9 @@ async function prove() {
 
         console.log('Using age-weight clause selection');
 
+        // Allow browser to paint the loading state before blocking computation
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
         // Run prover with trace for inspector
         const result = await prover.prove_with_trace(input, options);
         showResult(result);
