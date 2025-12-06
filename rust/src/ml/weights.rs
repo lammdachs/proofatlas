@@ -4,19 +4,30 @@
 //! 1. Project-local `.weights/` directory (for development)
 //! 2. Global cache `~/.cache/proofatlas/models/` (for pip installs)
 //!
-//! If not found, weights are downloaded from GitHub Releases to the global cache.
+//! If not found and the "download" feature is enabled, weights are downloaded
+//! from GitHub Releases to the global cache.
 
-use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::{self, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io;
+use std::path::PathBuf;
 use thiserror::Error;
 
+#[cfg(feature = "download")]
+use sha2::{Digest, Sha256};
+#[cfg(feature = "download")]
+use std::fs::File;
+#[cfg(feature = "download")]
+use std::io::{BufReader, Read, Write};
+#[cfg(feature = "download")]
+use std::path::Path;
+
 /// Base URL for downloading model weights from GitHub Releases
+#[cfg(feature = "download")]
 const GITHUB_RELEASE_URL: &str =
     "https://github.com/lexpk/proofatlas/releases/download";
 
 /// Default version tag for model downloads
+#[cfg(feature = "download")]
 const DEFAULT_VERSION: &str = "v0.2.0";
 
 #[derive(Error, Debug)]
@@ -35,6 +46,9 @@ pub enum WeightError {
 
     #[error("No cache directory available")]
     NoCacheDir,
+
+    #[error("Download feature not enabled")]
+    DownloadDisabled,
 }
 
 /// Model metadata for downloading and verification
@@ -45,10 +59,12 @@ pub struct ModelInfo {
     /// Expected SHA256 hash of the file (hex string), or None to skip verification
     pub sha256: Option<String>,
     /// Version tag for GitHub release
+    #[cfg(feature = "download")]
     pub version: String,
 }
 
 impl ModelInfo {
+    #[cfg(feature = "download")]
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -57,6 +73,15 @@ impl ModelInfo {
         }
     }
 
+    #[cfg(not(feature = "download"))]
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            sha256: None,
+        }
+    }
+
+    #[cfg(feature = "download")]
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self
@@ -68,6 +93,7 @@ impl ModelInfo {
     }
 
     /// Get the download URL for this model
+    #[cfg(feature = "download")]
     pub fn download_url(&self) -> String {
         format!(
             "{}/{}/{}.safetensors",
@@ -82,8 +108,19 @@ impl ModelInfo {
 }
 
 /// Get the global cache directory for model weights
+#[cfg(feature = "download")]
 pub fn global_cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|p| p.join("proofatlas").join("models"))
+}
+
+#[cfg(not(feature = "download"))]
+pub fn global_cache_dir() -> Option<PathBuf> {
+    // Without dirs crate, try common locations
+    if let Ok(home) = std::env::var("HOME") {
+        Some(PathBuf::from(home).join(".cache").join("proofatlas").join("models"))
+    } else {
+        None
+    }
 }
 
 /// Get the project-local weights directory
@@ -112,7 +149,8 @@ pub fn find_model(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Get a model, downloading if necessary
+/// Get a model, downloading if necessary (requires "download" feature)
+#[cfg(feature = "download")]
 pub fn get_model(info: &ModelInfo) -> Result<PathBuf, WeightError> {
     // Check if already available
     if let Some(path) = find_model(&info.name) {
@@ -137,7 +175,14 @@ pub fn get_model(info: &ModelInfo) -> Result<PathBuf, WeightError> {
     download_model(info)
 }
 
+/// Get a model (without download support)
+#[cfg(not(feature = "download"))]
+pub fn get_model(info: &ModelInfo) -> Result<PathBuf, WeightError> {
+    find_model(&info.name).ok_or_else(|| WeightError::NotFound(info.name.clone()))
+}
+
 /// Download a model to the global cache
+#[cfg(feature = "download")]
 pub fn download_model(info: &ModelInfo) -> Result<PathBuf, WeightError> {
     let cache_dir = global_cache_dir().ok_or(WeightError::NoCacheDir)?;
     fs::create_dir_all(&cache_dir)?;
@@ -210,7 +255,13 @@ pub fn download_model(info: &ModelInfo) -> Result<PathBuf, WeightError> {
     Ok(dest_path)
 }
 
+#[cfg(not(feature = "download"))]
+pub fn download_model(_info: &ModelInfo) -> Result<PathBuf, WeightError> {
+    Err(WeightError::DownloadDisabled)
+}
+
 /// Calculate SHA256 hash of a file
+#[cfg(feature = "download")]
 pub fn file_sha256(path: &Path) -> Result<String, WeightError> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -276,7 +327,7 @@ pub fn clear_cache() -> Result<(), WeightError> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "download"))]
 mod tests {
     use super::*;
 

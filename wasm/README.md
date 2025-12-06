@@ -26,12 +26,13 @@ A client-side theorem prover that runs entirely in the browser using WebAssembly
 # Install wasm-pack
 curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-# Build WASM module
+# Build WASM module (from wasm directory)
 cd wasm
 wasm-pack build --target web
 
 # Serve locally for testing
 python3 -m http.server 8000
+# Then visit http://localhost:8000/
 ```
 
 ## Usage

@@ -564,14 +564,15 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
     literal_selection = str(preset.get("literal_selection", "0"))
     state.set_literal_selection(literal_selection)
 
-    # Get timeout and max clauses
+    # Get timeout, max clauses, and age_weight_ratio
     timeout = preset.get("timeout", 60)
     max_clauses = preset.get("max_clauses", 10000)
+    age_weight_ratio = preset.get("age_weight_ratio", 0.167)
 
     # Run saturation (timed)
     start = time.time()
     try:
-        proof_found = state.run_saturation(max_clauses, float(timeout), "age_weight", "")
+        proof_found = state.run_saturation(max_clauses, float(timeout), float(age_weight_ratio))
     except Exception as e:
         return BenchResult(problem=problem.name, status="error",
                           time_s=time.time() - start, stderr=f"Saturation error: {e}")
