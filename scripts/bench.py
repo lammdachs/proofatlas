@@ -414,7 +414,7 @@ def run_vampire(problem: Path, base_dir: Path, vampire_config: dict, preset_name
     """Run Vampire on a problem."""
     binary = base_dir / vampire_config["paths"]["binary"]
     if not binary.exists():
-        raise FileNotFoundError(f"Vampire not found: {binary}\nRun: ./scripts/setup_vampire.sh")
+        raise FileNotFoundError(f"Vampire not found: {binary}\nRun: python scripts/setup_vampire.py")
 
     presets = vampire_config.get("presets", {})
     if preset_name not in presets:
@@ -464,7 +464,7 @@ def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: st
     """Run SPASS on a problem."""
     binary = base_dir / spass_config["paths"]["binary"]
     if not binary.exists():
-        raise FileNotFoundError(f"SPASS not found: {binary}\nRun: ./scripts/setup_spass.sh")
+        raise FileNotFoundError(f"SPASS not found: {binary}\nRun: python scripts/setup_spass.py")
 
     presets = spass_config.get("presets", {})
     if preset_name not in presets:
