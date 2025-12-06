@@ -531,7 +531,7 @@ async function prove() {
             max_clauses: parseInt(document.getElementById('max-clauses').value),
             literal_selection: document.getElementById('literal-selection').value,
             selector_type: 'age_weight',
-            age_weight_ratio: 0.5
+            age_weight_ratio: 0.167
         };
 
         console.log('Using age-weight clause selection');
