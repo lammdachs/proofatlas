@@ -512,6 +512,17 @@ async function prove() {
     // Disable button and show loading
     proveBtn.disabled = true;
     proveBtn.textContent = 'Proving...';
+    proveBtn.classList.add('loading');
+
+    // Show working indicator in result section
+    const resultSection = document.getElementById('result-section');
+    const resultStatus = document.getElementById('result-status');
+    const resultStats = document.getElementById('result-stats');
+    resultSection.classList.remove('hidden');
+    resultStatus.className = 'working';
+    resultStatus.innerHTML = '<span class="spinner"></span> Solving...';
+    resultStats.innerHTML = '';
+    document.getElementById('clauses-container').classList.add('hidden');
 
     try {
         // Get options - uses age_weight selector by default
@@ -534,6 +545,7 @@ async function prove() {
     } finally {
         proveBtn.disabled = false;
         proveBtn.textContent = 'Prove';
+        proveBtn.classList.remove('loading');
     }
 }
 

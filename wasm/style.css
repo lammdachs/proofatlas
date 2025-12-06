@@ -251,6 +251,35 @@ main {
     border: 1px solid #ffeeba;
 }
 
+#result-status.working {
+    background: #e3f2fd;
+    color: #1565c0;
+    border: 1px solid #90caf9;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Loading spinner */
+.spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 3px solid #90caf9;
+    border-top-color: #1565c0;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.prove-button.loading {
+    background: #7f8c8d;
+    cursor: wait;
+}
+
 #result-stats {
     padding: 10px;
     background: #f8f9fa;
