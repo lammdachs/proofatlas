@@ -10,11 +10,11 @@ USAGE:
     proofatlas-bench --track                          # Start job and track progress
     proofatlas-bench --prover proofatlas              # One prover, all its presets
     proofatlas-bench --preset time_sel21              # All provers, one preset each
-    proofatlas-bench --prover proofatlas vampire --preset activation_sel21
+    proofatlas-bench --prover proofatlas vampire --preset time_sel21
 
     Filtering:
         --prover    Restrict to specific prover(s): proofatlas, vampire, spass
-        --preset    Restrict to specific preset(s): time_sel21, activation_sel20, etc.
+        --preset    Restrict to specific preset(s): time_sel0, time_sel20, time_sel21, time_sel22
 
     Output: .logs/eval_TIMESTAMP/ containing results.csv, summary.json, comparison_matrix.csv
 
@@ -426,8 +426,6 @@ def run_vampire(problem: Path, base_dir: Path, vampire_config: dict, preset_name
     cmd = [str(binary)]
     if "time_limit" in preset:
         cmd.extend(["--time_limit", str(preset["time_limit"])])
-    if "activation_limit" in preset:
-        cmd.extend(["--activation_limit", str(preset["activation_limit"])])
     if "selection" in preset:
         cmd.extend(["--selection", str(preset["selection"])])
     if "avatar" in preset:

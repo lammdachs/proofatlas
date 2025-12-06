@@ -48,51 +48,6 @@
         "seed": 42,
         "stratify_by": "domain"
       }
-    },
-
-    "activation_default": {
-      "description": "Default with 1000 activation limit",
-      "problem_set": "default",
-      "selector": "age_weight",
-      "literal_selection": "all",
-      "activation_limit": 1000,
-      "split": {
-        "train": 0.8,
-        "val": 0.1,
-        "test": 0.1,
-        "seed": 42,
-        "stratify_by": "domain"
-      }
-    },
-
-    "activation_test": {
-      "description": "Test set with 1000 activation limit",
-      "problem_set": "test",
-      "selector": "age_weight",
-      "literal_selection": "all",
-      "activation_limit": 1000,
-      "split": {
-        "train": 0.8,
-        "val": 0.1,
-        "test": 0.1,
-        "seed": 42,
-        "stratify_by": "domain"
-      }
-    },
-
-    "activation_unit_equality": {
-      "description": "Unit equality with 1000 activation limit",
-      "problem_set": "unit_equality",
-      "selector": "age_weight",
-      "literal_selection": "all",
-      "activation_limit": 1000,
-      "split": {
-        "train": 0.8,
-        "val": 0.1,
-        "test": 0.1,
-        "seed": 42,
-        "stratify_by": "domain"
-      }
     }
   }
 }

@@ -40,42 +40,6 @@
       "literal_selection": 22,
       "selector": "age_weight",
       "age_weight_ratio": 0.167
-    },
-
-    "activation_sel0": {
-      "description": "1000 clause limit with sel0",
-      "timeout": 300,
-      "max_clauses": 1000,
-      "literal_selection": 0,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.167
-    },
-
-    "activation_sel20": {
-      "description": "1000 clause limit with sel20",
-      "timeout": 300,
-      "max_clauses": 1000,
-      "literal_selection": 20,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.167
-    },
-
-    "activation_sel21": {
-      "description": "1000 clause limit with sel21",
-      "timeout": 300,
-      "max_clauses": 1000,
-      "literal_selection": 21,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.167
-    },
-
-    "activation_sel22": {
-      "description": "1000 clause limit with sel22",
-      "timeout": 300,
-      "max_clauses": 1000,
-      "literal_selection": 22,
-      "selector": "age_weight",
-      "age_weight_ratio": 0.167
     }
   }
 }

@@ -42,34 +42,6 @@
       "time_limit": 10,
       "selection": 22,
       "avatar": "off"
-    },
-
-    "activation_sel0": {
-      "description": "1000 activations with selection 0",
-      "activation_limit": 1000,
-      "selection": 0,
-      "avatar": "off"
-    },
-
-    "activation_sel20": {
-      "description": "1000 activations with selection 20",
-      "activation_limit": 1000,
-      "selection": 20,
-      "avatar": "off"
-    },
-
-    "activation_sel21": {
-      "description": "1000 activations with selection 21",
-      "activation_limit": 1000,
-      "selection": 21,
-      "avatar": "off"
-    },
-
-    "activation_sel22": {
-      "description": "1000 activations with selection 22",
-      "activation_limit": 1000,
-      "selection": 22,
-      "avatar": "off"
     }
   }
 }
