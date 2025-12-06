@@ -1,23 +1,113 @@
 #!/usr/bin/env python3
 """
-Extract metadata from TPTP problems into a single JSON file.
+Setup TPTP library and extract problem metadata.
 
-Fast version - uses efficient single-pass parsing without expensive regex.
+Downloads TPTP to .tptp/ and extracts metadata to .data/problem_metadata.json
 
-Extracts:
-- path, domain, status, format (cnf/fof only)
-- has_equality, is_unit_only, rating
-- num_clauses, num_axioms, num_conjectures, max_clause_size
-- num_predicates, num_functions, num_constants, max_term_depth
+Usage:
+    python scripts/setup_tptp.py
+    python scripts/setup_tptp.py --force  # Re-download and re-extract
 """
 
 import json
+import subprocess
+import tarfile
 import time
+import urllib.request
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
-from dataclasses import dataclass, asdict
 
+
+def get_project_root() -> Path:
+    """Get the project root directory."""
+    return Path(__file__).parent.parent
+
+
+def load_tptp_config() -> dict:
+    """Load TPTP configuration."""
+    config_path = get_project_root() / "configs" / "tptp.json"
+    with open(config_path) as f:
+        return json.load(f)
+
+
+# =============================================================================
+# TPTP Download
+# =============================================================================
+
+def download_tptp(force: bool = False) -> Path:
+    """Download and extract TPTP library.
+
+    Returns the path to the Problems directory.
+    """
+    config = load_tptp_config()
+    version = config["version"]
+    source = config["source"]
+
+    target_dir = get_project_root() / ".tptp"
+    tptp_dir = target_dir / f"TPTP-v{version}"
+    problems_dir = tptp_dir / "Problems"
+
+    print("TPTP Setup")
+    print("=" * 50)
+    print(f"Version: {version}")
+    print(f"Source:  {source}")
+    print(f"Target:  {target_dir}")
+    print()
+
+    # Check if already installed
+    if problems_dir.exists() and not force:
+        print(f"TPTP v{version} is already installed.")
+        print("Use --force to re-download.")
+        return problems_dir
+
+    # Create target directory
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Download
+    archive_path = target_dir / f"TPTP-v{version}.tgz"
+    if not archive_path.exists() or force:
+        print(f"Downloading TPTP v{version}...")
+        urllib.request.urlretrieve(source, archive_path, _download_progress)
+        print()  # newline after progress
+    else:
+        print("Archive already exists, skipping download.")
+
+    # Extract
+    print("Extracting...")
+    with tarfile.open(archive_path, "r:gz") as tar:
+        tar.extractall(target_dir)
+
+    # Verify
+    if not problems_dir.exists():
+        raise RuntimeError("Installation verification failed - Problems directory not found")
+
+    # Count problems
+    problem_count = sum(1 for _ in problems_dir.rglob("*.p"))
+    print(f"\nTPTP v{version} installed successfully!")
+    print(f"Problems directory: {problems_dir}")
+    print(f"Total problems: {problem_count}")
+
+    return problems_dir
+
+
+def _download_progress(block_num: int, block_size: int, total_size: int):
+    """Progress callback for urlretrieve."""
+    if total_size > 0:
+        downloaded = block_num * block_size
+        percent = min(100, downloaded * 100 / total_size)
+        bar_len = 30
+        filled = int(bar_len * percent / 100)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        mb_downloaded = downloaded / (1024 * 1024)
+        mb_total = total_size / (1024 * 1024)
+        print(f"\r[{bar}] {percent:5.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end="", flush=True)
+
+
+# =============================================================================
+# Metadata Extraction
+# =============================================================================
 
 @dataclass
 class ProblemMetadata:
@@ -38,16 +128,8 @@ class ProblemMetadata:
     max_term_depth: int
 
 
-def get_tptp_path() -> Path:
-    """Get the TPTP directory path."""
-    base_path = Path(__file__).parent.parent / ".tptp/TPTP-v9.0.0/Problems"
-    if not base_path.exists():
-        raise FileNotFoundError(f"TPTP directory not found: {base_path}")
-    return base_path
-
-
 def extract_header_info(content: str) -> Tuple[str, float]:
-    """Extract status and rating from the header comments (first 4KB)."""
+    """Extract status and rating from the header comments."""
     header = content[:4096]
 
     # Extract status
@@ -66,7 +148,6 @@ def extract_header_info(content: str) -> Tuple[str, float]:
     idx = header.lower().find('% rating')
     if idx != -1:
         portion = header[idx:idx + 50]
-        # Find digits after colon
         colon_idx = portion.find(':')
         if colon_idx != -1:
             num_str = ''
@@ -88,11 +169,9 @@ def quick_format_check(content: str) -> Optional[str]:
     """Check format from first 8KB of content."""
     header = content[:8192]
 
-    # Check for TFF/THF first - if present, skip
     if 'tff(' in header or 'thf(' in header:
         return None
 
-    # Check for CNF/FOF
     if 'fof(' in header:
         return 'fof'
     elif 'cnf(' in header:
@@ -102,12 +181,7 @@ def quick_format_check(content: str) -> Optional[str]:
 
 
 def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, int, Set[str], Set[str], Set[str]]:
-    """
-    Fast single-pass parser for TPTP clauses.
-
-    Returns: (num_clauses, num_axioms, num_conjectures, max_clause_size,
-              all_unit, has_equality, max_depth, predicates, functions, constants)
-    """
+    """Fast single-pass parser for TPTP clauses."""
     num_clauses = 0
     num_axioms = 0
     num_conjectures = 0
@@ -124,49 +198,41 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
     n = len(content)
 
     while i < n:
-        # Skip whitespace and comments
         while i < n and content[i] in ' \t\n\r':
             i += 1
 
         if i >= n:
             break
 
-        # Skip comment lines
         if content[i] == '%':
             while i < n and content[i] != '\n':
                 i += 1
             continue
 
-        # Skip include statements
         if content[i:i+7] == 'include':
             while i < n and content[i] != '.':
                 i += 1
             i += 1
             continue
 
-        # Check for cnf( or fof(
         is_cnf = content[i:i+4] == 'cnf('
         is_fof = content[i:i+4] == 'fof('
 
         if not is_cnf and not is_fof:
-            # Skip unknown content until next line
             while i < n and content[i] != '\n':
                 i += 1
             continue
 
-        i += 4  # Skip 'cnf(' or 'fof('
+        i += 4
         num_clauses += 1
 
-        # Skip clause name (until comma)
         while i < n and content[i] != ',':
             i += 1
-        i += 1  # Skip comma
+        i += 1
 
-        # Skip whitespace
         while i < n and content[i] in ' \t\n\r':
             i += 1
 
-        # Read role (until comma)
         role_start = i
         while i < n and content[i] not in ', \t\n\r':
             i += 1
@@ -177,21 +243,14 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
         elif role in ('conjecture', 'negated_conjecture'):
             num_conjectures += 1
 
-        # Skip to start of formula (after comma)
         while i < n and content[i] != ',':
             i += 1
-        i += 1  # Skip comma
+        i += 1
 
-        # Now parse the formula until closing ).
-        # Track: paren depth, literal count, max depth, symbols, equality
         paren_depth = 0
         literal_count = 1
         current_max_depth = 0
-        formula_start = i
-
-        # Track identifier being built
         ident = ''
-        ident_start = -1
         prev_non_space = ''
 
         while i < n:
@@ -200,26 +259,19 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
             if c == '(':
                 paren_depth += 1
                 current_max_depth = max(current_max_depth, paren_depth)
-
-                # If we were building an identifier, it's a predicate or function
                 if ident:
                     if prev_non_space in ('', '(', '|', '&', '~', ',', '['):
                         predicates.add(ident)
                     else:
                         functions.add(ident)
                     ident = ''
-
                 prev_non_space = c
                 i += 1
 
             elif c == ')':
-                # Check if this is the end of the clause
                 if paren_depth == 0:
-                    # End of formula - look for the closing dot
                     break
                 paren_depth -= 1
-
-                # If we were building an identifier (constant)
                 if ident and ident[0].islower():
                     if ident not in predicates and ident not in functions:
                         if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
@@ -241,13 +293,10 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
             elif c == '=' and i + 1 < n:
                 next_c = content[i + 1] if i + 1 < n else ''
                 prev_c = content[i - 1] if i > 0 else ''
-                # Check for real equality (not =>, <=, ==)
                 if prev_c not in ('<', '!', '=') and next_c not in ('>', '='):
                     has_equality = True
-                # Also != is equality
                 if prev_c == '!' and next_c != '>':
                     has_equality = True
-
                 if ident and ident[0].islower():
                     if ident not in predicates and ident not in functions:
                         if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
@@ -261,17 +310,13 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
                 i += 1
 
             elif c in ' \t\n\r':
-                # Whitespace - save identifier if any
                 if ident and ident[0].islower():
-                    # Check next non-whitespace to see if it's a function call
                     j = i
                     while j < n and content[j] in ' \t\n\r':
                         j += 1
                     if j < n and content[j] == '(':
-                        # It's a function/predicate, will be handled when we see (
                         pass
                     else:
-                        # It's a constant
                         if ident not in predicates and ident not in functions:
                             if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
                                 constants.add(ident)
@@ -297,10 +342,9 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
                     prev_non_space = c
                 i += 1
 
-        # Skip to end of clause (the dot)
         while i < n and content[i] != '.':
             i += 1
-        i += 1  # Skip dot
+        i += 1
 
         max_clause_size = max(max_clause_size, literal_count)
         max_depth = max(max_depth, current_max_depth)
@@ -319,23 +363,18 @@ def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMet
     except Exception:
         return None
 
-    # Quick format check
     fmt = quick_format_check(content)
     if fmt is None:
         return None
 
-    # Also check full content for TFF/THF (might appear after header)
     if 'tff(' in content or 'thf(' in content:
         return None
 
-    # Extract header info
     status, rating = extract_header_info(content)
 
-    # Parse clauses in single pass
     (num_clauses, num_axioms, num_conjectures, max_clause_size,
      all_unit, has_equality, max_depth, predicates, functions, constants) = parse_clauses_fast(content)
 
-    # Get relative path
     relative_path = problem_path.relative_to(tptp_root)
     domain = problem_path.parent.name
 
@@ -358,76 +397,45 @@ def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMet
     )
 
 
-def extract_all_metadata(verbose: bool = True) -> List[ProblemMetadata]:
+def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
     """Extract metadata from all TPTP problems."""
-    tptp_path = get_tptp_path()
-    problems = []
-
-    # Precompute all problem files for progress bar
-    if verbose:
-        print("Scanning for problem files...")
+    print("\nExtracting problem metadata...")
+    print("=" * 50)
 
     all_files = []
-    domains = sorted([d for d in tptp_path.iterdir() if d.is_dir()])
+    domains = sorted([d for d in problems_dir.iterdir() if d.is_dir()])
     for domain_dir in domains:
         all_files.extend(sorted(domain_dir.glob("*.p")))
 
     total_files = len(all_files)
-    if verbose:
-        print(f"Found {total_files} problem files in {len(domains)} domains")
+    print(f"Found {total_files} problem files in {len(domains)} domains")
 
-    # Process with progress bar
+    problems = []
+    start_time = time.time()
+
     for i, problem_file in enumerate(all_files):
-        if verbose:
-            pct = 100 * (i + 1) / total_files
-            bar_len = 30
-            filled = int(bar_len * (i + 1) / total_files)
-            bar = "█" * filled + "░" * (bar_len - filled)
-            # Show current file being processed
-            print(f"\r[{bar}] {pct:5.1f}% ({i+1}/{total_files}) {problem_file.name:<30}", end="", flush=True)
+        pct = 100 * (i + 1) / total_files
+        bar_len = 30
+        filled = int(bar_len * (i + 1) / total_files)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        print(f"\r[{bar}] {pct:5.1f}% ({i+1}/{total_files})", end="", flush=True)
 
-        metadata = extract_metadata(problem_file, tptp_path)
+        metadata = extract_metadata(problem_file, problems_dir)
         if metadata is not None:
             problems.append(metadata)
 
-    if verbose:
-        print()  # newline after progress bar
-
-    return problems
-
-
-def main():
-    """Main function."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Extract TPTP problem metadata")
-    parser.add_argument(
-        "--output", "-o",
-        type=Path,
-        default=Path(__file__).parent.parent / ".data/problem_metadata.json",
-        help="Output JSON file"
-    )
-    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
-
-    args = parser.parse_args()
-
-    print("Extracting TPTP problem metadata...")
-    print("=" * 50)
-
-    start_time = time.time()
-    problems = extract_all_metadata(verbose=not args.quiet)
     elapsed = time.time() - start_time
+    print()
 
-    # Create output
-    output = {
-        "version": "1.0",
-        "tptp_version": "9.0.0",
-        "generated": datetime.now().isoformat(),
-        "num_problems": len(problems),
-        "problems": [asdict(p) for p in problems],
-    }
+    return problems, elapsed
 
-    # Add summary statistics
+
+def save_metadata(problems: List[ProblemMetadata], elapsed: float):
+    """Save extracted metadata to JSON."""
+    output_path = get_project_root() / ".data" / "problem_metadata.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Summary statistics
     num_cnf = sum(1 for p in problems if p.format == 'cnf')
     num_fof = sum(1 for p in problems if p.format == 'fof')
     num_unsat = sum(1 for p in problems if p.status == 'unsatisfiable')
@@ -436,24 +444,63 @@ def main():
     num_with_eq = sum(1 for p in problems if p.has_equality)
     num_unit = sum(1 for p in problems if p.is_unit_only)
 
-    output["summary"] = {
-        "total": len(problems),
-        "by_format": {"cnf": num_cnf, "fof": num_fof},
-        "by_status": {"unsatisfiable": num_unsat, "satisfiable": num_sat, "unknown": num_unknown},
-        "with_equality": num_with_eq,
-        "unit_only": num_unit,
+    output = {
+        "version": "1.0",
+        "tptp_version": "9.0.0",
+        "generated": datetime.now().isoformat(),
+        "num_problems": len(problems),
+        "summary": {
+            "total": len(problems),
+            "by_format": {"cnf": num_cnf, "fof": num_fof},
+            "by_status": {"unsatisfiable": num_unsat, "satisfiable": num_sat, "unknown": num_unknown},
+            "with_equality": num_with_eq,
+            "unit_only": num_unit,
+        },
+        "problems": [asdict(p) for p in problems],
     }
 
-    # Write output
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, 'w') as f:
+    with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
 
     print(f"\nExtracted metadata for {len(problems)} problems in {elapsed:.1f}s")
     print(f"  CNF: {num_cnf}, FOF: {num_fof}")
     print(f"  Unsatisfiable: {num_unsat}, Satisfiable: {num_sat}, Unknown: {num_unknown}")
     print(f"  With equality: {num_with_eq}, Unit only: {num_unit}")
-    print(f"\nSaved to {args.output}")
+    print(f"\nSaved to {output_path}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Setup TPTP library and extract problem metadata"
+    )
+    parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Force re-download and re-extraction"
+    )
+    parser.add_argument(
+        "--skip-metadata",
+        action="store_true",
+        help="Skip metadata extraction (download only)"
+    )
+
+    args = parser.parse_args()
+
+    # Download TPTP
+    problems_dir = download_tptp(force=args.force)
+
+    # Extract metadata
+    if not args.skip_metadata:
+        problems, elapsed = extract_all_metadata(problems_dir)
+        save_metadata(problems, elapsed)
+
+    print("\nSetup complete!")
 
 
 if __name__ == "__main__":

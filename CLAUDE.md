@@ -409,10 +409,10 @@ python scripts/train.py --preset time_sel21 --training gcn
 
 ### Problem Metadata
 
-Problem metadata is extracted from TPTP and stored in `.data/problem_metadata.json`:
+Problem metadata is extracted during TPTP setup and stored in `.data/problem_metadata.json`:
 
 ```bash
-python scripts/extract_problem_metadata.py
+python scripts/setup_tptp.py  # Downloads TPTP and extracts metadata
 ```
 
 This creates a JSON file with metadata for all CNF/FOF problems:

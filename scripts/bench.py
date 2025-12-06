@@ -340,7 +340,7 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
 
     if not problems_dir.exists():
         raise FileNotFoundError(f"TPTP problems directory not found: {problems_dir}\n"
-                               "Run: ./scripts/setup_tptp.sh")
+                               "Run: python scripts/setup_tptp.py")
 
     # Load problem metadata if available
     metadata_path = base_dir / ".data" / "problem_metadata.json"
