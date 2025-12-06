@@ -556,17 +556,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Tab switching
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.addEventListener('click', () => {
-            const tabName = button.dataset.tab;
-            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            document.getElementById(`${tabName}-tab`).classList.add('active');
-        });
-    });
-
     // Helper function to fetch TPTP content from URL
     async function fetchTptpContent(url) {
         const corsUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;

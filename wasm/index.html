@@ -58,13 +58,6 @@
             </p>
         </section>
 
-        <div class="tabs">
-            <button class="tab-button active" data-tab="prover">Try It</button>
-            <button class="tab-button" data-tab="benchmarks">Results</button>
-            <button class="tab-button" data-tab="research">Research</button>
-        </div>
-
-        <div id="prover-tab" class="tab-content active">
         <main>
             <div class="input-section">
                 <div class="toolbar">
@@ -153,89 +146,16 @@ fof(goal, conjecture, p => r).</textarea>
                 </div>
             </div>
         </main>
-        </div>
-
-        <div id="benchmarks-tab" class="tab-content">
-        <main>
-            <div class="benchmark-content" style="text-align: center; padding: 40px;">
-                <h2>Benchmark Results</h2>
-                <p style="margin: 20px 0; color: #666;">
-                    Compare ProofAtlas, Vampire, and SPASS across TPTP problems.
-                </p>
-                <a href="results.html" class="try-button" style="display: inline-block; margin-top: 20px;">
-                    View Full Results →
-                </a>
-            </div>
-        </main>
-        </div>
-
-        <div id="research-tab" class="tab-content">
-        <main>
-            <div class="research-content">
-                <h2>Research Focus</h2>
-                <p class="research-question">
-                    <strong>How can we best represent logical clauses as graphs and learn to select useful clauses during proof search?</strong>
-                </p>
-
-                <div class="research-areas">
-                    <div class="research-card">
-                        <h3>Graph Representations</h3>
-                        <p>Clauses as syntax trees with typed nodes (clause, literal, predicate, function, variable, constant) and 13-dimensional features encoding structure and metadata.</p>
-                    </div>
-                    <div class="research-card">
-                        <h3>Graph Neural Networks</h3>
-                        <p>Learning embeddings from clause structure using GCN, GAT, GraphSAGE, and other architectures to capture logical patterns.</p>
-                    </div>
-                    <div class="research-card">
-                        <h3>Transformers/Attention</h3>
-                        <p>Using attention mechanisms over graph embeddings to score clauses based on their relevance to the proof goal.</p>
-                    </div>
-                    <div class="research-card">
-                        <h3>Learned Selection</h3>
-                        <p>Replacing hand-crafted heuristics (age-weight ratio) with neural policies trained on successful proofs.</p>
-                    </div>
-                </div>
-
-                <h2>Node Feature Layout</h2>
-                <table class="feature-table">
-                    <thead>
-                        <tr>
-                            <th>Index</th>
-                            <th>Feature</th>
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr><td>0-5</td><td>Node type</td><td>One-hot: clause, literal, predicate, function, variable, constant</td></tr>
-                        <tr><td>6</td><td>Arity</td><td>Number of arguments (predicates/functions)</td></tr>
-                        <tr><td>7</td><td>Arg position</td><td>0-indexed position as argument to parent</td></tr>
-                        <tr><td>8</td><td>Depth</td><td>Distance from clause root in syntax tree</td></tr>
-                        <tr><td>9</td><td>Age</td><td>Clause age normalized to [0, 1]</td></tr>
-                        <tr><td>10</td><td>Role</td><td>0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived</td></tr>
-                        <tr><td>11</td><td>Polarity</td><td>1.0=positive, 0.0=negative</td></tr>
-                        <tr><td>12</td><td>Is equality</td><td>1.0 if predicate is equality (=)</td></tr>
-                    </tbody>
-                </table>
-
-                <h2>Technical Stack</h2>
-                <ul class="tech-list">
-                    <li><strong>Rust core</strong>: High-performance saturation prover with superposition calculus</li>
-                    <li><strong>Burn</strong>: Pure Rust ML framework for clause selection</li>
-                    <li><strong>PyTorch</strong>: Model training with safetensors export</li>
-                    <li><strong>WebAssembly</strong>: Client-side proving with ML selection</li>
-                </ul>
-            </div>
-        </main>
-        </div>
 
         <footer>
             <p>
                 ProofAtlas runs entirely in your browser. No data is sent to any server.
             </p>
             <p class="footer-links">
-                <a href="https://github.com/apluska/proofatlas">GitHub</a> |
+                <a href="https://github.com/lexpk/proofatlas">GitHub</a> |
                 <a href="./docs.html">Docs</a> |
-                BSD 0-Clause License
+                <a href="./results.html">Results</a> |
+                <a href="./training.html">Training</a>
             </p>
         </footer>
     </div>
