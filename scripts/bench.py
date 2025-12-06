@@ -636,10 +636,14 @@ def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
         if not force:
             cached = load_cached_result(base_dir, prover, preset, problem.name)
             if cached:
-                result = cached
-                cached_count += 1
-            else:
-                cached = None
+                # If --trace and this is a proofatlas proof without a trace, rerun to get trace
+                if trace and prover == "proofatlas" and cached.status == "proof":
+                    trace_path = get_trace_cache_path(base_dir, preset, problem.name)
+                    if not trace_path.exists():
+                        cached = None  # Rerun to generate trace
+                if cached:
+                    result = cached
+                    cached_count += 1
         else:
             cached = None
 
