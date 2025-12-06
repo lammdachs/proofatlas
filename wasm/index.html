@@ -24,6 +24,7 @@
                 <a href="https://github.com/lexpk/proofatlas">GitHub</a>
                 <a href="./docs.html">Documentation</a>
                 <a href="./results.html">Results</a>
+                <a href="./training.html">Training</a>
             </nav>
         </header>
 
@@ -59,7 +60,7 @@
 
         <div class="tabs">
             <button class="tab-button active" data-tab="prover">Try It</button>
-            <button class="tab-button" data-tab="benchmarks">Benchmarks</button>
+            <button class="tab-button" data-tab="benchmarks">Results</button>
             <button class="tab-button" data-tab="research">Research</button>
         </div>
 
@@ -156,101 +157,14 @@ fof(goal, conjecture, p => r).</textarea>
 
         <div id="benchmarks-tab" class="tab-content">
         <main>
-            <div class="benchmark-content">
-                <p class="benchmark-description">
-                    Performance comparison on 150 TPTP Unsatisfiable problems (50 per category, 10s timeout)
+            <div class="benchmark-content" style="text-align: center; padding: 40px;">
+                <h2>Benchmark Results</h2>
+                <p style="margin: 20px 0; color: #666;">
+                    Compare ProofAtlas, Vampire, and SPASS across TPTP problems.
                 </p>
-
-                <div class="benchmark-overall">
-                    <h3>Overall Performance</h3>
-                    <div class="benchmark-stats">
-                        <div class="stat-card">
-                            <div class="stat-label">ProofAtlas</div>
-                            <div class="stat-value">41/150</div>
-                            <div class="stat-percent">27.3%</div>
-                        </div>
-                        <div class="stat-card winner">
-                            <div class="stat-label">Vampire 5.0</div>
-                            <div class="stat-value">50/150</div>
-                            <div class="stat-percent">33.3%</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="benchmark-categories">
-                    <h3>Performance by Category</h3>
-                    <table class="benchmark-table">
-                        <thead>
-                            <tr>
-                                <th>Category</th>
-                                <th>ProofAtlas</th>
-                                <th>Vampire</th>
-                                <th>Winner</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Unit Equalities</td>
-                                <td>18/50 (36%)</td>
-                                <td>23/50 (46%)</td>
-                                <td class="winner-cell">Vampire +5</td>
-                            </tr>
-                            <tr class="tied-row">
-                                <td>CNF Without Equality</td>
-                                <td>16/50 (32%)</td>
-                                <td>16/50 (32%)</td>
-                                <td class="tied-cell">Tied</td>
-                            </tr>
-                            <tr>
-                                <td>CNF With Equality</td>
-                                <td>7/50 (14%)</td>
-                                <td>11/50 (22%)</td>
-                                <td class="winner-cell">Vampire +4</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="benchmark-notes">
-                    <h4>Notes</h4>
-                    <ul>
-                        <li>Both provers use selection 22 (neg max-weight, else all maximal)</li>
-                        <li>Vampire uses clause selection strategy 22 (-s 22) with avatar disabled</li>
-                        <li>All problems are Unsatisfiable (should have proofs)</li>
-                        <li>Average solve time: ProofAtlas 1.15s, Vampire 0.71s</li>
-                    </ul>
-                </div>
-
-                <div class="benchmark-problems">
-                    <h3>Benchmark Problem List</h3>
-                    <div class="problem-controls">
-                        <label>
-                            Filter by category:
-                            <select id="category-filter">
-                                <option value="all">All Categories</option>
-                                <option value="Unit Equalities">Unit Equalities</option>
-                                <option value="CNF Without Equality">CNF Without Equality</option>
-                                <option value="CNF With Equality">CNF With Equality</option>
-                            </select>
-                        </label>
-                        <span id="problem-count">Loading problems...</span>
-                    </div>
-                    <div class="problems-table-container">
-                        <table class="problems-table">
-                            <thead>
-                                <tr>
-                                    <th>Problem</th>
-                                    <th>Domain</th>
-                                    <th>Category</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="problems-tbody">
-                                <tr><td colspan="4">Loading problems...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <a href="results.html" class="try-button" style="display: inline-block; margin-top: 20px;">
+                    View Full Results →
+                </a>
             </div>
         </main>
         </div>
