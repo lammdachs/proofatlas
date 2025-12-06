@@ -25,6 +25,7 @@
 !tests/.data/**/*.json
 !wasm/examples/*.json
 !wasm/benchmark_problems.json
+!wasm/data/benchmarks.json
 !configs/**/*.json
 
 # Node.js
