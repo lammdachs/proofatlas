@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[cfg(feature = "download")]
@@ -18,8 +18,6 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 #[cfg(feature = "download")]
 use std::io::{BufReader, Read, Write};
-#[cfg(feature = "download")]
-use std::path::Path;
 
 /// Base URL for downloading model weights from GitHub Releases
 #[cfg(feature = "download")]
