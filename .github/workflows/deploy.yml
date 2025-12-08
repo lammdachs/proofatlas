@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'wasm/**'
-      - 'rust/**'
+      - 'crates/**'
+      - 'web/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -37,26 +37,25 @@ jobs:
 
       - name: Build WASM module
         shell: bash -el {0}
-        working-directory: ./wasm
         run: |
-          cargo build --target wasm32-unknown-unknown --release
+          cargo build -p proofatlas-wasm --target wasm32-unknown-unknown --release
           wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
-            --out-dir pkg \
+            --out-dir web/pkg \
             --target web \
             --no-typescript
 
       - name: Prepare deployment files
-        working-directory: ./wasm
         run: |
-          mkdir -p dist
-          cp index.html docs.html style.css docs-style.css app.js favicon.svg benchmark_problems.json dist/
-          cp -r pkg dist/
-          cp -r examples dist/
+          mkdir -p web/dist
+          cp web/index.html web/docs.html web/style.css web/docs-style.css web/app.js web/favicon.svg web/dist/
+          cp -r web/pkg web/dist/
+          cp -r web/examples web/dist/
+          cp -r web/data web/dist/ 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./wasm/dist
+          path: ./web/dist
 
   deploy:
     environment:
