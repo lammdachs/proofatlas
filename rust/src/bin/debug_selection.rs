@@ -30,7 +30,7 @@ fn main() {
     }
 
     // Parse the TPTP file
-    let cnf_formula = match parse_tptp_file(filename, &include_dirs) {
+    let cnf_formula = match parse_tptp_file(filename, &include_dirs, None) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("Parse error: {}", e);

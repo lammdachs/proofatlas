@@ -98,7 +98,7 @@ fn main() {
 
     // Parse TPTP with include support
     let include_dir_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
-    let formula = match parse_tptp_file(filename, &include_dir_refs) {
+    let formula = match parse_tptp_file(filename, &include_dir_refs, None) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Parse error: {}", e);

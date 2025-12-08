@@ -3,6 +3,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, ToPyArray};
@@ -13,7 +14,7 @@ use crate::inference::{
     InferenceResult as RustInferenceResult, InferenceRule,
 };
 use crate::ml::{ClauseGraph, GraphBuilder};
-use crate::parser::{parse_tptp, parse_tptp_with_includes};
+use crate::parser::parse_tptp;
 use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
 use crate::inference::{LiteralSelector, SelectAll, SelectMaximal};
 
@@ -176,12 +177,19 @@ impl ProofState {
     /// Args:
     ///     content: TPTP file content as string
     ///     include_dir: Optional directory to search for included files (e.g., TPTP root)
-    #[pyo3(signature = (content, include_dir=None))]
-    pub fn add_clauses_from_tptp(&mut self, content: &str, include_dir: Option<&str>) -> PyResult<Vec<usize>> {
-        let cnf = match include_dir {
-            Some(dir) => parse_tptp_with_includes(content, &[dir]),
-            None => parse_tptp(content),
-        }.map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+    ///     timeout: Optional timeout in seconds for CNF conversion (prevents hangs on complex formulas)
+    #[pyo3(signature = (content, include_dir=None, timeout=None))]
+    pub fn add_clauses_from_tptp(
+        &mut self,
+        content: &str,
+        include_dir: Option<&str>,
+        timeout: Option<f64>,
+    ) -> PyResult<Vec<usize>> {
+        let timeout_instant = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
+        let include_dirs: Vec<&str> = include_dir.into_iter().collect();
+
+        let cnf = parse_tptp(content, &include_dirs, timeout_instant)
+            .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
 
         let mut ids = Vec::new();
         for mut clause in cnf.clauses {
@@ -494,23 +502,69 @@ impl ProofState {
     ///     max_iterations: Maximum number of saturation steps
     ///     timeout_secs: Optional timeout in seconds
     ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
+    ///     selector: Clause selector type: "age_weight" (default), "gcn", or "mlp"
+    ///     weights_path: Path to safetensors weights file (required for gcn/mlp)
     ///
     /// Returns:
     ///     True if proof found, False otherwise
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
         timeout_secs: Option<f64>,
         age_weight_ratio: Option<f64>,
+        selector: Option<String>,
+        weights_path: Option<String>,
     ) -> PyResult<bool> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
-        use crate::selectors::AgeWeightSelector;
+        use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
+        use crate::ml::weights::find_model;
         use std::time::Duration;
 
-        // Create clause selector (age-weight heuristic)
-        let ratio = age_weight_ratio.unwrap_or(0.5);
-        let clause_selector: Box<dyn crate::selectors::ClauseSelector> =
-            Box::new(AgeWeightSelector::new(ratio));
+        // Create clause selector based on selector type
+        let selector_type = selector.as_deref().unwrap_or("age_weight");
+        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match selector_type {
+            "age_weight" => {
+                let ratio = age_weight_ratio.unwrap_or(0.5);
+                Box::new(AgeWeightSelector::new(ratio))
+            }
+            "gcn" => {
+                // Find weights file
+                let weights = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path)
+                } else {
+                    find_model("gcn").ok_or_else(|| {
+                        PyValueError::new_err("GCN weights not found. Provide weights_path or place gcn.safetensors in .weights/")
+                    })?
+                };
+
+                // Load model (using defaults from models.json)
+                let selector = load_ndarray_gcn_selector(&weights, 13, 64, 3)
+                    .map_err(|e| PyValueError::new_err(format!("Failed to load GCN: {}", e)))?;
+                Box::new(selector)
+            }
+            "mlp" => {
+                // Find weights file
+                let weights = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path)
+                } else {
+                    find_model("mlp").ok_or_else(|| {
+                        PyValueError::new_err("MLP weights not found. Provide weights_path or place mlp.safetensors in .weights/")
+                    })?
+                };
+
+                // Load model (using defaults from models.json)
+                let selector = load_ndarray_mlp_selector(&weights, 13, 128, 3)
+                    .map_err(|e| PyValueError::new_err(format!("Failed to load MLP: {}", e)))?;
+                Box::new(selector)
+            }
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown selector: {}. Use 'age_weight', 'gcn', or 'mlp'",
+                    selector_type
+                )));
+            }
+        };
 
         // Build config
         let timeout = timeout_secs

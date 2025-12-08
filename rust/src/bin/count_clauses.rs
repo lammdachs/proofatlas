@@ -40,7 +40,7 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
     writeln!(file, "{}", tptp_content).expect("Failed to write temp file");
 
     // Parse the formula
-    let formula = match parse_tptp_file(temp_filename, &[]) {
+    let formula = match parse_tptp_file(temp_filename, &[], None) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Parse error: {}", e);

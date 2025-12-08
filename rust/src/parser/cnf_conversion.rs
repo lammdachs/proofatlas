@@ -3,19 +3,39 @@
 //! This module implements the standard algorithm for converting
 //! first-order formulas to Conjunctive Normal Form (CNF).
 
+use std::time::Instant;
+
 use super::fof::{FOFFormula, Quantifier};
 use crate::core::{
     Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, Term, Variable,
 };
 
-/// Convert a FOF formula to CNF
-pub fn fof_to_cnf(formula: FOFFormula) -> CNFFormula {
-    fof_to_cnf_with_role(formula, ClauseRole::Axiom)
+/// Error during CNF conversion
+#[derive(Debug, Clone)]
+pub enum CNFConversionError {
+    Timeout,
 }
 
-/// Convert a FOF formula to CNF with a specific role for all generated clauses
-pub fn fof_to_cnf_with_role(formula: FOFFormula, role: ClauseRole) -> CNFFormula {
-    let mut converter = CNFConverter::new(role);
+impl std::fmt::Display for CNFConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CNFConversionError::Timeout => write!(f, "CNF conversion timed out"),
+        }
+    }
+}
+
+/// Convert a FOF formula to CNF
+pub fn fof_to_cnf(formula: FOFFormula) -> Result<CNFFormula, CNFConversionError> {
+    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None)
+}
+
+/// Convert a FOF formula to CNF with a specific role and optional timeout
+pub fn fof_to_cnf_with_role(
+    formula: FOFFormula,
+    role: ClauseRole,
+    timeout: Option<Instant>,
+) -> Result<CNFFormula, CNFConversionError> {
+    let mut converter = CNFConverter::new(role, timeout);
     converter.convert(formula)
 }
 
@@ -23,18 +43,29 @@ struct CNFConverter {
     skolem_counter: usize,
     universal_vars: Vec<Variable>,
     role: ClauseRole,
+    timeout: Option<Instant>,
 }
 
 impl CNFConverter {
-    fn new(role: ClauseRole) -> Self {
+    fn new(role: ClauseRole, timeout: Option<Instant>) -> Self {
         CNFConverter {
             skolem_counter: 0,
             universal_vars: Vec::new(),
             role,
+            timeout,
         }
     }
 
-    fn convert(&mut self, formula: FOFFormula) -> CNFFormula {
+    fn check_timeout(&self) -> Result<(), CNFConversionError> {
+        if let Some(timeout) = self.timeout {
+            if Instant::now() >= timeout {
+                return Err(CNFConversionError::Timeout);
+            }
+        }
+        Ok(())
+    }
+
+    fn convert(&mut self, formula: FOFFormula) -> Result<CNFFormula, CNFConversionError> {
         // Step 1: Convert to NNF
         let nnf = formula.to_nnf();
 
@@ -45,9 +76,9 @@ impl CNFConverter {
         let matrix = self.remove_universal_quantifiers(skolemized);
 
         // Step 4: Convert to CNF using distribution
-        let clauses = self.distribute_to_cnf(matrix);
+        let clauses = self.distribute_to_cnf(matrix)?;
 
-        CNFFormula { clauses }
+        Ok(CNFFormula { clauses })
     }
 
     fn skolemize(&mut self, formula: FOFFormula) -> FOFFormula {
@@ -203,12 +234,15 @@ impl CNFConverter {
         }
     }
 
-    fn distribute_to_cnf(&self, formula: FOFFormula) -> Vec<Clause> {
+    fn distribute_to_cnf(&self, formula: FOFFormula) -> Result<Vec<Clause>, CNFConversionError> {
+        // Check timeout at each recursive call
+        self.check_timeout()?;
+
         match formula {
             FOFFormula::And(f1, f2) => {
-                let mut clauses = self.distribute_to_cnf(*f1);
-                clauses.extend(self.distribute_to_cnf(*f2));
-                clauses
+                let mut clauses = self.distribute_to_cnf(*f1)?;
+                clauses.extend(self.distribute_to_cnf(*f2)?);
+                Ok(clauses)
             }
 
             FOFFormula::Or(f1, f2) => {
@@ -218,28 +252,41 @@ impl CNFConverter {
                         // (A & B) | C => (A | C) & (B | C)
                         let c1 = FOFFormula::Or(a1, Box::new(f2.clone()));
                         let c2 = FOFFormula::Or(a2, Box::new(f2));
-                        let mut clauses = self.distribute_to_cnf(c1);
-                        clauses.extend(self.distribute_to_cnf(c2));
-                        clauses
+                        let mut clauses = self.distribute_to_cnf(c1)?;
+                        clauses.extend(self.distribute_to_cnf(c2)?);
+                        Ok(clauses)
                     }
                     (f1, FOFFormula::And(a1, a2)) => {
                         // C | (A & B) => (C | A) & (C | B)
                         let c1 = FOFFormula::Or(Box::new(f1.clone()), a1);
                         let c2 = FOFFormula::Or(Box::new(f1), a2);
-                        let mut clauses = self.distribute_to_cnf(c1);
-                        clauses.extend(self.distribute_to_cnf(c2));
-                        clauses
+                        let mut clauses = self.distribute_to_cnf(c1)?;
+                        clauses.extend(self.distribute_to_cnf(c2)?);
+                        Ok(clauses)
                     }
                     (f1, f2) => {
-                        // Normal disjunction - convert to clause
-                        vec![self.formula_to_clause(FOFFormula::Or(Box::new(f1), Box::new(f2)))]
+                        // Recursively process children to handle nested And inside Or
+                        let clauses1 = self.distribute_to_cnf(f1)?;
+                        let clauses2 = self.distribute_to_cnf(f2)?;
+
+                        // Combine clauses: each from clauses1 with each from clauses2
+                        let mut result = Vec::new();
+                        for c1 in &clauses1 {
+                            self.check_timeout()?;
+                            for c2 in &clauses2 {
+                                let mut combined = c1.literals.clone();
+                                combined.extend(c2.literals.clone());
+                                result.push(Clause::with_role(combined, self.role));
+                            }
+                        }
+                        Ok(result)
                     }
                 }
             }
 
             FOFFormula::Atom(_) | FOFFormula::Not(_) => {
                 // Single literal
-                vec![self.formula_to_clause(formula)]
+                Ok(vec![self.formula_to_clause(formula)])
             }
 
             _ => panic!("Unexpected formula type in CNF conversion: {:?}", formula),
@@ -295,7 +342,7 @@ mod tests {
         });
 
         let formula = FOFFormula::And(Box::new(p), Box::new(q));
-        let cnf = fof_to_cnf(formula);
+        let cnf = fof_to_cnf(formula).unwrap();
 
         assert_eq!(cnf.clauses.len(), 2);
         assert_eq!(cnf.clauses[0].literals.len(), 1);
@@ -317,7 +364,7 @@ mod tests {
         });
 
         let formula = FOFFormula::Quantified(Quantifier::Exists, x, Box::new(p_x));
-        let cnf = fof_to_cnf(formula);
+        let cnf = fof_to_cnf(formula).unwrap();
 
         assert_eq!(cnf.clauses.len(), 1);
         assert_eq!(cnf.clauses[0].literals.len(), 1);

@@ -6,7 +6,7 @@ pub mod orient_equalities;
 pub mod tptp;
 
 // Re-export main parsing functions
-pub use cnf_conversion::fof_to_cnf;
+pub use cnf_conversion::{fof_to_cnf, fof_to_cnf_with_role, CNFConversionError};
 pub use fof::{FOFFormula, Quantifier};
 pub use orient_equalities::{orient_all_equalities, orient_clause_equalities};
-pub use tptp::{parse_tptp, parse_tptp_file, parse_tptp_with_includes};
+pub use tptp::{parse_tptp, parse_tptp_file};

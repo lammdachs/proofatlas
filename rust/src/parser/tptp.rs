@@ -1,6 +1,6 @@
 //! TPTP parser for the standard formula representation
 
-use super::cnf_conversion::{fof_to_cnf_with_role};
+use super::cnf_conversion::fof_to_cnf_with_role;
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
 use super::orient_equalities::orient_all_equalities;
 use crate::core::{
@@ -19,6 +19,7 @@ use nom::{
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// Parse result containing formulas and included files
 #[derive(Debug)]
@@ -27,78 +28,40 @@ pub struct ParseResult {
     pub fof_formulas: Vec<NamedFormula>,
 }
 
-/// Parse a TPTP file with include support
-pub fn parse_tptp_file(file_path: &str, include_dirs: &[&str]) -> Result<CNFFormula, String> {
+/// Parse a TPTP file
+///
+/// Args:
+///   - file_path: Path to the TPTP file
+///   - include_dirs: Directories to search for included files
+///   - timeout: Optional timeout instant for CNF conversion
+pub fn parse_tptp_file(
+    file_path: &str,
+    include_dirs: &[&str],
+    timeout: Option<Instant>,
+) -> Result<CNFFormula, String> {
     let mut visited = HashSet::new();
     let result = parse_file_recursive(file_path, include_dirs, &mut visited)?;
-
-    // Convert all formulas to CNF
-    let mut all_clauses = result.cnf_formulas;
-
-    // Separate conjectures from other formulas
-    let mut conjectures = Vec::new();
-    let mut other_formulas = Vec::new();
-
-    for named_fof in result.fof_formulas {
-        match named_fof.role {
-            FormulaRole::Conjecture => conjectures.push(named_fof.formula),
-            _ => other_formulas.push((named_fof.formula, named_fof.role)),
-        }
-    }
-
-    // Convert non-conjecture formulas to CNF with their roles
-    for (formula, role) in other_formulas {
-        let clause_role = formula_role_to_clause_role(&role);
-        let cnf = fof_to_cnf_with_role(formula, clause_role);
-        all_clauses.extend(cnf.clauses);
-    }
-
-    // Handle conjectures: form the negation of their conjunction
-    if !conjectures.is_empty() {
-        let conjecture_formula = if conjectures.len() == 1 {
-            // Single conjecture: just negate it
-            FOFFormula::Not(Box::new(conjectures.into_iter().next().unwrap()))
-        } else {
-            // Multiple conjectures: negate their conjunction
-            // ¬(C₁ ∧ C₂ ∧ ... ∧ Cₙ) = ¬C₁ ∨ ¬C₂ ∨ ... ∨ ¬Cₙ
-            let negated_conjectures: Vec<FOFFormula> = conjectures
-                .into_iter()
-                .map(|c| FOFFormula::Not(Box::new(c)))
-                .collect();
-
-            // Build the disjunction
-            let mut disjunction = negated_conjectures.into_iter().rev();
-            let mut result = disjunction.next().unwrap();
-            for negated in disjunction {
-                result = FOFFormula::Or(Box::new(negated), Box::new(result));
-            }
-            result
-        };
-
-        // Negated conjectures get the NegatedConjecture role
-        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture);
-        all_clauses.extend(cnf.clauses);
-    }
-
-    // Orient all equalities
-    orient_all_equalities(&mut all_clauses);
-
-    Ok(CNFFormula {
-        clauses: all_clauses,
-    })
+    convert_to_cnf(result, timeout)
 }
 
 /// Parse a TPTP string
-pub fn parse_tptp(input: &str) -> Result<CNFFormula, String> {
-    parse_tptp_with_includes(input, &[])
-}
-
-/// Parse a TPTP string with include directories
-pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CNFFormula, String> {
+///
+/// Args:
+///   - input: TPTP content as string
+///   - include_dirs: Directories to search for included files
+///   - timeout: Optional timeout instant for CNF conversion
+pub fn parse_tptp(
+    input: &str,
+    include_dirs: &[&str],
+    timeout: Option<Instant>,
+) -> Result<CNFFormula, String> {
     let mut visited = HashSet::new();
     let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited)?;
+    convert_to_cnf(result, timeout)
+}
 
-    // Convert all formulas to CNF
+/// Convert parsed FOF formulas to CNF
+fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFormula, String> {
     let mut all_clauses = result.cnf_formulas;
 
     // Separate conjectures from other formulas
@@ -115,24 +78,22 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
     // Convert non-conjecture formulas to CNF with their roles
     for (formula, role) in other_formulas {
         let clause_role = formula_role_to_clause_role(&role);
-        let cnf = fof_to_cnf_with_role(formula, clause_role);
+        let cnf = fof_to_cnf_with_role(formula, clause_role, timeout)
+            .map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
 
     // Handle conjectures: form the negation of their conjunction
     if !conjectures.is_empty() {
         let conjecture_formula = if conjectures.len() == 1 {
-            // Single conjecture: just negate it
             FOFFormula::Not(Box::new(conjectures.into_iter().next().unwrap()))
         } else {
-            // Multiple conjectures: negate their conjunction
-            // ¬(C₁ ∧ C₂ ∧ ... ∧ Cₙ) = ¬C₁ ∨ ¬C₂ ∨ ... ∨ ¬Cₙ
+            // Multiple conjectures: ¬(C₁ ∧ C₂ ∧ ...) = ¬C₁ ∨ ¬C₂ ∨ ...
             let negated_conjectures: Vec<FOFFormula> = conjectures
                 .into_iter()
                 .map(|c| FOFFormula::Not(Box::new(c)))
                 .collect();
 
-            // Build the disjunction
             let mut disjunction = negated_conjectures.into_iter().rev();
             let mut result = disjunction.next().unwrap();
             for negated in disjunction {
@@ -141,12 +102,11 @@ pub fn parse_tptp_with_includes(input: &str, include_dirs: &[&str]) -> Result<CN
             result
         };
 
-        // Negated conjectures get the NegatedConjecture role
-        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture);
+        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout)
+            .map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
 
-    // Orient all equalities
     orient_all_equalities(&mut all_clauses);
 
     Ok(CNFFormula {

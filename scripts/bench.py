@@ -1,103 +1,74 @@
 #!/usr/bin/env python3
 """
-Benchmark script for theorem provers.
+Benchmark and train theorem provers.
 
 USAGE:
-    Runs prover/preset combinations in the background.
-    By default runs ALL provers (proofatlas, vampire, spass) with ALL their presets.
+    proofatlas-bench                                  # Evaluate with default preset
+    proofatlas-bench --preset time_sel0               # Use specific preset
+    proofatlas-bench --preset gcn --force-train       # Force retrain even if weights exist
 
-    proofatlas-bench                                  # Start job, return immediately
-    proofatlas-bench --track                          # Start job and track progress
-    proofatlas-bench --prover proofatlas              # One prover, all its presets
-    proofatlas-bench --preset time_sel21              # All provers, one preset each
-    proofatlas-bench --prover proofatlas vampire --preset time_sel21
+    proofatlas-bench --track                          # Start and monitor progress
+    proofatlas-bench --status                         # Check progress
+    proofatlas-bench --kill                           # Stop job
 
-    Filtering:
-        --prover    Restrict to specific prover(s): proofatlas, vampire, spass
-        --preset    Restrict to specific preset(s): time_sel0, time_sel20, time_sel21, time_sel22
+LEARNED SELECTORS:
+    When preset uses gcn/mlp/gat selector:
+    1. If weights exist in .weights/, uses them directly
+    2. If not, automatically:
+       - Collects traces with age_weight selector
+       - Trains the model
+       - Saves weights to .weights/
 
-    Output: .logs/eval_TIMESTAMP/ containing results.csv, summary.json, comparison_matrix.csv
-
-CACHING:
-    Results are cached in .data/runs/{prover}/{preset}/{problem}.json
-    Re-running with the same problem set reuses cached results.
-
-    proofatlas-bench --force     # Ignore cache, rerun all problems
-
-ML TRAINING DATA:
-    Use --trace to save proof traces for ML training (proofatlas only).
-    Traces are saved to .data/traces/{preset}/{problem}.pt
-
-    proofatlas-bench --prover proofatlas --trace  # Collect traces
-
-JOB MANAGEMENT:
-    Jobs run in the background and survive disconnection.
-
-    proofatlas-bench --track     # Attach to running job (or start new with tracking)
-    proofatlas-bench --status    # One-shot status check
-    proofatlas-bench --kill      # Stop running job
-
-COMMON OPTIONS:
-    --problem-set NAME    Problem set from configs/tptp.json (default: test)
-    --max-problems N      Limit number of problems to run
+OUTPUT:
+    .weights/<selector>.safetensors  - Trained model weights
+    .data/traces/<preset>/           - Proof traces for training
+    .data/runs/<prover>/<preset>/    - Per-problem results (JSON)
 """
 
 import argparse
 import json
-import subprocess
-import time
-import csv
 import os
+import random
 import signal
 import sys
-import hashlib
-from pathlib import Path
+import time
+from dataclasses import dataclass
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Optional
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable, **kwargs):
-        return iterable
 
 
 def find_project_root() -> Path:
-    """Find the proofatlas project root by looking for marker files."""
-    # Try current directory first
-    candidates = [
-        Path.cwd(),
-        Path(__file__).parent.parent,  # scripts/ -> project root
-    ]
-
+    """Find the proofatlas project root."""
+    candidates = [Path.cwd(), Path(__file__).parent.parent]
     for candidate in candidates:
-        if (candidate / "configs" / "tptp.json").exists():
+        if (candidate / "configs" / "proofatlas.json").exists():
             return candidate.resolve()
 
-    # Walk up from current directory
     path = Path.cwd()
     while path != path.parent:
-        if (path / "configs" / "tptp.json").exists():
+        if (path / "configs" / "proofatlas.json").exists():
             return path.resolve()
         path = path.parent
 
-    raise FileNotFoundError(
-        "Could not find proofatlas project root. "
-        "Run from the project directory or set PROOFATLAS_ROOT."
-    )
+    raise FileNotFoundError("Could not find proofatlas project root.")
 
 
 # Job management
-JOB_FILE = ".logs/bench_job.json"
+JOB_FILE = ".data/bench_job.json"
+LOG_FILE = ".data/bench.log"
 
 
 def get_job_file(base_dir: Path) -> Path:
     return base_dir / JOB_FILE
 
 
+def get_log_file(base_dir: Path) -> Path:
+    return base_dir / LOG_FILE
+
+
 def is_process_running(pid: int) -> bool:
-    """Check if a process with the given PID is running."""
     try:
         os.kill(pid, 0)
         return True
@@ -106,7 +77,6 @@ def is_process_running(pid: int) -> bool:
 
 
 def get_job_status(base_dir: Path) -> Optional[dict]:
-    """Get the current job status, or None if no job is running."""
     job_file = get_job_file(base_dir)
     if not job_file.exists():
         return None
@@ -117,29 +87,29 @@ def get_job_status(base_dir: Path) -> Optional[dict]:
     except (json.JSONDecodeError, IOError):
         return None
 
-    # Check if process is still running
     if not is_process_running(job["pid"]):
         return None
 
-    # Read progress from log file
     log_file = Path(job.get("log_file", ""))
     if log_file.exists():
         try:
             with open(log_file) as f:
                 lines = f.readlines()
-            # Find last progress line
             for line in reversed(lines):
                 if line.startswith("PROGRESS:"):
                     parts = line.strip().split(":")
                     if len(parts) >= 5:
-                        job["current_config"] = int(parts[1])
-                        job["total_configs"] = int(parts[2])
-                        job["current_problem"] = int(parts[3])
-                        job["total_problems"] = int(parts[4])
-                    if len(parts) >= 8:
-                        job["proofs"] = int(parts[5])
-                        job["saturated"] = int(parts[6])
-                        job["timeout"] = int(parts[7])
+                        job["current"] = int(parts[1])
+                        job["total"] = int(parts[2])
+                        job["proofs"] = int(parts[3])
+                        job["timeout"] = int(parts[4])
+                    break
+                elif line.startswith("TRAIN:"):
+                    parts = line.strip().split(":")
+                    if len(parts) >= 4:
+                        job["train_epoch"] = int(parts[1])
+                        job["train_total"] = int(parts[2])
+                        job["train_loss"] = float(parts[3])
                     break
         except IOError:
             pass
@@ -147,17 +117,16 @@ def get_job_status(base_dir: Path) -> Optional[dict]:
     return job
 
 
-def save_job_status(base_dir: Path, pid: int, args: list, output_dir: Path, log_file: Path):
-    """Save the current job status."""
+def save_job_status(base_dir: Path, pid: int, args: list, num_configs: int = 1):
     job_file = get_job_file(base_dir)
     job_file.parent.mkdir(parents=True, exist_ok=True)
 
     job = {
         "pid": pid,
         "args": args,
-        "output_dir": str(output_dir),
-        "log_file": str(log_file),
+        "log_file": str(get_log_file(base_dir)),
         "start_time": datetime.now().isoformat(),
+        "num_configs": num_configs,
     }
 
     with open(job_file, "w") as f:
@@ -165,14 +134,12 @@ def save_job_status(base_dir: Path, pid: int, args: list, output_dir: Path, log_
 
 
 def clear_job_status(base_dir: Path):
-    """Remove the job status file."""
     job_file = get_job_file(base_dir)
     if job_file.exists():
         job_file.unlink()
 
 
 def kill_job(base_dir: Path) -> bool:
-    """Kill the running job. Returns True if a job was killed."""
     job = get_job_status(base_dir)
     if not job:
         return False
@@ -187,7 +154,6 @@ def kill_job(base_dir: Path) -> bool:
 
 
 def format_job_status(job: dict) -> str:
-    """Format job status as a single line."""
     if not job:
         return "No job running"
 
@@ -198,21 +164,15 @@ def format_job_status(job: dict) -> str:
 
     parts = [f"[{hours}h{minutes:02d}m]"]
 
-    if "current_config" in job:
-        parts.append(f"cfg {job['current_config']}/{job['total_configs']}")
-        parts.append(f"prob {job['current_problem']}/{job['total_problems']}")
-
-    if "proofs" in job:
-        total = job["proofs"] + job["saturated"] + job["timeout"]
-        if total > 0:
-            rate = 100 * job["proofs"] / total
-            parts.append(f"+{job['proofs']} ~{job['saturated']} T{job['timeout']} ({rate:.1f}%)")
+    if "train_epoch" in job:
+        parts.append(f"train {job['train_epoch']}/{job['train_total']} loss={job['train_loss']:.4f}")
+    elif "current" in job:
+        parts.append(f"eval {job['current']}/{job['total']} +{job['proofs']} T{job['timeout']}")
 
     return " | ".join(parts)
 
 
 def print_job_status(base_dir: Path):
-    """Print the current job status."""
     job = get_job_status(base_dir)
     if not job:
         print("No job currently running.")
@@ -224,38 +184,86 @@ def print_job_status(base_dir: Path):
     minutes = (elapsed.seconds % 3600) // 60
 
     print(f"Job running (PID: {job['pid']})")
-    print(f"  Started:  {start.strftime('%Y-%m-%d %H:%M:%S')} ({hours}h {minutes}m ago)")
-    print(f"  Output:   {job['output_dir']}")
+    print(f"  Started: {start.strftime('%Y-%m-%d %H:%M:%S')} ({hours}h {minutes}m ago)")
 
-    if "current_config" in job:
-        print(f"  Progress: config {job['current_config']}/{job['total_configs']}, "
-              f"problem {job['current_problem']}/{job['total_problems']}")
+    # Parse log file for progress
+    log_file = Path(job.get("log_file", ""))
+    if log_file.exists():
+        last_progress = None
+        last_train = None
+        last_config = None  # CONFIG:name:index:total
+        phase = None
 
-    if "proofs" in job:
-        total = job["proofs"] + job["saturated"] + job["timeout"]
-        if total > 0:
-            rate = 100 * job["proofs"] / total
-            print(f"  Results:  +{job['proofs']} ~{job['saturated']} T{job['timeout']} ({rate:.1f}% proofs)")
+        with open(log_file) as f:
+            for line in f:
+                if line.startswith("PROGRESS:"):
+                    last_progress = line.strip()
+                    phase = "eval"
+                elif line.startswith("TRAIN:"):
+                    last_train = line.strip()
+                    phase = "train"
+                elif line.startswith("CONFIG:"):
+                    last_config = line.strip()
+                elif "Collecting traces" in line:
+                    phase = "collect"
+                elif "Training" in line and "problems" in line:
+                    phase = "train"
+
+        # Check if we're in trace collection
+        is_collecting = False
+        with open(log_file) as f:
+            content = f.read()
+            if "Collecting traces" in content:
+                eval_count = content.count("Evaluating")
+                is_collecting = eval_count == 1
+
+        # Show current config with progress
+        if last_config:
+            parts = last_config.split(":")
+            if len(parts) >= 4:
+                config_name, config_idx, config_total = parts[1], parts[2], parts[3]
+                # config_name is "prover/preset" format
+                if "/" in config_name:
+                    prover, preset = config_name.split("/", 1)
+                    print(f"  Prover:  {prover}")
+                    print(f"  Config:  {preset} ({config_idx}/{config_total})")
+                else:
+                    print(f"  Config:  {config_name} ({config_idx}/{config_total})")
+
+        if phase == "train" and last_train:
+            parts = last_train.split(":")
+            if len(parts) >= 4:
+                epoch, max_epochs, loss = parts[1], parts[2], parts[3]
+                print(f"  Training: epoch {epoch}/{max_epochs}, loss={float(loss):.4f}")
+        elif is_collecting and last_progress:
+            parts = last_progress.split(":")
+            if len(parts) >= 5:
+                current, total, proofs, timeout = parts[1:5]
+                print(f"  Collecting traces: {current}/{total}, +{proofs} proofs")
+        elif phase == "eval" and last_progress:
+            parts = last_progress.split(":")
+            if len(parts) >= 5:
+                current, total, proofs, timeout = parts[1:5]
+                print(f"  Evaluating: {current}/{total}, +{proofs} proofs, T{timeout} timeout")
+        else:
+            print("  Starting...")
+    else:
+        print("  Starting...")
 
     print(f"\nTo stop: proofatlas-bench --kill")
 
 
 def track_job(base_dir: Path, poll_interval: float = 1.0):
-    """Continuously display job status until it completes."""
-    import sys
-
     last_status = ""
     while True:
         job = get_job_status(base_dir)
         if not job:
-            # Clear line and print final message
             sys.stdout.write("\r" + " " * len(last_status) + "\r")
             sys.stdout.flush()
             print("Job completed.")
             break
 
         status = format_job_status(job)
-        # Clear previous line and print new status
         sys.stdout.write("\r" + " " * len(last_status) + "\r")
         sys.stdout.write(status)
         sys.stdout.flush()
@@ -267,63 +275,11 @@ def track_job(base_dir: Path, poll_interval: float = 1.0):
 @dataclass
 class BenchResult:
     problem: str
-    status: str  # "proof", "saturated", "timeout", "error", "unknown"
+    status: str  # "proof", "saturated", "timeout", "error"
     time_s: float
-    stdout: str = ""
-    stderr: str = ""
-
-
-# Result caching
-CACHE_DIR = ".data/runs"
-
-
-def get_cache_path(base_dir: Path, prover: str, preset: str, problem: str) -> Path:
-    """Get the cache file path for a result."""
-    # Use problem name without extension as filename
-    problem_name = Path(problem).stem
-    return base_dir / CACHE_DIR / prover / preset / f"{problem_name}.json"
-
-
-def load_cached_result(base_dir: Path, prover: str, preset: str, problem: str) -> Optional[BenchResult]:
-    """Load a cached result if it exists."""
-    cache_path = get_cache_path(base_dir, prover, preset, problem)
-    if not cache_path.exists():
-        return None
-    try:
-        with open(cache_path) as f:
-            data = json.load(f)
-        return BenchResult(
-            problem=data["problem"],
-            status=data["status"],
-            time_s=data["time_s"],
-            stdout=data.get("stdout", ""),
-            stderr=data.get("stderr", ""),
-        )
-    except (json.JSONDecodeError, KeyError):
-        return None
-
-
-def save_cached_result(base_dir: Path, prover: str, preset: str, result: BenchResult):
-    """Save a result to the cache."""
-    cache_path = get_cache_path(base_dir, prover, preset, result.problem)
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-    data = {
-        "problem": result.problem,
-        "status": result.status,
-        "time_s": result.time_s,
-        "prover": prover,
-        "preset": preset,
-        "timestamp": datetime.now().isoformat(),
-    }
-    # Don't cache stdout/stderr to save space (can be large)
-
-    with open(cache_path, "w") as f:
-        json.dump(data, f, indent=2)
 
 
 def load_config(config_path: Path) -> dict:
-    """Load a JSON config file."""
     with open(config_path) as f:
         return json.load(f)
 
@@ -339,10 +295,9 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     problems_dir = base_dir / tptp_config["paths"]["problems"]
 
     if not problems_dir.exists():
-        raise FileNotFoundError(f"TPTP problems directory not found: {problems_dir}\n"
-                               "Run: python scripts/setup_tptp.py")
+        raise FileNotFoundError(f"TPTP problems not found: {problems_dir}")
 
-    # Load problem metadata if available
+    # Load metadata
     metadata_path = base_dir / ".data" / "problem_metadata.json"
     metadata = {}
     if metadata_path.exists():
@@ -351,57 +306,29 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
             problems_list = data.get("problems", data) if isinstance(data, dict) else data
             metadata = {p["path"]: p for p in problems_list}
 
-    # Collect matching problems
     problems = []
     for domain_dir in sorted(problems_dir.iterdir()):
         if not domain_dir.is_dir():
             continue
 
         domain = domain_dir.name
-
-        # Check domain filters
-        if "domains" in filters and filters["domains"]:
-            if domain not in filters["domains"]:
-                continue
-        if "exclude_domains" in filters and filters["exclude_domains"]:
-            if domain in filters["exclude_domains"]:
-                continue
+        if "domains" in filters and filters["domains"] and domain not in filters["domains"]:
+            continue
+        if "exclude_domains" in filters and domain in filters.get("exclude_domains", []):
+            continue
 
         for problem_file in sorted(domain_dir.glob("*.p")):
             rel_path = str(problem_file.relative_to(problems_dir))
             meta = metadata.get(rel_path, {})
 
-            # Apply filters
             if "status" in filters and filters["status"]:
                 if meta.get("status") not in filters["status"]:
                     continue
-
             if "format" in filters and filters["format"]:
                 if meta.get("format") not in filters["format"]:
                     continue
-
-            if "has_equality" in filters and filters["has_equality"] is not None:
-                if meta.get("has_equality") != filters["has_equality"]:
-                    continue
-
-            if "is_unit_only" in filters and filters["is_unit_only"] is not None:
-                if meta.get("is_unit_only") != filters["is_unit_only"]:
-                    continue
-
             if "max_rating" in filters and filters["max_rating"] is not None:
                 if meta.get("rating", 1.0) > filters["max_rating"]:
-                    continue
-
-            if "min_rating" in filters and filters["min_rating"] is not None:
-                if meta.get("rating", 0.0) < filters["min_rating"]:
-                    continue
-
-            if "max_clauses" in filters and filters["max_clauses"] is not None:
-                if meta.get("num_clauses", 0) > filters["max_clauses"]:
-                    continue
-
-            if "min_clauses" in filters and filters["min_clauses"] is not None:
-                if meta.get("num_clauses", 0) < filters["min_clauses"]:
                     continue
 
             problems.append(problem_file)
@@ -409,174 +336,366 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     return problems
 
 
-def run_vampire(problem: Path, base_dir: Path, vampire_config: dict, preset_name: str,
-                tptp_root: Path) -> BenchResult:
-    """Run Vampire on a problem."""
-    binary = base_dir / vampire_config["paths"]["binary"]
-    if not binary.exists():
-        raise FileNotFoundError(f"Vampire not found: {binary}\nRun: python scripts/setup_vampire.py")
+# Weights management
 
-    presets = vampire_config.get("presets", {})
-    if preset_name not in presets:
-        available = list(presets.keys())
-        raise ValueError(f"Unknown preset: {preset_name}. Available: {available}")
+def find_weights(base_dir: Path, selector: str) -> Optional[Path]:
+    """Find weights file for a learned selector."""
+    weights_dir = base_dir / ".weights"
+    if not weights_dir.exists():
+        return None
 
-    preset = presets[preset_name]
+    # Check exact name first
+    exact = weights_dir / f"{selector}.safetensors"
+    if exact.exists():
+        return exact
 
-    cmd = [str(binary)]
-    if "time_limit" in preset:
-        cmd.extend(["--time_limit", str(preset["time_limit"])])
-    if "selection" in preset:
-        cmd.extend(["--selection", str(preset["selection"])])
-    if "avatar" in preset:
-        cmd.extend(["--avatar", preset["avatar"]])
-    cmd.extend(["--include", str(tptp_root)])
-    cmd.append(str(problem))
+    # Check for iteration variants (e.g., gcn_iter_5.safetensors)
+    prefix = f"{selector}_iter_"
+    latest_iter = None
+    latest_path = None
 
-    start = time.time()
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                               timeout=preset.get("time_limit", 60) + 5)
-        elapsed = time.time() - start
+    for f in weights_dir.glob(f"{prefix}*.safetensors"):
+        try:
+            iter_num = int(f.stem[len(prefix):])
+            if latest_iter is None or iter_num > latest_iter:
+                latest_iter = iter_num
+                latest_path = f
+        except ValueError:
+            continue
 
-        if "Refutation found" in result.stdout:
-            status = "proof"
-        elif "Satisfiable" in result.stdout:
-            status = "saturated"
-        elif "Time limit" in result.stdout or "Time out" in result.stdout:
-            status = "timeout"
-        else:
-            status = "unknown"
-
-        return BenchResult(problem=problem.name, status=status, time_s=elapsed,
-                          stdout=result.stdout, stderr=result.stderr)
-    except subprocess.TimeoutExpired:
-        return BenchResult(problem=problem.name, status="timeout",
-                          time_s=preset.get("time_limit", 60))
-    except Exception as e:
-        return BenchResult(problem=problem.name, status="error",
-                          time_s=time.time() - start, stderr=str(e))
+    return latest_path
 
 
-def run_spass(problem: Path, base_dir: Path, spass_config: dict, preset_name: str) -> BenchResult:
-    """Run SPASS on a problem."""
-    binary = base_dir / spass_config["paths"]["binary"]
-    if not binary.exists():
-        raise FileNotFoundError(f"SPASS not found: {binary}\nRun: python scripts/setup_spass.py")
-
-    presets = spass_config.get("presets", {})
-    if preset_name not in presets:
-        available = list(presets.keys())
-        raise ValueError(f"Unknown preset: {preset_name}. Available: {available}")
-
-    preset = presets[preset_name]
-
-    cmd = [str(binary), "-TPTP"]
-    if "TimeLimit" in preset:
-        cmd.append("-TimeLimit=" + str(preset["TimeLimit"]))
-    if "Loops" in preset:
-        cmd.append("-Loops=" + str(preset["Loops"]))
-    if "Select" in preset:
-        cmd.append("-Select=" + str(preset["Select"]))
-    cmd.append(str(problem))
-
-    timeout = preset.get("TimeLimit", 300) + 5
-
-    start = time.time()
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        elapsed = time.time() - start
-
-        if "SPASS beagle" in result.stdout or "Proof found" in result.stdout:
-            status = "proof"
-        elif "Completion found" in result.stdout:
-            status = "saturated"
-        elif "Ran out of time" in result.stdout:
-            status = "timeout"
-        else:
-            status = "unknown"
-
-        return BenchResult(problem=problem.name, status=status, time_s=elapsed,
-                          stdout=result.stdout, stderr=result.stderr)
-    except subprocess.TimeoutExpired:
-        return BenchResult(problem=problem.name, status="timeout", time_s=timeout - 5)
-    except Exception as e:
-        return BenchResult(problem=problem.name, status="error",
-                          time_s=time.time() - start, stderr=str(e))
+def is_learned_selector(selector_config: dict) -> bool:
+    """Check if selector requires trained weights (has a 'model' field)."""
+    return "model" in selector_config
 
 
-# Trace caching for ML data collection
-TRACE_CACHE_DIR = ".data/traces"
+# Trace collection and training
 
-
-def get_trace_cache_path(base_dir: Path, preset: str, problem: str) -> Path:
-    """Get cache path for a proof trace."""
-    problem_name = Path(problem).stem
-    return base_dir / TRACE_CACHE_DIR / preset / f"{problem_name}.pt"
-
-
-def save_proof_trace(base_dir: Path, preset: str, problem: str, trace_data: dict):
-    """Save proof trace for ML data collection."""
+def save_trace(base_dir: Path, preset: str, problem: str, trace_data: dict):
+    """Save proof trace for training."""
     try:
         import torch
-        cache_path = get_trace_cache_path(base_dir, preset, problem)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(trace_data, cache_path)
+        traces_dir = base_dir / ".data" / "traces" / preset
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        problem_name = Path(problem).stem
+        torch.save(trace_data, traces_dir / f"{problem_name}.pt")
     except Exception:
-        pass  # Trace saving is best-effort, don't fail the benchmark
+        pass
 
 
-def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
-                   preset_name: str, tptp_root: Path, trace: bool = False) -> BenchResult:
-    """Run ProofAtlas on a problem using Python bindings.
+def load_traces(base_dir: Path, preset: str, problem_names: set[str] = None):
+    """Load traces for training, optionally filtered by problem names.
 
-    Uses Python bindings instead of subprocess to enable trace extraction
-    for ML training data. When trace=True, saves traces to .data/traces/{preset}/{problem}.pt
+    Args:
+        base_dir: Project root directory
+        preset: Trace preset name (subdirectory in .data/traces/)
+        problem_names: Optional set of problem names to include. If None, loads all.
+
+    Returns:
+        Dict with 'problems' list and 'num_problems' count.
     """
+    import torch
+
+    traces_dir = base_dir / ".data" / "traces" / preset
+    if not traces_dir.exists():
+        return {"problems": [], "num_problems": 0}
+
+    problems = []
+    for trace_file in sorted(traces_dir.glob("*.pt")):
+        # Filter by problem set if specified
+        if problem_names is not None and trace_file.stem not in problem_names:
+            continue
+
+        try:
+            trace = torch.load(trace_file, weights_only=False)
+        except Exception:
+            continue
+
+        if not trace.get("proof_found") or not trace.get("graphs"):
+            continue
+
+        problems.append({
+            "name": trace_file.stem,
+            "graphs": trace["graphs"],
+            "labels": trace["labels"],
+        })
+
+    return {"problems": problems, "num_problems": len(problems)}
+
+
+def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log_file,
+                 init_weights: Path = None) -> Path:
+    """Train a model and return the weights path.
+
+    Args:
+        init_weights: Optional path to weights file to initialize from.
+                     If provided, continues training from these weights.
+    """
+    import torch
+    import torch.nn.functional as F
+    import torch.optim as optim
+    from torch.utils.data import DataLoader
+
+    sys.path.insert(0, str(base_dir / "python"))
+    from proofatlas.ml.training import ClauseDataset, collate_clause_batch
+    from proofatlas.selectors import create_model
+
+    # Load configs
+    with open(base_dir / "configs" / "models.json") as f:
+        models_config = json.load(f)
+    with open(base_dir / "configs" / "training.json") as f:
+        training_config = json.load(f)
+
+    # Get model and training config from preset
+    model_name = preset.get("model")
+    training_name = preset.get("training", "standard")
+
+    # Get model architecture
+    arch = models_config["architectures"].get(model_name)
+    if not arch:
+        raise ValueError(f"Unknown model: {model_name}")
+
+    # Get training config
+    training_defaults = training_config.get("defaults", {})
+    training_overrides = training_config.get("configs", {}).get(training_name, {})
+
+    # Merge: training defaults < training overrides < model architecture
+    config = {**training_defaults, **training_overrides, **arch}
+    config["input_dim"] = models_config.get("input_dim", 13)
+
+    problems = data["problems"]
+    if not problems:
+        raise ValueError("No training data")
+
+    # Problem-level split
+    val_ratio = config.get("val_ratio", 0.0)
+    random.seed(42)
+    problem_indices = list(range(len(problems)))
+    random.shuffle(problem_indices)
+
+    if val_ratio > 0:
+        val_count = max(1, int(len(problems) * val_ratio))
+        train_indices = problem_indices[val_count:]
+        val_indices = problem_indices[:val_count]
+    else:
+        train_indices = problem_indices
+        val_indices = []
+
+    def make_dataset(prob_indices):
+        all_graphs, all_labels = [], []
+        for idx in prob_indices:
+            p = problems[idx]
+            all_graphs.extend(p["graphs"])
+            all_labels.extend(p["labels"])
+        if not all_graphs:
+            return None
+        return ClauseDataset(
+            node_features=[g["x"] for g in all_graphs],
+            edge_indices=[g["edge_index"] for g in all_graphs],
+            labels=all_labels,
+        )
+
+    train_ds = make_dataset(train_indices)
+    val_ds = make_dataset(val_indices) if val_indices else None
+
+    if not train_ds:
+        raise ValueError("No training examples")
+
+    print(f"Training {preset_name}: {len(train_indices)} problems, {len(train_ds)} examples")
+
+    # Create model
+    model_type = config.get("type", "gcn")
+    model = create_model(
+        model_type=model_type,
+        node_feature_dim=config.get("input_dim", 13),
+        hidden_dim=config.get("hidden_dim", 64),
+        num_layers=config.get("num_layers", 3),
+        num_heads=config.get("num_heads", 4),
+        dropout=config.get("dropout", 0.1),
+    )
+
+    needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    # Initialize from existing weights if provided
+    if init_weights and init_weights.exists():
+        print(f"Initializing from {init_weights}")
+        from safetensors.torch import load_file
+        state_dict = load_file(init_weights)
+        model.load_state_dict(state_dict)
+        model = model.to(device)
+
+    batch_size = config.get("batch_size", 32)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_clause_batch)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_clause_batch) if val_ds else None
+
+    # Optimizer
+    optimizer_type = config.get("optimizer", "adamw").lower()
+    lr = config.get("learning_rate", 0.001)
+    weight_decay = config.get("weight_decay", 1e-5)
+
+    if optimizer_type == "adamw":
+        betas = tuple(config.get("betas", [0.9, 0.999]))
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+    elif optimizer_type == "adam":
+        betas = tuple(config.get("betas", [0.9, 0.999]))
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+    elif optimizer_type == "sgd":
+        momentum = config.get("momentum", 0.9)
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_type}")
+
+    max_epochs = config.get("max_epochs", 100)
+
+    # Margin ranking loss for pairwise learning
+    margin = config.get("margin", 0.1)
+    ranking_loss = torch.nn.MarginRankingLoss(margin=margin)
+
+    def compute_pairwise_loss(scores, labels):
+        """Compute pairwise margin ranking loss between positive and negative examples."""
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+
+        if not pos_mask.any() or not neg_mask.any():
+            # Fallback to BCE if no pairs available
+            return F.binary_cross_entropy_with_logits(scores, labels.float())
+
+        pos_scores = scores[pos_mask]
+        neg_scores = scores[neg_mask]
+
+        # Sample pairs: for each positive, sample a random negative
+        n_pos = pos_scores.size(0)
+        n_neg = neg_scores.size(0)
+
+        # Random pairing: sample n_pos negatives (with replacement if needed)
+        neg_indices = torch.randint(0, n_neg, (n_pos,), device=scores.device)
+        neg_sampled = neg_scores[neg_indices]
+
+        # Target: +1 means first input should be ranked higher than second
+        target = torch.ones(n_pos, device=scores.device)
+        return ranking_loss(pos_scores, neg_sampled, target)
+
+    for epoch in range(1, max_epochs + 1):
+        model.train()
+        train_loss = 0
+        for batch in train_loader:
+            optimizer.zero_grad()
+            x = batch["node_features"].to(device)
+            adj = batch["adj"].to(device)
+            pool = batch["pool_matrix"].to(device)
+            labels = batch["labels"].to(device)
+
+            scores = model(x, adj, pool) if needs_adj else model(x, pool)
+            loss = compute_pairwise_loss(scores, labels)
+            loss.backward()
+
+            if config.get("gradient_clip"):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
+
+            optimizer.step()
+            train_loss += loss.item()
+
+        train_loss /= len(train_loader)
+
+        val_loss = 0
+        if val_loader:
+            model.eval()
+            with torch.no_grad():
+                for batch in val_loader:
+                    x = batch["node_features"].to(device)
+                    adj = batch["adj"].to(device)
+                    pool = batch["pool_matrix"].to(device)
+                    labels = batch["labels"].to(device)
+                    scores = model(x, adj, pool) if needs_adj else model(x, pool)
+                    val_loss += compute_pairwise_loss(scores, labels).item()
+            val_loss /= len(val_loader)
+
+        if val_loader:
+            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
+        else:
+            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
+
+        log_file.write(f"TRAIN:{epoch}:{max_epochs}:{train_loss:.6f}\n")
+        log_file.flush()
+
+    # Save weights
+    from safetensors.torch import save_file
+    weights_dir = base_dir / ".weights"
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = weights_dir / f"{preset_name}.safetensors"
+
+    metadata = {
+        "model_type": model_type,
+        "hidden_dim": str(config.get("hidden_dim", 64)),
+        "num_layers": str(config.get("num_layers", 3)),
+        "num_heads": str(config.get("num_heads", 4)),
+        "input_dim": str(config.get("input_dim", 13)),
+    }
+    save_file(model.state_dict(), weights_path, metadata=metadata)
+    print(f"Weights saved: {weights_path}")
+
+    return weights_path
+
+
+# Prover execution
+
+def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
+                   weights_path: str = None, collect_trace: bool = False,
+                   trace_preset: str = None) -> BenchResult:
+    """Run ProofAtlas on a problem."""
     from proofatlas import ProofState
 
-    presets = proofatlas_config.get("presets", {})
-    defaults = proofatlas_config.get("defaults", {})
+    timeout = preset.get("timeout", 10)
 
-    if preset_name not in presets:
-        available = list(presets.keys())
-        raise ValueError(f"Unknown preset: {preset_name}. Available: {available}")
-
-    preset = {**defaults, **presets[preset_name]}
-
-    # Read problem file
     try:
         with open(problem) as f:
             content = f.read()
-    except Exception as e:
-        return BenchResult(problem=problem.name, status="error", time_s=0, stderr=f"Read error: {e}")
+    except Exception:
+        return BenchResult(problem=problem.name, status="error", time_s=0)
 
-    # Initialize prover state
+    # Start timer before parsing (CNF conversion counts against timeout)
+    start = time.time()
+
     state = ProofState()
     try:
-        state.add_clauses_from_tptp(content, str(tptp_root))
+        # Pass timeout to parsing to prevent CNF conversion hangs
+        state.add_clauses_from_tptp(content, str(tptp_root), timeout)
     except Exception as e:
-        return BenchResult(problem=problem.name, status="error", time_s=0, stderr=f"Parse error: {e}")
+        elapsed = time.time() - start
+        # Check if this was a timeout during CNF conversion
+        if "timed out" in str(e).lower():
+            return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
+        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
-    # Configure literal selection
-    literal_selection = str(preset.get("literal_selection", "0"))
+    literal_selection = str(preset.get("literal_selection", 21))
     state.set_literal_selection(literal_selection)
 
-    # Get timeout, max clauses, and age_weight_ratio
-    timeout = preset.get("timeout", 60)
     max_clauses = preset.get("max_clauses", 10000)
+    is_learned = "model" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
+    selector = preset.get("model", "age_weight") if is_learned else "age_weight"
 
-    # Run saturation (timed)
-    start = time.time()
+    # Remaining time after parsing
+    elapsed_parsing = time.time() - start
+    remaining_timeout = max(0.1, timeout - elapsed_parsing)
+
     try:
-        proof_found = state.run_saturation(max_clauses, float(timeout), float(age_weight_ratio))
-    except Exception as e:
-        return BenchResult(problem=problem.name, status="error",
-                          time_s=time.time() - start, stderr=f"Saturation error: {e}")
+        proof_found = state.run_saturation(
+            max_clauses,
+            float(remaining_timeout),
+            float(age_weight_ratio) if not is_learned else None,
+            selector,
+            weights_path,
+        )
+    except Exception:
+        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
+
     elapsed = time.time() - start
 
-    # Determine status
     if proof_found:
         status = "proof"
     elif elapsed >= timeout:
@@ -584,243 +703,303 @@ def run_proofatlas(problem: Path, base_dir: Path, proofatlas_config: dict,
     else:
         status = "saturated"
 
-    # Extract and save trace for ML (after timing, doesn't affect benchmark)
-    if trace and proof_found:
+    # Collect trace for training
+    if collect_trace and proof_found and trace_preset:
         try:
             from proofatlas.ml.graph_utils import to_torch_tensors
-
             examples = state.extract_training_examples()
             if examples:
                 clause_ids = [e.clause_idx for e in examples]
                 graphs = state.clauses_to_graphs(clause_ids)
                 graph_tensors = [to_torch_tensors(g) for g in graphs]
                 labels = [e.label for e in examples]
-
                 trace_data = {
                     "proof_found": True,
                     "time": elapsed,
-                    "examples": len(examples),
                     "graphs": graph_tensors,
                     "labels": labels,
-                    "clause_ids": clause_ids,
-                    "preset": preset_name,
                 }
-                save_proof_trace(base_dir, preset_name, problem.name, trace_data)
+                save_trace(base_dir, trace_preset, problem.name, trace_data)
         except Exception:
-            pass  # Trace extraction is best-effort
+            pass
 
     return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
 
-def run_single(prover: str, preset: str, problems: list[Path], base_dir: Path,
-               tptp_root: Path, configs: dict, verbose: bool = False,
-               quiet: bool = False, use_progress: bool = False,
-               progress_desc: str = None, log_file = None,
-               config_idx: int = 0, total_configs: int = 0,
-               force: bool = False, trace: bool = False) -> tuple[list[BenchResult], dict]:
-    """Run a single prover/preset on a list of problems.
+def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path) -> BenchResult:
+    """Run Vampire on a problem."""
+    import subprocess
 
-    Results are cached in .data/runs/{prover}/{preset}/{problem}.json.
-    Cached results are reused unless force=True.
-    """
+    timeout = preset.get("time_limit", 10)
+    selection = preset.get("selection", 21)
+    avatar = preset.get("avatar", "off")
+
+    cmd = [
+        str(binary),
+        "--time_limit", str(timeout),
+        "--selection", str(selection),
+        "--avatar", avatar,
+        str(problem),
+    ]
+
+    start = time.time()
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,  # grace period
+        )
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
+    except Exception:
+        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
+
+    elapsed = time.time() - start
+
+    # Parse Vampire output
+    if "Refutation found" in output or "Termination reason: Refutation" in output:
+        status = "proof"
+    elif "Termination reason: Satisfiable" in output:
+        status = "saturated"
+    elif "Termination reason: Time limit" in output or elapsed >= timeout:
+        status = "timeout"
+    else:
+        status = "error"
+
+    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
+
+
+def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
+    """Run SPASS on a problem."""
+    import subprocess
+
+    timeout = preset.get("TimeLimit", 10)
+    selection = preset.get("Select", 1)
+
+    # SPASS requires TPTP format with -TPTP flag
+    cmd = [
+        str(binary),
+        "-TPTP",
+        f"-TimeLimit={timeout}",
+        f"-Select={selection}",
+        str(problem),
+    ]
+
+    start = time.time()
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+            env={**os.environ, "TPTP": str(tptp_root)},
+        )
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
+    except Exception:
+        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
+
+    elapsed = time.time() - start
+
+    # Parse SPASS output
+    if "SPASS beherrschbarkeit: " in output and "Proof found" in output:
+        status = "proof"
+    elif "Completion found" in output:
+        status = "saturated"
+    elif elapsed >= timeout or "SPASS broke down" in output:
+        status = "timeout"
+    else:
+        status = "error"
+
+    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
+
+
+def get_run_result_path(base_dir: Path, prover: str, preset_name: str, problem: Path) -> Path:
+    """Get path to result file for a problem."""
+    return base_dir / ".data" / "runs" / prover / preset_name / f"{problem.stem}.json"
+
+
+def load_run_result(base_dir: Path, prover: str, preset_name: str, problem: Path) -> Optional[BenchResult]:
+    """Load existing result if available."""
+    result_file = get_run_result_path(base_dir, prover, preset_name, problem)
+    if not result_file.exists():
+        return None
+    try:
+        with open(result_file) as f:
+            data = json.load(f)
+        return BenchResult(
+            problem=data["problem"],
+            status=data["status"],
+            time_s=data["time_s"],
+        )
+    except (json.JSONDecodeError, KeyError, IOError):
+        return None
+
+
+def save_run_result(base_dir: Path, prover: str, preset_name: str, result: BenchResult):
+    """Save individual result to .data/runs/<prover>/<preset>/<problem>.json"""
+    runs_dir = base_dir / ".data" / "runs" / prover / preset_name
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    problem_name = Path(result.problem).stem
+    result_file = runs_dir / f"{problem_name}.json"
+
+    data = {
+        "problem": result.problem,
+        "status": result.status,
+        "time_s": result.time_s,
+        "prover": prover,
+        "preset": preset_name,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    with open(result_file, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
+                   prover: str, preset: dict, log_file,
+                   preset_name: str = None, weights_path: str = None,
+                   binary: Path = None, trace_preset: str = None,
+                   rerun: bool = False):
+    """Run evaluation on problems with the specified prover."""
     results = []
-    stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "unknown": 0}
-    cached_count = 0
+    stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
-    desc = progress_desc or f"{prover}/{preset}"
-    problems_iter = tqdm(problems, desc=desc, unit="prob", leave=False) if use_progress else problems
+    if prover == "proofatlas":
+        selector_type = "learned" if "model" in preset else "age_weight"
+        print(f"\nEvaluating {len(problems)} problems with {selector_type}")
+        if weights_path:
+            print(f"Weights: {weights_path}")
+    else:
+        print(f"\nEvaluating {len(problems)} problems")
 
-    for i, problem in enumerate(problems_iter if use_progress else problems, 1):
-        # Check cache first
-        if not force:
-            cached = load_cached_result(base_dir, prover, preset, problem.name)
-            if cached:
-                # If --trace and this is a proofatlas proof without a trace, rerun to get trace
-                if trace and prover == "proofatlas" and cached.status == "proof":
-                    trace_path = get_trace_cache_path(base_dir, preset, problem.name)
-                    if not trace_path.exists():
-                        cached = None  # Rerun to generate trace
-                if cached:
-                    result = cached
-                    cached_count += 1
+    # Always collect traces for proofatlas
+    collect_trace = (prover == "proofatlas")
+
+    for i, problem in enumerate(problems, 1):
+        # Check if already evaluated (skip unless --rerun)
+        existing = load_run_result(base_dir, prover, preset_name, problem)
+        if existing and not rerun:
+            results.append(existing)
+            stats[existing.status] = stats.get(existing.status, 0) + 1
+            stats["skip"] += 1
+
+            log_file.write(f"SKIP:{i}:{len(problems)}:{problem.name}\n")
+            log_file.flush()
+
+            symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[existing.status]
+            print(f"[{i}/{len(problems)}] S{symbol} {existing.problem} (cached)")
+            continue
+
+        if prover == "proofatlas":
+            result = run_proofatlas(
+                problem, base_dir, preset, tptp_root,
+                weights_path=weights_path, collect_trace=collect_trace,
+                trace_preset=trace_preset,
+            )
+        elif prover == "vampire":
+            result = run_vampire(problem, base_dir, preset, binary)
+        elif prover == "spass":
+            result = run_spass(problem, base_dir, preset, binary, tptp_root)
         else:
-            cached = None
-
-        if cached is None:
-            # Run the prover
-            if prover == "vampire":
-                result = run_vampire(problem, base_dir, configs["vampire"], preset, tptp_root)
-            elif prover == "spass":
-                result = run_spass(problem, base_dir, configs["spass"], preset)
-            else:
-                result = run_proofatlas(problem, base_dir, configs["proofatlas"], preset, tptp_root, trace=trace)
-
-            # Cache the result
-            save_cached_result(base_dir, prover, preset, result)
+            result = BenchResult(problem=problem.name, status="error", time_s=0)
 
         results.append(result)
         stats[result.status] = stats.get(result.status, 0) + 1
 
-        if log_file:
-            # Write progress for background job monitoring
-            log_file.write(f"PROGRESS:{config_idx}:{total_configs}:{i}:{len(problems)}:"
-                          f"{stats['proof']}:{stats['saturated']}:{stats['timeout']}\n")
-            log_file.flush()
+        # Save individual result to .data/runs/
+        save_run_result(base_dir, prover, preset_name, result)
 
-        if use_progress:
-            cache_info = f" (c:{cached_count})" if cached_count > 0 else ""
-            problems_iter.set_postfix_str(f"+{stats['proof']} ~{stats['saturated']} T{stats['timeout']}{cache_info}")
-        elif not quiet:
-            symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!", "unknown": "?"}.get(result.status, "?")
-            if cached:
-                symbol = symbol.lower()  # lowercase for cached
-            if verbose:
-                cached_str = " (cached)" if cached else ""
-                print(f"[{i}/{len(problems)}] {symbol} {result.problem}: {result.status} ({result.time_s:.2f}s){cached_str}")
-            else:
-                print(symbol, end="", flush=True)
-                if i % 50 == 0:
-                    print(f" [{i}/{len(problems)}]")
+        log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
+        log_file.flush()
 
-    if not quiet and not verbose and not use_progress:
-        print()
+        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+        print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
 
-    return results, stats
+    # Print summary (individual results saved to .data/runs/)
+    # Note: skip count is separate (skipped problems are also counted in their status)
+    total = len(problems)
+    proof_rate = 100 * stats["proof"] / total if total else 0
+
+    print(f"\n{'='*60}")
+    skip_str = f" S{stats['skip']}" if stats["skip"] else ""
+    print(f"Results: +{stats['proof']} ~{stats['saturated']} T{stats['timeout']}{skip_str} ({proof_rate:.1f}% proofs)")
+
+    return stats
 
 
-def run_eval(provers: list[str], presets: list[str], problems: list[Path], base_dir: Path,
-             tptp_root: Path, configs: dict, output_dir: Path, verbose: bool = False,
-             log_file = None, force: bool = False, trace: bool = False):
-    """Run evaluation across multiple provers and presets.
+def get_available_provers(base_dir: Path) -> dict:
+    """Get available provers and their configs."""
+    provers = {}
 
-    Results are cached in .data/runs/ and reused unless force=True.
-    When trace=True, saves proof traces for proofatlas (for ML training).
-    """
-    # Collect all runs
-    runs = []
-    for prover in provers:
-        prover_presets = list(configs[prover].get("presets", {}).keys())
-        if presets:
-            prover_presets = [p for p in prover_presets if p in presets]
-        for preset in prover_presets:
-            runs.append((prover, preset))
+    # proofatlas is always available (Python bindings)
+    proofatlas_config_path = base_dir / "configs" / "proofatlas.json"
+    if proofatlas_config_path.exists():
+        provers["proofatlas"] = {
+            "config": load_config(proofatlas_config_path),
+            "binary": None,  # Uses Python bindings
+        }
 
-    print(f"Evaluation Configuration")
-    print(f"========================")
-    print(f"Problems: {len(problems)}")
-    print(f"Output dir: {output_dir}")
-    print(f"Cache: .data/runs/ {'(--force: ignoring cache)' if force else '(reusing cached results)'}")
-    if trace:
-        print(f"Traces: .data/traces/ (saving for ML training)")
-    print(f"Configurations: {len(runs)}")
-    for prover, preset in runs:
-        print(f"  - {prover} / {preset}")
-    print()
+    # Check for vampire
+    vampire_config_path = base_dir / "configs" / "vampire.json"
+    if vampire_config_path.exists():
+        vampire_config = load_config(vampire_config_path)
+        vampire_binary = base_dir / vampire_config["paths"]["binary"]
+        if vampire_binary.exists():
+            provers["vampire"] = {
+                "config": vampire_config,
+                "binary": vampire_binary,
+            }
 
-    all_results = []
-    summary = []
+    # Check for spass
+    spass_config_path = base_dir / "configs" / "spass.json"
+    if spass_config_path.exists():
+        spass_config = load_config(spass_config_path)
+        spass_binary = base_dir / spass_config["paths"]["binary"]
+        if spass_binary.exists():
+            provers["spass"] = {
+                "config": spass_config,
+                "binary": spass_binary,
+            }
 
-    use_progress = not verbose
-
-    for idx, (prover, preset) in enumerate(runs, 1):
-        desc = f"[{idx}/{len(runs)}] {prover}/{preset}"
-        results, stats = run_single(prover, preset, problems, base_dir, tptp_root, configs,
-                                    verbose=False, quiet=True, use_progress=use_progress, progress_desc=desc,
-                                    log_file=log_file, config_idx=idx, total_configs=len(runs),
-                                    force=force, trace=trace)
-
-        for r in results:
-            all_results.append({"prover": prover, "preset": preset, **r.__dict__})
-
-        total = sum(stats.values())
-        if total > 0:
-            proof_rate = 100 * stats["proof"] / total
-            summary.append({
-                "prover": prover, "preset": preset, "total": total,
-                "proofs": stats["proof"], "proof_rate": f"{proof_rate:.1f}%",
-                "saturated": stats["saturated"], "timeout": stats["timeout"],
-                "error": stats["error"], "unknown": stats["unknown"],
-            })
-
-    # Save detailed results
-    results_file = output_dir / "results.csv"
-    with open(results_file, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["prover", "preset", "problem", "status", "time_s"])
-        for r in all_results:
-            writer.writerow([r["prover"], r["preset"], r["problem"], r["status"], f"{r['time_s']:.3f}"])
-
-    # Save summary
-    summary_file = output_dir / "summary.json"
-    with open(summary_file, "w") as f:
-        json.dump(summary, f, indent=2)
-
-    # Print summary table
-    print("\n" + "=" * 80)
-    print("EVALUATION SUMMARY")
-    print("=" * 80)
-    print(f"{'Prover':<12} {'Preset':<20} {'Total':>6} {'Proofs':>8} {'Rate':>8} {'Sat':>6} {'T/O':>6}")
-    print("-" * 80)
-
-    for s in sorted(summary, key=lambda x: (x["prover"], x["preset"])):
-        print(f"{s['prover']:<12} {s['preset']:<20} {s['total']:>6} {s['proofs']:>8} {s['proof_rate']:>8} "
-              f"{s['saturated']:>6} {s['timeout']:>6}")
-
-    print("-" * 80)
-    print(f"\nResults saved to: {output_dir}")
-    print(f"  - Detailed: {results_file}")
-    print(f"  - Summary:  {summary_file}")
-
-    # Create comparison matrix
-    if all_results:
-        matrix_file = output_dir / "comparison_matrix.csv"
-        problems_set = sorted(set(r["problem"] for r in all_results))
-        configs_set = sorted(set((r["prover"], r["preset"]) for r in all_results))
-
-        results_dict = {(r["problem"], r["prover"], r["preset"]): r["status"] for r in all_results}
-
-        with open(matrix_file, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["problem"] + [f"{p}:{pr}" for p, pr in configs_set])
-            for problem in problems_set:
-                row = [problem]
-                for prover, preset in configs_set:
-                    status = results_dict.get((problem, prover, preset), "-")
-                    abbrev = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!", "unknown": "?"}
-                    row.append(abbrev.get(status, status))
-                writer.writerow(row)
-
-        print(f"  - Matrix:   {matrix_file}")
+    return provers
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark theorem provers")
-    parser.add_argument("--prover", nargs="+", choices=["vampire", "spass", "proofatlas"],
-                       help="Prover(s) to run (default: all)")
-    parser.add_argument("--preset", nargs="+",
-                       help="Preset(s) to run (default: all)")
-    parser.add_argument("--problem-set", default="test",
+    parser = argparse.ArgumentParser(description="Benchmark and train theorem provers")
+    parser.add_argument("--prover",
+                       help="Prover to run (default: all available)")
+    parser.add_argument("--preset",
+                       help="Solver preset (default: all)")
+    parser.add_argument("--problem-set", default="default",
                        help="Problem set from tptp.json")
-    parser.add_argument("--max-problems", type=int, help="Maximum number of problems")
-    parser.add_argument("--output-dir", type=str, help="Output directory")
-    parser.add_argument("--force", action="store_true",
-                       help="Ignore cached results and rerun all problems")
-    parser.add_argument("--trace", action="store_true",
-                       help="Save proof traces for ML training (proofatlas only)")
+    parser.add_argument("--force-train", action="store_true",
+                       help="Force retrain even if weights exist")
+    parser.add_argument("--base-only", action="store_true",
+                       help="Only run base configs (skip learned selectors)")
+    parser.add_argument("--rerun", action="store_true",
+                       help="Re-evaluate problems even if cached results exist")
+    parser.add_argument("--trace-preset",
+                       help="Preset name for trace collection (default: solver preset)")
 
     # Job management
     parser.add_argument("--track", action="store_true",
-                       help="Track progress (attach to running job or start with tracking)")
+                       help="Track progress")
     parser.add_argument("--status", action="store_true",
-                       help="Check status of running job (one-shot)")
+                       help="Check job status")
     parser.add_argument("--kill", action="store_true",
                        help="Stop running job")
 
     args = parser.parse_args()
-
     base_dir = find_project_root()
 
-    # Handle job management commands first
+    # Job management
     if args.status:
         print_job_status(base_dir)
         return
@@ -830,73 +1009,168 @@ def main():
         if job:
             track_job(base_dir)
             return
-        # No job running - fall through to start a new one with tracking
 
     if args.kill:
         if kill_job(base_dir):
             print("Job killed.")
         else:
-            print("No job currently running.")
+            print("No job running.")
         return
 
-    # Check if a job is already running (for any job-starting command)
     existing = get_job_status(base_dir)
     if existing:
-        print(f"Error: A job is already running (PID: {existing['pid']})")
-        print(f"Use --status to check progress, --track to monitor, or --kill to stop it.")
+        print(f"Error: Job already running (PID: {existing['pid']})")
+        print("Use --status, --track, or --kill")
         sys.exit(1)
 
     # Load configs
     tptp_config = load_config(base_dir / "configs" / "tptp.json")
     tptp_root = base_dir / tptp_config["paths"]["root"]
 
-    configs = {
-        "proofatlas": load_config(base_dir / "configs" / "proofatlas.json"),
-        "vampire": load_config(base_dir / "configs" / "vampire.json"),
-        "spass": load_config(base_dir / "configs" / "spass.json"),
-    }
+    # Get available provers
+    available_provers = get_available_provers(base_dir)
+    if not available_provers:
+        print("Error: No provers available")
+        sys.exit(1)
+
+    # Filter provers if specified
+    if args.prover:
+        if args.prover not in available_provers:
+            print(f"Error: Prover '{args.prover}' not available")
+            print(f"Available: {', '.join(available_provers.keys())}")
+            sys.exit(1)
+        available_provers = {args.prover: available_provers[args.prover]}
+
+    # Build list of (prover, preset_name, preset, binary) combinations
+    runs = []
+    for prover_name, prover_info in available_provers.items():
+        presets = prover_info["config"].get("presets", {})
+
+        if args.preset:
+            if args.preset not in presets:
+                continue  # Skip this prover if preset not available
+            preset_names = [args.preset]
+        else:
+            preset_names = list(presets.keys())
+
+        for preset_name in preset_names:
+            preset = presets[preset_name]
+
+            # Skip learned selectors if --base-only
+            if args.base_only and "model" in preset:
+                continue
+
+            runs.append({
+                "prover": prover_name,
+                "preset_name": preset_name,
+                "preset": preset,
+                "binary": prover_info["binary"],
+                "config": prover_info["config"],
+            })
+
+    if not runs:
+        print("Error: No matching prover/preset combinations")
+        sys.exit(1)
 
     # Get problems
     problems = get_problems(base_dir, tptp_config, args.problem_set)
-    if args.max_problems:
-        problems = problems[:args.max_problems]
 
-    # Determine provers and presets
-    provers = args.prover or ["proofatlas", "vampire", "spass"]
-    presets = args.preset  # None means all presets
-
-    # Setup output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = base_dir / ".logs" / f"eval_{timestamp}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = get_log_file(base_dir)
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Fork to background
-    log_file_path = output_dir / "bench.log"
-
     pid = os.fork()
     if pid > 0:
-        # Parent process
-        save_job_status(base_dir, pid, sys.argv, output_dir, log_file_path)
-        print(f"Started background job (PID: {pid})")
-        print(f"Output: {output_dir}")
-        print(f"Use --track to monitor, --status to check, --kill to stop.")
+        save_job_status(base_dir, pid, sys.argv, len(runs))
+        prover_names = sorted(set(r["prover"] for r in runs))
+        print(f"Started job (PID: {pid})")
+        print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
+        print("Use --track to monitor, --status to check, --kill to stop")
         if args.track:
-            time.sleep(0.5)  # Give child time to start
+            time.sleep(0.5)
             print()
             track_job(base_dir)
     else:
-        # Child process - detach and run
         os.setsid()
         sys.stdout = open(log_file_path, "w")
         sys.stderr = sys.stdout
 
+        # Extract problem names for filtering traces
+        problem_names = {p.stem for p in problems}
+        num_runs = len(runs)
+
         try:
-            run_eval(provers, presets, problems, base_dir, tptp_root, configs,
-                     output_dir, verbose=True, log_file=sys.stdout, force=args.force,
-                     trace=args.trace)
+            for run_idx, run in enumerate(runs, 1):
+                prover = run["prover"]
+                preset_name = run["preset_name"]
+                preset = run["preset"]
+                binary = run["binary"]
+                prover_config = run["config"]
+
+                config_label = f"{prover}/{preset_name}"
+                trace_preset = args.trace_preset or preset.get("traces") or preset_name
+
+                # Log config progress for --status parsing
+                print(f"CONFIG:{config_label}:{run_idx}:{num_runs}")
+                sys.stdout.flush()
+
+                print(f"\n{'='*60}")
+                print(f"Running: {config_label} ({run_idx}/{num_runs})")
+                print(f"{'='*60}\n")
+
+                weights_path = None
+                current_preset = preset
+
+                # Training only supported for proofatlas
+                if prover == "proofatlas" and is_learned_selector(preset):
+                    existing_weights = find_weights(base_dir, preset_name)
+
+                    if existing_weights and not args.force_train:
+                        print(f"Using existing weights: {existing_weights}")
+                        weights_path = existing_weights
+                    else:
+                        print(f"Training {preset_name}...")
+
+                        # First collect traces with age_weight if none exist
+                        traces_dir = base_dir / ".data" / "traces" / trace_preset
+                        proofatlas_presets = prover_config.get("presets", {})
+                        if not traces_dir.exists() or not list(traces_dir.glob("*.pt")):
+                            print("Collecting traces with age_weight...")
+                            trace_source_preset = proofatlas_presets.get(trace_preset, preset)
+                            run_evaluation(
+                                base_dir, problems, tptp_root,
+                                prover="proofatlas", preset=trace_source_preset,
+                                log_file=sys.stdout,
+                                preset_name=trace_preset, trace_preset=trace_preset,
+                                rerun=True,  # Always run for trace collection
+                            )
+
+                        # Load traces and train (filtered by problem set)
+                        data = load_traces(base_dir, trace_preset, problem_names)
+                        if data["num_problems"] > 0:
+                            weights_path = run_training(
+                                base_dir, preset_name, preset, data, sys.stdout,
+                                init_weights=existing_weights,
+                            )
+                        else:
+                            print("No traces collected, using age_weight")
+                            current_preset = proofatlas_presets.get(trace_preset, preset)
+                            weights_path = None
+
+                # Run evaluation
+                run_evaluation(
+                    base_dir, problems, tptp_root,
+                    prover=prover, preset=current_preset,
+                    log_file=sys.stdout,
+                    preset_name=preset_name, weights_path=str(weights_path) if weights_path else None,
+                    binary=binary, trace_preset=trace_preset,
+                    rerun=args.rerun,
+                )
+
+        except Exception as e:
+            print(f"ERROR: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             clear_job_status(base_dir)
             sys.stdout.close()
