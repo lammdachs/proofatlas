@@ -87,7 +87,7 @@ impl ProofAtlasWasm {
             options.timeout_ms, options.max_clauses).into());
         
         // Parse TPTP input
-        let cnf = parse_tptp(tptp_input)
+        let cnf = parse_tptp(tptp_input, &[], None)
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
         
         web_sys::console::log_1(&format!("Parsed {} clauses", cnf.clauses.len()).into());
@@ -328,9 +328,9 @@ impl ProofAtlasWasm {
     }
     
     #[wasm_bindgen]
-    pub fn parse_tptp(&self, input: &str) -> Result<String, JsError> {
+    pub fn validate_tptp(&self, input: &str) -> Result<String, JsError> {
         // Just parse and return success/error for validation
-        match parse_tptp(input) {
+        match parse_tptp(input, &[], None) {
             Ok(cnf) => Ok(format!("Valid TPTP input with {} clauses", cnf.clauses.len())),
             Err(e) => Err(JsError::new(&format!("Parse error: {}", e))),
         }
