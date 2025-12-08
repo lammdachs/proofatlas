@@ -18,7 +18,7 @@ fn run_group_problem(
     timeout_secs: u64,
 ) -> (SaturationResult, Vec<String>) {
     // Parse the problem
-    let formula = parse_tptp_file(problem_file, &[]).expect("Failed to parse TPTP file");
+    let formula = parse_tptp_file(problem_file, &[], None).expect("Failed to parse TPTP file");
 
     // Configure saturation with reasonable limits
     let config = SaturationConfig {
