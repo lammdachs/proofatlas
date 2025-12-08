@@ -923,7 +923,7 @@ mod tests {
     #[test]
     fn test_parse_simple_clause() {
         let input = "cnf(test, axiom, p(a)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses.len(), 1);
         assert_eq!(result.clauses[0].literals.len(), 1);
     }
@@ -931,7 +931,7 @@ mod tests {
     #[test]
     fn test_parse_equality() {
         let input = "cnf(test, axiom, X = f(a)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses.len(), 1);
         assert_eq!(result.clauses[0].literals.len(), 1);
         assert!(result.clauses[0].literals[0].atom.is_equality());
@@ -940,7 +940,7 @@ mod tests {
     #[test]
     fn test_parse_negation() {
         let input = "cnf(test, axiom, ~p(X) | q(X)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses.len(), 1);
         assert_eq!(result.clauses[0].literals.len(), 2);
         assert!(!result.clauses[0].literals[0].polarity);
@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn test_parse_fof_conjunction() {
         let input = "fof(test, axiom, p(a) & q(b)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         // Should produce two unit clauses after CNF conversion
         assert_eq!(result.clauses.len(), 2);
     }
@@ -958,7 +958,7 @@ mod tests {
     #[test]
     fn test_parse_fof_quantified() {
         let input = "fof(test, axiom, ![X]: p(X)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses.len(), 1);
     }
 
@@ -976,17 +976,17 @@ mod tests {
 
         // Test CNF axiom role
         let input = "cnf(c1, axiom, p(a)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses[0].role, ClauseRole::Axiom);
 
         // Test CNF negated_conjecture role
         let input = "cnf(c2, negated_conjecture, ~p(a)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
 
         // Test CNF hypothesis role
         let input = "cnf(c3, hypothesis, q(X)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
     }
 
@@ -996,7 +996,7 @@ mod tests {
 
         // Test FOF axiom role
         let input = "fof(ax1, axiom, p(a) & q(b)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         // All clauses from an axiom should have Axiom role
         for clause in &result.clauses {
             assert_eq!(clause.role, ClauseRole::Axiom);
@@ -1004,13 +1004,13 @@ mod tests {
 
         // Test FOF conjecture role (should become NegatedConjecture)
         let input = "fof(conj, conjecture, p(a)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         // Negated conjecture clauses should have NegatedConjecture role
         assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
 
         // Test FOF hypothesis role
         let input = "fof(hyp1, hypothesis, r(X)).";
-        let result = parse_tptp(input).unwrap();
+        let result = parse_tptp(input, &[], None).unwrap();
         assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
     }
 }
