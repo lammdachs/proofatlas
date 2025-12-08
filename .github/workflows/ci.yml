@@ -127,7 +127,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Run ML tests
-        run: cargo test ml::
+        run: "cargo test ml::"
         working-directory: rust
 
   python-ml-tests:

@@ -14,7 +14,7 @@ fn test_simple_resolution() {
         cnf(not_q_a, negated_conjecture, ~q(a)).
     "#;
 
-    let formula = parse_tptp(tptp).unwrap();
+    let formula = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
     let result = saturate(formula, config, create_selector());
 
@@ -32,7 +32,7 @@ fn test_equality_reflexivity() {
         cnf(not_self_equal, negated_conjecture, a != a).
     "#;
 
-    let formula = parse_tptp(tptp).unwrap();
+    let formula = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
     let result = saturate(formula, config, create_selector());
 
@@ -51,7 +51,7 @@ fn test_satisfiable_formula() {
         cnf(q_b, axiom, q(b)).
     "#;
 
-    let formula = parse_tptp(tptp).unwrap();
+    let formula = parse_tptp(tptp, &[], None).unwrap();
     let mut config = SaturationConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
     let result = saturate(formula, config, create_selector());
