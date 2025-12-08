@@ -3,43 +3,64 @@
     "binary": "rust/target/release/prove"
   },
 
-  "default_preset": "time_sel21",
+  "defaults": {
+    "preset": "time_sel21"
+  },
 
   "presets": {
     "time_sel0": {
       "description": "10s with sel0 (all literals)",
       "timeout": 10,
-      "max_clauses": 10000,
       "literal_selection": 0,
-      "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
 
     "time_sel20": {
       "description": "10s with sel20 (all maximal literals)",
       "timeout": 10,
-      "max_clauses": 10000,
       "literal_selection": 20,
-      "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
 
     "time_sel21": {
       "description": "10s with sel21 (unique maximal, else neg max-weight, else all maximal)",
       "timeout": 10,
-      "max_clauses": 10000,
       "literal_selection": 21,
-      "selector": "age_weight",
       "age_weight_ratio": 0.167
     },
 
     "time_sel22": {
       "description": "10s with sel22 (neg max-weight, else all maximal)",
       "timeout": 10,
-      "max_clauses": 10000,
       "literal_selection": 22,
-      "selector": "age_weight",
       "age_weight_ratio": 0.167
+    },
+
+    "gcn_quick_val": {
+      "description": "10s with GCN clause selector and validation",
+      "timeout": 10,
+      "literal_selection": 21,
+      "model": "gcn",
+      "training": "with_val",
+      "traces": "time_sel21"
+    },
+
+    "mlp": {
+      "description": "10s with MLP clause selector",
+      "timeout": 10,
+      "literal_selection": 21,
+      "model": "mlp",
+      "training": "standard",
+      "traces": "time_sel21"
+    },
+
+    "gat": {
+      "description": "10s with GAT clause selector",
+      "timeout": 10,
+      "literal_selection": 21,
+      "model": "gat",
+      "training": "standard",
+      "traces": "time_sel21"
     }
   }
 }

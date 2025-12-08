@@ -128,7 +128,8 @@ pub fn local_weights_dir() -> PathBuf {
     PathBuf::from(".weights")
 }
 
-/// Find a model weight file, checking local and global cache
+/// Find a model weight file, checking local and global cache.
+/// If the exact name is not found, looks for the latest iteration (e.g., gcn_iter_5.safetensors).
 pub fn find_model(name: &str) -> Option<PathBuf> {
     let filename = format!("{}.safetensors", name);
 
@@ -146,7 +147,50 @@ pub fn find_model(name: &str) -> Option<PathBuf> {
         }
     }
 
+    // 3. Look for latest iteration (e.g., gcn_iter_5.safetensors)
+    if let Some(path) = find_latest_iteration(name, &local_weights_dir()) {
+        return Some(path);
+    }
+
+    if let Some(cache_dir) = global_cache_dir() {
+        if let Some(path) = find_latest_iteration(name, &cache_dir) {
+            return Some(path);
+        }
+    }
+
     None
+}
+
+/// Find the latest iteration of a model (e.g., gcn_iter_5.safetensors for "gcn")
+fn find_latest_iteration(name: &str, dir: &Path) -> Option<PathBuf> {
+    if !dir.exists() {
+        return None;
+    }
+
+    let prefix = format!("{}_iter_", name);
+    let mut latest_iter: Option<(u32, PathBuf)> = None;
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if stem.starts_with(&prefix) {
+                    // Extract iteration number
+                    if let Ok(iter_num) = stem[prefix.len()..].parse::<u32>() {
+                        match &latest_iter {
+                            None => latest_iter = Some((iter_num, path)),
+                            Some((best, _)) if iter_num > *best => {
+                                latest_iter = Some((iter_num, path))
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    latest_iter.map(|(_, path)| path)
 }
 
 /// Get a model, downloading if necessary (requires "download" feature)

@@ -18,4 +18,7 @@ pub trait ClauseSelector: Send {
 
     /// Get the name of this selection strategy
     fn name(&self) -> &str;
+
+    /// Reset any internal state (e.g., caches) when starting a new problem
+    fn reset(&mut self) {}
 }

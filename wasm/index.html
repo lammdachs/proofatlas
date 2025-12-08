@@ -28,36 +28,6 @@
             </nav>
         </header>
 
-        <section class="architecture-section">
-            <h2>Architecture</h2>
-            <div class="pipeline">
-                <div class="pipeline-step">
-                    <div class="step-icon">C</div>
-                    <div class="step-label">Clauses</div>
-                </div>
-                <div class="pipeline-arrow">&#10132;</div>
-                <div class="pipeline-step">
-                    <div class="step-icon">G</div>
-                    <div class="step-label">Graph</div>
-                </div>
-                <div class="pipeline-arrow">&#10132;</div>
-                <div class="pipeline-step">
-                    <div class="step-icon">NN</div>
-                    <div class="step-label">GNN/Transformer</div>
-                </div>
-                <div class="pipeline-arrow">&#10132;</div>
-                <div class="pipeline-step">
-                    <div class="step-icon">S</div>
-                    <div class="step-label">Selection</div>
-                </div>
-            </div>
-            <p class="architecture-desc">
-                Each clause is converted to a graph with <strong>13-dimensional node features</strong>
-                (type, arity, argument position, depth, age, role, polarity, equality).
-                Neural networks score clauses, and softmax sampling selects the next clause to process.
-            </p>
-        </section>
-
         <main>
             <div class="input-section">
                 <div class="toolbar">

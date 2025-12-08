@@ -10,35 +10,34 @@ import sys
 from pathlib import Path
 
 
-def main():
-    # Find project root and add scripts to path
-    root = Path(__file__).parent.parent.parent.parent.parent  # cli -> proofatlas -> python -> project root
+def find_project_root() -> Path:
+    """Find the proofatlas project root."""
+    root = Path(__file__).parent.parent.parent.parent.parent
 
-    # Try to find the project root by looking for configs
     candidates = [root, Path.cwd()]
     for candidate in candidates:
-        if (candidate / "configs" / "tptp.json").exists():
-            root = candidate
-            break
-    else:
-        # Walk up from cwd
-        path = Path.cwd()
-        while path != path.parent:
-            if (path / "configs" / "tptp.json").exists():
-                root = path
-                break
-            path = path.parent
+        if (candidate / "configs" / "proofatlas.json").exists():
+            return candidate
 
+    path = Path.cwd()
+    while path != path.parent:
+        if (path / "configs" / "proofatlas.json").exists():
+            return path
+        path = path.parent
+
+    return Path.cwd()
+
+
+def main():
+    root = find_project_root()
     scripts_dir = root / "scripts"
     if scripts_dir.exists():
         sys.path.insert(0, str(scripts_dir))
 
-    # Import and run
     try:
         from bench import main as bench_main
         bench_main()
     except ImportError:
-        # Fallback: execute the script directly
         import subprocess
         script = root / "scripts" / "bench.py"
         if script.exists():

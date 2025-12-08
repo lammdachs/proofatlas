@@ -12,10 +12,8 @@
     "default": {
       "description": "Default problem set for training",
       "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "max_rating": 0.8,
-      "min_clauses": 1,
-      "max_clauses": 1000,
+      "format": ["cnf", "fof"],
+      "max_clauses": 100,
       "exclude_domains": ["CSR", "HWV", "SWV"]
     },
 
@@ -37,15 +35,6 @@
       "max_rating": 0.5,
       "max_clauses": 500,
       "domains": ["GRP", "RNG", "LAT", "BOO", "COL"]
-    },
-
-    "hard": {
-      "description": "Challenging problems for evaluation",
-      "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "min_rating": 0.5,
-      "max_rating": 1.0,
-      "max_clauses": 2000
     }
   }
 }

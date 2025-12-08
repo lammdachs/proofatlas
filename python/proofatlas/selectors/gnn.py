@@ -35,6 +35,26 @@ class GCNLayer(nn.Module):
         return self.linear(h)
 
 
+class ScorerHead(nn.Module):
+    """
+    MLP scoring head for clause scoring.
+
+    Named fields match Burn's ScorerHead structure for weight compatibility.
+    """
+
+    def __init__(self, hidden_dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.linear1 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, 1)
+        self.dropout = dropout
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear1(x)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.linear2(x)
+
+
 class GATLayer(nn.Module):
     """
     Graph Attention Network layer (Velickovic et al., 2018).
@@ -156,12 +176,7 @@ class ClauseGCN(nn.Module):
 
         self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
 
-        self.scorer = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
+        self.scorer = ScorerHead(hidden_dim, dropout)
 
     def forward(
         self,
@@ -284,12 +299,7 @@ class ClauseGraphSAGE(nn.Module):
 
         self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
 
-        self.scorer = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
+        self.scorer = ScorerHead(hidden_dim, dropout)
 
     def forward(
         self,

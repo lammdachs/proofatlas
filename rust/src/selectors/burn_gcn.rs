@@ -10,7 +10,7 @@ use burn::prelude::*;
 use burn::record::{FullPrecisionSettings, Recorder};
 use burn::tensor::activation::relu;
 use burn_import::safetensors::{AdapterType, LoadArgs, SafetensorsFileRecorder};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use crate::core::Clause;
@@ -148,7 +148,48 @@ impl<B: Backend> GcnModel<B> {
         Ok(model.load_record(record))
     }
 
-    /// Forward pass
+    /// Encode clauses to embeddings (GCN layers + pooling)
+    ///
+    /// # Arguments
+    /// * `node_features` - [total_nodes, input_dim]
+    /// * `adj` - Normalized adjacency matrix [total_nodes, total_nodes]
+    /// * `pool_matrix` - [num_clauses, total_nodes] for mean pooling
+    ///
+    /// # Returns
+    /// * Clause embeddings [num_clauses, hidden_dim]
+    pub fn encode(
+        &self,
+        node_features: Tensor<B, 2>,
+        adj: Tensor<B, 2>,
+        pool_matrix: Tensor<B, 2>,
+    ) -> Tensor<B, 2> {
+        let num_layers = self.convs.len();
+        let mut x = node_features;
+
+        // Apply GCN layers with LayerNorm and ReLU
+        for (i, (conv, norm)) in self.convs.iter().zip(self.norms.iter()).enumerate() {
+            x = conv.forward(x, adj.clone());
+            x = norm.forward(x);
+            x = relu(x);
+            let _ = i < num_layers - 1; // placeholder for dropout logic
+        }
+
+        // Pool to clause embeddings: [num_clauses, hidden_dim]
+        pool_matrix.matmul(x)
+    }
+
+    /// Score clause embeddings
+    ///
+    /// # Arguments
+    /// * `clause_emb` - [num_clauses, hidden_dim]
+    ///
+    /// # Returns
+    /// * Logits [num_clauses, 1]
+    pub fn score(&self, clause_emb: Tensor<B, 2>) -> Tensor<B, 2> {
+        self.scorer.forward(clause_emb)
+    }
+
+    /// Forward pass (encode + score)
     ///
     /// # Arguments
     /// * `node_features` - [total_nodes, input_dim]
@@ -163,27 +204,12 @@ impl<B: Backend> GcnModel<B> {
         adj: Tensor<B, 2>,
         pool_matrix: Tensor<B, 2>,
     ) -> Tensor<B, 2> {
-        let num_layers = self.convs.len();
-        let mut x = node_features;
-
-        // Apply GCN layers with LayerNorm and ReLU
-        for (i, (conv, norm)) in self.convs.iter().zip(self.norms.iter()).enumerate() {
-            x = conv.forward(x, adj.clone());
-            x = norm.forward(x);
-            x = relu(x);
-            // No dropout during inference (would be applied during training only)
-            let _ = i < num_layers - 1; // placeholder for dropout logic
-        }
-
-        // Pool to clause embeddings: [num_clauses, hidden_dim]
-        let clause_emb = pool_matrix.matmul(x);
-
-        // Score clauses: [num_clauses, 1]
-        self.scorer.forward(clause_emb)
+        let clause_emb = self.encode(node_features, adj, pool_matrix);
+        self.score(clause_emb)
     }
 }
 
-/// Burn-based GCN clause selector
+/// Burn-based GCN clause selector with embedding cache for incremental updates
 pub struct BurnGcnSelector<B: Backend> {
     model: GcnModel<B>,
     device: B::Device,
@@ -191,16 +217,23 @@ pub struct BurnGcnSelector<B: Backend> {
     max_age: usize,
     /// Random number generator state (simple LCG)
     rng_state: u64,
+    /// Hidden dimension for embeddings
+    hidden_dim: usize,
+    /// Cache of clause embeddings: clause_index -> embedding vector
+    embedding_cache: HashMap<usize, Vec<f32>>,
 }
 
 impl<B: Backend> BurnGcnSelector<B> {
     /// Create a new GCN selector with the given model
     pub fn new(model: GcnModel<B>, device: B::Device) -> Self {
+        let hidden_dim = model.hidden_dim;
         Self {
             model,
             device,
             max_age: 1000,
             rng_state: 12345,
+            hidden_dim,
+            embedding_cache: HashMap::new(),
         }
     }
 
@@ -208,6 +241,11 @@ impl<B: Backend> BurnGcnSelector<B> {
     pub fn with_max_age(mut self, max_age: usize) -> Self {
         self.max_age = max_age;
         self
+    }
+
+    /// Clear the embedding cache (call when starting a new problem)
+    pub fn clear_cache(&mut self) {
+        self.embedding_cache.clear();
     }
 
     /// Generate a random float in [0, 1)
@@ -253,8 +291,8 @@ impl<B: Backend> BurnGcnSelector<B> {
         logits.len() - 1
     }
 
-    /// Score clauses using the GCN model
-    fn score_clauses(&self, clauses: &[&Clause]) -> Vec<f32> {
+    /// Encode a batch of clauses to embeddings using GCN
+    fn encode_clauses(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
         if clauses.is_empty() {
             return Vec::new();
         }
@@ -269,12 +307,10 @@ impl<B: Backend> BurnGcnSelector<B> {
             let graph = GraphBuilder::build_from_clause_with_context(clause, self.max_age);
             clause_node_counts.push(graph.num_nodes);
 
-            // Flatten node features
             for features in &graph.node_features {
                 all_node_features.extend_from_slice(features);
             }
 
-            // Offset edges and add
             for &(src, dst) in &graph.edge_indices {
                 all_edges.push((src + node_offset, dst + node_offset));
             }
@@ -285,21 +321,22 @@ impl<B: Backend> BurnGcnSelector<B> {
         let total_nodes = clause_node_counts.iter().sum::<usize>();
         let num_clauses = clauses.len();
 
+        if total_nodes == 0 {
+            return vec![vec![0.0; self.hidden_dim]; num_clauses];
+        }
+
         // Build adjacency matrix with self-loops and normalize
         let mut adj_data = vec![0.0f32; total_nodes * total_nodes];
 
-        // Add self-loops
         for i in 0..total_nodes {
             adj_data[i * total_nodes + i] = 1.0;
         }
 
-        // Add edges (undirected)
         for &(src, dst) in &all_edges {
             adj_data[src * total_nodes + dst] = 1.0;
             adj_data[dst * total_nodes + src] = 1.0;
         }
 
-        // Compute degree and normalize (symmetric normalization)
         let mut degrees: Vec<f32> = vec![0.0; total_nodes];
         for i in 0..total_nodes {
             for j in 0..total_nodes {
@@ -307,7 +344,6 @@ impl<B: Backend> BurnGcnSelector<B> {
             }
         }
 
-        // D^{-1/2} A D^{-1/2}
         for i in 0..total_nodes {
             for j in 0..total_nodes {
                 if adj_data[i * total_nodes + j] > 0.0 {
@@ -319,7 +355,7 @@ impl<B: Backend> BurnGcnSelector<B> {
             }
         }
 
-        // Build pool matrix [num_clauses, total_nodes]
+        // Build pool matrix
         let mut pool_matrix_data = vec![0.0f32; num_clauses * total_nodes];
         let mut current_start = 0usize;
         for (clause_idx, &num_nodes) in clause_node_counts.iter().enumerate() {
@@ -332,7 +368,7 @@ impl<B: Backend> BurnGcnSelector<B> {
             current_start += num_nodes;
         }
 
-        // Create tensors
+        // Create tensors and encode
         let node_features_tensor =
             Tensor::<B, 1>::from_floats(all_node_features.as_slice(), &self.device)
                 .reshape([total_nodes, FEATURE_DIM]);
@@ -343,12 +379,70 @@ impl<B: Backend> BurnGcnSelector<B> {
         let pool_tensor = Tensor::<B, 1>::from_floats(pool_matrix_data.as_slice(), &self.device)
             .reshape([num_clauses, total_nodes]);
 
-        // Run model
-        let logits = self.model.forward(node_features_tensor, adj_tensor, pool_tensor);
+        // Get embeddings (not scores)
+        let embeddings = self.model.encode(node_features_tensor, adj_tensor, pool_tensor);
 
-        // Extract scores
-        let logits_data: Vec<f32> = logits.into_data().to_vec().unwrap();
-        logits_data
+        // Convert to Vec<Vec<f32>>
+        let flat_data: Vec<f32> = embeddings.into_data().to_vec().unwrap();
+        flat_data
+            .chunks(self.hidden_dim)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    /// Score embeddings using the model's scorer head
+    fn score_embeddings(&self, embeddings: &[Vec<f32>]) -> Vec<f32> {
+        if embeddings.is_empty() {
+            return Vec::new();
+        }
+
+        let num_clauses = embeddings.len();
+        let flat_emb: Vec<f32> = embeddings.iter().flatten().cloned().collect();
+
+        let emb_tensor = Tensor::<B, 1>::from_floats(flat_emb.as_slice(), &self.device)
+            .reshape([num_clauses, self.hidden_dim]);
+
+        let logits = self.model.score(emb_tensor);
+        logits.into_data().to_vec().unwrap()
+    }
+
+    /// Score clauses with caching - only encode uncached clauses
+    fn score_clauses_cached(
+        &mut self,
+        clause_indices: &[usize],
+        clauses: &[Clause],
+    ) -> Vec<f32> {
+        if clause_indices.is_empty() {
+            return Vec::new();
+        }
+
+        // Find which clauses need encoding
+        let mut uncached_indices: Vec<usize> = Vec::new();
+        let mut uncached_clauses: Vec<&Clause> = Vec::new();
+
+        for &idx in clause_indices {
+            if !self.embedding_cache.contains_key(&idx) {
+                uncached_indices.push(idx);
+                uncached_clauses.push(&clauses[idx]);
+            }
+        }
+
+        // Encode uncached clauses and store in cache
+        if !uncached_clauses.is_empty() {
+            let new_embeddings = self.encode_clauses(&uncached_clauses);
+            for (idx, emb) in uncached_indices.into_iter().zip(new_embeddings) {
+                self.embedding_cache.insert(idx, emb);
+            }
+        }
+
+        // Gather all embeddings in order
+        let embeddings: Vec<Vec<f32>> = clause_indices
+            .iter()
+            .map(|&idx| self.embedding_cache.get(&idx).unwrap().clone())
+            .collect();
+
+        // Score all embeddings
+        self.score_embeddings(&embeddings)
     }
 }
 
@@ -362,11 +456,11 @@ where
             return None;
         }
 
-        // Collect clause references for scoring
-        let clause_refs: Vec<&Clause> = unprocessed.iter().map(|&idx| &clauses[idx]).collect();
+        // Collect clause indices for cached scoring
+        let clause_indices: Vec<usize> = unprocessed.iter().cloned().collect();
 
-        // Score clauses
-        let scores = self.score_clauses(&clause_refs);
+        // Score clauses using cache
+        let scores = self.score_clauses_cached(&clause_indices, clauses);
 
         if scores.is_empty() {
             // Fallback to FIFO
@@ -382,6 +476,10 @@ where
 
     fn name(&self) -> &str {
         "BurnGCN"
+    }
+
+    fn reset(&mut self) {
+        self.embedding_cache.clear();
     }
 }
 

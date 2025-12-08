@@ -175,6 +175,10 @@ impl SaturationState {
             LiteralSelectionStrategy::Sel22 => Box::new(SelectNegMaxWeightOrMaximal::new()),
         };
 
+        // Reset clause selector state (clear any caches from previous problems)
+        let mut clause_selector = clause_selector;
+        clause_selector.reset();
+
         SaturationState {
             clauses,
             processed: HashSet::new(),
