@@ -14,6 +14,7 @@ jobs:
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
       rust_ml: ${{ steps.filter.outputs.rust_ml }}
+      rust_wasm: ${{ steps.filter.outputs.rust_wasm }}
       python_ml: ${{ steps.filter.outputs.python_ml }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
     steps:
@@ -23,16 +24,19 @@ jobs:
         with:
           filters: |
             rust_core:
-              - 'rust/src/core/**'
-              - 'rust/src/inference/**'
-              - 'rust/src/saturation/**'
-              - 'rust/src/parser/**'
-              - 'rust/src/unification/**'
-              - 'rust/src/selectors/**'
+              - 'crates/proofatlas/src/core/**'
+              - 'crates/proofatlas/src/inference/**'
+              - 'crates/proofatlas/src/saturation/**'
+              - 'crates/proofatlas/src/parser/**'
+              - 'crates/proofatlas/src/unification/**'
+              - 'crates/proofatlas/src/selectors/**'
+              - 'crates/proofatlas/Cargo.toml'
               - 'Cargo.toml'
-              - 'Cargo.lock'
             rust_ml:
-              - 'rust/src/ml/**'
+              - 'crates/proofatlas/src/ml/**'
+            rust_wasm:
+              - 'crates/proofatlas-wasm/**'
+              - 'web/**'
             python_ml:
               - 'python/proofatlas/ml/**'
               - 'python/tests/ml/**'
@@ -52,18 +56,16 @@ jobs:
         with:
           path: |
             ~/.cargo
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Rust compile check
-        run: cargo check
-        working-directory: rust
+        run: cargo check -p proofatlas
 
       - name: End-to-end proof tests
-        run: cargo test --test basic_test
-        working-directory: rust
+        run: cargo test -p proofatlas --test basic_test
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -74,7 +76,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -97,16 +99,15 @@ jobs:
         with:
           path: |
             ~/.cargo
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Run all Rust tests
         run: |
-          cargo test --lib
-          cargo test --test '*'
-        working-directory: rust
+          cargo test -p proofatlas --lib
+          cargo test -p proofatlas --test '*'
 
   rust-ml-tests:
     needs: [detect-changes, critical-tests]
@@ -121,14 +122,37 @@ jobs:
         with:
           path: |
             ~/.cargo
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Run ML tests
-        run: "cargo test ml::"
-        working-directory: rust
+        run: "cargo test -p proofatlas ml::"
+
+  rust-wasm-tests:
+    needs: [detect-changes, critical-tests]
+    if: needs.detect-changes.outputs.rust_wasm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm-
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Check WASM build
+        run: cargo check -p proofatlas-wasm --target wasm32-unknown-unknown
 
   python-ml-tests:
     needs: [detect-changes, critical-tests]
@@ -147,7 +171,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-ml-${{ hashFiles('**/setup.py') }}
+          key: ${{ runner.os }}-pip-ml-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-ml-
 
@@ -166,6 +190,7 @@ jobs:
       needs.detect-changes.outputs.docs_only == 'true' &&
       needs.detect-changes.outputs.rust_core == 'false' &&
       needs.detect-changes.outputs.rust_ml == 'false' &&
+      needs.detect-changes.outputs.rust_wasm == 'false' &&
       needs.detect-changes.outputs.python_ml == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -185,8 +210,8 @@ jobs:
         with:
           path: |
             ~/.cargo
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -199,13 +224,12 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-full-${{ hashFiles('**/setup.py') }}
+          key: ${{ runner.os }}-pip-full-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-full-
 
       - name: Run all Rust tests
-        run: cargo test --all
-        working-directory: rust
+        run: cargo test --workspace
 
       - name: Run all Python tests
         run: |

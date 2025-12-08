@@ -10,14 +10,9 @@ crate-type = ["cdylib"]
 wasm-bindgen = "=0.2.100"
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
-proofatlas = { path = "../rust", default-features = false, features = ["wasm"] }
+proofatlas = { path = "../proofatlas", default-features = false, features = ["wasm"] }
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["Performance", "Window", "console"] }
 js-sys = "=0.3.77"
 # Required for Burn's dependency chain in WASM
 getrandom = { version = "0.3", features = ["wasm_js"] }
-
-# Optimize for small code size
-[profile.release]
-opt-level = "z"
-lto = true

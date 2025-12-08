@@ -75,25 +75,25 @@ proofatlas = ["*.so", "*.pyd", "*.dylib"]
 
 [[tool.setuptools-rust.ext-modules]]
 target = "proofatlas.proofatlas"
-path = "rust/Cargo.toml"
+path = "crates/proofatlas/Cargo.toml"
 binding = "PyO3"
 features = ["python"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py37"
-extend-exclude = ["rust/"]
+extend-exclude = ["crates/"]
 
 [tool.black]
 line-length = 100
 target-version = ['py37']
-extend-exclude = "rust/"
+extend-exclude = "crates/"
 
 [tool.mypy]
 python_version = "3.7"
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["rust/", "build/", "dist/"]
+exclude = ["crates/", "build/", "dist/"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

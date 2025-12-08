@@ -1,55 +1,30 @@
-# Data directories (new structure)
+# Data directories (runtime, gitignored)
 /.data/
 /.logs/
-/.selectors/
-/.claude/
 /.tptp/
 /.spass/
-
-# Legacy directories
-/problems/
-/proofs/
-/results/
-/vampire_select/
-/overfit/
-/gnn/
-
-# Model and data files
-*.pt
-*.ckpt
-
-# Logs and temporary files
-*.json
-!setup.json
-!environment.json
-!tests/.data/**/*.json
-!wasm/examples/*.json
-!configs/**/*.json
-
-# Node.js
-node_modules/
-
-# Test files
-test_tptp_download/
-test_tptp_setup.sh
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+/.vampire/
+/.weights/
+/.benchmarks/
+/.selectors/
+/.claude/
 
 # Rust build artifacts
-rust/target/
-target/
-wasm/pkg/
-wasm/dist/
-rust/Cargo.lock
+/target/
+Cargo.lock
 *.so
 *.dylib
 *.dll
 *.pyd
 
-# Distribution / packaging
+# WASM build outputs
+/web/pkg/
+/web/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 .Python
 build/
 develop-eggs/
@@ -68,21 +43,34 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.pytest_cache/
 
-.pytest_cache
-.vscode
+# Model files
+*.pt
+*.ckpt
 
+# JSON (except configs and test data)
+*.json
+!configs/**/*.json
+!web/examples/*.json
+!web/data/*.json
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Node.js
+node_modules/
 
-# IPython
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
 profile_default/
 ipython_config.py
 
-#pytorch lightning
+# PyTorch Lightning
 lightning_logs/
+
+# Misc
 problem.p
 benchmark*.txt
 large_benchmark.txt
-.vampire/

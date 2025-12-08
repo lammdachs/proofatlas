@@ -1,199 +1,151 @@
 # ProofAtlas: Neural Clause Selection for Theorem Proving
 
-ProofAtlas is a research framework for experimenting with neural guidance in automated theorem proving. The project focuses on comparing different **graph embeddings** and **transformer/attention mechanisms** for clause selection during saturation-based proof search.
-
-## Research Focus
-
-The core research question: **How can we best represent logical clauses as graphs and learn to select useful clauses during proof search?**
-
-Key areas of investigation:
-- **Graph representations**: Converting clauses to graphs with node features (type, arity, depth, age, etc.)
-- **Graph Neural Networks**: Learning embeddings from clause structure
-- **Transformers/Attention**: Scoring clauses using attention mechanisms over graph embeddings
-- **Clause selection**: Replacing heuristics like age-weight ratio with learned selectors
-
-## Architecture
-
-```
-Clauses → Graph Representation → GNN/Transformer → Logits → Softmax Sampling → Selected Clause
-```
-
-Each clause is converted to a graph where nodes represent syntactic elements (clause, literal, predicate, function, variable, constant). Nodes have a **13-dimensional feature vector** encoding type, arity, argument position, depth, age, role, polarity, and equality status.
+ProofAtlas is a research framework for experimenting with neural guidance in automated theorem proving. It combines a high-performance Rust theorem prover with ML-based clause selection.
 
 ## Live Demo
 
 Try ProofAtlas in your browser: **[lexpk.github.io/proofatlas](https://lexpk.github.io/proofatlas)**
 
-The web demo runs entirely client-side using WebAssembly with ONNX-based neural clause selection.
+## Research Focus
 
-## Key Features
+**How can we best represent logical clauses as graphs and learn to select useful clauses during proof search?**
 
-- **High-performance Rust core**: Saturation-based theorem prover with superposition calculus
-- **ONNX inference**: Pure Rust inference via tract-onnx (works in native and WASM)
-- **Graph-based clause representation**: 13-dimensional node features for ML models
-- **Softmax sampling**: Probabilistic clause selection from model logits
-- **TPTP support**: Parser for standard theorem proving problem format
-- **WebAssembly build**: Run the prover in browsers with ML-guided selection
+- **Graph representations**: Converting clauses to graphs with node features (type, arity, depth, age, etc.)
+- **Graph Neural Networks**: GCN, MLP architectures for learning clause embeddings
+- **Clause selection**: Replacing heuristics like age-weight ratio with learned selectors
 
 ## Project Structure
 
 ```
 proofatlas/
-├── rust/src/                  # Core Rust theorem prover
-│   ├── core/                  # Terms, literals, clauses, substitutions, KBO
-│   ├── inference/             # Resolution, factoring, superposition, demodulation
-│   ├── saturation/            # Saturation loop, subsumption
-│   ├── parser/                # TPTP parser
-│   ├── selectors/             # Clause/literal selection (Rust/Burn)
-│   └── ml/                    # Graph building, inference
 │
-├── python/proofatlas/         # Python bindings and ML training
-│   ├── ml/                    # Config, training infrastructure
-│   └── selectors/             # PyTorch model implementations (GCN, GAT, MLP, Transformer)
+├── crates/
+│   ├── proofatlas/             # Core theorem prover (Rust)
+│   │   └── src/
+│   │       ├── core/           # Terms, literals, clauses, substitutions, KBO ordering
+│   │       ├── inference/      # Inference rules: resolution, superposition, demodulation
+│   │       ├── saturation/     # Saturation loop, forward/backward subsumption
+│   │       ├── parser/         # TPTP parser with FOF→CNF conversion
+│   │       ├── unification/    # Most General Unifier (MGU) computation
+│   │       ├── selectors/      # Clause/literal selection strategies (Burn ML)
+│   │       └── ml/             # Graph building from clauses, weight loading
+│   │
+│   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
-├── configs/
-│   ├── data/                  # Data collection configs (Rust selector + problem filters)
-│   └── training/              # ML training configs (model architecture + hyperparameters)
+├── python/proofatlas/          # Python package
+│   ├── cli/                    # Command-line interface (bench entry point)
+│   ├── ml/                     # Training configs, data loading, training loops
+│   └── selectors/              # PyTorch model implementations (GCN, MLP)
 │
-├── scripts/                   # train.py, bench.py, compare_with_vampire.py
-├── wasm/                      # WebAssembly frontend
-├── docs/                      # Documentation
+├── web/                        # Web frontend
+│   ├── index.html              # Main prover interface
+│   ├── app.js                  # Frontend logic
+│   └── style.css               # Styling
 │
-│ # External tools (gitignored):
-├── .vampire/                  # Vampire prover binary (for benchmarking)
-├── .spass/                    # SPASS prover (for benchmarking)
+├── configs/                    # JSON configuration for provers, training, benchmarks
 │
-│ # Generated/data (gitignored):
-├── .weights/                  # Trained model weights (safetensors)
-├── .data/                     # TPTP problems, traces, metadata
-└── .logs/                     # Training logs
+├── scripts/                    # Utility scripts
+│   ├── bench.py                # Multi-prover benchmarking with trace collection
+│   ├── export.py               # Export results for web display
+│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
+│
+├── .data/                      # Runtime data (gitignored)
+│   ├── traces/                 # Proof search traces for ML training
+│   └── runs/                   # Benchmark results
+├── .tptp/                      # TPTP problem library (gitignored)
+├── .weights/                   # Trained model weights (gitignored)
+├── .vampire/                   # Vampire prover binary (gitignored)
+└── .spass/                     # SPASS prover binary (gitignored)
 ```
 
 ## Installation
 
-### Rust (Core Prover)
+See [INSTALL.md](INSTALL.md) for detailed instructions.
+
+### Quick Start
 
 ```bash
-cd rust
+# Build the Rust prover
 cargo build --release
-./target/release/prove problem.p --timeout 30
-```
 
-### Python (ML Training)
-
-```bash
-# Install with PyTorch for training
+# Install Python package with ML dependencies
 pip install -e ".[ml]"
 
-# Or minimal install for bindings only
-pip install -e .
+# Setup TPTP problem library
+python scripts/setup_tptp.py
 ```
 
-### WebAssembly
+## Usage
 
-The WASM build is automatically deployed to GitHub Pages. To build locally:
+### Running the Prover
 
 ```bash
-cd wasm
-cargo build --target wasm32-unknown-unknown --release
-wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
-    --out-dir pkg --target web
+./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p --timeout 30
 ```
 
-## Using Clause Selectors
+### Benchmarking
 
-### Heuristic Selectors (Rust)
+```bash
+python scripts/bench.py --prover proofatlas --preset quick
+```
+
+### Training ML Models
+
+```bash
+# Collect traces
+python scripts/bench.py --prover proofatlas --trace
+
+# Train a GCN selector
+python scripts/train.py --training gcn
+```
+
+## Clause Selection
+
+### Heuristic Selectors
 
 ```rust
 use proofatlas::AgeWeightSelector;
-
-// Age-weight heuristic (classic, no ML)
 let selector = AgeWeightSelector::new(0.5); // 50% age, 50% weight
-state.set_clause_selector(Box::new(selector));
 ```
 
-### ML Selectors with Burn (Rust)
+### ML Selectors (Burn)
 
 ```rust
-use proofatlas::selection::{load_ndarray_gcn_selector, load_ndarray_mlp_selector};
-
-// Load a GCN selector from trained weights (safetensors format)
+use proofatlas::selection::load_ndarray_gcn_selector;
 let selector = load_ndarray_gcn_selector(
-    ".weights/gcn.safetensors",
-    13,  // input_dim
-    64,  // hidden_dim
-    3,   // num_layers
-).expect("Failed to load GCN weights");
-state.set_clause_selector(Box::new(selector));
-
-// Or load an MLP selector
-let selector = load_ndarray_mlp_selector(
-    ".weights/mlp.safetensors",
-    13,  // input_dim
-    64,  // hidden_dim
-    2,   // num_layers
-).expect("Failed to load MLP weights");
+    ".weights/gcn.safetensors", 13, 64, 3
+)?;
 ```
 
-### Training Custom Models (Python)
+## Node Features
 
-```bash
-# 1. Run benchmark with trace collection
-proofatlas-bench --prover proofatlas --preset time_sel21 --trace
-
-# 2. Train a GCN model (aggregates traces automatically)
-python scripts/train.py --preset time_sel21 --training gcn
-```
-
-Available model architectures (in `configs/training/`):
-- **gcn**: Graph Convolutional Network
-- **mlp**: Multi-Layer Perceptron baseline
-
-## Node Feature Layout
+Each clause is converted to a graph with 13-dimensional node features:
 
 | Index | Feature | Description |
 |-------|---------|-------------|
 | 0-5 | Node type | One-hot: clause, literal, predicate, function, variable, constant |
-| 6 | Arity | Number of arguments (predicates/functions) |
-| 7 | Arg position | 0-indexed position as argument to parent |
+| 6 | Arity | Number of arguments |
+| 7 | Arg position | Position as argument to parent |
 | 8 | Depth | Distance from clause root |
 | 9 | Age | Clause age normalized to [0, 1] |
-| 10 | Role | 0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived |
-| 11 | Polarity | 1.0=positive, 0.0=negative |
-| 12 | Is equality | 1.0 if predicate is equality |
+| 10 | Role | axiom/hypothesis/negated_conjecture/derived |
+| 11 | Polarity | positive/negative |
+| 12 | Is equality | Whether predicate is equality |
 
-## Benchmarks
-
-On 150 TPTP Unsatisfiable problems (10s timeout):
-
-| Category | ProofAtlas | Vampire 5.0 |
-|----------|------------|-------------|
-| Unit Equalities | 18/50 (36%) | 23/50 (46%) |
-| CNF Without Equality | 16/50 (32%) | 16/50 (32%) |
-| CNF With Equality | 7/50 (14%) | 11/50 (22%) |
-| **Total** | **41/150 (27%)** | **50/150 (33%)** |
-
-## Running Tests
+## Tests
 
 ```bash
-# Rust tests
-cd rust && cargo test
-
-# Python tests
-cd python && python -m pytest tests/ -v
+cargo test                        # Rust tests
+python -m pytest python/tests/    # Python tests
 ```
 
 ## Contributing
 
-Contributions are welcome! Areas of interest:
-- New graph embedding architectures (GCN, GAT, GraphSAGE)
-- Transformer-based clause scoring
-- Training data collection from proof traces
-- Benchmark expansion
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-BSD 0-Clause License - see [LICENSE](LICENSE) for details.
+BSD 0-Clause License
 
 ## Citation
 
@@ -201,6 +153,6 @@ BSD 0-Clause License - see [LICENSE](LICENSE) for details.
 @software{proofatlas2024,
   title = {ProofAtlas: Neural Clause Selection for Theorem Proving},
   year = {2024},
-  url = {https://github.com/apluska/proofatlas}
+  url = {https://github.com/lexpk/proofatlas}
 }
 ```
