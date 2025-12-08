@@ -8,11 +8,8 @@ PyTorch utilities for converting clause graphs to tensors and training GNNs for 
 # Basic installation (NumPy only)
 pip install proofatlas
 
-# With PyTorch support
+# With PyTorch support (for ML training)
 pip install proofatlas torch
-
-# With PyTorch Geometric support (recommended for GNN training)
-pip install proofatlas torch torch-geometric
 ```
 
 ## Quick Start
@@ -51,17 +48,6 @@ Convert ClauseGraphData to PyTorch tensors.
 - `num_nodes`: int
 - `num_edges`: int
 
-#### `to_torch_geometric(graph, y=None, device='cpu')`
-
-Convert to PyTorch Geometric Data object.
-
-**Args:**
-- `graph`: ClauseGraphData from Rust
-- `y`: Optional label/target
-- `device`: PyTorch device
-
-**Returns:** PyTorch Geometric `Data` object
-
 #### `to_sparse_adjacency(graph, format='coo', device='cpu')`
 
 Convert to sparse adjacency matrix.
@@ -84,18 +70,6 @@ Batch multiple graphs into single disconnected graph.
 - `batch`: Graph assignment for each node
 - `num_graphs`: Number of graphs
 - `y`: Labels (if provided)
-
-#### `batch_graphs_geometric(graphs, labels=None, device='cpu')`
-
-Batch using PyTorch Geometric's Batch.
-
-**Returns:** PyTorch Geometric `Batch` object
-
-#### `create_dataloader(graphs, labels=None, batch_size=32, shuffle=True, **kwargs)`
-
-Create PyTorch DataLoader for graphs.
-
-**Returns:** PyTorch Geometric `DataLoader`
 
 ### Embedding Extraction
 
@@ -155,7 +129,7 @@ Compute statistics about a clause graph.
 
 - Edges represent parent-child relationships in the syntax tree
 - Graph is a tree rooted at the clause node
-- Edges are directed (parent → child)
+- Edges are directed (parent -> child)
 - Stored in COO format: shape (2, num_edges)
 
 ## Usage Examples
@@ -194,38 +168,41 @@ batch_assignment = batched['batch']
 targets = batched['y']
 ```
 
-### Example 3: PyTorch Geometric Integration
+### Example 3: GNN Training with Pure PyTorch
 
 ```python
-from proofatlas.ml import create_dataloader
-from torch_geometric.nn import GCNConv, global_mean_pool
+import torch
 import torch.nn as nn
+from proofatlas.ml import batch_graphs, extract_graph_embeddings
 
-# Create DataLoader
-loader = create_dataloader(
-    graphs,
-    labels,
-    batch_size=32,
-    shuffle=True
-)
+# Simple GCN layer (pure PyTorch)
+class GCNLayer(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x, edge_index):
+        # Simple message passing
+        row, col = edge_index
+        out = torch.zeros_like(x)
+        out.index_add_(0, row, x[col])
+        return self.linear(out).relu()
 
 # Define GNN model
 class ClauseGNN(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = GCNConv(20, 64)
-        self.conv2 = GCNConv(64, 64)
+        self.conv1 = GCNLayer(20, 64)
+        self.conv2 = GCNLayer(64, 64)
         self.classifier = nn.Linear(64, 1)
 
-    def forward(self, data):
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-
+    def forward(self, x, edge_index, batch):
         # GNN layers
-        x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index).relu()
+        x = self.conv1(x, edge_index)
+        x = self.conv2(x, edge_index)
 
-        # Global pooling
-        x = global_mean_pool(x, batch)
+        # Global mean pooling
+        x = extract_graph_embeddings(x, batch, method='mean')
 
         # Classification
         return self.classifier(x)
@@ -236,12 +213,13 @@ optimizer = torch.optim.Adam(model.parameters())
 criterion = nn.BCEWithLogitsLoss()
 
 for epoch in range(10):
-    for batch in loader:
-        optimizer.zero_grad()
-        predictions = model(batch)
-        loss = criterion(predictions.squeeze(), batch.y)
-        loss.backward()
-        optimizer.step()
+    batch_data = batch_graphs(graphs, labels=labels)
+
+    optimizer.zero_grad()
+    predictions = model(batch_data['x'], batch_data['edge_index'], batch_data['batch'])
+    loss = criterion(predictions.squeeze(), batch_data['y'])
+    loss.backward()
+    optimizer.step()
 ```
 
 ### Example 4: Custom Pooling
@@ -250,13 +228,13 @@ for epoch in range(10):
 from proofatlas.ml import extract_graph_embeddings
 
 # After GNN forward pass
-node_embeddings = gnn(batch.x, batch.edge_index)
+node_embeddings = gnn(batched['x'], batched['edge_index'])
 
 # Different pooling strategies
-mean_emb = extract_graph_embeddings(node_embeddings, batch.batch, method='mean')
-sum_emb = extract_graph_embeddings(node_embeddings, batch.batch, method='sum')
-max_emb = extract_graph_embeddings(node_embeddings, batch.batch, method='max')
-root_emb = extract_graph_embeddings(node_embeddings, batch.batch, method='root')
+mean_emb = extract_graph_embeddings(node_embeddings, batched['batch'], method='mean')
+sum_emb = extract_graph_embeddings(node_embeddings, batched['batch'], method='sum')
+max_emb = extract_graph_embeddings(node_embeddings, batched['batch'], method='max')
+root_emb = extract_graph_embeddings(node_embeddings, batched['batch'], method='root')
 ```
 
 ### Example 5: Node Type Filtering
@@ -280,7 +258,7 @@ for type_name, mask in masks.items():
 
 - **Sparse representation**: Efficient memory usage for large graphs
 - **Batch processing**: Combine multiple graphs for GPU efficiency
-- **Zero-copy transfer**: Direct NumPy → PyTorch conversion
+- **Zero-copy transfer**: Direct NumPy -> PyTorch conversion
 - **Fast aggregation**: Optimized pooling operations
 
 ## Testing
@@ -294,10 +272,6 @@ pytest python/tests/ml/test_graph_export.py -v
 pytest python/tests/ml/test_graph_utils.py -v
 ```
 
-## Complete Example
-
-See `python/examples/pytorch_graph_usage.py` for a comprehensive example demonstrating all features.
-
 ## Next Steps
 
 1. **Data Collection**: Instrument saturation loop to collect training data
@@ -308,5 +282,4 @@ See `python/examples/pytorch_graph_usage.py` for a comprehensive example demonst
 ## References
 
 - [PyTorch](https://pytorch.org/)
-- [PyTorch Geometric](https://pytorch-geometric.readthedocs.io/)
 - [Graph Neural Networks](https://distill.pub/2021/gnn-intro/)

@@ -1,10 +1,10 @@
 """PyTorch utilities for converting clause graphs to tensors
 
 This module provides functions to convert ClauseGraphData objects to PyTorch
-tensors, batch multiple graphs, and integrate with PyTorch Geometric.
+tensors and batch multiple graphs.
 """
 
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Optional
 import numpy as np
 
 try:
@@ -13,12 +13,6 @@ try:
 except ImportError:
     TORCH_AVAILABLE = False
 
-try:
-    from torch_geometric.data import Data, Batch
-    TORCH_GEOMETRIC_AVAILABLE = True
-except ImportError:
-    TORCH_GEOMETRIC_AVAILABLE = False
-
 
 def _check_torch():
     """Check if PyTorch is available"""
@@ -26,15 +20,6 @@ def _check_torch():
         raise ImportError(
             "PyTorch is required for graph utilities. "
             "Install with: pip install torch"
-        )
-
-
-def _check_torch_geometric():
-    """Check if PyTorch Geometric is available"""
-    if not TORCH_GEOMETRIC_AVAILABLE:
-        raise ImportError(
-            "PyTorch Geometric is required for this function. "
-            "Install with: pip install torch-geometric"
         )
 
 
@@ -80,53 +65,6 @@ def to_torch_tensors(graph, device: str = "cpu") -> Dict[str, "torch.Tensor"]:
         'num_nodes': graph.num_nodes(),
         'num_edges': graph.num_edges(),
     }
-
-
-def to_torch_geometric(
-    graph,
-    y: Optional[Any] = None,
-    device: str = "cpu"
-) -> "Data":
-    """Convert ClauseGraphData to PyTorch Geometric Data object
-
-    Args:
-        graph: ClauseGraphData object from Rust
-        y: Optional label/target (for supervised learning)
-        device: PyTorch device
-
-    Returns:
-        PyTorch Geometric Data object with:
-            - data.edge_index: Edge connectivity (2, num_edges)
-            - data.x: Node features (num_nodes, feature_dim)
-            - data.node_types: Node type indices (num_nodes,)
-            - data.y: Label (if provided)
-            - data.num_nodes: Number of nodes
-
-    Example:
-        >>> graph = state.clause_to_graph(clause_id)
-        >>> data = to_torch_geometric(graph, y=1)  # Label 1 = selected
-        >>> print(data)
-        Data(x=[4, 20], edge_index=[2, 3], node_types=[4], y=1)
-    """
-    _check_torch()
-    _check_torch_geometric()
-
-    tensors = to_torch_tensors(graph, device=device)
-
-    data = Data(
-        x=tensors['x'],
-        edge_index=tensors['edge_index'],
-        node_types=tensors['node_types'],
-        num_nodes=tensors['num_nodes'],
-    )
-
-    if y is not None:
-        if isinstance(y, (int, float)):
-            data.y = torch.tensor([y], dtype=torch.float).to(device)
-        else:
-            data.y = torch.tensor(y).to(device)
-
-    return data
 
 
 def to_sparse_adjacency(
@@ -271,89 +209,6 @@ def batch_graphs(
         result['y'] = torch.tensor(labels, dtype=torch.float, device=device)
 
     return result
-
-
-def batch_graphs_geometric(
-    graphs: List,
-    labels: Optional[List] = None,
-    device: str = "cpu"
-) -> "Batch":
-    """Batch graphs using PyTorch Geometric's Batch
-
-    Args:
-        graphs: List of ClauseGraphData objects
-        labels: Optional list of labels
-        device: PyTorch device
-
-    Returns:
-        PyTorch Geometric Batch object
-
-    Example:
-        >>> graphs = [state.clause_to_graph(id) for id in clause_ids]
-        >>> batch = batch_graphs_geometric(graphs, labels=[0, 1, 1])
-        >>> batch.num_graphs
-        3
-    """
-    _check_torch()
-    _check_torch_geometric()
-
-    # Convert each graph to PyTorch Geometric Data
-    data_list = []
-    for i, graph in enumerate(graphs):
-        y = labels[i] if labels is not None else None
-        data = to_torch_geometric(graph, y=y, device=device)
-        data_list.append(data)
-
-    # Use PyG's batching
-    return Batch.from_data_list(data_list)
-
-
-def create_dataloader(
-    graphs: List,
-    labels: Optional[List] = None,
-    batch_size: int = 32,
-    shuffle: bool = True,
-    **kwargs
-) -> "torch.utils.data.DataLoader":
-    """Create a PyTorch DataLoader for clause graphs
-
-    Args:
-        graphs: List of ClauseGraphData objects
-        labels: Optional list of labels
-        batch_size: Batch size
-        shuffle: Whether to shuffle data
-        **kwargs: Additional arguments for DataLoader
-
-    Returns:
-        PyTorch DataLoader that yields batched graphs
-
-    Example:
-        >>> graphs = [state.clause_to_graph(id) for id in clause_ids]
-        >>> labels = [0, 1, 1, 0, 1]
-        >>> loader = create_dataloader(graphs, labels, batch_size=2)
-        >>> for batch in loader:
-        ...     print(batch['x'].shape)  # Node features
-        ...     print(batch['y'].shape)  # Labels
-    """
-    _check_torch()
-    _check_torch_geometric()
-
-    from torch_geometric.loader import DataLoader
-
-    # Convert to PyTorch Geometric Data objects
-    data_list = []
-    for i, graph in enumerate(graphs):
-        y = labels[i] if labels is not None else None
-        data = to_torch_geometric(graph, y=y)
-        data_list.append(data)
-
-    # Create DataLoader
-    return DataLoader(
-        data_list,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        **kwargs
-    )
 
 
 def extract_graph_embeddings(

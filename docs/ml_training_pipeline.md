@@ -83,7 +83,20 @@ torch.save(training_examples, "data/training_data.pt")
 ```python
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv, global_mean_pool
+from proofatlas.ml import extract_graph_embeddings
+
+class GCNLayer(nn.Module):
+    """Simple GCN layer using pure PyTorch"""
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x, edge_index):
+        row, col = edge_index
+        out = torch.zeros_like(x)
+        out.index_add_(0, row, x[col])
+        return self.linear(out).relu()
 
 class ClauseGNN(nn.Module):
     """GNN for predicting clause quality (proof relevance)"""
@@ -93,9 +106,9 @@ class ClauseGNN(nn.Module):
 
         # GCN layers
         self.convs = nn.ModuleList()
-        self.convs.append(GCNConv(node_feature_dim, hidden_dim))
+        self.convs.append(GCNLayer(node_feature_dim, hidden_dim))
         for _ in range(num_layers - 1):
-            self.convs.append(GCNConv(hidden_dim, hidden_dim))
+            self.convs.append(GCNLayer(hidden_dim, hidden_dim))
 
         # Output layer
         self.classifier = nn.Linear(hidden_dim, 1)
@@ -104,7 +117,6 @@ class ClauseGNN(nn.Module):
         # GNN layers
         for conv in self.convs:
             x = conv(x, edge_index)
-            x = torch.relu(x)
 
         # Global pooling (graph-level embedding)
         if batch is None:
@@ -112,7 +124,7 @@ class ClauseGNN(nn.Module):
             x = torch.mean(x, dim=0, keepdim=True)
         else:
             # Batched graphs
-            x = global_mean_pool(x, batch)
+            x = extract_graph_embeddings(x, batch, method='mean')
 
         # Classification
         return self.classifier(x).squeeze()
@@ -121,32 +133,17 @@ class ClauseGNN(nn.Module):
 ### Training Loop
 
 ```python
-from torch_geometric.data import Data, DataLoader
+from proofatlas.ml import batch_graphs
 import torch.optim as optim
 
 # Load training data
 training_examples = torch.load("data/training_data.pt")
 
-# Create PyTorch Geometric dataset
-dataset = []
-for example in training_examples:
-    data = Data(
-        x=example["node_features"],
-        edge_index=example["edge_index"],
-        y=torch.tensor([example["label"]], dtype=torch.float),
-    )
-    dataset.append(data)
-
 # Split train/val/test
-train_size = int(0.8 * len(dataset))
-val_size = int(0.1 * len(dataset))
-train_dataset = dataset[:train_size]
-val_dataset = dataset[train_size:train_size + val_size]
-test_dataset = dataset[train_size + val_size:]
-
-# Create dataloaders
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32)
+train_size = int(0.8 * len(training_examples))
+val_size = int(0.1 * len(training_examples))
+train_examples = training_examples[:train_size]
+val_examples = training_examples[train_size:train_size + val_size]
 
 # Initialize model
 model = ClauseGNN(node_feature_dim=20, hidden_dim=64, num_layers=2)
@@ -154,16 +151,27 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.BCEWithLogitsLoss()
 
 # Training loop
+batch_size = 32
 for epoch in range(100):
     model.train()
     total_loss = 0
 
-    for batch in train_loader:
+    # Mini-batch training
+    for i in range(0, len(train_examples), batch_size):
+        batch_examples = train_examples[i:i+batch_size]
+
+        # Extract graphs and labels
+        graphs = [ex["graph"] for ex in batch_examples]
+        labels = [ex["label"] for ex in batch_examples]
+
+        # Batch graphs together
+        batched = batch_graphs(graphs, labels=labels)
+
         optimizer.zero_grad()
 
         # Forward pass
-        predictions = model(batch.x, batch.edge_index, batch.batch)
-        loss = criterion(predictions, batch.y)
+        predictions = model(batched['x'], batched['edge_index'], batched['batch'])
+        loss = criterion(predictions, batched['y'])
 
         # Backward pass
         loss.backward()
@@ -177,11 +185,16 @@ for epoch in range(100):
     total = 0
 
     with torch.no_grad():
-        for batch in val_loader:
-            predictions = model(batch.x, batch.edge_index, batch.batch)
+        for i in range(0, len(val_examples), batch_size):
+            batch_examples = val_examples[i:i+batch_size]
+            graphs = [ex["graph"] for ex in batch_examples]
+            labels = [ex["label"] for ex in batch_examples]
+            batched = batch_graphs(graphs, labels=labels)
+
+            predictions = model(batched['x'], batched['edge_index'], batched['batch'])
             predicted = (torch.sigmoid(predictions) > 0.5).float()
-            correct += (predicted == batch.y).sum().item()
-            total += len(batch.y)
+            correct += (predicted == batched['y']).sum().item()
+            total += len(batched['y'])
 
     accuracy = correct / total
     print(f"Epoch {epoch}: Loss={total_loss:.4f}, Val Acc={accuracy:.4f}")

@@ -178,7 +178,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e .
-          pip install torch torch-geometric
+          pip install torch
 
       - name: Run Python ML tests
         run: pytest python/tests/ml/ -v
@@ -234,5 +234,5 @@ jobs:
       - name: Run all Python tests
         run: |
           pip install -e .
-          pip install torch torch-geometric
+          pip install torch
           pytest python/tests/ -v

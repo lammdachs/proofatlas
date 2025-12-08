@@ -7,28 +7,26 @@ Comprehensive test coverage for graph export and PyTorch utilities.
 Tests follow user workflow progression:
 
 1. **TestBasicConversion** - Single graph operations
-2. **TestBatchingAndDataLoaders** - Multi-graph training preparation
+2. **TestGraphBatching** - Multi-graph training preparation
 3. **TestAdvancedFormats** - Sparse matrix formats
 4. **TestPostProcessing** - GNN output aggregation
 5. **TestUtilityFunctions** - Helper functions
 
 ## Coverage Summary
 
-**31 tests, 100% passing**
+**26 tests, 100% passing**
 
-### TestBasicConversion (6 tests)
+### TestBasicConversion (4 tests)
 Tests fundamental graph-to-tensor conversion.
 
 - `test_to_torch_tensors_basic` - Verifies dict keys returned
 - `test_tensor_shapes_and_dtypes` - Validates shapes and data types
 - `test_device_placement_cpu` - Confirms CPU placement
-- `test_device_placement_cuda` - Confirms CUDA placement (requires GPU)
-- `test_to_torch_geometric_basic` - PyG Data object creation
-- `test_to_torch_geometric_with_label` - PyG with classification labels
+- `test_device_placement_cuda` - Confirms CUDA placement (skipped if no GPU)
 
-**Validates:** NumPy → PyTorch conversion, device handling, PyG integration
+**Validates:** NumPy -> PyTorch conversion, device handling
 
-### TestBatchingAndDataLoaders (9 tests)
+### TestGraphBatching (7 tests)
 Tests combining multiple graphs for training.
 
 - `test_batch_single_graph` - Single graph batching edge case
@@ -38,10 +36,8 @@ Tests combining multiple graphs for training.
 - `test_batch_different_sizes` - Variable-size graph handling
 - `test_batch_empty_raises_error` - Error on empty batch
 - `test_batch_labels_mismatch_raises_error` - Label validation
-- `test_batch_graphs_geometric` - PyG native batching
-- `test_dataloader_creation` - DataLoader construction
 
-**Validates:** Batch correctness, label handling, error cases, DataLoader integration
+**Validates:** Batch correctness, label handling, error cases
 
 ### TestAdvancedFormats (3 tests)
 Tests sparse adjacency matrix formats.
@@ -99,16 +95,7 @@ pytest python/tests/ml/test_graph_utils.py --cov=proofatlas.ml --cov-report=html
 - PyTorch (`torch`)
 
 **Optional (some tests skipped without):**
-- PyTorch Geometric (`torch-geometric`) - 6 tests
 - CUDA GPU - 1 test
-
-## Test Results
-
-```
-31 passed, 1 warning in 2.53s
-```
-
-**Warning:** CSR sparse format is in beta (PyTorch limitation)
 
 ## What's Tested
 
@@ -137,11 +124,10 @@ pytest python/tests/ml/test_graph_utils.py --cov=proofatlas.ml --cov-report=html
 
 1. **CSR format warning** - PyTorch sparse CSR is beta
 2. **CUDA test** - Skipped if no GPU available
-3. **PyG tests** - Skipped if torch-geometric not installed
 
 ## Performance
 
-- **Execution time:** ~2.5 seconds for all 31 tests
+- **Execution time:** ~2.5 seconds for all tests
 - **No external files:** All tests use inline TPTP strings
 - **Parallel safe:** Tests are independent
 
@@ -152,13 +138,10 @@ Each function in `proofatlas.ml.graph_utils` has corresponding tests:
 | Function | Test Count |
 |----------|-----------|
 | `to_torch_tensors` | 3 |
-| `to_torch_geometric` | 2 |
 | `to_sparse_adjacency` | 3 |
 | `batch_graphs` | 7 |
-| `batch_graphs_geometric` | 1 |
-| `create_dataloader` | 1 |
 | `extract_graph_embeddings` | 5 |
 | `get_node_type_masks` | 4 |
 | `compute_graph_statistics` | 4 |
 
-**Total: 30 API tests + 1 CUDA device test = 31 tests**
+**Total: 27 tests (1 skipped without GPU)**

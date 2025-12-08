@@ -3,7 +3,7 @@
 
 Tests are organized by user workflow:
 1. Basic Conversion - Converting a single graph to tensors
-2. Batching and DataLoaders - Preparing data for training
+2. Graph Batching - Preparing data for training
 3. Advanced Formats - Specialized tensor formats
 4. Post-Processing - Operations on GNN outputs
 5. Utilities - Helper and analysis functions
@@ -18,13 +18,6 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-
-# Try to import PyTorch Geometric
-try:
-    from torch_geometric.data import Data, Batch
-    TORCH_GEOMETRIC_AVAILABLE = True
-except ImportError:
-    TORCH_GEOMETRIC_AVAILABLE = False
 
 # Import our utilities
 from proofatlas.ml import graph_utils
@@ -46,7 +39,6 @@ class TestBasicConversion:
 
     This covers the fundamental operations users need to get started:
     - Converting graphs to PyTorch tensors
-    - Using PyTorch Geometric Data objects
     - Device placement (CPU/CUDA)
     """
 
@@ -113,56 +105,16 @@ class TestBasicConversion:
         assert tensors['edge_index'].is_cuda
         assert tensors['x'].is_cuda
 
-    @pytest.mark.skipif(
-        not TORCH_GEOMETRIC_AVAILABLE,
-        reason="PyTorch Geometric not installed"
-    )
-    def test_to_torch_geometric_basic(self):
-        """Test conversion to PyTorch Geometric Data object"""
-        state = ProofState()
-        tptp = "cnf(test, axiom, p(X))."
-        clause_ids = state.add_clauses_from_tptp(tptp)
-
-        graph = state.clause_to_graph(clause_ids[0])
-        data = graph_utils.to_torch_geometric(graph)
-
-        assert isinstance(data, Data)
-        assert hasattr(data, 'x')
-        assert hasattr(data, 'edge_index')
-        assert hasattr(data, 'node_types')
-
-    @pytest.mark.skipif(
-        not TORCH_GEOMETRIC_AVAILABLE,
-        reason="PyTorch Geometric not installed"
-    )
-    def test_to_torch_geometric_with_label(self):
-        """Test PyG conversion with classification label"""
-        state = ProofState()
-        tptp = "cnf(test, axiom, p(X))."
-        clause_ids = state.add_clauses_from_tptp(tptp)
-
-        graph = state.clause_to_graph(clause_ids[0])
-
-        # Test with scalar label
-        data = graph_utils.to_torch_geometric(graph, y=1)
-        assert hasattr(data, 'y')
-        assert data.y.item() == 1.0
-
-        # Test with vector label
-        data = graph_utils.to_torch_geometric(graph, y=[0.5, 0.5])
-        assert data.y.shape == (2,)
-
 
 # ============================================================================
-# Level 2: Training Setup - Batching and DataLoaders
+# Level 2: Training Setup - Graph Batching
 # ============================================================================
 
-class TestBatchingAndDataLoaders:
+class TestGraphBatching:
     """Preparing data for training
 
     Covers operations needed to prepare graphs for batch training:
     - Combining multiple graphs into batches
-    - Creating PyTorch DataLoaders
     - Handling labels for supervised learning
     """
 
@@ -273,53 +225,6 @@ class TestBatchingAndDataLoaders:
 
         with pytest.raises(ValueError):
             graph_utils.batch_graphs(graphs, labels=[0])  # Only 1 label for 2 graphs
-
-    @pytest.mark.skipif(
-        not TORCH_GEOMETRIC_AVAILABLE,
-        reason="PyTorch Geometric not installed"
-    )
-    def test_batch_graphs_geometric(self):
-        """Test PyTorch Geometric's native batching"""
-        state = ProofState()
-        tptp = """
-        cnf(c1, axiom, p(X)).
-        cnf(c2, axiom, q(Y)).
-        """
-        clause_ids = state.add_clauses_from_tptp(tptp)
-
-        graphs = [state.clause_to_graph(id) for id in clause_ids]
-        batch = graph_utils.batch_graphs_geometric(graphs)
-
-        assert isinstance(batch, Batch)
-        assert batch.num_graphs == 2
-
-    @pytest.mark.skipif(
-        not TORCH_GEOMETRIC_AVAILABLE,
-        reason="PyTorch Geometric not installed"
-    )
-    def test_dataloader_creation(self):
-        """Test creating a PyTorch DataLoader for training"""
-        state = ProofState()
-        tptp = """
-        cnf(c1, axiom, p(X)).
-        cnf(c2, axiom, q(Y)).
-        cnf(c3, axiom, r(Z)).
-        cnf(c4, axiom, s(a)).
-        """
-        clause_ids = state.add_clauses_from_tptp(tptp)
-
-        graphs = [state.clause_to_graph(id) for id in clause_ids]
-        labels = [0, 1, 1, 0]
-
-        loader = graph_utils.create_dataloader(
-            graphs, labels,
-            batch_size=2,
-            shuffle=False
-        )
-
-        # Should have 2 batches (4 graphs / batch_size=2)
-        batches = list(loader)
-        assert len(batches) == 2
 
 
 # ============================================================================
