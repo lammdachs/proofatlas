@@ -68,175 +68,211 @@ impl FOFFormula {
         self.free_variables().is_empty()
     }
 
-    /// Convert to negation normal form (NNF)
+    /// Convert to negation normal form (NNF) using iterative approach to avoid stack overflow
     pub fn to_nnf(self) -> FOFFormula {
-        self.to_nnf_impl(false)
-    }
+        // Pure stack-based algorithm - result stack holds intermediate FOFFormulas
+        enum WorkItem {
+            Process(FOFFormula, bool), // (formula, negate)
+            CombineAnd,
+            CombineOr,
+            CombineQuantified(Quantifier, Variable),
+        }
 
-    fn to_nnf_impl(self, negate: bool) -> FOFFormula {
-        match (self, negate) {
-            // Atom
-            (FOFFormula::Atom(a), false) => FOFFormula::Atom(a),
-            (FOFFormula::Atom(a), true) => FOFFormula::Not(Box::new(FOFFormula::Atom(a))),
+        let mut stack: Vec<WorkItem> = vec![WorkItem::Process(self, false)];
+        let mut results: Vec<FOFFormula> = Vec::new();
 
-            // Double negation
-            (FOFFormula::Not(f), false) => f.to_nnf_impl(true),
-            (FOFFormula::Not(f), true) => f.to_nnf_impl(false),
+        while let Some(item) = stack.pop() {
+            match item {
+                WorkItem::Process(formula, negate) => {
+                    match (formula, negate) {
+                        // Atom - base case
+                        (FOFFormula::Atom(a), false) => {
+                            results.push(FOFFormula::Atom(a));
+                        }
+                        (FOFFormula::Atom(a), true) => {
+                            results.push(FOFFormula::Not(Box::new(FOFFormula::Atom(a))));
+                        }
 
-            // Conjunction
-            (FOFFormula::And(f1, f2), false) => FOFFormula::And(
-                Box::new(f1.to_nnf_impl(false)),
-                Box::new(f2.to_nnf_impl(false)),
-            ),
-            (FOFFormula::And(f1, f2), true) => {
-                // De Morgan: ~(A & B) = ~A | ~B
-                FOFFormula::Or(
-                    Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true)),
-                )
-            }
+                        // Double negation - just flip and continue
+                        (FOFFormula::Not(f), neg) => {
+                            stack.push(WorkItem::Process(*f, !neg));
+                        }
 
-            // Disjunction
-            (FOFFormula::Or(f1, f2), false) => FOFFormula::Or(
-                Box::new(f1.to_nnf_impl(false)),
-                Box::new(f2.to_nnf_impl(false)),
-            ),
-            (FOFFormula::Or(f1, f2), true) => {
-                // De Morgan: ~(A | B) = ~A & ~B
-                FOFFormula::And(
-                    Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true)),
-                )
-            }
+                        // Conjunction
+                        (FOFFormula::And(f1, f2), false) => {
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
+                        (FOFFormula::And(f1, f2), true) => {
+                            // De Morgan: ~(A & B) = ~A | ~B
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
 
-            // Implication
-            (FOFFormula::Implies(f1, f2), false) => {
-                // A => B = ~A | B
-                FOFFormula::Or(
-                    Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(false)),
-                )
-            }
-            (FOFFormula::Implies(f1, f2), true) => {
-                // ~(A => B) = A & ~B
-                FOFFormula::And(
-                    Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(true)),
-                )
-            }
+                        // Disjunction
+                        (FOFFormula::Or(f1, f2), false) => {
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
+                        (FOFFormula::Or(f1, f2), true) => {
+                            // De Morgan: ~(A | B) = ~A & ~B
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
 
-            // Biconditional
-            (FOFFormula::Iff(f1, f2), false) => {
-                // A <=> B = (A => B) & (B => A) = (~A | B) & (~B | A)
-                let f1_clone = f1.clone();
-                let f2_clone = f2.clone();
-                FOFFormula::And(
-                    Box::new(FOFFormula::Or(
-                        Box::new(f1.to_nnf_impl(true)),
-                        Box::new(f2.to_nnf_impl(false)),
-                    )),
-                    Box::new(FOFFormula::Or(
-                        Box::new(f2_clone.to_nnf_impl(true)),
-                        Box::new(f1_clone.to_nnf_impl(false)),
-                    )),
-                )
-            }
-            (FOFFormula::Iff(f1, f2), true) => {
-                // ~(A <=> B) = (A & ~B) | (~A & B)
-                let f1_clone = f1.clone();
-                let f2_clone = f2.clone();
-                FOFFormula::Or(
-                    Box::new(FOFFormula::And(
-                        Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(true)),
-                    )),
-                    Box::new(FOFFormula::And(
-                        Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(false)),
-                    )),
-                )
-            }
+                        // Implication: A => B = ~A | B
+                        (FOFFormula::Implies(f1, f2), false) => {
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
+                        (FOFFormula::Implies(f1, f2), true) => {
+                            // ~(A => B) = A & ~B
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
 
-            // XOR
-            (FOFFormula::Xor(f1, f2), false) => {
-                // A <~> B = (A & ~B) | (~A & B)
-                let f1_clone = f1.clone();
-                let f2_clone = f2.clone();
-                FOFFormula::Or(
-                    Box::new(FOFFormula::And(
-                        Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(true)),
-                    )),
-                    Box::new(FOFFormula::And(
-                        Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(false)),
-                    )),
-                )
-            }
-            (FOFFormula::Xor(f1, f2), true) => {
-                // ~(A <~> B) = (A & B) | (~A & ~B)
-                let f1_clone = f1.clone();
-                let f2_clone = f2.clone();
-                FOFFormula::Or(
-                    Box::new(FOFFormula::And(
-                        Box::new(f1.to_nnf_impl(false)),
-                        Box::new(f2.to_nnf_impl(false)),
-                    )),
-                    Box::new(FOFFormula::And(
-                        Box::new(f1_clone.to_nnf_impl(true)),
-                        Box::new(f2_clone.to_nnf_impl(true)),
-                    )),
-                )
-            }
+                        // Biconditional: A <=> B = (~A | B) & (~B | A) = (A & B) | (~A & ~B)
+                        // Using: (~A | B) & (A | ~B)
+                        (FOFFormula::Iff(f1, f2), false) => {
+                            let f1_clone = (*f1).clone();
+                            let f2_clone = (*f2).clone();
 
-            // NAND
-            (FOFFormula::Nand(f1, f2), false) => {
-                // A ~& B = ~(A & B) = ~A | ~B
-                FOFFormula::Or(
-                    Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true)),
-                )
-            }
-            (FOFFormula::Nand(f1, f2), true) => {
-                // ~(A ~& B) = A & B
-                FOFFormula::And(
-                    Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false)),
-                )
-            }
+                            // (~A | B) & (A | ~B)
+                            // Structure: And(Or(~A, B), Or(A, ~B))
+                            stack.push(WorkItem::CombineAnd);
+                            // Second Or: (A | ~B)
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(f2_clone, true));
+                            stack.push(WorkItem::Process(f1_clone, false));
+                            // First Or: (~A | B)
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
+                        (FOFFormula::Iff(f1, f2), true) => {
+                            // ~(A <=> B) = (A & ~B) | (~A & B)
+                            let f1_clone = (*f1).clone();
+                            let f2_clone = (*f2).clone();
 
-            // NOR
-            (FOFFormula::Nor(f1, f2), false) => {
-                // A ~| B = ~(A | B) = ~A & ~B
-                FOFFormula::And(
-                    Box::new(f1.to_nnf_impl(true)),
-                    Box::new(f2.to_nnf_impl(true)),
-                )
-            }
-            (FOFFormula::Nor(f1, f2), true) => {
-                // ~(A ~| B) = A | B
-                FOFFormula::Or(
-                    Box::new(f1.to_nnf_impl(false)),
-                    Box::new(f2.to_nnf_impl(false)),
-                )
-            }
+                            // (A & ~B) | (~A & B)
+                            // Structure: Or(And(A, ~B), And(~A, B))
+                            stack.push(WorkItem::CombineOr);
+                            // Second And: (~A & B)
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(f2_clone, false));
+                            stack.push(WorkItem::Process(f1_clone, true));
+                            // First And: (A & ~B)
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
 
-            // Quantifiers
-            (FOFFormula::Quantified(Quantifier::Forall, var, f), false) => {
-                FOFFormula::Quantified(Quantifier::Forall, var, Box::new(f.to_nnf_impl(false)))
-            }
-            (FOFFormula::Quantified(Quantifier::Forall, var, f), true) => {
-                // ~(∀x.P) = ∃x.~P
-                FOFFormula::Quantified(Quantifier::Exists, var, Box::new(f.to_nnf_impl(true)))
-            }
-            (FOFFormula::Quantified(Quantifier::Exists, var, f), false) => {
-                FOFFormula::Quantified(Quantifier::Exists, var, Box::new(f.to_nnf_impl(false)))
-            }
-            (FOFFormula::Quantified(Quantifier::Exists, var, f), true) => {
-                // ~(∃x.P) = ∀x.~P
-                FOFFormula::Quantified(Quantifier::Forall, var, Box::new(f.to_nnf_impl(true)))
+                        // XOR: A <~> B = (A & ~B) | (~A & B)
+                        (FOFFormula::Xor(f1, f2), false) => {
+                            let f1_clone = (*f1).clone();
+                            let f2_clone = (*f2).clone();
+
+                            // (A & ~B) | (~A & B)
+                            stack.push(WorkItem::CombineOr);
+                            // Second And: (~A & B)
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(f2_clone, false));
+                            stack.push(WorkItem::Process(f1_clone, true));
+                            // First And: (A & ~B)
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
+                        (FOFFormula::Xor(f1, f2), true) => {
+                            // ~(A <~> B) = (A <=> B) = (~A | B) & (A | ~B)
+                            let f1_clone = (*f1).clone();
+                            let f2_clone = (*f2).clone();
+
+                            stack.push(WorkItem::CombineAnd);
+                            // Second Or: (A | ~B)
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(f2_clone, true));
+                            stack.push(WorkItem::Process(f1_clone, false));
+                            // First Or: (~A | B)
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
+
+                        // NAND: A ~& B = ~(A & B) = ~A | ~B
+                        (FOFFormula::Nand(f1, f2), false) => {
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
+                        (FOFFormula::Nand(f1, f2), true) => {
+                            // ~(A ~& B) = A & B
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
+
+                        // NOR: A ~| B = ~(A | B) = ~A & ~B
+                        (FOFFormula::Nor(f1, f2), false) => {
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2, true));
+                            stack.push(WorkItem::Process(*f1, true));
+                        }
+                        (FOFFormula::Nor(f1, f2), true) => {
+                            // ~(A ~| B) = A | B
+                            stack.push(WorkItem::CombineOr);
+                            stack.push(WorkItem::Process(*f2, false));
+                            stack.push(WorkItem::Process(*f1, false));
+                        }
+
+                        // Quantifiers
+                        (FOFFormula::Quantified(Quantifier::Forall, var, f), false) => {
+                            stack.push(WorkItem::CombineQuantified(Quantifier::Forall, var));
+                            stack.push(WorkItem::Process(*f, false));
+                        }
+                        (FOFFormula::Quantified(Quantifier::Forall, var, f), true) => {
+                            // ~(∀x.P) = ∃x.~P
+                            stack.push(WorkItem::CombineQuantified(Quantifier::Exists, var));
+                            stack.push(WorkItem::Process(*f, true));
+                        }
+                        (FOFFormula::Quantified(Quantifier::Exists, var, f), false) => {
+                            stack.push(WorkItem::CombineQuantified(Quantifier::Exists, var));
+                            stack.push(WorkItem::Process(*f, false));
+                        }
+                        (FOFFormula::Quantified(Quantifier::Exists, var, f), true) => {
+                            // ~(∃x.P) = ∀x.~P
+                            stack.push(WorkItem::CombineQuantified(Quantifier::Forall, var));
+                            stack.push(WorkItem::Process(*f, true));
+                        }
+                    }
+                }
+
+                WorkItem::CombineAnd => {
+                    let child2 = results.pop().unwrap();
+                    let child1 = results.pop().unwrap();
+                    results.push(FOFFormula::And(Box::new(child1), Box::new(child2)));
+                }
+
+                WorkItem::CombineOr => {
+                    let child2 = results.pop().unwrap();
+                    let child1 = results.pop().unwrap();
+                    results.push(FOFFormula::Or(Box::new(child1), Box::new(child2)));
+                }
+
+                WorkItem::CombineQuantified(q, var) => {
+                    let child = results.pop().unwrap();
+                    results.push(FOFFormula::Quantified(q, var, Box::new(child)));
+                }
             }
         }
+
+        results.pop().unwrap()
     }
 }
 

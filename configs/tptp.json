@@ -35,6 +35,13 @@
       "max_rating": 0.5,
       "max_clauses": 500,
       "domains": ["GRP", "RNG", "LAT", "BOO", "COL"]
+    },
+
+    "krs": {
+      "description": "KRS domain problems for testing deep formulas",
+      "status": ["unsatisfiable"],
+      "format": ["cnf", "fof"],
+      "domains": ["KRS"]
     }
   }
 }

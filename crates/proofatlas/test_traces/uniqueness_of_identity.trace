@@ -7,7 +7,7 @@ Initial clauses:
 [4] mult(e1,X) = X
 [5] ~e1 = e
 
-✓ PROOF FOUND in 0.008s
+✓ PROOF FOUND in 0.002s
 Generated 23 clauses
 Empty clause at index: 13
 
@@ -68,9 +68,9 @@ Empty clause at index: 13
     Rule: GivenClauseSelection
     Parents: []
 
-[8] mult(X_1,Y_1) = mult(X_1,Y_1)
+[8] mult(Y_2,Z_2) = mult(Y_2,Z_2)
     Rule: Superposition
-    Parents: [3, 1]
+    Parents: [0, 3]
 
 [9] mult(inv(Y_2),mult(Y_2,Z_2)) = Z_2
     Rule: Superposition

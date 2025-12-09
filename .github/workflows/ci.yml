@@ -178,7 +178,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e .
-          pip install pytest
+          pip install pytest numpy
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run Python ML tests
@@ -235,6 +235,6 @@ jobs:
       - name: Run all Python tests
         run: |
           pip install -e .
-          pip install pytest
+          pip install pytest numpy
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pytest python/tests/ -v

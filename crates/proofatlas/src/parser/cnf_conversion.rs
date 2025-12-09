@@ -82,62 +82,106 @@ impl CNFConverter {
     }
 
     fn skolemize(&mut self, formula: FOFFormula) -> FOFFormula {
-        match formula {
-            FOFFormula::Atom(_) | FOFFormula::Not(_) => formula,
+        // Iterative skolemization using explicit stack
+        // The tricky part is managing universal_vars scope correctly
+        enum WorkItem {
+            Process(FOFFormula),
+            CombineAnd,
+            CombineOr,
+            CombineForall(Variable), // After processing body, pop var and wrap result
+        }
 
-            FOFFormula::And(f1, f2) => {
-                FOFFormula::And(Box::new(self.skolemize(*f1)), Box::new(self.skolemize(*f2)))
-            }
+        let mut stack: Vec<WorkItem> = vec![WorkItem::Process(formula)];
+        let mut results: Vec<FOFFormula> = Vec::new();
 
-            FOFFormula::Or(f1, f2) => {
-                FOFFormula::Or(Box::new(self.skolemize(*f1)), Box::new(self.skolemize(*f2)))
-            }
+        while let Some(item) = stack.pop() {
+            match item {
+                WorkItem::Process(f) => match f {
+                    FOFFormula::Atom(_) | FOFFormula::Not(_) => {
+                        results.push(f);
+                    }
 
-            FOFFormula::Quantified(Quantifier::Forall, var, f) => {
-                self.universal_vars.push(var.clone());
-                let result =
-                    FOFFormula::Quantified(Quantifier::Forall, var, Box::new(self.skolemize(*f)));
-                self.universal_vars.pop();
-                result
-            }
+                    FOFFormula::And(f1, f2) => {
+                        stack.push(WorkItem::CombineAnd);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
 
-            FOFFormula::Quantified(Quantifier::Exists, var, f) => {
-                // Create Skolem function/constant
-                let skolem_term = if self.universal_vars.is_empty() {
-                    // No universal variables - create a Skolem constant
-                    Term::Constant(Constant {
-                        name: format!("sk{}", self.skolem_counter),
-                    })
-                } else {
-                    // Create Skolem function with universal variables as arguments
-                    Term::Function(
-                        FunctionSymbol {
-                            name: format!("sk{}", self.skolem_counter),
-                            arity: self.universal_vars.len(),
-                        },
-                        self.universal_vars
-                            .iter()
-                            .map(|v| Term::Variable(v.clone()))
-                            .collect(),
-                    )
-                };
+                    FOFFormula::Or(f1, f2) => {
+                        stack.push(WorkItem::CombineOr);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
 
-                self.skolem_counter += 1;
+                    FOFFormula::Quantified(Quantifier::Forall, var, f) => {
+                        // Push var to universal_vars scope
+                        self.universal_vars.push(var.clone());
+                        // When body is done, wrap it in Forall and pop the var
+                        stack.push(WorkItem::CombineForall(var));
+                        stack.push(WorkItem::Process(*f));
+                    }
 
-                // Replace the existential variable with the Skolem term
-                let substituted = self.substitute_in_formula(*f, &var, &skolem_term);
-                self.skolemize(substituted)
-            }
+                    FOFFormula::Quantified(Quantifier::Exists, var, f) => {
+                        // Create Skolem function/constant
+                        let skolem_term = if self.universal_vars.is_empty() {
+                            Term::Constant(Constant {
+                                name: format!("sk{}", self.skolem_counter),
+                            })
+                        } else {
+                            Term::Function(
+                                FunctionSymbol {
+                                    name: format!("sk{}", self.skolem_counter),
+                                    arity: self.universal_vars.len(),
+                                },
+                                self.universal_vars
+                                    .iter()
+                                    .map(|v| Term::Variable(v.clone()))
+                                    .collect(),
+                            )
+                        };
 
-            // These shouldn't appear after NNF conversion
-            FOFFormula::Implies(_, _)
-            | FOFFormula::Iff(_, _)
-            | FOFFormula::Xor(_, _)
-            | FOFFormula::Nand(_, _)
-            | FOFFormula::Nor(_, _) => {
-                panic!("Complex connectives should be eliminated by NNF conversion")
+                        self.skolem_counter += 1;
+
+                        // Replace the existential variable with the Skolem term
+                        let substituted = self.substitute_in_formula(*f, &var, &skolem_term);
+                        // Continue processing the substituted formula (existential is eliminated)
+                        stack.push(WorkItem::Process(substituted));
+                    }
+
+                    FOFFormula::Implies(_, _)
+                    | FOFFormula::Iff(_, _)
+                    | FOFFormula::Xor(_, _)
+                    | FOFFormula::Nand(_, _)
+                    | FOFFormula::Nor(_, _) => {
+                        panic!("Complex connectives should be eliminated by NNF conversion")
+                    }
+                },
+
+                WorkItem::CombineAnd => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::And(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineOr => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::Or(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineForall(var) => {
+                    self.universal_vars.pop();
+                    let body = results.pop().unwrap();
+                    results.push(FOFFormula::Quantified(
+                        Quantifier::Forall,
+                        var,
+                        Box::new(body),
+                    ));
+                }
             }
         }
+
+        results.pop().unwrap()
     }
 
     fn substitute_in_formula(
@@ -146,54 +190,94 @@ impl CNFConverter {
         var: &Variable,
         term: &Term,
     ) -> FOFFormula {
-        match formula {
-            FOFFormula::Atom(atom) => {
-                let new_args = atom
-                    .args
-                    .iter()
-                    .map(|t| self.substitute_in_term(t, var, term))
-                    .collect();
-                FOFFormula::Atom(Atom {
-                    predicate: atom.predicate,
-                    args: new_args,
-                })
-            }
+        // Iterative substitution using explicit stack
+        enum WorkItem {
+            Process(FOFFormula),
+            CombineNot,
+            CombineAnd,
+            CombineOr,
+            CombineQuantified(Quantifier, Variable),
+        }
 
-            FOFFormula::Not(f) => {
-                FOFFormula::Not(Box::new(self.substitute_in_formula(*f, var, term)))
-            }
+        let mut stack: Vec<WorkItem> = vec![WorkItem::Process(formula)];
+        let mut results: Vec<FOFFormula> = Vec::new();
 
-            FOFFormula::And(f1, f2) => FOFFormula::And(
-                Box::new(self.substitute_in_formula(*f1, var, term)),
-                Box::new(self.substitute_in_formula(*f2, var, term)),
-            ),
+        while let Some(item) = stack.pop() {
+            match item {
+                WorkItem::Process(f) => match f {
+                    FOFFormula::Atom(atom) => {
+                        let new_args = atom
+                            .args
+                            .iter()
+                            .map(|t| self.substitute_in_term(t, var, term))
+                            .collect();
+                        results.push(FOFFormula::Atom(Atom {
+                            predicate: atom.predicate,
+                            args: new_args,
+                        }));
+                    }
 
-            FOFFormula::Or(f1, f2) => FOFFormula::Or(
-                Box::new(self.substitute_in_formula(*f1, var, term)),
-                Box::new(self.substitute_in_formula(*f2, var, term)),
-            ),
+                    FOFFormula::Not(f) => {
+                        stack.push(WorkItem::CombineNot);
+                        stack.push(WorkItem::Process(*f));
+                    }
 
-            FOFFormula::Quantified(q, v, f) => {
-                if &v == var {
-                    // Variable is bound here, don't substitute
-                    FOFFormula::Quantified(q, v, f)
-                } else {
-                    FOFFormula::Quantified(
-                        q,
-                        v,
-                        Box::new(self.substitute_in_formula(*f, var, term)),
-                    )
+                    FOFFormula::And(f1, f2) => {
+                        stack.push(WorkItem::CombineAnd);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
+
+                    FOFFormula::Or(f1, f2) => {
+                        stack.push(WorkItem::CombineOr);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
+
+                    FOFFormula::Quantified(q, v, f) => {
+                        if &v == var {
+                            // Variable is bound here, don't substitute - keep formula as-is
+                            results.push(FOFFormula::Quantified(q, v, f));
+                        } else {
+                            stack.push(WorkItem::CombineQuantified(q, v));
+                            stack.push(WorkItem::Process(*f));
+                        }
+                    }
+
+                    FOFFormula::Implies(_, _)
+                    | FOFFormula::Iff(_, _)
+                    | FOFFormula::Xor(_, _)
+                    | FOFFormula::Nand(_, _)
+                    | FOFFormula::Nor(_, _) => {
+                        panic!("Complex connectives should be eliminated")
+                    }
+                },
+
+                WorkItem::CombineNot => {
+                    let inner = results.pop().unwrap();
+                    results.push(FOFFormula::Not(Box::new(inner)));
+                }
+
+                WorkItem::CombineAnd => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::And(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineOr => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::Or(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineQuantified(q, v) => {
+                    let inner = results.pop().unwrap();
+                    results.push(FOFFormula::Quantified(q, v, Box::new(inner)));
                 }
             }
-
-            FOFFormula::Implies(_, _)
-            | FOFFormula::Iff(_, _)
-            | FOFFormula::Xor(_, _)
-            | FOFFormula::Nand(_, _)
-            | FOFFormula::Nor(_, _) => {
-                panic!("Complex connectives should be eliminated")
-            }
         }
+
+        results.pop().unwrap()
     }
 
     fn substitute_in_term(&self, t: &Term, var: &Variable, replacement: &Term) -> Term {
@@ -217,80 +301,151 @@ impl CNFConverter {
     }
 
     fn remove_universal_quantifiers(&self, formula: FOFFormula) -> FOFFormula {
-        match formula {
-            FOFFormula::Quantified(Quantifier::Forall, _, f) => {
-                self.remove_universal_quantifiers(*f)
-            }
-            FOFFormula::And(f1, f2) => FOFFormula::And(
-                Box::new(self.remove_universal_quantifiers(*f1)),
-                Box::new(self.remove_universal_quantifiers(*f2)),
-            ),
-            FOFFormula::Or(f1, f2) => FOFFormula::Or(
-                Box::new(self.remove_universal_quantifiers(*f1)),
-                Box::new(self.remove_universal_quantifiers(*f2)),
-            ),
-            FOFFormula::Not(f) => FOFFormula::Not(Box::new(self.remove_universal_quantifiers(*f))),
-            _ => formula,
+        // Iterative removal of universal quantifiers
+        enum WorkItem {
+            Process(FOFFormula),
+            CombineAnd,
+            CombineOr,
+            CombineNot,
         }
+
+        let mut stack: Vec<WorkItem> = vec![WorkItem::Process(formula)];
+        let mut results: Vec<FOFFormula> = Vec::new();
+
+        while let Some(item) = stack.pop() {
+            match item {
+                WorkItem::Process(f) => match f {
+                    FOFFormula::Quantified(Quantifier::Forall, _, inner) => {
+                        // Skip the quantifier, process the body
+                        stack.push(WorkItem::Process(*inner));
+                    }
+                    FOFFormula::And(f1, f2) => {
+                        stack.push(WorkItem::CombineAnd);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
+                    FOFFormula::Or(f1, f2) => {
+                        stack.push(WorkItem::CombineOr);
+                        stack.push(WorkItem::Process(*f2));
+                        stack.push(WorkItem::Process(*f1));
+                    }
+                    FOFFormula::Not(inner) => {
+                        stack.push(WorkItem::CombineNot);
+                        stack.push(WorkItem::Process(*inner));
+                    }
+                    _ => {
+                        results.push(f);
+                    }
+                },
+
+                WorkItem::CombineAnd => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::And(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineOr => {
+                    let right = results.pop().unwrap();
+                    let left = results.pop().unwrap();
+                    results.push(FOFFormula::Or(Box::new(left), Box::new(right)));
+                }
+
+                WorkItem::CombineNot => {
+                    let inner = results.pop().unwrap();
+                    results.push(FOFFormula::Not(Box::new(inner)));
+                }
+            }
+        }
+
+        results.pop().unwrap()
     }
 
     fn distribute_to_cnf(&self, formula: FOFFormula) -> Result<Vec<Clause>, CNFConversionError> {
-        // Check timeout at each recursive call
-        self.check_timeout()?;
+        // Iterative CNF distribution - matches original recursive structure
+        // Key: work with Vec<Clause> directly, distribute OR over AND inline
+        enum WorkItem {
+            Process(FOFFormula),
+            CombineAnd,       // Concatenate clause lists
+            CombineOrCross,   // Cross-product of clause lists
+        }
 
-        match formula {
-            FOFFormula::And(f1, f2) => {
-                let mut clauses = self.distribute_to_cnf(*f1)?;
-                clauses.extend(self.distribute_to_cnf(*f2)?);
-                Ok(clauses)
-            }
+        let mut stack: Vec<WorkItem> = vec![WorkItem::Process(formula)];
+        let mut results: Vec<Vec<Clause>> = Vec::new();
 
-            FOFFormula::Or(f1, f2) => {
-                // Check if we need to distribute OR over AND
-                match (*f1, *f2) {
-                    (FOFFormula::And(a1, a2), f2) => {
-                        // (A & B) | C => (A | C) & (B | C)
-                        let c1 = FOFFormula::Or(a1, Box::new(f2.clone()));
-                        let c2 = FOFFormula::Or(a2, Box::new(f2));
-                        let mut clauses = self.distribute_to_cnf(c1)?;
-                        clauses.extend(self.distribute_to_cnf(c2)?);
-                        Ok(clauses)
-                    }
-                    (f1, FOFFormula::And(a1, a2)) => {
-                        // C | (A & B) => (C | A) & (C | B)
-                        let c1 = FOFFormula::Or(Box::new(f1.clone()), a1);
-                        let c2 = FOFFormula::Or(Box::new(f1), a2);
-                        let mut clauses = self.distribute_to_cnf(c1)?;
-                        clauses.extend(self.distribute_to_cnf(c2)?);
-                        Ok(clauses)
-                    }
-                    (f1, f2) => {
-                        // Recursively process children to handle nested And inside Or
-                        let clauses1 = self.distribute_to_cnf(f1)?;
-                        let clauses2 = self.distribute_to_cnf(f2)?;
+        while let Some(item) = stack.pop() {
+            self.check_timeout()?;
 
-                        // Combine clauses: each from clauses1 with each from clauses2
-                        let mut result = Vec::new();
-                        for c1 in &clauses1 {
-                            self.check_timeout()?;
-                            for c2 in &clauses2 {
-                                let mut combined = c1.literals.clone();
-                                combined.extend(c2.literals.clone());
-                                result.push(Clause::with_role(combined, self.role));
+            match item {
+                WorkItem::Process(f) => {
+                    match f {
+                        FOFFormula::And(f1, f2) => {
+                            stack.push(WorkItem::CombineAnd);
+                            stack.push(WorkItem::Process(*f2));
+                            stack.push(WorkItem::Process(*f1));
+                        }
+
+                        FOFFormula::Or(f1, f2) => {
+                            // Check if we need to distribute OR over AND
+                            match (*f1, *f2) {
+                                (FOFFormula::And(a1, a2), f2) => {
+                                    // (A & B) | C => (A | C) & (B | C)
+                                    let c1 = FOFFormula::Or(a1, Box::new(f2.clone()));
+                                    let c2 = FOFFormula::Or(a2, Box::new(f2));
+                                    stack.push(WorkItem::CombineAnd);
+                                    stack.push(WorkItem::Process(c2));
+                                    stack.push(WorkItem::Process(c1));
+                                }
+                                (f1, FOFFormula::And(a1, a2)) => {
+                                    // C | (A & B) => (C | A) & (C | B)
+                                    let c1 = FOFFormula::Or(Box::new(f1.clone()), a1);
+                                    let c2 = FOFFormula::Or(Box::new(f1), a2);
+                                    stack.push(WorkItem::CombineAnd);
+                                    stack.push(WorkItem::Process(c2));
+                                    stack.push(WorkItem::Process(c1));
+                                }
+                                (f1, f2) => {
+                                    // No And at top level of either child
+                                    // Recurse and take cross product
+                                    stack.push(WorkItem::CombineOrCross);
+                                    stack.push(WorkItem::Process(f2));
+                                    stack.push(WorkItem::Process(f1));
+                                }
                             }
                         }
-                        Ok(result)
+
+                        FOFFormula::Atom(_) | FOFFormula::Not(_) => {
+                            results.push(vec![self.formula_to_clause(f)]);
+                        }
+
+                        _ => panic!("Unexpected formula type in CNF conversion: {:?}", f),
                     }
                 }
-            }
 
-            FOFFormula::Atom(_) | FOFFormula::Not(_) => {
-                // Single literal
-                Ok(vec![self.formula_to_clause(formula)])
-            }
+                WorkItem::CombineAnd => {
+                    let right = results.pop().unwrap();
+                    let mut left = results.pop().unwrap();
+                    left.extend(right);
+                    results.push(left);
+                }
 
-            _ => panic!("Unexpected formula type in CNF conversion: {:?}", formula),
+                WorkItem::CombineOrCross => {
+                    let clauses2 = results.pop().unwrap();
+                    let clauses1 = results.pop().unwrap();
+
+                    let mut result = Vec::new();
+                    for c1 in &clauses1 {
+                        for c2 in &clauses2 {
+                            let mut combined = c1.literals.clone();
+                            combined.extend(c2.literals.clone());
+                            result.push(Clause::with_role(combined, self.role));
+                        }
+                    }
+                    results.push(result);
+                }
+            }
         }
+
+        Ok(results.pop().unwrap_or_default())
     }
 
     fn formula_to_clause(&self, formula: FOFFormula) -> Clause {
@@ -299,22 +454,33 @@ impl CNFConverter {
     }
 
     fn collect_literals(&self, formula: FOFFormula) -> Vec<Literal> {
-        match formula {
-            FOFFormula::Or(f1, f2) => {
-                let mut lits = self.collect_literals(*f1);
-                lits.extend(self.collect_literals(*f2));
-                lits
+        // Iterative literal collection
+        let mut stack: Vec<FOFFormula> = vec![formula];
+        let mut literals: Vec<Literal> = Vec::new();
+
+        while let Some(f) = stack.pop() {
+            match f {
+                FOFFormula::Or(f1, f2) => {
+                    stack.push(*f2);
+                    stack.push(*f1);
+                }
+
+                FOFFormula::Atom(atom) => {
+                    literals.push(Literal::positive(atom));
+                }
+
+                FOFFormula::Not(inner) => match *inner {
+                    FOFFormula::Atom(atom) => {
+                        literals.push(Literal::negative(atom));
+                    }
+                    _ => panic!("Negation of non-atom in CNF: {:?}", inner),
+                },
+
+                _ => panic!("Non-disjunctive formula in clause: {:?}", f),
             }
-
-            FOFFormula::Atom(atom) => vec![Literal::positive(atom)],
-
-            FOFFormula::Not(f) => match *f {
-                FOFFormula::Atom(atom) => vec![Literal::negative(atom)],
-                _ => panic!("Negation of non-atom in CNF: {:?}", f),
-            },
-
-            _ => panic!("Non-disjunctive formula in clause: {:?}", formula),
         }
+
+        literals
     }
 }
 
