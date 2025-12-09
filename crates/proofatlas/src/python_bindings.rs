@@ -186,9 +186,20 @@ impl ProofState {
         timeout: Option<f64>,
     ) -> PyResult<Vec<usize>> {
         let timeout_instant = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
-        let include_dirs: Vec<&str> = include_dir.into_iter().collect();
+        let include_dirs: Vec<String> = include_dir.into_iter().map(|s| s.to_string()).collect();
+        let content_owned = content.to_string();
 
-        let cnf = parse_tptp(content, &include_dirs, timeout_instant)
+        // Run parsing in a thread with larger stack to handle deeply nested formulas
+        // Default Python thread stack is too small for formulas with depth > 2000
+        let cnf = std::thread::Builder::new()
+            .stack_size(128 * 1024 * 1024)  // 128MB stack
+            .spawn(move || {
+                let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
+                parse_tptp(&content_owned, &include_refs, timeout_instant)
+            })
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?
+            .join()
+            .map_err(|_| PyValueError::new_err("Parser thread panicked"))?
             .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
 
         let mut ids = Vec::new();
