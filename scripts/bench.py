@@ -726,7 +726,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
 
-def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path) -> BenchResult:
+def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
     """Run Vampire on a problem."""
     import subprocess
 
@@ -736,6 +736,7 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path) -> Be
 
     cmd = [
         str(binary),
+        "--include", str(tptp_root),
         "--time_limit", str(timeout),
         "--selection", str(selection),
         "--avatar", avatar,
@@ -903,7 +904,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                 trace_preset=trace_preset,
             )
         elif prover == "vampire":
-            result = run_vampire(problem, base_dir, preset, binary)
+            result = run_vampire(problem, base_dir, preset, binary, tptp_root)
         elif prover == "spass":
             result = run_spass(problem, base_dir, preset, binary, tptp_root)
         else:
