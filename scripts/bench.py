@@ -805,7 +805,8 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
     elapsed = time.time() - start
 
     # Parse SPASS output
-    if "SPASS beherrschbarkeit: " in output and "Proof found" in output:
+    # SPASS says "SPASS beiseite: Proof found." for proofs
+    if "Proof found" in output:
         status = "proof"
     elif "Completion found" in output:
         status = "saturated"
