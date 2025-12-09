@@ -40,7 +40,7 @@ pub fn parse_tptp_file(
     timeout: Option<Instant>,
 ) -> Result<CNFFormula, String> {
     let mut visited = HashSet::new();
-    let result = parse_file_recursive(file_path, include_dirs, &mut visited)?;
+    let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)?;
     convert_to_cnf(result, timeout)
 }
 
@@ -56,7 +56,7 @@ pub fn parse_tptp(
     timeout: Option<Instant>,
 ) -> Result<CNFFormula, String> {
     let mut visited = HashSet::new();
-    let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited)?;
+    let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)?;
     convert_to_cnf(result, timeout)
 }
 
@@ -132,6 +132,7 @@ fn parse_file_recursive(
     file_path: &str,
     include_dirs: &[&str],
     visited: &mut HashSet<PathBuf>,
+    timeout: Option<Instant>,
 ) -> Result<ParseResult, String> {
     let path = PathBuf::from(file_path);
 
@@ -149,7 +150,7 @@ fn parse_file_recursive(
         .map_err(|e| format!("Failed to read file {}: {}", file_path, e))?;
 
     let parent_dir = path.parent().unwrap_or(Path::new("."));
-    parse_content(&content, include_dirs, parent_dir, visited)
+    parse_content(&content, include_dirs, parent_dir, visited, timeout)
 }
 
 fn parse_content(
@@ -157,6 +158,7 @@ fn parse_content(
     include_dirs: &[&str],
     current_dir: &Path,
     visited: &mut HashSet<PathBuf>,
+    timeout: Option<Instant>,
 ) -> Result<ParseResult, String> {
     let mut cnf_formulas = Vec::new();
     let mut fof_formulas = Vec::new();
@@ -165,6 +167,13 @@ fn parse_content(
     let mut current_statement = String::new();
 
     for line in input.lines() {
+        // Check timeout before processing each line
+        if let Some(deadline) = timeout {
+            if Instant::now() > deadline {
+                return Err("Parsing timed out".to_string());
+            }
+        }
+
         let line = line.trim();
 
         // Skip comments
@@ -187,7 +196,7 @@ fn parse_content(
             // Parse include directive
             if statement.starts_with("include(") {
                 let included =
-                    parse_include_directive(statement, include_dirs, current_dir, visited)?;
+                    parse_include_directive(statement, include_dirs, current_dir, visited, timeout)?;
                 cnf_formulas.extend(included.cnf_formulas);
                 fof_formulas.extend(included.fof_formulas);
             }
@@ -205,6 +214,22 @@ fn parse_content(
             }
             // Parse FOF formula
             else if statement.starts_with("fof(") {
+                // Check timeout before parsing potentially huge formulas
+                if let Some(deadline) = timeout {
+                    if Instant::now() > deadline {
+                        return Err("Parsing timed out".to_string());
+                    }
+                }
+
+                // Skip extremely large statements (> 100KB) as they will timeout anyway
+                // These are typically machine-generated formulas with depth > 3000
+                if statement.len() > 100_000 {
+                    return Err(format!(
+                        "Formula too large to parse ({} bytes, max 100KB)",
+                        statement.len()
+                    ));
+                }
+
                 match parse_fof_line(statement) {
                     Ok((_, named_formula)) => fof_formulas.push(named_formula),
                     Err(e) => {
@@ -231,6 +256,7 @@ fn parse_include_directive(
     include_dirs: &[&str],
     current_dir: &Path,
     visited: &mut HashSet<PathBuf>,
+    timeout: Option<Instant>,
 ) -> Result<ParseResult, String> {
     // Parse include('filename').
     let (_, filename) =
@@ -240,7 +266,7 @@ fn parse_include_directive(
     let file_path = find_include_file(filename, include_dirs, current_dir)?;
 
     // Recursively parse the included file
-    parse_file_recursive(&file_path.to_string_lossy(), include_dirs, visited)
+    parse_file_recursive(&file_path.to_string_lossy(), include_dirs, visited, timeout)
 }
 
 fn find_include_file(
