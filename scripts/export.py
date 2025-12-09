@@ -3,9 +3,11 @@
 Export benchmark and training results for web display.
 
 USAGE:
-    python scripts/export.py                    # Export all
-    python scripts/export.py --benchmarks       # Export benchmarks only
-    python scripts/export.py --training         # Export training only
+    python scripts/export.py                              # Export all results
+    python scripts/export.py --benchmarks                 # Export benchmarks only
+    python scripts/export.py --training                   # Export training only
+    python scripts/export.py --problem-set test           # Limit to 'test' problem set
+    python scripts/export.py --configs proofatlas vampire # Only include these provers
 
 OUTPUT:
     web/data/benchmarks.json  - Benchmark results per prover/preset
@@ -21,6 +23,91 @@ from pathlib import Path
 
 def get_project_root() -> Path:
     return Path(__file__).parent.parent
+
+
+def load_problem_set(root: Path, problem_set_name: str) -> set[str]:
+    """Load problem names from a problem set definition."""
+    tptp_config_path = root / "configs" / "tptp.json"
+    if not tptp_config_path.exists():
+        raise FileNotFoundError(f"TPTP config not found: {tptp_config_path}")
+
+    with open(tptp_config_path) as f:
+        tptp_config = json.load(f)
+
+    problem_sets = tptp_config.get("problem_sets", {})
+    if problem_set_name not in problem_sets:
+        available = list(problem_sets.keys())
+        raise ValueError(f"Unknown problem set: {problem_set_name}. Available: {available}")
+
+    filters = problem_sets[problem_set_name]
+    problems_dir = root / tptp_config["paths"]["problems"]
+
+    if not problems_dir.exists():
+        raise FileNotFoundError(f"TPTP problems not found: {problems_dir}")
+
+    # Load metadata
+    metadata_path = root / ".data" / "problem_metadata.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(
+            f"Problem metadata not found: {metadata_path}\n"
+            "Run: python scripts/setup_tptp.py --scan"
+        )
+
+    with open(metadata_path) as f:
+        data = json.load(f)
+        problems_list = data.get("problems", data) if isinstance(data, dict) else data
+        metadata = {p["path"]: p for p in problems_list}
+
+    # Filter problems
+    matching = set()
+    for path, meta in metadata.items():
+        # Status filter
+        if "status" in filters:
+            if meta.get("status", "").lower() not in [s.lower() for s in filters["status"]]:
+                continue
+
+        # Format filter
+        if "format" in filters:
+            if meta.get("format", "").lower() not in [f.lower() for f in filters["format"]]:
+                continue
+
+        # Domain filter (include)
+        if "domains" in filters:
+            domain = path.split("/")[0] if "/" in path else path[:3]
+            if domain not in filters["domains"]:
+                continue
+
+        # Domain filter (exclude)
+        if "exclude_domains" in filters:
+            domain = path.split("/")[0] if "/" in path else path[:3]
+            if domain in filters["exclude_domains"]:
+                continue
+
+        # Rating filter
+        if "max_rating" in filters:
+            if meta.get("rating", 1.0) > filters["max_rating"]:
+                continue
+
+        # Clause count filter
+        if "max_clauses" in filters:
+            if meta.get("num_clauses", float("inf")) > filters["max_clauses"]:
+                continue
+
+        # Equality filter
+        if "has_equality" in filters:
+            if meta.get("has_equality", False) != filters["has_equality"]:
+                continue
+
+        # Unit-only filter
+        if "is_unit_only" in filters:
+            if meta.get("is_unit_only", False) != filters["is_unit_only"]:
+                continue
+
+        # Extract problem name from path (e.g., "PUZ/PUZ001-1.p" -> "PUZ001-1.p")
+        problem_name = path.split("/")[-1] if "/" in path else path
+        matching.add(problem_name)
+
+    return matching
 
 
 # Benchmark export
@@ -57,6 +144,34 @@ def load_benchmark_results(runs_dir: Path) -> list:
                     continue
 
     return results
+
+
+def filter_results(
+    results: list,
+    problem_set: set[str] | None = None,
+    configs: list[str] | None = None,
+) -> list:
+    """Filter results by problem set and/or configs."""
+    filtered = results
+
+    if problem_set is not None:
+        filtered = [r for r in filtered if r["problem"] in problem_set]
+
+    if configs is not None:
+        # configs can be "prover" or "prover/preset"
+        def matches_config(r):
+            for cfg in configs:
+                if "/" in cfg:
+                    prover, preset = cfg.split("/", 1)
+                    if r["prover"] == prover and r["preset"] == preset:
+                        return True
+                else:
+                    if r["prover"] == cfg:
+                        return True
+            return False
+        filtered = [r for r in filtered if matches_config(r)]
+
+    return filtered
 
 
 def compute_benchmark_summary(results: list) -> list:
@@ -115,7 +230,12 @@ def compute_problem_comparison(results: list) -> dict:
     return dict(problems)
 
 
-def export_benchmarks(root: Path, output_path: Path):
+def export_benchmarks(
+    root: Path,
+    output_path: Path,
+    problem_set_name: str | None = None,
+    configs: list[str] | None = None,
+):
     """Export benchmark results to JSON."""
     runs_dir = root / ".data" / "runs"
 
@@ -127,14 +247,32 @@ def export_benchmarks(root: Path, output_path: Path):
         print("No benchmark results to export")
         return False
 
+    # Load problem set if specified
+    problem_set = None
+    if problem_set_name:
+        print(f"Loading problem set '{problem_set_name}'...")
+        problem_set = load_problem_set(root, problem_set_name)
+        print(f"  Problem set contains {len(problem_set)} problems")
+
+    # Filter results
+    if problem_set or configs:
+        results = filter_results(results, problem_set, configs)
+        print(f"  After filtering: {len(results)} results")
+
+    if not results:
+        print("No results match the filters")
+        return False
+
     summary = compute_benchmark_summary(results)
     problems = compute_problem_comparison(results)
-    configs = sorted(set(f"{r['prover']}/{r['preset']}" for r in results))
+    found_configs = sorted(set(f"{r['prover']}/{r['preset']}" for r in results))
 
     output = {
         "generated": datetime.now().isoformat(),
+        "problem_set": problem_set_name,
+        "configs_filter": configs,
         "total_results": len(results),
-        "configs": configs,
+        "configs": found_configs,
         "summary": summary,
         "problems": problems,
     }
@@ -144,7 +282,7 @@ def export_benchmarks(root: Path, output_path: Path):
         json.dump(output, f, indent=2)
 
     print(f"Exported benchmarks to {output_path}")
-    print(f"  Configurations: {len(configs)}")
+    print(f"  Configurations: {len(found_configs)}")
     print(f"  Problems: {len(problems)}")
 
     # Print summary table
@@ -318,6 +456,10 @@ def main():
                        help="Export benchmarks only")
     parser.add_argument("--training", action="store_true",
                        help="Export training only")
+    parser.add_argument("--problem-set", type=str, metavar="NAME",
+                       help="Limit to problems in this problem set (e.g., test, default)")
+    parser.add_argument("--configs", type=str, nargs="+", metavar="CFG",
+                       help="Only include these provers/configs (e.g., proofatlas vampire/time_sel0)")
     parser.add_argument("--output-dir", type=Path,
                        help="Output directory (default: web/data/)")
     args = parser.parse_args()
@@ -329,7 +471,9 @@ def main():
     export_both = not args.benchmarks and not args.training
 
     if args.benchmarks or export_both:
-        export_benchmarks(root, output_dir / "benchmarks.json")
+        export_benchmarks(root, output_dir / "benchmarks.json",
+                         problem_set_name=args.problem_set,
+                         configs=args.configs)
         print()
 
     if args.training or export_both:
