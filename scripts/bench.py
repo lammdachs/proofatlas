@@ -868,7 +868,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False):
     """Run evaluation on problems with the specified prover."""
-    results = []
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
@@ -886,7 +885,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         # Check if already evaluated (skip unless --rerun)
         existing = load_run_result(base_dir, prover, preset_name, problem)
         if existing and not rerun:
-            results.append(existing)
             stats[existing.status] = stats.get(existing.status, 0) + 1
             stats["skip"] += 1
 
@@ -910,7 +908,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         else:
             result = BenchResult(problem=problem.name, status="error", time_s=0)
 
-        results.append(result)
         stats[result.status] = stats.get(result.status, 0) + 1
 
         # Save individual result to .data/runs/
