@@ -21,7 +21,7 @@ class TestBasicGraphExport:
         # Expected: clause -> literal -> predicate -> variable
         assert graph.num_nodes() == 4
         assert graph.num_edges() == 3
-        assert graph.feature_dim() == 20
+        assert graph.feature_dim() == 13
 
     def test_two_literal_clause(self):
         """Test graph export for clause with two literals: P(x) | Q(a)"""
@@ -45,8 +45,8 @@ class TestBasicGraphExport:
         node_features = graph.node_features()
 
         # Find literal node (should be node 1)
-        # Feature index 12 is polarity
-        literal_polarity = node_features[1, 12]
+        # Feature index 11 is polarity
+        literal_polarity = node_features[1, 11]
         assert literal_polarity == 0.0  # negative literal
 
     def test_invalid_clause_id(self):
@@ -193,8 +193,8 @@ class TestEqualityHandling:
 
         assert pred_idx is not None
 
-        # Feature index 13 is is_equality
-        is_equality = node_features[pred_idx, 13]
+        # Feature index 12 is is_equality
+        is_equality = node_features[pred_idx, 12]
         assert is_equality == 1.0
 
     def test_complex_equality(self):
@@ -216,35 +216,29 @@ class TestEqualityHandling:
 class TestClauseFeatures:
     """Test clause-level features"""
 
-    def test_unit_clause_feature(self):
-        """Test that unit clauses are correctly identified"""
+    def test_unit_clause_structure(self):
+        """Test that unit clauses have correct structure"""
         state = ProofState()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
         graph = state.clause_to_graph(clause_ids[0])
-        node_features = graph.node_features()
+        # Unit clause has 1 literal
+        # Structure: clause -> literal -> predicate -> variable
+        assert graph.num_nodes() == 4
 
-        # Node 0 is clause root
-        # Feature index 14 is is_unit
-        is_unit = node_features[0, 14]
-        assert is_unit == 1.0
-
-    def test_non_unit_clause_feature(self):
-        """Test that non-unit clauses are correctly identified"""
+    def test_non_unit_clause_structure(self):
+        """Test that non-unit clauses have correct structure"""
         state = ProofState()
         tptp = "cnf(test, axiom, (p(X) | q(Y)))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
         graph = state.clause_to_graph(clause_ids[0])
-        node_features = graph.node_features()
+        # Two literals: clause -> 2 * (literal -> predicate -> variable)
+        assert graph.num_nodes() == 7
 
-        # Feature index 14 is is_unit
-        is_unit = node_features[0, 14]
-        assert is_unit == 0.0
-
-    def test_horn_clause_feature(self):
-        """Test that Horn clauses are correctly identified"""
+    def test_polarity_feature(self):
+        """Test that literal polarity is correctly encoded"""
         state = ProofState()
         # Horn clause: at most one positive literal
         tptp = "cnf(test, axiom, (~p(X) | q(X)))."
@@ -252,36 +246,41 @@ class TestClauseFeatures:
 
         graph = state.clause_to_graph(clause_ids[0])
         node_features = graph.node_features()
+        node_types = graph.node_types()
 
-        # Feature index 15 is is_horn
-        is_horn = node_features[0, 15]
-        assert is_horn == 1.0
+        # Find literal nodes (type 1)
+        literal_indices = [i for i, t in enumerate(node_types) if t == 1]
+        assert len(literal_indices) == 2
 
-    def test_ground_clause_feature(self):
-        """Test that ground clauses are correctly identified"""
+        # Check polarities (index 11)
+        polarities = [node_features[i, 11] for i in literal_indices]
+        # One negative, one positive
+        assert 0.0 in polarities and 1.0 in polarities
+
+    def test_ground_clause_structure(self):
+        """Test that ground clauses have correct structure"""
         state = ProofState()
         tptp = "cnf(test, axiom, p(a))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
         graph = state.clause_to_graph(clause_ids[0])
-        node_features = graph.node_features()
+        node_types = graph.node_types()
 
-        # Feature index 16 is is_ground
-        is_ground = node_features[0, 16]
-        assert is_ground == 1.0
+        # Should have constant (type 5), no variable (type 4)
+        assert 5 in node_types  # constant
+        assert 4 not in node_types  # no variables
 
-    def test_non_ground_clause_feature(self):
-        """Test that non-ground clauses are correctly identified"""
+    def test_non_ground_clause_structure(self):
+        """Test that non-ground clauses have variables"""
         state = ProofState()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
         graph = state.clause_to_graph(clause_ids[0])
-        node_features = graph.node_features()
+        node_types = graph.node_types()
 
-        # Feature index 16 is is_ground
-        is_ground = node_features[0, 16]
-        assert is_ground == 0.0
+        # Should have variable (type 4)
+        assert 4 in node_types
 
 
 class TestEdgeStructure:
@@ -354,7 +353,7 @@ class TestFeatureArrays:
         graph = state.clause_to_graph(clause_ids[0])
         node_features = graph.node_features()
 
-        assert node_features.shape == (graph.num_nodes(), 20)
+        assert node_features.shape == (graph.num_nodes(), 13)
         assert node_features.dtype == np.float32
 
     def test_node_types_shape(self):
@@ -399,15 +398,74 @@ class TestFeatureArrays:
         graph = state.clause_to_graph(clause_ids[0])
         node_features = graph.node_features()
 
-        # Feature index 7 is depth
+        # Feature index 8 is depth
         # Clause root should have depth 0
-        assert node_features[0, 7] == 0.0
+        assert node_features[0, 8] == 0.0
 
         # Literal should have depth 1
-        assert node_features[1, 7] == 1.0
+        assert node_features[1, 8] == 1.0
 
         # Predicate should have depth 2
-        assert node_features[2, 7] == 2.0
+        assert node_features[2, 8] == 2.0
+
+    def test_arg_position_feature(self):
+        """Test that arg_position feature is correctly set for function arguments"""
+        state = ProofState()
+        # p(a, b, c) - arguments at positions 0, 1, 2
+        tptp = "cnf(test, axiom, p(a, b, c))."
+        clause_ids = state.add_clauses_from_tptp(tptp)
+
+        graph = state.clause_to_graph(clause_ids[0])
+        node_features = graph.node_features()
+        node_names = graph.node_names()
+
+        # Find constant nodes and check their arg positions
+        # Feature index 7 is arg_position
+        for i, name in enumerate(node_names):
+            if name == 'a':
+                assert node_features[i, 7] == 0.0  # first arg
+            elif name == 'b':
+                assert node_features[i, 7] == 1.0  # second arg
+            elif name == 'c':
+                assert node_features[i, 7] == 2.0  # third arg
+
+    def test_role_feature(self):
+        """Test that role feature distinguishes axiom from negated_conjecture"""
+        state = ProofState()
+        tptp = """
+        cnf(ax1, axiom, p(a)).
+        cnf(nc1, negated_conjecture, q(b)).
+        """
+        clause_ids = state.add_clauses_from_tptp(tptp)
+
+        # Feature index 10 is role
+        # Role encoding: 0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived
+        graph1 = state.clause_to_graph(clause_ids[0])
+        graph2 = state.clause_to_graph(clause_ids[1])
+
+        # Clause root is node 0, check its role feature
+        assert graph1.node_features()[0, 10] == 0.0  # axiom
+        assert graph2.node_features()[0, 10] == 3.0  # negated_conjecture
+
+    def test_age_feature(self):
+        """Test that age feature is correctly computed"""
+        state = ProofState()
+        # Add initial clauses - they all have raw age 0
+        state.add_clauses_from_tptp("""
+        cnf(c1, axiom, p(a)).
+        cnf(c2, axiom, q(b)).
+        cnf(c3, axiom, r(c)).
+        """)
+
+        # Feature index 9 is age
+        # Initial clauses have raw age 0, so normalized age is 0/max_age = 0
+        graph0 = state.clause_to_graph(0)
+        age0 = graph0.node_features()[0, 9]
+
+        # Age feature should be non-negative
+        assert age0 >= 0.0
+        # For initial clauses, age is 0 (not derived during saturation)
+        assert age0 == 0.0
 
 
 class TestBatchConversion:
@@ -517,11 +575,11 @@ class TestRealWorldExamples:
         num_functions = np.sum(node_types == 3)
         assert num_functions == 3  # mult, inv, mult
 
-        # Should detect equality
+        # Should detect equality (feature index 12)
         node_features = graph.node_features()
         pred_nodes = np.where(node_types == 2)[0]
         assert len(pred_nodes) > 0
-        is_equality = node_features[pred_nodes[0], 13]
+        is_equality = node_features[pred_nodes[0], 12]
         assert is_equality == 1.0
 
     def test_resolution_example(self):
@@ -537,11 +595,14 @@ class TestRealWorldExamples:
 
         assert len(graphs) == 2
 
-        # First clause should be ground
-        assert graphs[0].node_features()[0, 16] == 1.0
+        # First clause should be ground (has constant, no variable)
+        node_types_0 = graphs[0].node_types()
+        assert 5 in node_types_0  # has constant
+        assert 4 not in node_types_0  # no variable
 
-        # Second clause should not be ground
-        assert graphs[1].node_features()[0, 16] == 0.0
+        # Second clause should not be ground (has variable)
+        node_types_1 = graphs[1].node_types()
+        assert 4 in node_types_1  # has variable
 
 
 if __name__ == "__main__":
