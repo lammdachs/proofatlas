@@ -8,8 +8,8 @@ USAGE:
     python scripts/export.py --training         # Export training only
 
 OUTPUT:
-    wasm/data/benchmarks.json  - Benchmark results per prover/preset
-    wasm/data/training.json    - Training runs and available weights
+    web/data/benchmarks.json  - Benchmark results per prover/preset
+    web/data/training.json    - Training runs and available weights
 """
 
 import argparse
@@ -319,11 +319,11 @@ def main():
     parser.add_argument("--training", action="store_true",
                        help="Export training only")
     parser.add_argument("--output-dir", type=Path,
-                       help="Output directory (default: wasm/data/)")
+                       help="Output directory (default: web/data/)")
     args = parser.parse_args()
 
     root = get_project_root()
-    output_dir = args.output_dir or root / "wasm" / "data"
+    output_dir = args.output_dir or root / "web" / "data"
 
     # If neither flag specified, export both
     export_both = not args.benchmarks and not args.training
