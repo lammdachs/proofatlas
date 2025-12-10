@@ -85,10 +85,10 @@ jobs:
           pip install -e .
           python -c "from proofatlas import ProofState; print('OK')"
 
-  # Tier 2: Selective tests based on changes
+  # Tier 2: Selective tests based on changes (always run on main/schedule)
   rust-core-tests:
     needs: [detect-changes, critical-tests]
-    if: needs.detect-changes.outputs.rust_core == 'true'
+    if: needs.detect-changes.outputs.rust_core == 'true' || github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -111,7 +111,7 @@ jobs:
 
   rust-ml-tests:
     needs: [detect-changes, critical-tests]
-    if: needs.detect-changes.outputs.rust_ml == 'true'
+    if: needs.detect-changes.outputs.rust_ml == 'true' || github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -132,7 +132,7 @@ jobs:
 
   rust-wasm-tests:
     needs: [detect-changes, critical-tests]
-    if: needs.detect-changes.outputs.rust_wasm == 'true'
+    if: needs.detect-changes.outputs.rust_wasm == 'true' || github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -156,7 +156,7 @@ jobs:
 
   python-ml-tests:
     needs: [detect-changes, critical-tests]
-    if: needs.detect-changes.outputs.python_ml == 'true'
+    if: needs.detect-changes.outputs.python_ml == 'true' || github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -197,44 +197,3 @@ jobs:
     steps:
       - name: Documentation-only changes
         run: echo "Only documentation changed, skipping component tests"
-
-  # Tier 3: Full test suite (on main or schedule)
-  full-suite:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Cache Cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-full-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-full-
-
-      - name: Run all Rust tests
-        run: cargo test --workspace
-
-      - name: Run all Python tests
-        run: |
-          pip install -e .
-          pip install pytest numpy
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pytest python/tests/ -v
