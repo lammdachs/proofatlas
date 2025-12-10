@@ -8,6 +8,7 @@ USAGE:
     python scripts/export.py --training                   # Export training only
     python scripts/export.py --problem-set test           # Limit to 'test' problem set
     python scripts/export.py --configs proofatlas vampire # Only include these provers
+    python scripts/export.py --base-only                  # Skip learned selectors
 
 OUTPUT:
     web/data/benchmarks.json  - Benchmark results per prover/preset
@@ -150,6 +151,7 @@ def filter_results(
     results: list,
     problem_set: set[str] | None = None,
     configs: list[str] | None = None,
+    base_only: bool = False,
 ) -> list:
     """Filter results by problem set and/or configs."""
     filtered = results
@@ -170,6 +172,10 @@ def filter_results(
                         return True
             return False
         filtered = [r for r in filtered if matches_config(r)]
+
+    if base_only:
+        # Skip learned selectors (presets with "model" in the name)
+        filtered = [r for r in filtered if "model" not in r["preset"]]
 
     return filtered
 
@@ -235,6 +241,7 @@ def export_benchmarks(
     output_path: Path,
     problem_set_name: str | None = None,
     configs: list[str] | None = None,
+    base_only: bool = False,
 ):
     """Export benchmark results to JSON."""
     runs_dir = root / ".data" / "runs"
@@ -255,8 +262,8 @@ def export_benchmarks(
         print(f"  Problem set contains {len(problem_set)} problems")
 
     # Filter results
-    if problem_set or configs:
-        results = filter_results(results, problem_set, configs)
+    if problem_set or configs or base_only:
+        results = filter_results(results, problem_set, configs, base_only)
         print(f"  After filtering: {len(results)} results")
 
     if not results:
@@ -460,6 +467,8 @@ def main():
                        help="Limit to problems in this problem set (e.g., test, default)")
     parser.add_argument("--configs", type=str, nargs="+", metavar="CFG",
                        help="Only include these provers/configs (e.g., proofatlas vampire/time_sel0)")
+    parser.add_argument("--base-only", action="store_true",
+                       help="Only run base configs (skip learned selectors)")
     parser.add_argument("--output-dir", type=Path,
                        help="Output directory (default: web/data/)")
     args = parser.parse_args()
@@ -473,7 +482,8 @@ def main():
     if args.benchmarks or export_both:
         export_benchmarks(root, output_dir / "benchmarks.json",
                          problem_set_name=args.problem_set,
-                         configs=args.configs)
+                         configs=args.configs,
+                         base_only=args.base_only)
         print()
 
     if args.training or export_both:
