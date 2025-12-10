@@ -34,6 +34,7 @@ dependencies = [
 
 [project.scripts]
 proofatlas-bench = "proofatlas.cli.bench:main"
+proofatlas-export = "proofatlas.cli.export:main"
 
 [project.urls]
 Homepage = "https://github.com/lexpk/proofatlas"
