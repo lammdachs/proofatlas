@@ -74,6 +74,27 @@ proofatlas-bench --track
 proofatlas-bench --status
 ```
 
+## Exporting Results
+
+Export benchmark results for web display:
+
+```bash
+# Export all results
+proofatlas-export --benchmarks
+
+# Filter by prover and/or preset
+proofatlas-export --benchmarks --prover proofatlas
+proofatlas-export --benchmarks --prover vampire --preset time_sel22
+
+# Filter by problem set
+proofatlas-export --benchmarks --problem-set krs
+
+# Skip learned selectors (only base configs)
+proofatlas-export --benchmarks --base-only
+```
+
+Results are written to `web/data/benchmarks.json`.
+
 ## Common Issues
 
 1. **Rust not found**
