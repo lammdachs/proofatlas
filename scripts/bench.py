@@ -330,6 +330,21 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
             if "max_rating" in filters and filters["max_rating"] is not None:
                 if meta.get("rating", 1.0) > filters["max_rating"]:
                     continue
+            if "max_clauses" in filters and filters["max_clauses"] is not None:
+                if meta.get("num_clauses", 0) > filters["max_clauses"]:
+                    continue
+            if "max_term_depth" in filters and filters["max_term_depth"] is not None:
+                if meta.get("max_term_depth", 0) > filters["max_term_depth"]:
+                    continue
+            if "max_clause_size" in filters and filters["max_clause_size"] is not None:
+                if meta.get("max_clause_size", 0) > filters["max_clause_size"]:
+                    continue
+            if "has_equality" in filters and filters["has_equality"] is not None:
+                if meta.get("has_equality") != filters["has_equality"]:
+                    continue
+            if "is_unit_only" in filters and filters["is_unit_only"] is not None:
+                if meta.get("is_unit_only") != filters["is_unit_only"]:
+                    continue
 
             problems.append(problem_file)
 

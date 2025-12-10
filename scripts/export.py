@@ -109,6 +109,16 @@ def load_problem_set(root: Path, problem_set_name: str) -> set[str]:
             if meta.get("num_clauses", float("inf")) > filters["max_clauses"]:
                 continue
 
+        # Term depth filter
+        if "max_term_depth" in filters:
+            if meta.get("max_term_depth", float("inf")) > filters["max_term_depth"]:
+                continue
+
+        # Clause size filter
+        if "max_clause_size" in filters:
+            if meta.get("max_clause_size", float("inf")) > filters["max_clause_size"]:
+                continue
+
         # Equality filter
         if "has_equality" in filters:
             if meta.get("has_equality", False) != filters["has_equality"]:
