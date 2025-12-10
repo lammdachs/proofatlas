@@ -484,6 +484,8 @@ def main():
                        help="Only include base configs (skip learned selectors)")
     parser.add_argument("--output-dir", type=Path,
                        help="Output directory (default: web/data/)")
+    parser.add_argument("--commit", action="store_true",
+                       help="Commit exported files to git")
     args = parser.parse_args()
 
     root = get_project_root()
@@ -507,6 +509,35 @@ def main():
 
     if args.training or export_both:
         export_training(root, output_dir / "training.json")
+
+    if args.commit:
+        import subprocess
+
+        files_to_commit = []
+        if args.benchmarks or export_both:
+            files_to_commit.append(str(output_dir / "benchmarks.json"))
+        if args.training or export_both:
+            files_to_commit.append(str(output_dir / "training.json"))
+
+        # Stage files
+        subprocess.run(["git", "add"] + files_to_commit, cwd=root, check=True)
+
+        # Check if there are changes to commit
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=root,
+            capture_output=True
+        )
+        if result.returncode != 0:
+            # There are staged changes, commit them
+            subprocess.run(
+                ["git", "commit", "-m", "Update exported web data"],
+                cwd=root,
+                check=True
+            )
+            print("\nCommitted exported files to git")
+        else:
+            print("\nNo changes to commit")
 
 
 if __name__ == "__main__":
