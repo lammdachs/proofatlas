@@ -3,13 +3,15 @@
 Export benchmark and training results for web display.
 
 USAGE:
-    python scripts/export.py                    # Export all results
+    python scripts/export.py                    # Export all results (uses default problem set)
     python scripts/export.py --benchmarks       # Export benchmarks only
     python scripts/export.py --training         # Export training only
     python scripts/export.py --problem-set test # Limit to 'test' problem set
     python scripts/export.py --prover proofatlas # Only include this prover
     python scripts/export.py --preset time_sel0 # Only include this preset
     python scripts/export.py --base-only        # Skip learned selectors
+
+The default problem set is read from configs/tptp.json (defaults.problem_set).
 
 OUTPUT:
     web/data/benchmarks.json  - Benchmark results per prover/preset
@@ -25,6 +27,18 @@ from pathlib import Path
 
 def get_project_root() -> Path:
     return Path(__file__).parent.parent
+
+
+def get_default_problem_set(root: Path) -> str | None:
+    """Get the default problem set from tptp.json."""
+    tptp_config_path = root / "configs" / "tptp.json"
+    if not tptp_config_path.exists():
+        return None
+
+    with open(tptp_config_path) as f:
+        tptp_config = json.load(f)
+
+    return tptp_config.get("defaults", {}).get("problem_set")
 
 
 def load_problem_set(root: Path, problem_set_name: str) -> set[str]:
@@ -475,12 +489,17 @@ def main():
     root = get_project_root()
     output_dir = args.output_dir or root / "web" / "data"
 
+    # Use default problem set if not specified
+    problem_set_name = args.problem_set
+    if problem_set_name is None:
+        problem_set_name = get_default_problem_set(root)
+
     # If neither flag specified, export both
     export_both = not args.benchmarks and not args.training
 
     if args.benchmarks or export_both:
         export_benchmarks(root, output_dir / "benchmarks.json",
-                         problem_set_name=args.problem_set,
+                         problem_set_name=problem_set_name,
                          prover=args.prover,
                          preset=args.preset,
                          base_only=args.base_only)

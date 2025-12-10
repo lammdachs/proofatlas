@@ -79,20 +79,21 @@ proofatlas-bench --status
 Export benchmark results for web display:
 
 ```bash
-# Export all results
+# Export all results (uses default problem set from tptp.json)
 proofatlas-export --benchmarks
 
 # Filter by prover and/or preset
 proofatlas-export --benchmarks --prover proofatlas
 proofatlas-export --benchmarks --prover vampire --preset time_sel22
 
-# Filter by problem set
+# Filter by problem set (overrides default)
 proofatlas-export --benchmarks --problem-set krs
 
 # Skip learned selectors (only base configs)
 proofatlas-export --benchmarks --base-only
 ```
 
+The default problem set is configured in `configs/tptp.json` under `defaults.problem_set`.
 Results are written to `web/data/benchmarks.json`.
 
 ## Common Issues

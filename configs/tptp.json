@@ -8,9 +8,13 @@
     "axioms": ".tptp/TPTP-v9.0.0/Axioms"
   },
 
+  "defaults": {
+    "problem_set": "unsat100"
+  },
+
   "problem_sets": {
-    "default": {
-      "description": "Default problem set for training",
+    "unsat100": {
+      "description": "Unsatisfiable problems with at most 100 clauses",
       "status": ["unsatisfiable"],
       "format": ["cnf", "fof"],
       "max_clauses": 100,

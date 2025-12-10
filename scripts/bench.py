@@ -976,8 +976,8 @@ def main():
                        help="Prover to run (default: all available)")
     parser.add_argument("--preset",
                        help="Solver preset (default: all)")
-    parser.add_argument("--problem-set", default="default",
-                       help="Problem set from tptp.json")
+    parser.add_argument("--problem-set",
+                       help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--force-train", action="store_true",
                        help="Force retrain even if weights exist")
     parser.add_argument("--base-only", action="store_true",
@@ -1026,6 +1026,14 @@ def main():
     tptp_config = load_config(base_dir / "configs" / "tptp.json")
     tptp_root = base_dir / tptp_config["paths"]["root"]
 
+    # Determine problem set (use default from config if not specified)
+    problem_set = args.problem_set
+    if problem_set is None:
+        problem_set = tptp_config.get("defaults", {}).get("problem_set")
+        if problem_set is None:
+            print("Error: No --problem-set specified and no default in tptp.json")
+            sys.exit(1)
+
     # Get available provers
     available_provers = get_available_provers(base_dir)
     if not available_provers:
@@ -1072,7 +1080,7 @@ def main():
         sys.exit(1)
 
     # Get problems
-    problems = get_problems(base_dir, tptp_config, args.problem_set)
+    problems = get_problems(base_dir, tptp_config, problem_set)
 
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
