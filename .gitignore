@@ -74,3 +74,6 @@ lightning_logs/
 problem.p
 benchmark*.txt
 large_benchmark.txt
+
+# NFS lock files
+.nfs*
