@@ -18,6 +18,7 @@
       "status": ["unsatisfiable"],
       "format": ["cnf", "fof"],
       "max_clauses": 100,
+      "max_term_depth" : 8,
       "exclude_domains": ["CSR", "HWV", "SWV"]
     },
 
@@ -27,6 +28,7 @@
       "format": ["cnf"],
       "max_rating": 0.3,
       "max_clauses": 50,
+      "max_term_depth": 4,
       "domains": ["PUZ", "SYN"]
     },
 
