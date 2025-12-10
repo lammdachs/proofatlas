@@ -82,9 +82,55 @@ python -m pytest python/tests/ -v        # Python tests
 ### Benchmarking
 
 ```bash
-python scripts/bench.py --prover proofatlas --preset quick
-python scripts/bench.py --prover vampire --preset quick
-python scripts/bench.py --prover proofatlas --trace    # Collect ML training data
+proofatlas-bench --prover proofatlas --preset time_sel0
+proofatlas-bench --prover vampire --problem-set test
+proofatlas-bench --base-only                           # Skip learned selectors
+```
+
+### Exporting Results
+
+```bash
+proofatlas-export                      # Export benchmarks and training data
+proofatlas-export --benchmarks         # Benchmarks only
+proofatlas-export --commit             # Auto-commit to git
+```
+
+## Problem Sets
+
+Problem sets are defined in `configs/tptp.json` and filter TPTP problems for benchmarking. The default is set in `defaults.problem_set`.
+
+### Available Filters
+
+| Filter | Type | Description |
+|--------|------|-------------|
+| `status` | list | Problem status: `["unsatisfiable"]`, `["satisfiable"]` |
+| `format` | list | Input format: `["cnf"]`, `["fof"]`, `["cnf", "fof"]` |
+| `domains` | list | Include only these domains: `["GRP", "PUZ"]` |
+| `exclude_domains` | list | Exclude these domains: `["CSR", "HWV", "SWV"]` |
+| `max_rating` | float | Maximum TPTP difficulty rating (0.0-1.0) |
+| `max_clauses` | int | Maximum number of clauses in problem |
+| `max_term_depth` | int | Maximum term nesting depth |
+| `max_clause_size` | int | Maximum literals per clause |
+| `has_equality` | bool | `true` = only equality, `false` = no equality |
+| `is_unit_only` | bool | `true` = only unit clauses, `false` = has non-unit |
+
+### Example Problem Set
+
+```json
+{
+  "problem_sets": {
+    "unit_equality": {
+      "description": "Unit equality problems",
+      "status": ["unsatisfiable"],
+      "format": ["cnf"],
+      "has_equality": true,
+      "is_unit_only": true,
+      "max_clauses": 500,
+      "max_term_depth": 8,
+      "domains": ["GRP", "RNG", "LAT"]
+    }
+  }
+}
 ```
 
 ## Testing the Theorem Prover
