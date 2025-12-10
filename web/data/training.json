@@ -1,0 +1,44 @@
+{
+  "generated": "2025-12-10T01:31:48.511012",
+  "total_runs": 0,
+  "total_weights": 0,
+  "summary": {
+    "best_preset": null,
+    "best_proof_rate": null
+  },
+  "architectures": {
+    "gcn": {
+      "type": "gcn",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "dropout": 0.1
+    },
+    "gcn_small": {
+      "type": "gcn",
+      "hidden_dim": 32,
+      "num_layers": 2,
+      "dropout": 0.1
+    },
+    "gcn_large": {
+      "type": "gcn",
+      "hidden_dim": 128,
+      "num_layers": 4,
+      "dropout": 0.1
+    },
+    "gat": {
+      "type": "gat",
+      "hidden_dim": 64,
+      "num_layers": 3,
+      "num_heads": 4,
+      "dropout": 0.1
+    },
+    "mlp": {
+      "type": "mlp",
+      "hidden_dim": 128,
+      "num_layers": 3,
+      "dropout": 0.1
+    }
+  },
+  "weights": [],
+  "runs": []
+}
