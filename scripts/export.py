@@ -8,7 +8,6 @@ USAGE:
     python scripts/export.py --training                   # Export training only
     python scripts/export.py --problem-set test           # Limit to 'test' problem set
     python scripts/export.py --configs proofatlas vampire # Only include these provers
-    python scripts/export.py --common-only                # Only problems with results from all configs
 
 OUTPUT:
     web/data/benchmarks.json  - Benchmark results per prover/preset
@@ -151,16 +150,8 @@ def filter_results(
     results: list,
     problem_set: set[str] | None = None,
     configs: list[str] | None = None,
-    common_only: bool = False,
 ) -> list:
-    """Filter results by problem set and/or configs.
-
-    Args:
-        results: List of benchmark results
-        problem_set: If provided, only include problems in this set
-        configs: If provided, only include these prover/preset configs
-        common_only: If True, only include problems that have results from ALL configs
-    """
+    """Filter results by problem set and/or configs."""
     filtered = results
 
     if problem_set is not None:
@@ -179,23 +170,6 @@ def filter_results(
                         return True
             return False
         filtered = [r for r in filtered if matches_config(r)]
-
-    if common_only:
-        # Find all configs in filtered results
-        all_configs = set(f"{r['prover']}/{r['preset']}" for r in filtered)
-
-        # Count how many configs have results for each problem
-        problem_config_count = defaultdict(set)
-        for r in filtered:
-            cfg = f"{r['prover']}/{r['preset']}"
-            problem_config_count[r["problem"]].add(cfg)
-
-        # Only keep problems that have results from ALL configs
-        common_problems = {
-            problem for problem, cfgs in problem_config_count.items()
-            if cfgs == all_configs
-        }
-        filtered = [r for r in filtered if r["problem"] in common_problems]
 
     return filtered
 
@@ -261,7 +235,6 @@ def export_benchmarks(
     output_path: Path,
     problem_set_name: str | None = None,
     configs: list[str] | None = None,
-    common_only: bool = False,
 ):
     """Export benchmark results to JSON."""
     runs_dir = root / ".data" / "runs"
@@ -282,8 +255,8 @@ def export_benchmarks(
         print(f"  Problem set contains {len(problem_set)} problems")
 
     # Filter results
-    if problem_set or configs or common_only:
-        results = filter_results(results, problem_set, configs, common_only)
+    if problem_set or configs:
+        results = filter_results(results, problem_set, configs)
         print(f"  After filtering: {len(results)} results")
 
     if not results:
@@ -298,7 +271,6 @@ def export_benchmarks(
         "generated": datetime.now().isoformat(),
         "problem_set": problem_set_name,
         "configs_filter": configs,
-        "common_only": common_only,
         "total_results": len(results),
         "configs": found_configs,
         "summary": summary,
@@ -488,8 +460,6 @@ def main():
                        help="Limit to problems in this problem set (e.g., test, default)")
     parser.add_argument("--configs", type=str, nargs="+", metavar="CFG",
                        help="Only include these provers/configs (e.g., proofatlas vampire/time_sel0)")
-    parser.add_argument("--common-only", action="store_true",
-                       help="Only include problems that have results from ALL configs")
     parser.add_argument("--output-dir", type=Path,
                        help="Output directory (default: web/data/)")
     args = parser.parse_args()
@@ -503,8 +473,7 @@ def main():
     if args.benchmarks or export_both:
         export_benchmarks(root, output_dir / "benchmarks.json",
                          problem_set_name=args.problem_set,
-                         configs=args.configs,
-                         common_only=args.common_only)
+                         configs=args.configs)
         print()
 
     if args.training or export_both:

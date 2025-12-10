@@ -1,9 +1,8 @@
 {
-  "generated": "2025-12-10T01:02:21.203352",
-  "problem_set": null,
+  "generated": "2025-12-10T00:56:45.799224",
+  "problem_set": "krs",
   "configs_filter": null,
-  "common_only": true,
-  "total_results": 1056,
+  "total_results": 1220,
   "configs": [
     "proofatlas/time_sel0",
     "proofatlas/time_sel20",
@@ -18,50 +17,50 @@
     {
       "prover": "proofatlas",
       "preset": "time_sel0",
-      "total": 132,
-      "proof": 54,
+      "total": 173,
+      "proof": 95,
       "saturated": 0,
       "timeout": 72,
       "error": 6,
-      "proof_rate": 40.9,
-      "avg_proof_time": 1.2,
-      "total_time": 826.9
+      "proof_rate": 54.9,
+      "avg_proof_time": 0.684,
+      "total_time": 827.1
     },
     {
       "prover": "proofatlas",
       "preset": "time_sel20",
-      "total": 132,
-      "proof": 63,
+      "total": 173,
+      "proof": 104,
       "saturated": 0,
       "timeout": 63,
       "error": 6,
-      "proof_rate": 47.7,
-      "avg_proof_time": 0.576,
-      "total_time": 857.0
+      "proof_rate": 60.1,
+      "avg_proof_time": 0.353,
+      "total_time": 857.5
     },
     {
       "prover": "proofatlas",
       "preset": "time_sel21",
-      "total": 132,
-      "proof": 87,
+      "total": 173,
+      "proof": 128,
       "saturated": 0,
       "timeout": 39,
       "error": 6,
-      "proof_rate": 65.9,
-      "avg_proof_time": 0.7,
-      "total_time": 618.7
+      "proof_rate": 74.0,
+      "avg_proof_time": 0.478,
+      "total_time": 619.1
     },
     {
       "prover": "proofatlas",
       "preset": "time_sel22",
-      "total": 132,
-      "proof": 94,
+      "total": 173,
+      "proof": 135,
       "saturated": 0,
       "timeout": 32,
       "error": 6,
-      "proof_rate": 71.2,
-      "avg_proof_time": 0.25,
-      "total_time": 16540.7
+      "proof_rate": 78.0,
+      "avg_proof_time": 0.177,
+      "total_time": 16541.1
     },
     {
       "prover": "vampire",
@@ -4225,6 +4224,744 @@
       "vampire/time_sel22": {
         "status": "proof",
         "time_s": 0.03877663612365723
+      }
+    },
+    "KRS178+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0038301944732666016
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.006815195083618164
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.006110191345214844
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.005933284759521484
+      }
+    },
+    "KRS179+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.002713441848754883
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.0054912567138671875
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.005274534225463867
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.0034308433532714844
+      }
+    },
+    "KRS180+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0027458667755126953
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.0055615901947021484
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.00582575798034668
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.003483295440673828
+      }
+    },
+    "KRS181+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0026721954345703125
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.005331993103027344
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.0053730010986328125
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.0033037662506103516
+      }
+    },
+    "KRS186+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005922555923461914
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010185003280639648
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009967565536499023
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009754419326782227
+      }
+    },
+    "KRS187+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0055065155029296875
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009442806243896484
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.010951519012451172
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009510040283203125
+      }
+    },
+    "KRS188+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005492210388183594
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.00945591926574707
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009553670883178711
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.00949239730834961
+      }
+    },
+    "KRS189+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005488157272338867
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009467840194702148
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009523630142211914
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.00949549674987793
+      }
+    },
+    "KRS190+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0054950714111328125
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009511709213256836
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009560346603393555
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009426355361938477
+      }
+    },
+    "KRS191+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005622386932373047
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009486913681030273
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009549617767333984
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009611129760742188
+      }
+    },
+    "KRS192+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005501747131347656
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009448766708374023
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009555816650390625
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009433746337890625
+      }
+    },
+    "KRS193+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005500078201293945
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.009670019149780273
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009891271591186523
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009514808654785156
+      }
+    },
+    "KRS194+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005472660064697266
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010431289672851562
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009565353393554688
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009510278701782227
+      }
+    },
+    "KRS195+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005487203598022461
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.013721942901611328
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.00955057144165039
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009493827819824219
+      }
+    },
+    "KRS196+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005494832992553711
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.00948786735534668
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009557723999023438
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009492158889770508
+      }
+    },
+    "KRS200+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005491733551025391
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.012898921966552734
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009563922882080078
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.00951075553894043
+      }
+    },
+    "KRS201+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005480766296386719
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010983943939208984
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009418249130249023
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009473800659179688
+      }
+    },
+    "KRS202+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005496025085449219
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010865926742553711
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.0095367431640625
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.009500741958618164
+      }
+    },
+    "KRS203+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005559682846069336
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011204242706298828
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009529590606689453
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.0095062255859375
+      }
+    },
+    "KRS215+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005492448806762695
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010806798934936523
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009588003158569336
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011383295059204102
+      }
+    },
+    "KRS216+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005485057830810547
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010631561279296875
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009514093399047852
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.012721776962280273
+      }
+    },
+    "KRS217+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005486249923706055
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010915040969848633
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009480953216552734
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011199474334716797
+      }
+    },
+    "KRS233+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.0056612491607666016
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.012479305267333984
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.011670827865600586
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.0108184814453125
+      }
+    },
+    "KRS234+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005462646484375
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011461734771728516
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.00943756103515625
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011229276657104492
+      }
+    },
+    "KRS235+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005791187286376953
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.013161659240722656
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009434938430786133
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011315345764160156
+      }
+    },
+    "KRS251+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005626201629638672
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.01116323471069336
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009408235549926758
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011322498321533203
+      }
+    },
+    "KRS254+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005530595779418945
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011178255081176758
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009452342987060547
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011710166931152344
+      }
+    },
+    "KRS255+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005589008331298828
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011680364608764648
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009443998336791992
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011380910873413086
+      }
+    },
+    "KRS256+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005484104156494141
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011183023452758789
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009361982345581055
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011758089065551758
+      }
+    },
+    "KRS257+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005496501922607422
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011991024017333984
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009401559829711914
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011724710464477539
+      }
+    },
+    "KRS258+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.00548863410949707
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011199951171875
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009429216384887695
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011379003524780273
+      }
+    },
+    "KRS259+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005499601364135742
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011743783950805664
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.010331153869628906
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.010938405990600586
+      }
+    },
+    "KRS260+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005641937255859375
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011272192001342773
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009396076202392578
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011041641235351562
+      }
+    },
+    "KRS261+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005640745162963867
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010824918746948242
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009431123733520508
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011330842971801758
+      }
+    },
+    "KRS262+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005652189254760742
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010907649993896484
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009420633316040039
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011657238006591797
+      }
+    },
+    "KRS263+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005647897720336914
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011079072952270508
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009434700012207031
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011655092239379883
+      }
+    },
+    "KRS264+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005539417266845703
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.012194633483886719
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009528636932373047
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011827945709228516
+      }
+    },
+    "KRS265+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005491495132446289
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011586666107177734
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009219646453857422
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011429309844970703
+      }
+    },
+    "KRS266+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005499362945556641
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.010896682739257812
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009185791015625
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011183977127075195
+      }
+    },
+    "KRS267+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005479574203491211
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.01134800910949707
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.010489702224731445
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011482954025268555
+      }
+    },
+    "KRS268+1.p": {
+      "proofatlas/time_sel0": {
+        "status": "proof",
+        "time_s": 0.005499601364135742
+      },
+      "proofatlas/time_sel20": {
+        "status": "proof",
+        "time_s": 0.011192798614501953
+      },
+      "proofatlas/time_sel21": {
+        "status": "proof",
+        "time_s": 0.009503364562988281
+      },
+      "proofatlas/time_sel22": {
+        "status": "proof",
+        "time_s": 0.011060237884521484
       }
     },
     "KRS278+1.p": {
