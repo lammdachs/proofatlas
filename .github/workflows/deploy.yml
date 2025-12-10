@@ -47,7 +47,7 @@ jobs:
       - name: Prepare deployment files
         run: |
           mkdir -p web/dist
-          cp web/index.html web/docs.html web/style.css web/docs-style.css web/app.js web/favicon.svg web/dist/
+          cp web/index.html web/docs.html web/results.html web/training.html web/style.css web/docs-style.css web/app.js web/favicon.svg web/dist/
           cp -r web/pkg web/dist/
           cp -r web/examples web/dist/
           cp -r web/data web/dist/ 2>/dev/null || true
