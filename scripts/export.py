@@ -3,12 +3,13 @@
 Export benchmark and training results for web display.
 
 USAGE:
-    python scripts/export.py                              # Export all results
-    python scripts/export.py --benchmarks                 # Export benchmarks only
-    python scripts/export.py --training                   # Export training only
-    python scripts/export.py --problem-set test           # Limit to 'test' problem set
-    python scripts/export.py --configs proofatlas vampire # Only include these provers
-    python scripts/export.py --base-only                  # Skip learned selectors
+    python scripts/export.py                    # Export all results
+    python scripts/export.py --benchmarks       # Export benchmarks only
+    python scripts/export.py --training         # Export training only
+    python scripts/export.py --problem-set test # Limit to 'test' problem set
+    python scripts/export.py --prover proofatlas # Only include this prover
+    python scripts/export.py --preset time_sel0 # Only include this preset
+    python scripts/export.py --base-only        # Skip learned selectors
 
 OUTPUT:
     web/data/benchmarks.json  - Benchmark results per prover/preset
@@ -150,28 +151,21 @@ def load_benchmark_results(runs_dir: Path) -> list:
 def filter_results(
     results: list,
     problem_set: set[str] | None = None,
-    configs: list[str] | None = None,
+    prover: str | None = None,
+    preset: str | None = None,
     base_only: bool = False,
 ) -> list:
-    """Filter results by problem set and/or configs."""
+    """Filter results by problem set, prover, preset, and base_only."""
     filtered = results
 
     if problem_set is not None:
         filtered = [r for r in filtered if r["problem"] in problem_set]
 
-    if configs is not None:
-        # configs can be "prover" or "prover/preset"
-        def matches_config(r):
-            for cfg in configs:
-                if "/" in cfg:
-                    prover, preset = cfg.split("/", 1)
-                    if r["prover"] == prover and r["preset"] == preset:
-                        return True
-                else:
-                    if r["prover"] == cfg:
-                        return True
-            return False
-        filtered = [r for r in filtered if matches_config(r)]
+    if prover is not None:
+        filtered = [r for r in filtered if r["prover"] == prover]
+
+    if preset is not None:
+        filtered = [r for r in filtered if r["preset"] == preset]
 
     if base_only:
         # Skip learned selectors (presets with "model" in the name)
@@ -240,7 +234,8 @@ def export_benchmarks(
     root: Path,
     output_path: Path,
     problem_set_name: str | None = None,
-    configs: list[str] | None = None,
+    prover: str | None = None,
+    preset: str | None = None,
     base_only: bool = False,
 ):
     """Export benchmark results to JSON."""
@@ -262,8 +257,8 @@ def export_benchmarks(
         print(f"  Problem set contains {len(problem_set)} problems")
 
     # Filter results
-    if problem_set or configs or base_only:
-        results = filter_results(results, problem_set, configs, base_only)
+    if problem_set or prover or preset or base_only:
+        results = filter_results(results, problem_set, prover, preset, base_only)
         print(f"  After filtering: {len(results)} results")
 
     if not results:
@@ -277,7 +272,9 @@ def export_benchmarks(
     output = {
         "generated": datetime.now().isoformat(),
         "problem_set": problem_set_name,
-        "configs_filter": configs,
+        "prover_filter": prover,
+        "preset_filter": preset,
+        "base_only": base_only,
         "total_results": len(results),
         "configs": found_configs,
         "summary": summary,
@@ -465,10 +462,12 @@ def main():
                        help="Export training only")
     parser.add_argument("--problem-set", type=str, metavar="NAME",
                        help="Limit to problems in this problem set (e.g., test, default)")
-    parser.add_argument("--configs", type=str, nargs="+", metavar="CFG",
-                       help="Only include these provers/configs (e.g., proofatlas vampire/time_sel0)")
+    parser.add_argument("--prover", type=str,
+                       help="Prover to include (default: all)")
+    parser.add_argument("--preset", type=str,
+                       help="Preset to include (default: all)")
     parser.add_argument("--base-only", action="store_true",
-                       help="Only run base configs (skip learned selectors)")
+                       help="Only include base configs (skip learned selectors)")
     parser.add_argument("--output-dir", type=Path,
                        help="Output directory (default: web/data/)")
     args = parser.parse_args()
@@ -482,7 +481,8 @@ def main():
     if args.benchmarks or export_both:
         export_benchmarks(root, output_dir / "benchmarks.json",
                          problem_set_name=args.problem_set,
-                         configs=args.configs,
+                         prover=args.prover,
+                         preset=args.preset,
                          base_only=args.base_only)
         print()
 
