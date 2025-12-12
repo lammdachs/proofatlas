@@ -735,6 +735,8 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                     "labels": labels,
                 }
                 save_trace(base_dir, trace_preset, problem.name, trace_data)
+                # Free memory
+                del examples, clause_ids, graphs, graph_tensors, labels, trace_data
         except Exception:
             pass
 
@@ -1100,103 +1102,131 @@ def main():
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Fork to background
+    # Double fork to fully daemonize (survives terminal close, SSH disconnect)
+    # Use a pipe to communicate grandchild PID back to parent
+    read_fd, write_fd = os.pipe()
+
     pid = os.fork()
     if pid > 0:
-        save_job_status(base_dir, pid, sys.argv, len(runs))
+        # First parent: wait for intermediate child and read grandchild PID
+        os.close(write_fd)
+        os.waitpid(pid, 0)
+        grandchild_pid = int(os.read(read_fd, 32).decode().strip())
+        os.close(read_fd)
+
+        save_job_status(base_dir, grandchild_pid, sys.argv, len(runs))
         prover_names = sorted(set(r["prover"] for r in runs))
-        print(f"Started job (PID: {pid})")
+        print(f"Started job (PID: {grandchild_pid})")
         print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
         print("Use --track to monitor, --status to check, --kill to stop")
         if args.track:
             time.sleep(0.5)
             print()
             track_job(base_dir)
-    else:
-        os.setsid()
-        sys.stdout = open(log_file_path, "w")
-        sys.stderr = sys.stdout
+        return
 
-        # Extract problem names for filtering traces
-        problem_names = {p.stem for p in problems}
-        num_runs = len(runs)
+    # First child: become session leader and fork again
+    os.close(read_fd)
+    os.setsid()
+    import signal
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
-        try:
-            for run_idx, run in enumerate(runs, 1):
-                prover = run["prover"]
-                preset_name = run["preset_name"]
-                preset = run["preset"]
-                binary = run["binary"]
-                prover_config = run["config"]
-
-                config_label = f"{prover}/{preset_name}"
-                trace_preset = args.trace_preset or preset.get("traces") or preset_name
-
-                # Log config progress for --status parsing
-                print(f"CONFIG:{config_label}:{run_idx}:{num_runs}")
-                sys.stdout.flush()
-
-                print(f"\n{'='*60}")
-                print(f"Running: {config_label} ({run_idx}/{num_runs})")
-                print(f"{'='*60}\n")
-
-                weights_path = None
-                current_preset = preset
-
-                # Training only supported for proofatlas
-                if prover == "proofatlas" and is_learned_selector(preset):
-                    existing_weights = find_weights(base_dir, preset_name)
-
-                    if existing_weights and not args.force_train:
-                        print(f"Using existing weights: {existing_weights}")
-                        weights_path = existing_weights
-                    else:
-                        print(f"Training {preset_name}...")
-
-                        # First collect traces with age_weight if none exist
-                        traces_dir = base_dir / ".data" / "traces" / trace_preset
-                        proofatlas_presets = prover_config.get("presets", {})
-                        if not traces_dir.exists() or not list(traces_dir.glob("*.pt")):
-                            print("Collecting traces with age_weight...")
-                            trace_source_preset = proofatlas_presets.get(trace_preset, preset)
-                            run_evaluation(
-                                base_dir, problems, tptp_root,
-                                prover="proofatlas", preset=trace_source_preset,
-                                log_file=sys.stdout,
-                                preset_name=trace_preset, trace_preset=trace_preset,
-                                rerun=True,  # Always run for trace collection
-                            )
-
-                        # Load traces and train (filtered by problem set)
-                        data = load_traces(base_dir, trace_preset, problem_names)
-                        if data["num_problems"] > 0:
-                            weights_path = run_training(
-                                base_dir, preset_name, preset, data, sys.stdout,
-                                init_weights=existing_weights,
-                            )
-                        else:
-                            print("No traces collected, using age_weight")
-                            current_preset = proofatlas_presets.get(trace_preset, preset)
-                            weights_path = None
-
-                # Run evaluation
-                run_evaluation(
-                    base_dir, problems, tptp_root,
-                    prover=prover, preset=current_preset,
-                    log_file=sys.stdout,
-                    preset_name=preset_name, weights_path=str(weights_path) if weights_path else None,
-                    binary=binary, trace_preset=trace_preset,
-                    rerun=args.rerun,
-                )
-
-        except Exception as e:
-            print(f"ERROR: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            clear_job_status(base_dir)
-            sys.stdout.close()
+    pid2 = os.fork()
+    if pid2 > 0:
+        # Intermediate child: send grandchild PID to parent and exit
+        os.write(write_fd, f"{pid2}\n".encode())
+        os.close(write_fd)
         os._exit(0)
+
+    # Second child (grandchild): the actual daemon
+    os.close(write_fd)
+
+    # Close all file descriptors and redirect stdin
+    sys.stdin.close()
+    os.close(0)
+    sys.stdout = open(log_file_path, "w")
+    sys.stderr = sys.stdout
+
+    # Extract problem names for filtering traces
+    problem_names = {p.stem for p in problems}
+    num_runs = len(runs)
+
+    try:
+        for run_idx, run in enumerate(runs, 1):
+            prover = run["prover"]
+            preset_name = run["preset_name"]
+            preset = run["preset"]
+            binary = run["binary"]
+            prover_config = run["config"]
+
+            config_label = f"{prover}/{preset_name}"
+            trace_preset = args.trace_preset or preset.get("traces") or preset_name
+
+            # Log config progress for --status parsing
+            print(f"CONFIG:{config_label}:{run_idx}:{num_runs}")
+            sys.stdout.flush()
+
+            print(f"\n{'='*60}")
+            print(f"Running: {config_label} ({run_idx}/{num_runs})")
+            print(f"{'='*60}\n")
+
+            weights_path = None
+            current_preset = preset
+
+            # Training only supported for proofatlas
+            if prover == "proofatlas" and is_learned_selector(preset):
+                existing_weights = find_weights(base_dir, preset_name)
+
+                if existing_weights and not args.force_train:
+                    print(f"Using existing weights: {existing_weights}")
+                    weights_path = existing_weights
+                else:
+                    print(f"Training {preset_name}...")
+
+                    # First collect traces with age_weight if none exist
+                    traces_dir = base_dir / ".data" / "traces" / trace_preset
+                    proofatlas_presets = prover_config.get("presets", {})
+                    if not traces_dir.exists() or not list(traces_dir.glob("*.pt")):
+                        print("Collecting traces with age_weight...")
+                        trace_source_preset = proofatlas_presets.get(trace_preset, preset)
+                        run_evaluation(
+                            base_dir, problems, tptp_root,
+                            prover="proofatlas", preset=trace_source_preset,
+                            log_file=sys.stdout,
+                            preset_name=trace_preset, trace_preset=trace_preset,
+                            rerun=True,  # Always run for trace collection
+                        )
+
+                    # Load traces and train (filtered by problem set)
+                    data = load_traces(base_dir, trace_preset, problem_names)
+                    if data["num_problems"] > 0:
+                        weights_path = run_training(
+                            base_dir, preset_name, preset, data, sys.stdout,
+                            init_weights=existing_weights,
+                        )
+                    else:
+                        print("No traces collected, using age_weight")
+                        current_preset = proofatlas_presets.get(trace_preset, preset)
+                        weights_path = None
+
+            # Run evaluation
+            run_evaluation(
+                base_dir, problems, tptp_root,
+                prover=prover, preset=current_preset,
+                log_file=sys.stdout,
+                preset_name=preset_name, weights_path=str(weights_path) if weights_path else None,
+                binary=binary, trace_preset=trace_preset,
+                rerun=args.rerun,
+            )
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        clear_job_status(base_dir)
+        sys.stdout.close()
+    os._exit(0)
 
 
 if __name__ == "__main__":
