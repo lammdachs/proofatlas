@@ -902,9 +902,14 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
     for i, problem in enumerate(problems, 1):
         # Periodic garbage collection to prevent OOM
-        if i % 1000 == 0:
+        if i % 100 == 0:
             import gc
             gc.collect()
+
+        # Debug logging for crash investigation
+        if i >= 8288:
+            print(f"DEBUG: Starting problem {i}: {problem.name}")
+            sys.stdout.flush()
 
         try:
             # Check if already evaluated (skip unless --rerun)
