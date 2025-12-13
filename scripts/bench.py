@@ -901,42 +901,51 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     collect_trace = (prover == "proofatlas")
 
     for i, problem in enumerate(problems, 1):
-        # Check if already evaluated (skip unless --rerun)
-        existing = load_run_result(base_dir, prover, preset_name, problem)
-        if existing and not rerun:
-            stats[existing.status] = stats.get(existing.status, 0) + 1
-            stats["skip"] += 1
+        try:
+            # Check if already evaluated (skip unless --rerun)
+            existing = load_run_result(base_dir, prover, preset_name, problem)
+            if existing and not rerun:
+                stats[existing.status] = stats.get(existing.status, 0) + 1
+                stats["skip"] += 1
 
-            log_file.write(f"SKIP:{i}:{len(problems)}:{problem.name}\n")
+                log_file.write(f"SKIP:{i}:{len(problems)}:{problem.name}\n")
+                log_file.flush()
+
+                symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[existing.status]
+                print(f"[{i}/{len(problems)}] S{symbol} {existing.problem} (cached)")
+                sys.stdout.flush()
+                continue
+
+            if prover == "proofatlas":
+                result = run_proofatlas(
+                    problem, base_dir, preset, tptp_root,
+                    weights_path=weights_path, collect_trace=collect_trace,
+                    trace_preset=trace_preset,
+                )
+            elif prover == "vampire":
+                result = run_vampire(problem, base_dir, preset, binary, tptp_root)
+            elif prover == "spass":
+                result = run_spass(problem, base_dir, preset, binary, tptp_root)
+            else:
+                result = BenchResult(problem=problem.name, status="error", time_s=0)
+
+            stats[result.status] = stats.get(result.status, 0) + 1
+
+            # Save individual result to .data/runs/
+            save_run_result(base_dir, prover, preset_name, result)
+
+            log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
             log_file.flush()
 
-            symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[existing.status]
-            print(f"[{i}/{len(problems)}] S{symbol} {existing.problem} (cached)")
-            continue
-
-        if prover == "proofatlas":
-            result = run_proofatlas(
-                problem, base_dir, preset, tptp_root,
-                weights_path=weights_path, collect_trace=collect_trace,
-                trace_preset=trace_preset,
-            )
-        elif prover == "vampire":
-            result = run_vampire(problem, base_dir, preset, binary, tptp_root)
-        elif prover == "spass":
-            result = run_spass(problem, base_dir, preset, binary, tptp_root)
-        else:
-            result = BenchResult(problem=problem.name, status="error", time_s=0)
-
-        stats[result.status] = stats.get(result.status, 0) + 1
-
-        # Save individual result to .data/runs/
-        save_run_result(base_dir, prover, preset_name, result)
-
-        log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
-        log_file.flush()
-
-        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
-        print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
+            symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+            print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"ERROR processing {problem.name}: {e}")
+            sys.stdout.flush()
+            import traceback
+            traceback.print_exc()
+            sys.stdout.flush()
 
     # Print summary (individual results saved to .data/runs/)
     # Note: skip count is separate (skipped problems are also counted in their status)
@@ -1146,6 +1155,21 @@ def main():
     os.close(0)
     sys.stdout = open(log_file_path, "w")
     sys.stderr = sys.stdout
+
+    # Set up signal handlers to log unexpected termination
+    def signal_handler(signum, frame):
+        sig_names = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT",
+                     signal.SIGQUIT: "SIGQUIT", signal.SIGABRT: "SIGABRT"}
+        sig_name = sig_names.get(signum, f"signal {signum}")
+        print(f"\nRECEIVED {sig_name} - exiting")
+        sys.stdout.flush()
+        clear_job_status(base_dir)
+        sys.stdout.close()
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
 
     # Extract problem names for filtering traces
     problem_names = {p.stem for p in problems}
