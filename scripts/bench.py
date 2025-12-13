@@ -901,6 +901,11 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     collect_trace = (prover == "proofatlas")
 
     for i, problem in enumerate(problems, 1):
+        # Periodic garbage collection to prevent OOM
+        if i % 1000 == 0:
+            import gc
+            gc.collect()
+
         try:
             # Check if already evaluated (skip unless --rerun)
             existing = load_run_result(base_dir, prover, preset_name, problem)
