@@ -602,8 +602,13 @@ impl ProofState {
         let initial_clauses: Vec<Clause> = self.clauses.clone();
         let state = SaturationState::new(initial_clauses, config, clause_selector);
 
-        // Run saturation
-        let result = state.saturate();
+        // Run saturation in a thread with larger stack to handle deep recursion
+        let result = std::thread::Builder::new()
+            .stack_size(128 * 1024 * 1024)  // 128MB stack
+            .spawn(move || state.saturate())
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
+            .join()
+            .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
 
         // Copy back the results
         let (proof_found, final_clauses, proof_steps) = match result {

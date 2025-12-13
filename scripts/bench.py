@@ -689,7 +689,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     literal_selection = str(preset.get("literal_selection", 21))
     state.set_literal_selection(literal_selection)
 
-    max_clauses = preset.get("max_clauses", 10000)
+    max_clauses = preset.get("max_clauses", 0)  # 0 means no limit
     is_learned = "model" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
     selector = preset.get("model", "age_weight") if is_learned else "age_weight"
@@ -706,7 +706,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
             selector,
             weights_path,
         )
-    except Exception:
+    except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
 
     elapsed = time.time() - start
@@ -905,11 +905,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         if i % 100 == 0:
             import gc
             gc.collect()
-
-        # Debug logging for crash investigation
-        if i >= 8288:
-            print(f"DEBUG: Starting problem {i}: {problem.name}")
-            sys.stdout.flush()
 
         try:
             # Check if already evaluated (skip unless --rerun)
