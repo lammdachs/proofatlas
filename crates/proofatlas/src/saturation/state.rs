@@ -224,13 +224,13 @@ impl SaturationState {
             }
 
             // Check other limits
-            if iterations >= self.config.max_iterations {
+            if self.config.max_iterations > 0 && iterations >= self.config.max_iterations {
                 return SaturationResult::ResourceLimit(
                     self.proof_steps.clone(),
                     self.clauses.clone(),
                 );
             }
-            if self.clauses.len() >= self.config.max_clauses {
+            if self.config.max_clauses > 0 && self.clauses.len() >= self.config.max_clauses {
                 return SaturationResult::ResourceLimit(
                     self.proof_steps.clone(),
                     self.clauses.clone(),
