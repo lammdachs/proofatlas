@@ -43,7 +43,8 @@ def run_saturation_loop(
     Returns:
         True if proof found, False otherwise
     """
-    return state.run_saturation(max_iterations, timeout_secs)
+    proof_found, _status = state.run_saturation(max_iterations, timeout_secs)
+    return proof_found
 
 
 def collect_from_problem(

@@ -517,7 +517,8 @@ impl ProofState {
     ///     weights_path: Path to safetensors weights file (required for gcn/mlp)
     ///
     /// Returns:
-    ///     True if proof found, False otherwise
+    ///     Tuple of (proof_found: bool, status: str) where status is one of:
+    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit)
     #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None))]
     pub fn run_saturation(
         &mut self,
@@ -526,7 +527,7 @@ impl ProofState {
         age_weight_ratio: Option<f64>,
         selector: Option<String>,
         weights_path: Option<String>,
-    ) -> PyResult<bool> {
+    ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
         use crate::ml::weights::find_model;
@@ -611,13 +612,13 @@ impl ProofState {
             .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
 
         // Copy back the results
-        let (proof_found, final_clauses, proof_steps) = match result {
+        let (proof_found, status, final_clauses, proof_steps) = match result {
             SaturationResult::Proof(proof) => {
-                (true, proof.all_clauses, proof.steps)
+                (true, "proof", proof.all_clauses, proof.steps)
             }
-            SaturationResult::Saturated(steps, clauses) => (false, clauses, steps),
-            SaturationResult::ResourceLimit(steps, clauses) => (false, clauses, steps),
-            SaturationResult::Timeout(steps, clauses) => (false, clauses, steps),
+            SaturationResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps),
+            SaturationResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps),
+            SaturationResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps),
         };
 
         // Update our state with the results
@@ -641,7 +642,7 @@ impl ProofState {
             });
         }
 
-        Ok(proof_found)
+        Ok((proof_found, status.to_string()))
     }
 
     /// Get statistics

@@ -699,7 +699,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     remaining_timeout = max(0.1, timeout - elapsed_parsing)
 
     try:
-        proof_found = state.run_saturation(
+        proof_found, status = state.run_saturation(
             max_clauses,
             float(remaining_timeout),
             float(age_weight_ratio) if not is_learned else None,
@@ -711,12 +711,9 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
 
     elapsed = time.time() - start
 
-    if proof_found:
-        status = "proof"
-    elif elapsed >= timeout:
+    # Map status to benchmark format (resource_limit -> timeout for compatibility)
+    if status == "resource_limit":
         status = "timeout"
-    else:
-        status = "saturated"
 
     # Collect trace for training
     if collect_trace and proof_found and trace_preset:
