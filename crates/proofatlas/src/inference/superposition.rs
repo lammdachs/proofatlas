@@ -50,118 +50,110 @@ pub fn superposition(
         let from_lit = &renamed_from.literals[from_idx];
 
         if from_lit.polarity && from_lit.atom.is_equality() {
-            if let [ref l, ref r] = from_lit.atom.args.as_slice() {
-                // Use the equality l ≈ r in its given orientation
-                // The ordering constraint l ⪯̸ r is an invariant of the program
-                // Standard superposition: find occurrences of l and replace with r
+            if let [ref left, ref right] = from_lit.atom.args.as_slice() {
+                // Try superposition in BOTH directions:
+                // 1. Find occurrences of left, replace with right (left → right)
+                // 2. Find occurrences of right, replace with left (right → left)
+                // The ordering constraint is checked AFTER computing the MGU
 
-                // For each selected literal in into_clause
-                for &into_idx in &selected_into {
-                    let into_lit = &renamed_into.literals[into_idx];
+                let directions: [(_, _, &str); 2] = [
+                    (left, right, "l→r"),
+                    (right, left, "r→l"),
+                ];
 
-                    // Find positions where l can be unified with some subterm in the target literal
-                    // This is the correct formulation - we look for the LARGER term and replace with the SMALLER
-                    let positions = find_unifiable_positions(&into_lit.atom, l, &kbo);
+                for (pattern, replacement, _dir) in directions {
+                    // For each selected literal in into_clause
+                    for &into_idx in &selected_into {
+                        let into_lit = &renamed_into.literals[into_idx];
 
-                    // Positions are already filtered during search, so we can use them directly
+                        // Find positions where pattern can be unified with some subterm
+                        let positions = find_unifiable_positions(&into_lit.atom, pattern, &kbo);
 
-                    for pos in positions {
-                        // CRITICAL: l' (pos.term) must not be a variable
-                        // This prevents unsound inferences like mult(inv(X),X) = mult(e,e)
-                        if matches!(pos.term, Term::Variable(_)) {
-                            continue;
-                        }
-
-                        if let Ok(mgu) = unify(l, &pos.term) {
-                            // Apply substitution to both sides
-                            let l_sigma = l.apply_substitution(&mgu);
-                            let r_sigma = r.apply_substitution(&mgu);
-
-                            // Check ordering constraint: l_sigma ⪯̸ r_sigma
-                            // This is equivalent to: ¬(l_sigma ≤ r_sigma)
-
-                            match kbo.compare(&l_sigma, &r_sigma) {
-                                Ordering::Less | Ordering::Equal => continue, // l_sigma ≤ r_sigma, skip
-                                Ordering::Greater | Ordering::Incomparable => {} // l_sigma ⪯̸ r_sigma, proceed
+                        for pos in positions {
+                            // CRITICAL: l' (pos.term) must not be a variable
+                            // This prevents unsound inferences
+                            if matches!(pos.term, Term::Variable(_)) {
+                                continue;
                             }
 
-                            // Additional check for superposition into equalities
-                            // According to the calculus, for s[l'] ⊕ t, we need s[l']σ ⪯̸ tσ
-                            // This means: if l' is in s (left side), check s[l']σ ⪯̸ tσ
-                            //            if l' is in t (right side), check sσ ⪯̸ t[l']σ
-                            if into_lit.atom.is_equality() && !pos.path.is_empty() {
-                                let s = &into_lit.atom.args[0];
-                                let t = &into_lit.atom.args[1];
+                            if let Ok(mgu) = unify(pattern, &pos.term) {
+                                // Apply substitution to both sides
+                                let pattern_sigma = pattern.apply_substitution(&mgu);
+                                let replacement_sigma = replacement.apply_substitution(&mgu);
 
-                                if pos.path[0] == 0 {
-                                    // l' is in s (left side), so we have s[l'] = t
-                                    // Need to check s[l']σ ⪯̸ tσ
+                                // Check ordering constraint: pattern_sigma ⪯̸ replacement_sigma
+                                // i.e., pattern_sigma must NOT be smaller than replacement_sigma
+                                // This ensures we're rewriting larger to smaller (simplifying)
+                                match kbo.compare(&pattern_sigma, &replacement_sigma) {
+                                    Ordering::Less | Ordering::Equal => continue,
+                                    Ordering::Greater | Ordering::Incomparable => {}
+                                }
+
+                                // Additional check for superposition into equalities
+                                // For s[l'] ⊕ t, we need s[l']σ ⪯̸ tσ
+                                if into_lit.atom.is_equality() && !pos.path.is_empty() {
+                                    let s = &into_lit.atom.args[0];
+                                    let t = &into_lit.atom.args[1];
+
                                     let s_sigma = s.apply_substitution(&mgu);
                                     let t_sigma = t.apply_substitution(&mgu);
 
-                                    match kbo.compare(&s_sigma, &t_sigma) {
-                                        Ordering::Less | Ordering::Equal => continue, // s[l']σ ≤ tσ, skip
-                                        Ordering::Greater | Ordering::Incomparable => {} // s[l']σ ⪯̸ tσ, proceed
-                                    }
-                                } else if pos.path[0] == 1 {
-                                    // l' is in t (right side), so we have s = t[l']
-                                    // Need to check sσ ⪯̸ t[l']σ
-                                    let s_sigma = s.apply_substitution(&mgu);
-                                    let t_sigma = t.apply_substitution(&mgu);
-
-                                    match kbo.compare(&s_sigma, &t_sigma) {
-                                        Ordering::Less | Ordering::Equal => continue, // sσ ≤ t[l']σ, skip
-                                        Ordering::Greater | Ordering::Incomparable => {} // sσ ⪯̸ t[l']σ, proceed
+                                    if pos.path[0] == 0 {
+                                        // l' is in s (left side)
+                                        match kbo.compare(&s_sigma, &t_sigma) {
+                                            Ordering::Less | Ordering::Equal => continue,
+                                            Ordering::Greater | Ordering::Incomparable => {}
+                                        }
+                                    } else if pos.path[0] == 1 {
+                                        // l' is in t (right side)
+                                        match kbo.compare(&s_sigma, &t_sigma) {
+                                            Ordering::Less | Ordering::Equal => continue,
+                                            Ordering::Greater | Ordering::Incomparable => {}
+                                        }
                                     }
                                 }
-                            }
 
-                            // Apply superposition according to the calculus:
-                            // Result is (s[r] ⊕ t ∨ C₁ ∨ C₂)σ where:
-                            // - s[r] ⊕ t is the modified literal from into_clause (l' replaced by r)
-                            // - C₁ are the other literals from from_clause (excluding l ≈ r)
-                            // - C₂ are the other literals from into_clause (excluding s[l'] ⊕ t)
-                            let mut new_literals = Vec::new();
+                                // Apply superposition: replace pattern with replacement
+                                let mut new_literals = Vec::new();
 
-                            // Add C₁: literals from from_clause EXCEPT the equality l ≈ r being used
-                            // IMPORTANT: Use renamed_from to ensure substitution applies correctly
-                            for (i, lit) in renamed_from.literals.iter().enumerate() {
-                                if i != from_idx {
-                                    new_literals.push(lit.apply_substitution(&mgu));
+                                // Add literals from from_clause EXCEPT the equality being used
+                                for (i, lit) in renamed_from.literals.iter().enumerate() {
+                                    if i != from_idx {
+                                        new_literals.push(lit.apply_substitution(&mgu));
+                                    }
                                 }
-                            }
 
-                            // Add the modified literal s[r] ⊕ t and C₂ (other literals from into_clause)
-                            for (k, lit) in renamed_into.literals.iter().enumerate() {
-                                if k == into_idx {
-                                    // This is the literal s[l'] ⊕ t that we're modifying
-                                    // Replace the occurrence of l with r at the position
-                                    // IMPORTANT: Apply MGU to r before replacement to ensure all variables are substituted
-                                    let r_sigma = r.apply_substitution(&mgu);
-                                    let new_atom =
-                                        replace_at_position(&lit.atom, &pos.path, &r_sigma, &mgu);
+                                // Add the modified literal and other literals from into_clause
+                                for (k, lit) in renamed_into.literals.iter().enumerate() {
+                                    if k == into_idx {
+                                        let new_atom = replace_at_position(
+                                            &lit.atom,
+                                            &pos.path,
+                                            &replacement_sigma,
+                                            &mgu,
+                                        );
 
-                                    new_literals.push(Literal {
-                                        atom: new_atom,
-                                        polarity: lit.polarity,
+                                        new_literals.push(Literal {
+                                            atom: new_atom,
+                                            polarity: lit.polarity,
+                                        });
+                                    } else {
+                                        new_literals.push(lit.apply_substitution(&mgu));
+                                    }
+                                }
+
+                                // Remove duplicates
+                                new_literals = remove_duplicate_literals(new_literals);
+
+                                let new_clause = Clause::new(new_literals);
+
+                                if !new_clause.is_tautology() {
+                                    results.push(InferenceResult {
+                                        rule: InferenceRule::Superposition,
+                                        premises: vec![idx1, idx2],
+                                        conclusion: new_clause,
                                     });
-                                } else {
-                                    // Add other literals from C₂
-                                    new_literals.push(lit.apply_substitution(&mgu));
                                 }
-                            }
-
-                            // Remove duplicates
-                            new_literals = remove_duplicate_literals(new_literals);
-
-                            let new_clause = Clause::new(new_literals);
-
-                            if !new_clause.is_tautology() {
-                                results.push(InferenceResult {
-                                    rule: InferenceRule::Superposition,
-                                    premises: vec![idx1, idx2],
-                                    conclusion: new_clause,
-                                });
                             }
                         }
                     }
@@ -175,27 +167,19 @@ pub fn superposition(
 
 /// Find all positions in an atom where a term can potentially unify with pattern
 /// This is used to find occurrences of l in the atom that can unify with l
-/// For equalities, we only search in the maximal side(s) based on ordering
-fn find_unifiable_positions(atom: &Atom, pattern: &Term, kbo: &KBO) -> Vec<Position> {
+///
+/// For equalities, we search BOTH sides. The ordering constraint (s[l']σ ⪯̸ tσ)
+/// is checked later after computing the MGU, not here during position search.
+/// This is important because the ordering depends on the substitution, which
+/// we don't know until we find a unifier.
+fn find_unifiable_positions(atom: &Atom, pattern: &Term, _kbo: &KBO) -> Vec<Position> {
     let mut positions = Vec::new();
 
-    if atom.is_equality() && atom.args.len() == 2 {
-        let left = &atom.args[0];
-        let right = &atom.args[1];
-
-        // Always search the left side (due to orientation invariant, left is never smaller)
-        find_positions_in_term(left, pattern, vec![0], &mut positions);
-
-        // Only search the right side if the terms are incomparable
-        // If left > right, we don't need to search the right side
-        if matches!(kbo.compare(left, right), Ordering::Incomparable) {
-            find_positions_in_term(right, pattern, vec![1], &mut positions);
-        }
-    } else {
-        // For non-equalities, search in all arguments
-        for (i, arg) in atom.args.iter().enumerate() {
-            find_positions_in_term(arg, pattern, vec![i], &mut positions);
-        }
+    // Search all arguments for potential unification positions
+    // For equalities, this searches both sides; the ordering constraint
+    // is checked later in the superposition function after computing the MGU
+    for (i, arg) in atom.args.iter().enumerate() {
+        find_positions_in_term(arg, pattern, vec![i], &mut positions);
     }
 
     positions
@@ -280,6 +264,81 @@ mod tests {
     use super::*;
     use crate::core::{Constant, FunctionSymbol, PredicateSymbol, Variable};
     use crate::inference::SelectAll;
+
+    /// Test superposition into the RIGHT side of an equality
+    /// This catches a bug where find_unifiable_positions only searched the left side
+    /// when left > right in KBO, missing valid superposition positions.
+    #[test]
+    fn test_superposition_into_right_side_of_equality() {
+        // From: f(X) = X (f(X) > X in KBO, so left=f(X), right=X)
+        // Into: g(g(a)) = f(a) (g(g(a)) > f(a) in KBO, so left=g(g(a)), right=f(a))
+        //
+        // The pattern f(X) should unify with f(a) in the RIGHT side of the into clause.
+        // After superposition: g(g(a)) = a
+        //
+        // Bug: The old code only searched the right side if left and right were
+        // incomparable. Since g(g(a)) > f(a), it never searched the right side
+        // and missed this valid inference.
+
+        let eq = PredicateSymbol {
+            name: "=".to_string(),
+            arity: 2,
+        };
+        let f = FunctionSymbol {
+            name: "f".to_string(),
+            arity: 1,
+        };
+        let g = FunctionSymbol {
+            name: "g".to_string(),
+            arity: 1,
+        };
+
+        let a = Term::Constant(Constant {
+            name: "a".to_string(),
+        });
+        let x = Term::Variable(Variable {
+            name: "X".to_string(),
+        });
+        let f_x = Term::Function(f.clone(), vec![x.clone()]);
+        let f_a = Term::Function(f.clone(), vec![a.clone()]);
+        let g_a = Term::Function(g.clone(), vec![a.clone()]);
+        let g_g_a = Term::Function(g.clone(), vec![g_a.clone()]);
+
+        // f(X) = X
+        let clause1 = Clause::new(vec![Literal::positive(Atom {
+            predicate: eq.clone(),
+            args: vec![f_x.clone(), x.clone()],
+        })]);
+
+        // g(g(a)) = f(a)
+        let clause2 = Clause::new(vec![Literal::positive(Atom {
+            predicate: eq.clone(),
+            args: vec![g_g_a.clone(), f_a.clone()],
+        })]);
+
+        let selector = SelectAll;
+        let results = superposition(&clause1, &clause2, 0, 1, &selector);
+
+        // Should derive: g(g(a)) = a
+        assert!(
+            !results.is_empty(),
+            "Superposition should find positions in the right side of equalities"
+        );
+
+        // Find the expected result: g(g(a)) = a
+        let found = results.iter().any(|r| {
+            r.conclusion.literals.len() == 1
+                && r.conclusion.literals[0].polarity
+                && r.conclusion.literals[0].atom.predicate.name == "="
+                && r.conclusion.literals[0].atom.args.len() == 2
+        });
+
+        assert!(
+            found,
+            "Expected to derive g(g(a)) = a, got: {:?}",
+            results.iter().map(|r| r.conclusion.to_string()).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn test_superposition_with_selection() {
