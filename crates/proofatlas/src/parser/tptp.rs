@@ -404,6 +404,24 @@ fn parse_fof_binary(input: &str) -> IResult<&str, FOFFormula> {
     }
 }
 
+/// Parse $true as a special atom
+fn parse_fof_true(input: &str) -> IResult<&str, FOFFormula> {
+    let (input, _) = tag("$true")(input)?;
+    Ok((input, FOFFormula::Atom(Atom {
+        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+        args: vec![],
+    })))
+}
+
+/// Parse $false as a special atom
+fn parse_fof_false(input: &str) -> IResult<&str, FOFFormula> {
+    let (input, _) = tag("$false")(input)?;
+    Ok((input, FOFFormula::Atom(Atom {
+        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+        args: vec![],
+    })))
+}
+
 /// Parse unary formula
 fn parse_fof_unary(input: &str) -> IResult<&str, FOFFormula> {
     alt((
@@ -412,6 +430,9 @@ fn parse_fof_unary(input: &str) -> IResult<&str, FOFFormula> {
             preceded(tuple((char('~'), multispace0)), parse_fof_unary),
             |f| FOFFormula::Not(Box::new(f)),
         ),
+        // $true and $false (before other atoms)
+        parse_fof_true,
+        parse_fof_false,
         // Infix inequality (try before atomic to catch != operator)
         parse_fof_infix_unary,
         // Quantified formula

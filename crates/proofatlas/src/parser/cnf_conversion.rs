@@ -69,12 +69,29 @@ impl CNFConverter {
     }
 
     fn convert(&mut self, formula: FOFFormula) -> Result<CNFFormula, CNFConversionError> {
-        // Step 0: Apply definitional CNF to biconditionals with quantifiers
+        // Step 0a: Simplify $true and $false
+        let simplified = self.simplify_truth_constants(formula);
+
+        // Handle degenerate cases
+        if self.is_true_constant(&simplified) {
+            // Formula is trivially true - no clauses needed
+            return Ok(CNFFormula { clauses: vec![] });
+        }
+        if self.is_false_constant(&simplified) {
+            // Formula is trivially false - return empty clause
+            let mut empty_clause = Clause::new(vec![]);
+            empty_clause.role = self.role;
+            return Ok(CNFFormula {
+                clauses: vec![empty_clause]
+            });
+        }
+
+        // Step 0b: Apply definitional CNF to biconditionals with quantifiers
         // When A <=> B contains quantified subformulas, NNF expansion would duplicate them.
         // Instead, we replace the biconditional with a definition predicate and add
         // polarity-appropriate definition clauses.
         let mut definitions = Vec::new();
-        let transformed = self.definitional_transform(formula, true, &mut definitions);
+        let transformed = self.definitional_transform(simplified, true, &mut definitions);
 
         // Combine with definitions
         let combined = definitions.into_iter().fold(transformed, |acc, def| {
@@ -94,6 +111,198 @@ impl CNFConverter {
         let clauses = self.distribute_to_cnf(matrix)?;
 
         Ok(CNFFormula { clauses })
+    }
+
+    /// Check if a formula is the $true constant
+    fn is_true_constant(&self, formula: &FOFFormula) -> bool {
+        matches!(formula, FOFFormula::Atom(atom) if atom.predicate.name == "$true")
+    }
+
+    /// Check if a formula is the $false constant
+    fn is_false_constant(&self, formula: &FOFFormula) -> bool {
+        matches!(formula, FOFFormula::Atom(atom) if atom.predicate.name == "$false")
+    }
+
+    /// Simplify formulas containing $true and $false constants
+    fn simplify_truth_constants(&self, formula: FOFFormula) -> FOFFormula {
+        match formula {
+            FOFFormula::Atom(_) => formula,
+
+            FOFFormula::Not(f) => {
+                let f = self.simplify_truth_constants(*f);
+                if self.is_true_constant(&f) {
+                    // ~$true = $false
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_false_constant(&f) {
+                    // ~$false = $true
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else {
+                    FOFFormula::Not(Box::new(f))
+                }
+            }
+
+            FOFFormula::And(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                if self.is_false_constant(&f1) || self.is_false_constant(&f2) {
+                    // $false & A = $false
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_true_constant(&f1) {
+                    // $true & A = A
+                    f2
+                } else if self.is_true_constant(&f2) {
+                    // A & $true = A
+                    f1
+                } else {
+                    FOFFormula::And(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Or(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                if self.is_true_constant(&f1) || self.is_true_constant(&f2) {
+                    // $true | A = $true
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_false_constant(&f1) {
+                    // $false | A = A
+                    f2
+                } else if self.is_false_constant(&f2) {
+                    // A | $false = A
+                    f1
+                } else {
+                    FOFFormula::Or(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Implies(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                if self.is_false_constant(&f1) || self.is_true_constant(&f2) {
+                    // $false => A = $true, A => $true = $true
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_true_constant(&f1) {
+                    // $true => A = A
+                    f2
+                } else if self.is_false_constant(&f2) {
+                    // A => $false = ~A
+                    FOFFormula::Not(Box::new(f1))
+                } else {
+                    FOFFormula::Implies(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Iff(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                if self.is_true_constant(&f1) {
+                    // $true <=> A = A
+                    f2
+                } else if self.is_true_constant(&f2) {
+                    // A <=> $true = A
+                    f1
+                } else if self.is_false_constant(&f1) {
+                    // $false <=> A = ~A
+                    FOFFormula::Not(Box::new(f2))
+                } else if self.is_false_constant(&f2) {
+                    // A <=> $false = ~A
+                    FOFFormula::Not(Box::new(f1))
+                } else {
+                    FOFFormula::Iff(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Xor(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                if self.is_false_constant(&f1) {
+                    // $false XOR A = A
+                    f2
+                } else if self.is_false_constant(&f2) {
+                    // A XOR $false = A
+                    f1
+                } else if self.is_true_constant(&f1) {
+                    // $true XOR A = ~A
+                    FOFFormula::Not(Box::new(f2))
+                } else if self.is_true_constant(&f2) {
+                    // A XOR $true = ~A
+                    FOFFormula::Not(Box::new(f1))
+                } else {
+                    FOFFormula::Xor(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Nand(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                // A NAND B = ~(A & B)
+                if self.is_false_constant(&f1) || self.is_false_constant(&f2) {
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_true_constant(&f1) && self.is_true_constant(&f2) {
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_true_constant(&f1) {
+                    FOFFormula::Not(Box::new(f2))
+                } else if self.is_true_constant(&f2) {
+                    FOFFormula::Not(Box::new(f1))
+                } else {
+                    FOFFormula::Nand(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Nor(f1, f2) => {
+                let f1 = self.simplify_truth_constants(*f1);
+                let f2 = self.simplify_truth_constants(*f2);
+                // A NOR B = ~(A | B)
+                if self.is_true_constant(&f1) || self.is_true_constant(&f2) {
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_false_constant(&f1) && self.is_false_constant(&f2) {
+                    FOFFormula::Atom(Atom {
+                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                        args: vec![],
+                    })
+                } else if self.is_false_constant(&f1) {
+                    FOFFormula::Not(Box::new(f2))
+                } else if self.is_false_constant(&f2) {
+                    FOFFormula::Not(Box::new(f1))
+                } else {
+                    FOFFormula::Nor(Box::new(f1), Box::new(f2))
+                }
+            }
+
+            FOFFormula::Quantified(q, v, f) => {
+                let f = self.simplify_truth_constants(*f);
+                // Quantification over truth constants: ∀x.$true = $true, etc.
+                if self.is_true_constant(&f) || self.is_false_constant(&f) {
+                    f
+                } else {
+                    FOFFormula::Quantified(q, v, Box::new(f))
+                }
+            }
+        }
     }
 
     /// Apply definitional transformation to biconditionals containing quantifiers.
