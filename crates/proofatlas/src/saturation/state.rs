@@ -49,8 +49,8 @@ pub enum LiteralSelectionStrategy {
 impl Default for SaturationConfig {
     fn default() -> Self {
         SaturationConfig {
-            max_clauses: 10000,
-            max_iterations: 10000,
+            max_clauses: 0,      // 0 means no limit
+            max_iterations: 0,   // 0 means no limit
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
             literal_selection: LiteralSelectionStrategy::Sel0,
@@ -142,29 +142,37 @@ impl SaturationState {
 
         let mut proof_steps = Vec::new();
 
-        // Add initial clauses with IDs
-        for (i, mut clause) in initial_clauses.into_iter().enumerate() {
-            clause.id = Some(i);
+        // Add initial clauses with IDs, filtering tautologies
+        let mut clause_idx = 0;
+        for mut clause in initial_clauses.into_iter() {
             // Orient equalities before adding
             let mut oriented = clause.clone();
             orient_clause_equalities(&mut oriented);
 
+            // Skip tautologies (e.g., P(x) ∨ ~P(x) ∨ ...)
+            if oriented.is_tautology() {
+                continue;
+            }
+
+            clause.id = Some(clause_idx);
+
             // Add to subsumption checker
             let idx = subsumption_checker.add_clause(oriented.clone());
-            assert_eq!(idx, i); // Initial clauses should match their index
+            assert_eq!(idx, clause_idx);
 
             // Create proof step for initial clause
             proof_steps.push(ProofStep {
                 inference: InferenceResult {
                     rule: InferenceRule::Input,
-                    premises: vec![], // No parents for initial clauses
+                    premises: vec![],
                     conclusion: oriented,
                 },
-                clause_idx: i,
+                clause_idx,
             });
 
             clauses.push(clause);
-            unprocessed.push_back(i);
+            unprocessed.push_back(clause_idx);
+            clause_idx += 1;
         }
 
         // Create literal selector based on configuration
