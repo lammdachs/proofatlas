@@ -306,6 +306,16 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
             problems_list = data.get("problems", data) if isinstance(data, dict) else data
             metadata = {p["path"]: p for p in problems_list}
 
+    # Check for explicit problem list (inline or from file)
+    explicit_problems = filters.get("problems")
+    if "problems_file" in filters:
+        problems_file = base_dir / filters["problems_file"]
+        if problems_file.exists():
+            with open(problems_file) as f:
+                explicit_problems = [line.strip() for line in f if line.strip()]
+    if explicit_problems:
+        explicit_set = set(explicit_problems)
+
     problems = []
     for domain_dir in sorted(problems_dir.iterdir()):
         if not domain_dir.is_dir():
@@ -320,6 +330,12 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
         for problem_file in sorted(domain_dir.glob("*.p")):
             rel_path = str(problem_file.relative_to(problems_dir))
             meta = metadata.get(rel_path, {})
+
+            # Filter by explicit problem names (without .p extension)
+            if explicit_problems:
+                problem_name = problem_file.stem
+                if problem_name not in explicit_set:
+                    continue
 
             if "status" in filters and filters["status"]:
                 if meta.get("status") not in filters["status"]:
@@ -658,10 +674,10 @@ def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log
 
 # Prover execution
 
-def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
-                   weights_path: str = None, collect_trace: bool = False,
-                   trace_preset: str = None) -> BenchResult:
-    """Run ProofAtlas on a problem."""
+def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
+                          weights_path: str = None, collect_trace: bool = False,
+                          trace_preset: str = None) -> BenchResult:
+    """Inner function that actually runs ProofAtlas (called in subprocess)."""
     from proofatlas import ProofState
 
     timeout = preset.get("timeout", 10)
@@ -738,6 +754,72 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
             pass
 
     return BenchResult(problem=problem.name, status=status, time_s=elapsed)
+
+
+def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_path,
+                    collect_trace, trace_preset, result_queue):
+    """Worker function that runs in subprocess and sends result via queue."""
+    # Reset signal handlers inherited from parent daemon process.
+    # Without this, if the worker is killed (e.g., timeout), it would run
+    # the parent's signal handler which deletes the job file!
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+
+    try:
+        result = _run_proofatlas_inner(
+            Path(problem_str), Path(base_dir_str), preset, Path(tptp_root_str),
+            weights_path, collect_trace, trace_preset
+        )
+        result_queue.put((result.status, result.time_s))
+    except Exception as e:
+        result_queue.put(("error", 0))
+
+
+def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
+                   weights_path: str = None, collect_trace: bool = False,
+                   trace_preset: str = None) -> BenchResult:
+    """Run ProofAtlas on a problem in a subprocess.
+
+    Uses multiprocessing to isolate crashes (e.g., stack overflow on deeply
+    nested terms) so they don't take down the entire benchmark process.
+    """
+    import multiprocessing
+
+    timeout = preset.get("timeout", 10)
+    process_timeout = timeout + 10  # Extra time for overhead
+
+    result_queue = multiprocessing.Queue()
+    proc = multiprocessing.Process(
+        target=_worker_process,
+        args=(str(problem), str(base_dir), preset, str(tptp_root),
+              weights_path, collect_trace, trace_preset, result_queue)
+    )
+
+    start = time.time()
+    proc.start()
+    proc.join(timeout=process_timeout)
+    elapsed = time.time() - start
+
+    if proc.is_alive():
+        # Process hung - kill it
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+        return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
+
+    if proc.exitcode != 0:
+        # Process crashed (e.g., stack overflow gives exit code 134)
+        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
+
+    try:
+        status, elapsed_inner = result_queue.get_nowait()
+        return BenchResult(problem=problem.name, status=status, time_s=elapsed_inner)
+    except Exception:
+        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
 
 def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
@@ -1125,7 +1207,8 @@ def main():
         grandchild_pid = int(os.read(read_fd, 32).decode().strip())
         os.close(read_fd)
 
-        save_job_status(base_dir, grandchild_pid, sys.argv, len(runs))
+        # Job status is saved by grandchild - just wait briefly for it
+        time.sleep(0.1)
         prover_names = sorted(set(r["prover"] for r in runs))
         print(f"Started job (PID: {grandchild_pid})")
         print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
@@ -1152,11 +1235,29 @@ def main():
     # Second child (grandchild): the actual daemon
     os.close(write_fd)
 
-    # Close all file descriptors and redirect stdin
+    # Close stdin and redirect stdout/stderr to log file early
+    # so any errors during startup are captured
     sys.stdin.close()
     os.close(0)
     sys.stdout = open(log_file_path, "w")
     sys.stderr = sys.stdout
+
+    # Log startup info
+    print(f"Benchmark daemon started (PID: {os.getpid()})")
+    print(f"Working directory: {base_dir}")
+    print(f"Configs: {len(runs)}, Problems: {len(problems)}")
+    sys.stdout.flush()
+
+    # Save job status (grandchild saves its own status)
+    job_file_error = None
+    try:
+        save_job_status(base_dir, os.getpid(), sys.argv, len(runs))
+        print(f"Job file saved: {get_job_file(base_dir)}")
+    except Exception as e:
+        job_file_error = str(e)
+        print(f"WARNING: Failed to save job status: {e}")
+        print("Use 'ps aux | grep proofatlas' to find this process")
+    sys.stdout.flush()
 
     # Set up signal handlers to log unexpected termination
     def signal_handler(signum, frame):

@@ -709,6 +709,7 @@ fn parse_equality(input: &str) -> IResult<&str, Atom> {
 /// Parse a predicate
 fn parse_predicate(input: &str) -> IResult<&str, Atom> {
     let (input, name) = parse_identifier(input)?;
+    let name = strip_quotes(name);
 
     // Check if it has arguments
     if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('(')(input) {
@@ -752,7 +753,7 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
 
 /// Parse a function term
 fn parse_function_term(input: &str) -> IResult<&str, Term> {
-    let (input, name) = parse_lowercase_ident(input)?;
+    let (input, name) = parse_functor_name(input)?;
     let (input, _) = char('(')(input)?;
     let (input, args) =
         separated_list1(tuple((multispace0, char(','), multispace0)), parse_term)(input)?;
@@ -762,7 +763,7 @@ fn parse_function_term(input: &str) -> IResult<&str, Term> {
         input,
         Term::Function(
             FunctionSymbol {
-                name: name.to_string(),
+                name,
                 arity: args.len(),
             },
             args,
@@ -783,11 +784,11 @@ fn parse_variable_term(input: &str) -> IResult<&str, Term> {
 
 /// Parse a constant term
 fn parse_constant_term(input: &str) -> IResult<&str, Term> {
-    let (input, name) = parse_lowercase_ident(input)?;
+    let (input, name) = parse_functor_name(input)?;
     Ok((
         input,
         Term::Constant(Constant {
-            name: name.to_string(),
+            name,
         }),
     ))
 }
@@ -811,6 +812,24 @@ fn parse_lowercase_ident(input: &str) -> IResult<&str, &str> {
     recognize(pair(
         satisfy(|c| c.is_lowercase()),
         take_while(|c: char| c.is_alphanumeric() || c == '_'),
+    ))(input)
+}
+
+/// Strip quotes from a single-quoted string
+fn strip_quotes(s: &str) -> &str {
+    if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
+/// Parse a functor name (for functions and constants)
+/// Can be a lowercase identifier or a single-quoted string
+fn parse_functor_name(input: &str) -> IResult<&str, String> {
+    alt((
+        map(parse_single_quoted, |s| strip_quotes(s).to_string()),
+        map(parse_lowercase_ident, |s| s.to_string()),
     ))(input)
 }
 

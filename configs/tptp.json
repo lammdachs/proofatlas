@@ -48,6 +48,11 @@
       "status": ["unsatisfiable"],
       "format": ["cnf", "fof"],
       "domains": ["KRS"]
+    },
+
+    "parser_test": {
+      "description": "Problems testing parser fixes (nested biconditionals + quoted identifiers)",
+      "problems_file": ".data/parser_test_problems.txt"
     }
   }
 }
