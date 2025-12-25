@@ -698,34 +698,81 @@ fn parse_cnf_formula(input: &str) -> IResult<&str, Clause> {
     ))(input)
 }
 
+/// Get the name of a distinct object (without the '"' prefix)
+fn distinct_object_name(term: &Term) -> Option<&str> {
+    match term {
+        Term::Constant(c) if c.name.starts_with('"') => Some(&c.name[1..]),
+        _ => None,
+    }
+}
+
+/// Check if a literal is trivially true or false due to distinct object semantics
+/// Returns: Some(true) if tautology, Some(false) if contradiction, None if unknown
+fn eval_distinct_object_equality(lit: &Literal) -> Option<bool> {
+    if !lit.atom.is_equality() || lit.atom.args.len() != 2 {
+        return None;
+    }
+
+    let left = &lit.atom.args[0];
+    let right = &lit.atom.args[1];
+
+    // Both must be distinct objects for special handling
+    if let (Some(left_name), Some(right_name)) = (distinct_object_name(left), distinct_object_name(right)) {
+        let same = left_name == right_name;
+        // For positive equality: "A" = "B" is false if different, true if same
+        // For negative equality: "A" != "B" is true if different, false if same
+        if lit.polarity {
+            Some(same) // positive equality: true iff same
+        } else {
+            Some(!same) // negative equality: true iff different
+        }
+    } else {
+        None
+    }
+}
+
 /// Parse CNF disjunction
-/// Handles $true (makes clause a tautology) and $false (always false literal)
+/// Handles $true/$false and distinct object equalities
 fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
     separated_list1(tuple((multispace0, char('|'), multispace0)), parse_literal)(input)
         .map(|(remaining, literals)| {
-            // Check for $true - if present, clause is a tautology
-            let has_true = literals.iter().any(|lit| {
-                lit.polarity && lit.atom.predicate.name == "$true"
+            // Check for tautology conditions
+            let is_tautology = literals.iter().any(|lit| {
+                // $true makes clause a tautology
+                if lit.polarity && lit.atom.predicate.name == "$true" {
+                    return true;
+                }
+                // Distinct object inequality like "A" != "B" (different names) is always true
+                if let Some(true) = eval_distinct_object_equality(lit) {
+                    return true;
+                }
+                false
             });
 
-            // Filter out $false literals (always false, don't contribute to satisfying the clause)
-            // A clause with only $false becomes the empty clause (contradiction)
+            if is_tautology {
+                return (remaining, Clause::new(vec![Literal::positive(Atom {
+                    predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                    args: vec![],
+                })]));
+            }
+
+            // Filter out always-false literals
             let filtered: Vec<Literal> = literals
                 .into_iter()
                 .filter(|lit| {
-                    !(lit.polarity && lit.atom.predicate.name == "$false")
+                    // Remove $false
+                    if lit.polarity && lit.atom.predicate.name == "$false" {
+                        return false;
+                    }
+                    // Remove distinct object equalities that are false (e.g., "A" = "B")
+                    if let Some(false) = eval_distinct_object_equality(lit) {
+                        return false;
+                    }
+                    true
                 })
                 .collect();
 
-            // If clause had $true, add it back as a marker for tautology detection
-            if has_true {
-                (remaining, Clause::new(vec![Literal::positive(Atom {
-                    predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                    args: vec![],
-                })]))
-            } else {
-                (remaining, Clause::new(filtered))
-            }
+            (remaining, Clause::new(filtered))
         })
 }
 
@@ -871,9 +918,12 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
 }
 
 /// Parse a distinct object term (double-quoted string like "Apple")
+/// Distinct objects are prefixed with '"' to mark them for special equality handling
 fn parse_distinct_object_term(input: &str) -> IResult<&str, Term> {
     let (input, quoted) = parse_double_quoted(input)?;
-    let name = strip_double_quotes(quoted);
+    let inner = strip_double_quotes(quoted);
+    // Prefix with '"' to mark as distinct object
+    let name = format!("\"{}", inner);
     Ok((
         input,
         Term::Constant(Constant { name }),

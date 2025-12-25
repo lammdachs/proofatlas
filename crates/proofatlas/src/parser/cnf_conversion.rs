@@ -155,10 +155,40 @@ impl CNFConverter {
         matches!(formula, FOFFormula::Atom(atom) if atom.predicate.name == "$false")
     }
 
-    /// Simplify formulas containing $true and $false constants
+    /// Get the name of a distinct object (without the '"' prefix)
+    fn distinct_object_name(term: &Term) -> Option<&str> {
+        match term {
+            Term::Constant(c) if c.name.starts_with('"') => Some(&c.name[1..]),
+            _ => None,
+        }
+    }
+
+    /// Simplify formulas containing $true, $false, and distinct object equalities
     fn simplify_truth_constants(&self, formula: FOFFormula) -> FOFFormula {
         match formula {
-            FOFFormula::Atom(_) => formula,
+            FOFFormula::Atom(ref atom) => {
+                // Check for equality between distinct objects
+                if atom.is_equality() && atom.args.len() == 2 {
+                    if let (Some(left), Some(right)) = (
+                        Self::distinct_object_name(&atom.args[0]),
+                        Self::distinct_object_name(&atom.args[1]),
+                    ) {
+                        // "A" = "B" is false if different, true if same
+                        if left == right {
+                            return FOFFormula::Atom(Atom {
+                                predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                                args: vec![],
+                            });
+                        } else {
+                            return FOFFormula::Atom(Atom {
+                                predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+                                args: vec![],
+                            });
+                        }
+                    }
+                }
+                formula
+            }
 
             FOFFormula::Not(f) => {
                 let f = self.simplify_truth_constants(*f);
