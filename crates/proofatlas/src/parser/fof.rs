@@ -3,8 +3,8 @@
 //! This module provides structures for representing full first-order logic
 //! formulas before conversion to CNF.
 
-use crate::core::{Atom, Variable};
-use std::collections::HashSet;
+use crate::core::{Atom, Term, Variable};
+use std::collections::{HashMap, HashSet};
 
 /// Quantifier type
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +273,166 @@ impl FOFFormula {
         }
 
         results.pop().unwrap()
+    }
+
+    /// Standardize apart: rename all bound variables to unique names
+    ///
+    /// This ensures that each quantifier binds a unique variable, avoiding
+    /// issues with variable capture during CNF conversion.
+    pub fn standardize_apart(self) -> FOFFormula {
+        // Collect all variable names used in the formula to avoid clashes
+        let mut used_names = HashSet::new();
+        self.collect_variable_names(&mut used_names);
+
+        // Find a starting counter that won't clash
+        let mut counter = 0;
+        while used_names.contains(&format!("V{}", counter)) {
+            counter += 1;
+        }
+
+        self.standardize_apart_with_counter(&mut counter, &HashMap::new(), &used_names)
+    }
+
+    fn collect_variable_names(&self, names: &mut HashSet<String>) {
+        match self {
+            FOFFormula::Atom(atom) => {
+                for arg in &atom.args {
+                    Self::collect_term_variable_names(arg, names);
+                }
+            }
+            FOFFormula::Not(f) => f.collect_variable_names(names),
+            FOFFormula::And(f1, f2)
+            | FOFFormula::Or(f1, f2)
+            | FOFFormula::Implies(f1, f2)
+            | FOFFormula::Iff(f1, f2)
+            | FOFFormula::Xor(f1, f2)
+            | FOFFormula::Nand(f1, f2)
+            | FOFFormula::Nor(f1, f2) => {
+                f1.collect_variable_names(names);
+                f2.collect_variable_names(names);
+            }
+            FOFFormula::Quantified(_, var, f) => {
+                names.insert(var.name.clone());
+                f.collect_variable_names(names);
+            }
+        }
+    }
+
+    fn collect_term_variable_names(term: &Term, names: &mut HashSet<String>) {
+        match term {
+            Term::Variable(v) => {
+                names.insert(v.name.clone());
+            }
+            Term::Constant(_) => {}
+            Term::Function(_, args) => {
+                for arg in args {
+                    Self::collect_term_variable_names(arg, names);
+                }
+            }
+        }
+    }
+
+    fn standardize_apart_with_counter(
+        self,
+        counter: &mut usize,
+        renaming: &HashMap<String, String>,
+        used_names: &HashSet<String>,
+    ) -> FOFFormula {
+        match self {
+            FOFFormula::Atom(atom) => {
+                // Rename variables in the atom according to the current renaming
+                let new_args: Vec<Term> = atom
+                    .args
+                    .into_iter()
+                    .map(|t| Self::rename_term_vars(t, renaming))
+                    .collect();
+                FOFFormula::Atom(Atom {
+                    predicate: atom.predicate,
+                    args: new_args,
+                })
+            }
+
+            FOFFormula::Not(f) => {
+                FOFFormula::Not(Box::new(f.standardize_apart_with_counter(counter, renaming, used_names)))
+            }
+
+            FOFFormula::And(f1, f2) => FOFFormula::And(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Or(f1, f2) => FOFFormula::Or(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Implies(f1, f2) => FOFFormula::Implies(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Iff(f1, f2) => FOFFormula::Iff(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Xor(f1, f2) => FOFFormula::Xor(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Nand(f1, f2) => FOFFormula::Nand(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Nor(f1, f2) => FOFFormula::Nor(
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+            ),
+
+            FOFFormula::Quantified(quant, var, f) => {
+                // Generate a fresh variable name that doesn't clash
+                let mut new_name = format!("V{}", *counter);
+                *counter += 1;
+                while used_names.contains(&new_name) {
+                    new_name = format!("V{}", *counter);
+                    *counter += 1;
+                }
+
+                // Create new renaming that maps old name to new name
+                let mut new_renaming = renaming.clone();
+                new_renaming.insert(var.name.clone(), new_name.clone());
+
+                let new_var = Variable { name: new_name };
+                FOFFormula::Quantified(
+                    quant,
+                    new_var,
+                    Box::new(f.standardize_apart_with_counter(counter, &new_renaming, used_names)),
+                )
+            }
+        }
+    }
+
+    fn rename_term_vars(term: Term, renaming: &HashMap<String, String>) -> Term {
+        match term {
+            Term::Variable(v) => {
+                if let Some(new_name) = renaming.get(&v.name) {
+                    Term::Variable(Variable {
+                        name: new_name.clone(),
+                    })
+                } else {
+                    Term::Variable(v)
+                }
+            }
+            Term::Constant(c) => Term::Constant(c),
+            Term::Function(f, args) => Term::Function(
+                f,
+                args.into_iter()
+                    .map(|a| Self::rename_term_vars(a, renaming))
+                    .collect(),
+            ),
+        }
     }
 }
 

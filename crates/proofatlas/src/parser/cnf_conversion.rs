@@ -17,6 +17,33 @@ pub enum CNFConversionError {
     Timeout,
 }
 
+/// Polarity context for definitional CNF transformation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Polarity {
+    /// Formula appears only in positive context
+    Positive,
+    /// Formula appears only in negative context
+    Negative,
+    /// Formula appears in both contexts (e.g., inside biconditional)
+    Both,
+}
+
+impl Polarity {
+    /// Flip polarity (for negation, implication antecedent)
+    fn flip(self) -> Self {
+        match self {
+            Polarity::Positive => Polarity::Negative,
+            Polarity::Negative => Polarity::Positive,
+            Polarity::Both => Polarity::Both,
+        }
+    }
+
+    /// Inside a biconditional, everything becomes Both
+    fn in_biconditional(self) -> Self {
+        Polarity::Both
+    }
+}
+
 impl std::fmt::Display for CNFConversionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -91,15 +118,20 @@ impl CNFConverter {
         // Instead, we replace the biconditional with a definition predicate and add
         // polarity-appropriate definition clauses.
         let mut definitions = Vec::new();
-        let transformed = self.definitional_transform(simplified, true, &mut definitions);
+        let transformed = self.definitional_transform(simplified, Polarity::Positive, &mut definitions);
 
         // Combine with definitions
         let combined = definitions.into_iter().fold(transformed, |acc, def| {
             FOFFormula::And(Box::new(acc), Box::new(def))
         });
 
+        // Step 0c: Standardize apart - rename bound variables to be unique
+        // This prevents variable capture when the same variable name is used
+        // in different quantifier scopes (e.g., ∃Y.P(Y) => ∀Y.Q(Y))
+        let standardized = combined.standardize_apart();
+
         // Step 1: Convert to NNF
-        let nnf = combined.to_nnf();
+        let nnf = standardized.to_nnf();
 
         // Step 2: Skolemize (remove existential quantifiers)
         let skolemized = self.skolemize(nnf);
@@ -307,13 +339,14 @@ impl CNFConverter {
 
     /// Apply definitional transformation to biconditionals containing quantifiers.
     ///
-    /// Tracks polarity to generate the correct one-sided definitions:
-    /// - Positive occurrence: D => (A <=> B), i.e., (D & A) => B and (D & B) => A
-    /// - Negative occurrence: (A <=> B) => D, i.e., (A & B) => D and (~A & ~B) => D
+    /// Tracks polarity to generate the correct definitions:
+    /// - Positive: D => (A <=> B)
+    /// - Negative: (A <=> B) => D
+    /// - Both: full equivalence D <=> (A <=> B)
     fn definitional_transform(
         &mut self,
         formula: FOFFormula,
-        positive: bool, // true = positive polarity, false = negative
+        polarity: Polarity,
         definitions: &mut Vec<FOFFormula>,
     ) -> FOFFormula {
         match formula {
@@ -321,48 +354,52 @@ impl CNFConverter {
 
             FOFFormula::Not(f) => {
                 // Negation flips polarity
-                FOFFormula::Not(Box::new(self.definitional_transform(*f, !positive, definitions)))
+                FOFFormula::Not(Box::new(
+                    self.definitional_transform(*f, polarity.flip(), definitions),
+                ))
             }
 
             FOFFormula::And(f1, f2) => FOFFormula::And(
-                Box::new(self.definitional_transform(*f1, positive, definitions)),
-                Box::new(self.definitional_transform(*f2, positive, definitions)),
+                Box::new(self.definitional_transform(*f1, polarity, definitions)),
+                Box::new(self.definitional_transform(*f2, polarity, definitions)),
             ),
 
             FOFFormula::Or(f1, f2) => FOFFormula::Or(
-                Box::new(self.definitional_transform(*f1, positive, definitions)),
-                Box::new(self.definitional_transform(*f2, positive, definitions)),
+                Box::new(self.definitional_transform(*f1, polarity, definitions)),
+                Box::new(self.definitional_transform(*f2, polarity, definitions)),
             ),
 
             FOFFormula::Implies(f1, f2) => {
                 // A => B: A has flipped polarity, B keeps polarity
                 FOFFormula::Implies(
-                    Box::new(self.definitional_transform(*f1, !positive, definitions)),
-                    Box::new(self.definitional_transform(*f2, positive, definitions)),
+                    Box::new(self.definitional_transform(*f1, polarity.flip(), definitions)),
+                    Box::new(self.definitional_transform(*f2, polarity, definitions)),
                 )
             }
 
             FOFFormula::Iff(f1, f2) => {
-                // First, recursively transform subformulas (both polarities for biconditional)
-                let f1 = self.definitional_transform(*f1, positive, definitions);
-                let f2 = self.definitional_transform(*f2, positive, definitions);
+                // Inside biconditional, subformulas appear in both polarities
+                let inner_polarity = polarity.in_biconditional();
+                let f1 = self.definitional_transform(*f1, inner_polarity, definitions);
+                let f2 = self.definitional_transform(*f2, inner_polarity, definitions);
 
                 // Check if either side contains quantifiers
                 if self.contains_quantifier(&f1) || self.contains_quantifier(&f2) {
-                    self.create_iff_definition(f1, f2, positive, definitions)
+                    self.create_iff_definition(f1, f2, polarity, definitions)
                 } else {
                     FOFFormula::Iff(Box::new(f1), Box::new(f2))
                 }
             }
 
             FOFFormula::Xor(f1, f2) => {
-                // XOR is ~(A <=> B), so flip polarity for the inner biconditional
-                let f1 = self.definitional_transform(*f1, positive, definitions);
-                let f2 = self.definitional_transform(*f2, positive, definitions);
+                // XOR is ~(A <=> B), so subformulas are in biconditional context
+                let inner_polarity = polarity.in_biconditional();
+                let f1 = self.definitional_transform(*f1, inner_polarity, definitions);
+                let f2 = self.definitional_transform(*f2, inner_polarity, definitions);
 
                 if self.contains_quantifier(&f1) || self.contains_quantifier(&f2) {
                     // Create definition for (A <=> B) with flipped polarity, then negate
-                    let def_atom = self.create_iff_definition(f1, f2, !positive, definitions);
+                    let def_atom = self.create_iff_definition(f1, f2, polarity.flip(), definitions);
                     FOFFormula::Not(Box::new(def_atom))
                 } else {
                     FOFFormula::Xor(Box::new(f1), Box::new(f2))
@@ -370,19 +407,19 @@ impl CNFConverter {
             }
 
             FOFFormula::Nand(f1, f2) => FOFFormula::Nand(
-                Box::new(self.definitional_transform(*f1, !positive, definitions)),
-                Box::new(self.definitional_transform(*f2, !positive, definitions)),
+                Box::new(self.definitional_transform(*f1, polarity.flip(), definitions)),
+                Box::new(self.definitional_transform(*f2, polarity.flip(), definitions)),
             ),
 
             FOFFormula::Nor(f1, f2) => FOFFormula::Nor(
-                Box::new(self.definitional_transform(*f1, !positive, definitions)),
-                Box::new(self.definitional_transform(*f2, !positive, definitions)),
+                Box::new(self.definitional_transform(*f1, polarity.flip(), definitions)),
+                Box::new(self.definitional_transform(*f2, polarity.flip(), definitions)),
             ),
 
             FOFFormula::Quantified(q, var, f) => FOFFormula::Quantified(
                 q,
                 var,
-                Box::new(self.definitional_transform(*f, positive, definitions)),
+                Box::new(self.definitional_transform(*f, polarity, definitions)),
             ),
         }
     }
@@ -407,13 +444,14 @@ impl CNFConverter {
 
     /// Create a definition for A <=> B based on polarity.
     ///
-    /// - Positive: D => (A <=> B), i.e., (D & A) => B and (D & B) => A
-    /// - Negative: (A <=> B) => D, i.e., (A & B) => D and (~A & ~B) => D
+    /// - Positive: D => (A <=> B)
+    /// - Negative: (A <=> B) => D
+    /// - Both: full equivalence D <=> (A <=> B)
     fn create_iff_definition(
         &mut self,
         a: FOFFormula,
         b: FOFFormula,
-        positive: bool,
+        polarity: Polarity,
         definitions: &mut Vec<FOFFormula>,
     ) -> FOFFormula {
         // Collect free variables from both sides
@@ -440,34 +478,37 @@ impl CNFConverter {
             args: def_args,
         });
 
-        if positive {
-            // D => (A <=> B): (D & A) => B and (D & B) => A
-            // As implications: D => (A => B) and D => (B => A)
-            let def1 = FOFFormula::Implies(
+        // Positive direction: D => (A <=> B)
+        // As: D => (A => B) and D => (B => A)
+        if polarity == Polarity::Positive || polarity == Polarity::Both {
+            let pos_def1 = FOFFormula::Implies(
                 Box::new(def_atom.clone()),
                 Box::new(FOFFormula::Implies(Box::new(a.clone()), Box::new(b.clone()))),
             );
-            let def2 = FOFFormula::Implies(
+            let pos_def2 = FOFFormula::Implies(
                 Box::new(def_atom.clone()),
-                Box::new(FOFFormula::Implies(Box::new(b), Box::new(a))),
+                Box::new(FOFFormula::Implies(Box::new(b.clone()), Box::new(a.clone()))),
             );
-            definitions.push(self.wrap_with_forall(def1, &free_vars));
-            definitions.push(self.wrap_with_forall(def2, &free_vars));
-        } else {
-            // (A <=> B) => D: (A & B) => D and (~A & ~B) => D
-            let def1 = FOFFormula::Implies(
+            definitions.push(self.wrap_with_forall(pos_def1, &free_vars));
+            definitions.push(self.wrap_with_forall(pos_def2, &free_vars));
+        }
+
+        // Negative direction: (A <=> B) => D
+        // As: (A & B) => D and (~A & ~B) => D
+        if polarity == Polarity::Negative || polarity == Polarity::Both {
+            let neg_def1 = FOFFormula::Implies(
                 Box::new(FOFFormula::And(Box::new(a.clone()), Box::new(b.clone()))),
                 Box::new(def_atom.clone()),
             );
-            let def2 = FOFFormula::Implies(
+            let neg_def2 = FOFFormula::Implies(
                 Box::new(FOFFormula::And(
                     Box::new(FOFFormula::Not(Box::new(a))),
                     Box::new(FOFFormula::Not(Box::new(b))),
                 )),
                 Box::new(def_atom.clone()),
             );
-            definitions.push(self.wrap_with_forall(def1, &free_vars));
-            definitions.push(self.wrap_with_forall(def2, &free_vars));
+            definitions.push(self.wrap_with_forall(neg_def1, &free_vars));
+            definitions.push(self.wrap_with_forall(neg_def2, &free_vars));
         }
 
         def_atom
