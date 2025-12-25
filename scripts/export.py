@@ -76,7 +76,11 @@ def load_problem_set(root: Path, problem_set_name: str) -> set[str]:
 
     # Filter problems
     matching = set()
-    for path, meta in metadata.items():
+    total = len(metadata)
+    for i, (path, meta) in enumerate(metadata.items(), 1):
+        if i % 5000 == 0 or i == total:
+            print(f"\r  Filtering problems: {i}/{total}", end="", flush=True)
+
         # Status filter
         if "status" in filters:
             if meta.get("status", "").lower() not in [s.lower() for s in filters["status"]]:
@@ -133,6 +137,7 @@ def load_problem_set(root: Path, problem_set_name: str) -> set[str]:
         problem_name = path.split("/")[-1] if "/" in path else path
         matching.add(problem_name)
 
+    print()  # newline after progress
     return matching
 
 
@@ -145,30 +150,42 @@ def load_benchmark_results(runs_dir: Path) -> list:
     if not runs_dir.exists():
         return results
 
+    # First count total files for progress
+    all_files = []
     for prover_dir in sorted(runs_dir.iterdir()):
         if not prover_dir.is_dir():
             continue
-        prover = prover_dir.name
-
         for preset_dir in sorted(prover_dir.iterdir()):
             if not preset_dir.is_dir():
                 continue
-            preset = preset_dir.name
+            all_files.extend(preset_dir.glob("*.json"))
 
-            for result_file in sorted(preset_dir.glob("*.json")):
-                try:
-                    with open(result_file) as f:
-                        data = json.load(f)
-                    results.append({
-                        "prover": prover,
-                        "preset": preset,
-                        "problem": data["problem"],
-                        "status": data["status"],
-                        "time_s": data["time_s"],
-                    })
-                except Exception:
-                    continue
+    total = len(all_files)
+    if total == 0:
+        return results
 
+    for i, result_file in enumerate(all_files, 1):
+        if i % 1000 == 0 or i == total:
+            print(f"\r  Loading results: {i}/{total}", end="", flush=True)
+
+        try:
+            # Extract prover/preset from path
+            preset = result_file.parent.name
+            prover = result_file.parent.parent.name
+
+            with open(result_file) as f:
+                data = json.load(f)
+            results.append({
+                "prover": prover,
+                "preset": preset,
+                "problem": data["problem"],
+                "status": data["status"],
+                "time_s": data["time_s"],
+            })
+        except Exception:
+            continue
+
+    print()  # newline after progress
     return results
 
 
@@ -265,7 +282,7 @@ def export_benchmarks(
     """Export benchmark results to JSON."""
     runs_dir = root / ".data" / "runs"
 
-    print(f"Loading benchmark results from {runs_dir}...")
+    print(f"Loading benchmark results...")
     results = load_benchmark_results(runs_dir)
     print(f"  Loaded {len(results)} results")
 
@@ -278,17 +295,20 @@ def export_benchmarks(
     if problem_set_name:
         print(f"Loading problem set '{problem_set_name}'...")
         problem_set = load_problem_set(root, problem_set_name)
-        print(f"  Problem set contains {len(problem_set)} problems")
+        print(f"  Found {len(problem_set)} matching problems")
 
     # Filter results
     if problem_set or prover or preset or base_only:
+        print("Filtering results...")
+        before = len(results)
         results = filter_results(results, problem_set, prover, preset, base_only)
-        print(f"  After filtering: {len(results)} results")
+        print(f"  {before} -> {len(results)} results")
 
     if not results:
         print("No results match the filters")
         return False
 
+    print("Computing statistics...")
     summary = compute_benchmark_summary(results)
     problems = compute_problem_comparison(results)
     found_configs = sorted(set(f"{r['prover']}/{r['preset']}" for r in results))
