@@ -531,6 +531,7 @@ fn parse_name(input: &str) -> IResult<&str, &str> {
 }
 
 /// Parse a single-quoted name
+/// Handles escape sequences: \' for quote, \\ for backslash, '' for quote
 fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
     if !input.starts_with('\'') {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -543,13 +544,17 @@ fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
     let chars: Vec<char> = input.chars().collect();
 
     while pos < chars.len() {
-        if chars[pos] == '\'' {
-            // Check if it's an escaped quote
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            // Backslash escape: \' or \\
+            pos += 2;
+        } else if chars[pos] == '\'' {
+            // Check if it's an escaped quote ''
             if pos + 1 < chars.len() && chars[pos + 1] == '\'' {
                 pos += 2; // Skip escaped quote
             } else {
-                // Found closing quote
-                return Ok((&input[pos + 1..], &input[0..pos + 1]));
+                // Found closing quote - calculate byte position
+                let byte_pos: usize = chars[..=pos].iter().map(|c| c.len_utf8()).sum();
+                return Ok((&input[byte_pos..], &input[0..byte_pos]));
             }
         } else {
             pos += 1;
@@ -577,6 +582,64 @@ fn parse_integer_name(input: &str) -> IResult<&str, &str> {
     }
 
     Ok((remaining, digits))
+}
+
+/// Parse a double-quoted string (distinct object)
+/// Handles escape sequences: \" for quote, \\ for backslash
+fn parse_double_quoted(input: &str) -> IResult<&str, &str> {
+    if !input.starts_with('"') {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
+    }
+
+    let mut pos = 1;
+    let chars: Vec<char> = input.chars().collect();
+
+    while pos < chars.len() {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            // Backslash escape: \" or \\
+            pos += 2;
+        } else if chars[pos] == '"' {
+            // Found closing quote - calculate byte position
+            let byte_pos: usize = chars[..=pos].iter().map(|c| c.len_utf8()).sum();
+            return Ok((&input[byte_pos..], &input[0..byte_pos]));
+        } else {
+            pos += 1;
+        }
+    }
+
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::Tag,
+    )))
+}
+
+/// Strip double quotes and unescape content
+fn strip_double_quotes(s: &str) -> String {
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        let inner = &s[1..s.len() - 1];
+        // Unescape: \" -> ", \\ -> \
+        let mut result = String::with_capacity(inner.len());
+        let mut chars = inner.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                if let Some(&next) = chars.peek() {
+                    if next == '"' || next == '\\' {
+                        result.push(chars.next().unwrap());
+                        continue;
+                    }
+                }
+                result.push(c);
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    } else {
+        s.to_string()
+    }
 }
 
 /// Parse a lower word (starts with lowercase)
@@ -636,15 +699,70 @@ fn parse_cnf_formula(input: &str) -> IResult<&str, Clause> {
 }
 
 /// Parse CNF disjunction
+/// Handles $true (makes clause a tautology) and $false (always false literal)
 fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
     separated_list1(tuple((multispace0, char('|'), multispace0)), parse_literal)(input)
-        .map(|(remaining, literals)| (remaining, Clause::new(literals)))
+        .map(|(remaining, literals)| {
+            // Check for $true - if present, clause is a tautology
+            let has_true = literals.iter().any(|lit| {
+                lit.polarity && lit.atom.predicate.name == "$true"
+            });
+
+            // Filter out $false literals (always false, don't contribute to satisfying the clause)
+            // A clause with only $false becomes the empty clause (contradiction)
+            let filtered: Vec<Literal> = literals
+                .into_iter()
+                .filter(|lit| {
+                    !(lit.polarity && lit.atom.predicate.name == "$false")
+                })
+                .collect();
+
+            // If clause had $true, add it back as a marker for tautology detection
+            if has_true {
+                (remaining, Clause::new(vec![Literal::positive(Atom {
+                    predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+                    args: vec![],
+                })]))
+            } else {
+                (remaining, Clause::new(filtered))
+            }
+        })
+}
+
+/// Parse $true as a literal (always true - makes clause a tautology)
+fn parse_cnf_true(input: &str) -> IResult<&str, Literal> {
+    let (input, _) = tag("$true")(input)?;
+    Ok((input, Literal::positive(Atom {
+        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
+        args: vec![],
+    })))
+}
+
+/// Parse $false as a literal (always false - contributes nothing to clause)
+fn parse_cnf_false(input: &str) -> IResult<&str, Literal> {
+    let (input, _) = tag("$false")(input)?;
+    Ok((input, Literal::positive(Atom {
+        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
+        args: vec![],
+    })))
 }
 
 /// Parse a literal
 fn parse_literal(input: &str) -> IResult<&str, Literal> {
     let (input, _) = multispace0(input)?;
     alt((
+        // $true and $false (before other atoms)
+        parse_cnf_true,
+        parse_cnf_false,
+        // ~$true and ~$false
+        map(
+            preceded(tuple((char('~'), multispace0)), parse_cnf_true),
+            |lit| Literal::negative(lit.atom),
+        ),
+        map(
+            preceded(tuple((char('~'), multispace0)), parse_cnf_false),
+            |lit| Literal::negative(lit.atom),
+        ),
         // ~atom
         map(
             preceded(tuple((char('~'), multispace0)), parse_atom),
@@ -721,7 +839,7 @@ fn parse_predicate(input: &str) -> IResult<&str, Atom> {
             input,
             Atom {
                 predicate: PredicateSymbol {
-                    name: name.to_string(),
+                    name,
                     arity: args.len(),
                 },
                 args,
@@ -733,7 +851,7 @@ fn parse_predicate(input: &str) -> IResult<&str, Atom> {
             input,
             Atom {
                 predicate: PredicateSymbol {
-                    name: name.to_string(),
+                    name,
                     arity: 0,
                 },
                 args: vec![],
@@ -747,8 +865,19 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
     alt((
         parse_function_term,
         parse_variable_term,
+        parse_distinct_object_term,
         parse_constant_term,
     ))(input)
+}
+
+/// Parse a distinct object term (double-quoted string like "Apple")
+fn parse_distinct_object_term(input: &str) -> IResult<&str, Term> {
+    let (input, quoted) = parse_double_quoted(input)?;
+    let name = strip_double_quotes(quoted);
+    Ok((
+        input,
+        Term::Constant(Constant { name }),
+    ))
 }
 
 /// Parse a function term
@@ -815,12 +944,34 @@ fn parse_lowercase_ident(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
-/// Strip quotes from a single-quoted string
-fn strip_quotes(s: &str) -> &str {
+/// Strip quotes from a single-quoted string and unescape content
+fn strip_quotes(s: &str) -> String {
     if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-        &s[1..s.len() - 1]
+        let inner = &s[1..s.len() - 1];
+        // Unescape: \' -> ', \\ -> \, '' -> '
+        let mut result = String::with_capacity(inner.len());
+        let mut chars = inner.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                if let Some(&next) = chars.peek() {
+                    if next == '\'' || next == '\\' {
+                        result.push(chars.next().unwrap());
+                        continue;
+                    }
+                }
+                result.push(c);
+            } else if c == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    chars.next(); // Skip second quote
+                }
+                result.push('\'');
+            } else {
+                result.push(c);
+            }
+        }
+        result
     } else {
-        s
+        s.to_string()
     }
 }
 
@@ -828,7 +979,7 @@ fn strip_quotes(s: &str) -> &str {
 /// Can be a lowercase identifier or a single-quoted string
 fn parse_functor_name(input: &str) -> IResult<&str, String> {
     alt((
-        map(parse_single_quoted, |s| strip_quotes(s).to_string()),
+        map(parse_single_quoted, |s| strip_quotes(s)),
         map(parse_lowercase_ident, |s| s.to_string()),
     ))(input)
 }
