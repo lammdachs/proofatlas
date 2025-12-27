@@ -31,7 +31,7 @@ fn main() {
     let mut config = SaturationConfig::default();
     let mut verbose = false;
     let mut include_dirs: Vec<String> = Vec::new();
-    let mut age_weight_ratio: f64 = 0.5;
+    let mut age_weight_ratio: f64 = 0.167;
 
     // Parse command line options
     let mut i = 2;
