@@ -43,15 +43,8 @@
       "domains": ["GRP", "RNG", "LAT", "BOO", "COL"]
     },
 
-    "krs": {
-      "description": "KRS domain problems for testing deep formulas",
-      "status": ["unsatisfiable"],
-      "format": ["cnf", "fof"],
-      "domains": ["KRS"]
-    },
-
     "parser_test": {
-      "description": "Problems testing parser fixes (nested biconditionals + quoted identifiers)",
+      "description": "All unsat100 problems that currently error (for regression testing)",
       "problems_file": ".data/parser_test_problems.txt"
     }
   }
