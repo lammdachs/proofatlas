@@ -518,8 +518,8 @@ impl ProofState {
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str) where status is one of:
-    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit)
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None))]
+    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, step limit)
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None, step_limit=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
@@ -527,6 +527,7 @@ impl ProofState {
         age_weight_ratio: Option<f64>,
         selector: Option<String>,
         weights_path: Option<String>,
+        step_limit: Option<usize>,
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
@@ -596,7 +597,7 @@ impl ProofState {
             max_clause_size: 100,
             timeout,
             literal_selection,
-            step_limit: None,
+            step_limit,
         };
 
         // Create saturation state from current clauses

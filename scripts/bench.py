@@ -706,6 +706,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     state.set_literal_selection(literal_selection)
 
     max_clauses = preset.get("max_clauses", 0)  # 0 means no limit
+    step_limit = preset.get("step_limit")  # None means no limit
     is_learned = "model" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
     selector = preset.get("model", "age_weight") if is_learned else "age_weight"
@@ -721,6 +722,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             float(age_weight_ratio) if not is_learned else None,
             selector,
             weights_path,
+            step_limit,
         )
     except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
@@ -829,6 +831,7 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
     timeout = preset.get("time_limit", 10)
     selection = preset.get("selection", 21)
     avatar = preset.get("avatar", "off")
+    activation_limit = preset.get("activation_limit")
 
     cmd = [
         str(binary),
@@ -836,8 +839,12 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         "--time_limit", str(timeout),
         "--selection", str(selection),
         "--avatar", avatar,
-        str(problem),
     ]
+
+    if activation_limit is not None:
+        cmd.extend(["--activation_limit", str(activation_limit)])
+
+    cmd.append(str(problem))
 
     start = time.time()
     try:
@@ -874,6 +881,7 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
 
     timeout = preset.get("TimeLimit", 10)
     selection = preset.get("Select", 1)
+    loops = preset.get("Loops")
 
     # SPASS requires TPTP format with -TPTP flag
     cmd = [
@@ -881,8 +889,12 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
         "-TPTP",
         f"-TimeLimit={timeout}",
         f"-Select={selection}",
-        str(problem),
     ]
+
+    if loops is not None:
+        cmd.append(f"-Loops={loops}")
+
+    cmd.append(str(problem))
 
     start = time.time()
     try:

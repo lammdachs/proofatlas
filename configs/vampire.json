@@ -42,6 +42,38 @@
       "time_limit": 10,
       "selection": 22,
       "avatar": "off"
+    },
+
+    "steps_sel0": {
+      "description": "1000 activations with selection 0 (all literals)",
+      "time_limit": 3600,
+      "activation_limit": 1000,
+      "selection": 0,
+      "avatar": "off"
+    },
+
+    "steps_sel20": {
+      "description": "1000 activations with selection 20 (all maximal)",
+      "time_limit": 3600,
+      "activation_limit": 1000,
+      "selection": 20,
+      "avatar": "off"
+    },
+
+    "steps_sel21": {
+      "description": "1000 activations with selection 21 (unique maximal)",
+      "time_limit": 3600,
+      "activation_limit": 1000,
+      "selection": 21,
+      "avatar": "off"
+    },
+
+    "steps_sel22": {
+      "description": "1000 activations with selection 22 (neg max-weight)",
+      "time_limit": 3600,
+      "activation_limit": 1000,
+      "selection": 22,
+      "avatar": "off"
     }
   }
 }

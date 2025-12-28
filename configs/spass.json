@@ -30,6 +30,27 @@
       "description": "10s with Select=2 (neg max-weight, like Vampire sel22)",
       "TimeLimit": 10,
       "Select": 2
+    },
+
+    "steps_sel20": {
+      "description": "1000 loops with Select=0 (all maximal)",
+      "TimeLimit": 3600,
+      "Loops": 1000,
+      "Select": 0
+    },
+
+    "steps_sel21": {
+      "description": "1000 loops with Select=1 (prefer negative)",
+      "TimeLimit": 3600,
+      "Loops": 1000,
+      "Select": 1
+    },
+
+    "steps_sel22": {
+      "description": "1000 loops with Select=2 (neg max-weight)",
+      "TimeLimit": 3600,
+      "Loops": 1000,
+      "Select": 2
     }
   }
 }
