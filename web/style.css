@@ -375,14 +375,161 @@ footer a:hover {
 }
 
 @media (max-width: 768px) {
+    .container {
+        padding: 10px;
+    }
+
+    header.hero {
+        padding: 20px 15px;
+        border-radius: 0;
+        margin: -10px -10px 20px -10px;
+    }
+
+    header.hero h1 {
+        font-size: 1.5em;
+    }
+
+    header.hero .tagline {
+        font-size: 1em;
+    }
+
+    header.hero .description {
+        font-size: 0.9em;
+    }
+
+    .main-nav {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .main-nav a {
+        font-size: 14px;
+        padding: 6px 12px;
+    }
+
+    main {
+        padding: 15px;
+        border-radius: 0;
+    }
+
+    .toolbar {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    #example-select,
+    #tptp-url,
+    #load-url-btn,
+    #clear-btn {
+        width: 100%;
+    }
+
+    #tptp-input {
+        height: 200px;
+        font-size: 12px;
+    }
+
     .control-section {
         flex-direction: column;
-        gap: 20px;
+        gap: 15px;
+        padding: 15px;
     }
-    
+
     .options {
         flex-direction: column;
         width: 100%;
+        gap: 12px;
+    }
+
+    .options label {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .options input[type="number"],
+    .options select {
+        width: 120px;
+    }
+
+    .prove-button {
+        width: 100%;
+    }
+
+    .clause-selector {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .clause-sets {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .proof-step {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .proof-step-clause {
+        white-space: normal;
+        word-break: break-all;
+        font-size: 12px;
+    }
+
+    .proof-step-info {
+        text-align: left;
+        font-size: 12px;
+    }
+
+    .stepper-controls {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .stepper-controls button {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    #step-counter {
+        width: 100%;
+        text-align: center;
+        order: -1;
+        padding: 5px 0;
+    }
+
+    .clause-list {
+        font-size: 11px;
+    }
+
+    .given-clause {
+        font-size: 12px;
+        word-break: break-all;
+    }
+
+    footer {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    header.hero h1 {
+        font-size: 1.3em;
+    }
+
+    .main-nav a {
+        font-size: 12px;
+        padding: 5px 10px;
+    }
+
+    #tptp-input {
+        height: 150px;
+    }
+
+    .options input[type="number"],
+    .options select {
+        width: 100px;
     }
 }
 /* Proof Inspector Styles */
