@@ -58,6 +58,7 @@ def find_project_root() -> Path:
 # Job management
 JOB_FILE = ".data/bench_job.json"
 LOG_FILE = ".data/bench.log"
+PID_FILE = ".data/bench_pids.txt"
 
 
 def get_job_file(base_dir: Path) -> Path:
@@ -66,6 +67,53 @@ def get_job_file(base_dir: Path) -> Path:
 
 def get_log_file(base_dir: Path) -> Path:
     return base_dir / LOG_FILE
+
+
+def get_pid_file(base_dir: Path) -> Path:
+    return base_dir / PID_FILE
+
+
+def register_pid(base_dir: Path, pid: int):
+    """Register a spawned process PID for cleanup (Unix only)."""
+    if sys.platform == "win32":
+        return
+    pid_file = get_pid_file(base_dir)
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(pid_file, "a") as f:
+        f.write(f"{pid}\n")
+
+
+def clear_pids(base_dir: Path):
+    """Clear the PID tracking file."""
+    pid_file = get_pid_file(base_dir)
+    if pid_file.exists():
+        pid_file.unlink()
+
+
+def kill_tracked_pids(base_dir: Path) -> int:
+    """Kill all tracked PIDs and clear the file (Unix only)."""
+    if sys.platform == "win32":
+        return 0
+    pid_file = get_pid_file(base_dir)
+    if not pid_file.exists():
+        return 0
+
+    killed = 0
+    try:
+        pids = pid_file.read_text().splitlines()
+        for line in pids:
+            if not line:
+                continue
+            try:
+                os.kill(int(line), signal.SIGKILL)
+                killed += 1
+            except (ValueError, OSError, ProcessLookupError):
+                pass
+        pid_file.unlink(missing_ok=True)
+    except (IOError, OSError):
+        pass
+
+    return killed
 
 
 def is_process_running(pid: int) -> bool:
@@ -141,16 +189,28 @@ def clear_job_status(base_dir: Path):
 
 def kill_job(base_dir: Path) -> bool:
     job = get_job_status(base_dir)
-    if not job:
-        return False
 
-    try:
-        os.kill(job["pid"], signal.SIGTERM)
-        clear_job_status(base_dir)
-        return True
-    except (OSError, ProcessLookupError):
-        clear_job_status(base_dir)
-        return False
+    # Step 1: Clear job status to stop spawning new processes
+    clear_job_status(base_dir)
+
+    # Step 2: Kill the main daemon process
+    if job:
+        try:
+            os.kill(job['pid'], signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+    # Step 3: Keep killing tracked PIDs until none are left (Unix only)
+    if sys.platform != "win32":
+        max_iterations = 10
+        for _ in range(max_iterations):
+            killed = kill_tracked_pids(base_dir)
+            if killed == 0:
+                break
+            # Brief pause to let new PIDs get registered by dying workers
+            time.sleep(0.2)
+
+    return job is not None
 
 
 def format_job_status(job: dict) -> str:
@@ -848,15 +908,20 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
 
     start = time.time()
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout + 5,  # grace period
         )
-        output = result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
-        return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
+        register_pid(base_dir, proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout + 5)
+            output = stdout + stderr
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
     except Exception:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
 
@@ -869,6 +934,8 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         status = "saturated"
     elif "Termination reason: Time limit" in output or elapsed >= timeout:
         status = "timeout"
+    elif "Termination reason: Memory limit" in output:
+        status = "timeout"  # Memory limit treated as resource limit
     else:
         status = "error"
 
@@ -898,16 +965,21 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
 
     start = time.time()
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout + 5,
             env={**os.environ, "TPTP": str(tptp_root)},
         )
-        output = result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
-        return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
+        register_pid(base_dir, proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout + 5)
+            output = stdout + stderr
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
     except Exception:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
 
@@ -972,76 +1044,118 @@ def save_run_result(base_dir: Path, prover: str, preset_name: str, result: Bench
         os.fsync(f.fileno())
 
 
+def _run_single_problem(args):
+    """Worker function for parallel execution."""
+    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun = args
+
+    try:
+        # Check if already evaluated (skip unless --rerun)
+        existing = load_run_result(base_dir, prover, preset_name, problem)
+        if existing and not rerun:
+            return ("skip", existing)
+
+        if prover == "proofatlas":
+            result = run_proofatlas(
+                problem, base_dir, preset, tptp_root,
+                weights_path=weights_path, collect_trace=collect_trace,
+                trace_preset=trace_preset,
+            )
+        elif prover == "vampire":
+            result = run_vampire(problem, base_dir, preset, binary, tptp_root)
+        elif prover == "spass":
+            result = run_spass(problem, base_dir, preset, binary, tptp_root)
+        else:
+            result = BenchResult(problem=problem.name, status="error", time_s=0)
+
+        # Save individual result to .data/runs/
+        save_run_result(base_dir, prover, preset_name, result)
+        return ("run", result)
+    except Exception as e:
+        return ("error", BenchResult(problem=problem.name, status="error", time_s=0))
+
+
 def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    prover: str, preset: dict, log_file,
                    preset_name: str = None, weights_path: str = None,
                    binary: Path = None, trace_preset: str = None,
-                   rerun: bool = False):
+                   rerun: bool = False, n_jobs: int = 1):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
         selector_type = "learned" if "model" in preset else "age_weight"
-        print(f"\nEvaluating {len(problems)} problems with {selector_type}")
+        print(f"\nEvaluating {len(problems)} problems with {selector_type}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")
     else:
-        print(f"\nEvaluating {len(problems)} problems")
+        print(f"\nEvaluating {len(problems)} problems" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
 
     # Always collect traces for proofatlas
     collect_trace = (prover == "proofatlas")
 
-    for i, problem in enumerate(problems, 1):
-        # Periodic garbage collection to prevent OOM
-        if i % 100 == 0:
-            import gc
-            gc.collect()
+    # Prepare work items
+    work_items = [
+        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun)
+        for problem in problems
+    ]
 
-        try:
-            # Check if already evaluated (skip unless --rerun)
-            existing = load_run_result(base_dir, prover, preset_name, problem)
-            if existing and not rerun:
-                stats[existing.status] = stats.get(existing.status, 0) + 1
-                stats["skip"] += 1
+    if n_jobs > 1:
+        # Parallel execution
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
-                log_file.write(f"SKIP:{i}:{len(problems)}:{problem.name}\n")
+        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+            futures = {executor.submit(_run_single_problem, item): i for i, item in enumerate(work_items)}
+            completed = 0
+
+            for future in as_completed(futures):
+                completed += 1
+                try:
+                    status, result = future.result()
+                    if status == "skip":
+                        stats[result.status] = stats.get(result.status, 0) + 1
+                        stats["skip"] += 1
+                        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                        print(f"[{completed}/{len(problems)}] S{symbol} {result.problem} (cached)")
+                    else:
+                        stats[result.status] = stats.get(result.status, 0) + 1
+                        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                        print(f"[{completed}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
+
+                    log_file.write(f"PROGRESS:{completed}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
+                    log_file.flush()
+                    sys.stdout.flush()
+                except Exception as e:
+                    print(f"ERROR: {e}")
+                    stats["error"] += 1
+    else:
+        # Sequential execution
+        for i, item in enumerate(work_items, 1):
+            # Periodic garbage collection to prevent OOM
+            if i % 100 == 0:
+                import gc
+                gc.collect()
+
+            try:
+                status, result = _run_single_problem(item)
+                if status == "skip":
+                    stats[result.status] = stats.get(result.status, 0) + 1
+                    stats["skip"] += 1
+                    symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                    print(f"[{i}/{len(problems)}] S{symbol} {result.problem} (cached)")
+                else:
+                    stats[result.status] = stats.get(result.status, 0) + 1
+                    symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                    print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
+
+                log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
                 log_file.flush()
-
-                symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[existing.status]
-                print(f"[{i}/{len(problems)}] S{symbol} {existing.problem} (cached)")
                 sys.stdout.flush()
-                continue
-
-            if prover == "proofatlas":
-                result = run_proofatlas(
-                    problem, base_dir, preset, tptp_root,
-                    weights_path=weights_path, collect_trace=collect_trace,
-                    trace_preset=trace_preset,
-                )
-            elif prover == "vampire":
-                result = run_vampire(problem, base_dir, preset, binary, tptp_root)
-            elif prover == "spass":
-                result = run_spass(problem, base_dir, preset, binary, tptp_root)
-            else:
-                result = BenchResult(problem=problem.name, status="error", time_s=0)
-
-            stats[result.status] = stats.get(result.status, 0) + 1
-
-            # Save individual result to .data/runs/
-            save_run_result(base_dir, prover, preset_name, result)
-
-            log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
-            log_file.flush()
-
-            symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
-            print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
-            sys.stdout.flush()
-        except Exception as e:
-            print(f"ERROR processing {problem.name}: {e}")
-            sys.stdout.flush()
-            import traceback
-            traceback.print_exc()
-            sys.stdout.flush()
+            except Exception as e:
+                print(f"ERROR processing {item[0].name}: {e}")
+                sys.stdout.flush()
+                import traceback
+                traceback.print_exc()
+                sys.stdout.flush()
 
     # Print summary (individual results saved to .data/runs/)
     # Note: skip count is separate (skipped problems are also counted in their status)
@@ -1108,6 +1222,8 @@ def main():
                        help="Re-evaluate problems even if cached results exist")
     parser.add_argument("--trace-preset",
                        help="Preset name for trace collection (default: solver preset)")
+    parser.add_argument("--n-jobs", type=int, default=1,
+                       help="Number of parallel jobs (default: 1)")
 
     # Job management
     parser.add_argument("--track", action="store_true",
@@ -1132,10 +1248,11 @@ def main():
             return
 
     if args.kill:
-        if kill_job(base_dir):
+        had_job = kill_job(base_dir)
+        if had_job:
             print("Job killed.")
         else:
-            print("No job running.")
+            print("No job file found. Killing any orphaned processes...")
         return
 
     existing = get_job_status(base_dir)
@@ -1261,7 +1378,8 @@ def main():
     print(f"Configs: {len(runs)}, Problems: {len(problems)}")
     sys.stdout.flush()
 
-    # Save job status (grandchild saves its own status)
+    # Clear any stale PID tracking and save job status
+    clear_pids(base_dir)
     job_file_error = None
     try:
         save_job_status(base_dir, os.getpid(), sys.argv, len(runs))
@@ -1279,6 +1397,7 @@ def main():
         sig_name = sig_names.get(signum, f"signal {signum}")
         print(f"\nRECEIVED {sig_name} - exiting")
         sys.stdout.flush()
+        clear_pids(base_dir)
         clear_job_status(base_dir)
         sys.stdout.close()
         os._exit(128 + signum)
@@ -1356,7 +1475,7 @@ def main():
                 log_file=sys.stdout,
                 preset_name=preset_name, weights_path=str(weights_path) if weights_path else None,
                 binary=binary, trace_preset=trace_preset,
-                rerun=args.rerun,
+                rerun=args.rerun, n_jobs=args.n_jobs,
             )
 
     except Exception as e:
@@ -1364,6 +1483,7 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
+        clear_pids(base_dir)
         clear_job_status(base_dir)
         sys.stdout.close()
     os._exit(0)
