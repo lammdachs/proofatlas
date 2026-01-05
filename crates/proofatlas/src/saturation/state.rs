@@ -24,7 +24,8 @@ pub struct SaturationConfig {
     pub max_clause_size: usize,
     pub timeout: Duration,
     pub literal_selection: LiteralSelectionStrategy,
-    pub step_limit: Option<usize>,
+    /// Memory limit for clause storage in MB (directly comparable across provers)
+    pub max_clause_memory_mb: Option<usize>,
 }
 
 /// Literal selection strategies (numbers match Vampire's --selection option)
@@ -54,7 +55,7 @@ impl Default for SaturationConfig {
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
             literal_selection: LiteralSelectionStrategy::Sel0,
-            step_limit: None,
+            max_clause_memory_mb: None,
         }
     }
 }
@@ -122,6 +123,8 @@ pub struct SaturationState {
     clause_selector: Box<dyn ClauseSelector>,
     /// Literal selector
     literal_selector: Box<dyn LiteralSelector>,
+    /// Tracked clause memory usage in bytes
+    clause_memory_bytes: usize,
 }
 
 impl SaturationState {
@@ -139,6 +142,7 @@ impl SaturationState {
         let mut clauses = Vec::new();
         let mut unprocessed = VecDeque::new();
         let mut subsumption_checker = SubsumptionChecker::new();
+        let mut clause_memory_bytes = 0usize;
 
         let mut proof_steps = Vec::new();
 
@@ -155,6 +159,9 @@ impl SaturationState {
             }
 
             clause.id = Some(clause_idx);
+
+            // Track clause memory
+            clause_memory_bytes += clause.memory_bytes();
 
             // Add to subsumption checker
             let idx = subsumption_checker.add_clause(oriented.clone());
@@ -196,6 +203,7 @@ impl SaturationState {
             config,
             clause_selector,
             literal_selector,
+            clause_memory_bytes,
         }
     }
 
@@ -218,12 +226,11 @@ impl SaturationState {
     pub fn saturate(mut self) -> SaturationResult {
         let start_time = Instant::now();
         let mut iterations = 0;
-        let mut steps = 0;
 
         while let Some(given_idx) = self.select_given_clause() {
-            // Check step limit if specified
-            if let Some(limit) = self.config.step_limit {
-                if steps >= limit {
+            // Check clause memory limit (directly comparable across provers)
+            if let Some(limit_mb) = self.config.max_clause_memory_mb {
+                if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
                     return SaturationResult::ResourceLimit(
                         self.proof_steps.clone(),
                         self.clauses.clone(),
@@ -249,7 +256,6 @@ impl SaturationState {
             }
 
             iterations += 1;
-            steps += 1;
 
             // Process the given clause
             let given_clause = &self.clauses[given_idx];
@@ -432,6 +438,9 @@ impl SaturationState {
             .subsumption_checker
             .add_clause(demodulated_clause.clone());
         assert_eq!(idx_from_subsumption, new_idx);
+
+        // Track clause memory
+        self.clause_memory_bytes += clause_with_id.memory_bytes();
 
         self.clauses.push(clause_with_id.clone());
         self.unprocessed.push_back(new_idx);

@@ -113,7 +113,7 @@ impl ProofAtlasWasm {
             max_clause_size: 100,
             timeout: Duration::from_millis(options.timeout_ms as u64),
             literal_selection,
-            step_limit: None,
+            max_clause_memory_mb: None,
         };
 
         web_sys::console::log_1(&"Config created, creating clause selector...".into());

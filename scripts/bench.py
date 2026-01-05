@@ -706,7 +706,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     state.set_literal_selection(literal_selection)
 
     max_clauses = preset.get("max_clauses", 0)  # 0 means no limit
-    step_limit = preset.get("step_limit")  # None means no limit
+    max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
     is_learned = "model" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
     selector = preset.get("model", "age_weight") if is_learned else "age_weight"
@@ -722,7 +722,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             float(age_weight_ratio) if not is_learned else None,
             selector,
             weights_path,
-            step_limit,
+            max_clause_memory_mb,
         )
     except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
@@ -831,7 +831,7 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
     timeout = preset.get("time_limit", 10)
     selection = preset.get("selection", 21)
     avatar = preset.get("avatar", "off")
-    activation_limit = preset.get("activation_limit")
+    memory_limit = preset.get("memory_limit")
 
     cmd = [
         str(binary),
@@ -841,8 +841,8 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         "--avatar", avatar,
     ]
 
-    if activation_limit is not None:
-        cmd.extend(["--activation_limit", str(activation_limit)])
+    if memory_limit is not None:
+        cmd.extend(["--memory_limit", str(memory_limit)])
 
     cmd.append(str(problem))
 
@@ -881,7 +881,7 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
 
     timeout = preset.get("TimeLimit", 10)
     selection = preset.get("Select", 1)
-    loops = preset.get("Loops")
+    memory = preset.get("Memory")
 
     # SPASS requires TPTP format with -TPTP flag
     cmd = [
@@ -891,8 +891,8 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
         f"-Select={selection}",
     ]
 
-    if loops is not None:
-        cmd.append(f"-Loops={loops}")
+    if memory is not None:
+        cmd.append(f"-Memory={memory}")
 
     cmd.append(str(problem))
 
@@ -1096,8 +1096,8 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark and train theorem provers")
     parser.add_argument("--prover",
                        help="Prover to run (default: all available)")
-    parser.add_argument("--preset",
-                       help="Solver preset (default: all)")
+    parser.add_argument("--preset", nargs="*",
+                       help="Solver preset(s) (default: all)")
     parser.add_argument("--problem-set",
                        help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--force-train", action="store_true",
@@ -1176,9 +1176,10 @@ def main():
         presets = prover_info["config"].get("presets", {})
 
         if args.preset:
-            if args.preset not in presets:
-                continue  # Skip this prover if preset not available
-            preset_names = [args.preset]
+            # Filter to only presets that exist for this prover
+            preset_names = [p for p in args.preset if p in presets]
+            if not preset_names:
+                continue  # Skip this prover if no matching presets
         else:
             preset_names = list(presets.keys())
 

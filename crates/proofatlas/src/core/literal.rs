@@ -29,6 +29,17 @@ impl Atom {
     pub fn is_equality(&self) -> bool {
         self.predicate.name == "=" && self.predicate.arity == 2
     }
+
+    /// Estimate the heap memory usage of this atom in bytes
+    pub fn memory_bytes(&self) -> usize {
+        // Predicate name
+        let pred_bytes = self.predicate.name.capacity();
+        // Vec overhead: capacity * size_of::<Term>
+        let vec_bytes = self.args.capacity() * std::mem::size_of::<super::Term>();
+        // Term memory
+        let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
+        pred_bytes + vec_bytes + args_bytes
+    }
 }
 
 impl Literal {
@@ -61,6 +72,11 @@ impl Literal {
         for term in &self.atom.args {
             term.collect_variables(vars);
         }
+    }
+
+    /// Estimate the heap memory usage of this literal in bytes
+    pub fn memory_bytes(&self) -> usize {
+        self.atom.memory_bytes()
     }
 }
 

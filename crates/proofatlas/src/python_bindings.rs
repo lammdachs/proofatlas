@@ -515,11 +515,12 @@ impl ProofState {
     ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
     ///     selector: Clause selector type: "age_weight" (default), "gcn", or "mlp"
     ///     weights_path: Path to safetensors weights file (required for gcn/mlp)
+    ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str) where status is one of:
-    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, step limit)
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None, step_limit=None))]
+    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, max_clause_memory_mb)
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None, max_clause_memory_mb=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
@@ -527,7 +528,7 @@ impl ProofState {
         age_weight_ratio: Option<f64>,
         selector: Option<String>,
         weights_path: Option<String>,
-        step_limit: Option<usize>,
+        max_clause_memory_mb: Option<usize>,
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
@@ -597,7 +598,7 @@ impl ProofState {
             max_clause_size: 100,
             timeout,
             literal_selection,
-            step_limit,
+            max_clause_memory_mb,
         };
 
         // Create saturation state from current clauses

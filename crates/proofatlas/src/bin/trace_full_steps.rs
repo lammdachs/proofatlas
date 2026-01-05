@@ -65,7 +65,7 @@ fn main() {
         }
     };
 
-    println!("=== Right Identity Test - Trace (100 steps) ===\n");
+    println!("=== Right Identity Test - Trace (100 iterations) ===\n");
     println!("Initial clauses:");
     for (i, clause) in formula.clauses.iter().enumerate() {
         println!("[{}] {}", i, clause);
@@ -73,14 +73,12 @@ fn main() {
 
     // Configure saturation
     let mut config = SaturationConfig::default();
-    config.step_limit = Some(100);
-    config.max_clauses = 1000; // Allow more clauses to see what happens
-    config.literal_selection = LiteralSelectionStrategy::Sel0;
+    config.max_iterations = 100;
     config.max_clauses = 10000;
+    config.literal_selection = LiteralSelectionStrategy::Sel0;
     config.timeout = std::time::Duration::from_secs(60);
 
-    let step_limit = config.step_limit.unwrap();
-    println!("\nRunning saturation for {} steps...\n", step_limit);
+    println!("\nRunning saturation for {} iterations...\n", config.max_iterations);
 
     // Create saturation state and run
     let state = SaturationState::new(formula.clauses, config, clause_selector);
@@ -109,9 +107,8 @@ fn main() {
         proofatlas::SaturationResult::ResourceLimit(steps, _) => {
             println!("RESOURCE LIMIT REACHED");
             println!(
-                "Generated {} clauses in {} steps\n",
-                steps.len(),
-                step_limit
+                "Generated {} clauses\n",
+                steps.len()
             );
 
             println!("=== All Derived Clauses ===");

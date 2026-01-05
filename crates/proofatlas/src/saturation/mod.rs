@@ -17,15 +17,3 @@ pub fn saturate(
     let state = SaturationState::new(formula.clauses, config, clause_selector);
     state.saturate()
 }
-
-/// Run saturation on a CNF formula with a step limit
-pub fn saturate_with_steps(
-    formula: CNFFormula,
-    mut config: SaturationConfig,
-    clause_selector: Box<dyn ClauseSelector>,
-    steps: Option<usize>,
-) -> SaturationResult {
-    config.step_limit = steps;
-    let state = SaturationState::new(formula.clauses, config, clause_selector);
-    state.saturate()
-}

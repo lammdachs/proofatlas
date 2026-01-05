@@ -50,17 +50,17 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
 
     println!("Testing clause generation...\n");
 
-    // Test different step limits
-    for &steps in &[10, 20, 50, 100, 200] {
+    // Test different iteration limits
+    for &iterations in &[10, 20, 50, 100, 200] {
         let selector = create_selector();
 
         let config = SaturationConfig {
             max_clauses: 10000,
-            max_iterations: 10000,
+            max_iterations: iterations,
             max_clause_size: 100,
             timeout: Duration::from_secs(300),
             literal_selection: LiteralSelectionStrategy::Sel0,
-            step_limit: Some(steps),
+            max_clause_memory_mb: None,
         };
 
         let state = SaturationState::new(formula.clauses.clone(), config, selector);
@@ -68,13 +68,13 @@ cnf(goal, negated_conjecture, mult(c,e) != c).
         match state.saturate() {
             SaturationResult::ResourceLimit(proof_steps, _) => {
                 println!(
-                    "After {} steps: {} clauses generated",
-                    steps,
+                    "After {} iterations: {} clauses generated",
+                    iterations,
                     proof_steps.len()
                 );
             }
             SaturationResult::Proof(proof) => {
-                println!("PROOF FOUND after {} steps!", proof.steps.len());
+                println!("PROOF FOUND after {} iterations!", proof.steps.len());
                 println!("Empty clause at index: {}", proof.empty_clause_idx);
 
                 // Clean up temp file

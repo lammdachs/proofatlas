@@ -36,34 +36,34 @@
       "age_weight_ratio": 0.167
     },
 
-    "steps_sel0": {
-      "description": "1000 steps with sel0 (all literals)",
+    "memory_sel0": {
+      "description": "64MB clause memory with sel0",
       "timeout": 3600,
-      "step_limit": 1000,
+      "max_clause_memory_mb": 64,
       "literal_selection": 0,
       "age_weight_ratio": 0.167
     },
 
-    "steps_sel20": {
-      "description": "1000 steps with sel20 (all maximal)",
+    "memory_sel20": {
+      "description": "64MB clause memory with sel20",
       "timeout": 3600,
-      "step_limit": 1000,
+      "max_clause_memory_mb": 64,
       "literal_selection": 20,
       "age_weight_ratio": 0.167
     },
 
-    "steps_sel21": {
-      "description": "1000 steps with sel21 (unique maximal)",
+    "memory_sel21": {
+      "description": "64MB clause memory with sel21",
       "timeout": 3600,
-      "step_limit": 1000,
+      "max_clause_memory_mb": 64,
       "literal_selection": 21,
       "age_weight_ratio": 0.167
     },
 
-    "steps_sel22": {
-      "description": "1000 steps with sel22 (neg max-weight)",
+    "memory_sel22": {
+      "description": "64MB clause memory with sel22",
       "timeout": 3600,
-      "step_limit": 1000,
+      "max_clause_memory_mb": 64,
       "literal_selection": 22,
       "age_weight_ratio": 0.167
     },

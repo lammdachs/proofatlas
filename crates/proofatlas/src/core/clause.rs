@@ -157,6 +157,15 @@ impl Clause {
             }
         }
     }
+
+    /// Estimate the heap memory usage of this clause in bytes
+    pub fn memory_bytes(&self) -> usize {
+        // Vec overhead: capacity * size_of::<Literal>
+        let vec_bytes = self.literals.capacity() * std::mem::size_of::<super::Literal>();
+        // Literal memory
+        let lits_bytes: usize = self.literals.iter().map(|l| l.memory_bytes()).sum();
+        vec_bytes + lits_bytes
+    }
 }
 
 impl fmt::Display for Clause {
