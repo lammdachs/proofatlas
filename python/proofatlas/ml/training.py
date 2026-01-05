@@ -30,6 +30,105 @@ from .config import SelectorConfig
 
 
 # =============================================================================
+# Contrastive Loss
+# =============================================================================
+
+
+def info_nce_loss(
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """
+    InfoNCE contrastive loss for clause selection.
+
+    For each positive (proof clause), compute loss against all negatives.
+
+    Args:
+        scores: [batch_size] clause scores from model
+        labels: [batch_size] binary labels (1=proof clause, 0=not)
+        temperature: softmax temperature (lower = sharper)
+
+    Returns:
+        Scalar loss
+    """
+    scores = scores / temperature
+
+    pos_mask = labels.bool()
+    neg_mask = ~pos_mask
+
+    num_pos = pos_mask.sum()
+    num_neg = neg_mask.sum()
+
+    if num_pos == 0 or num_neg == 0:
+        # Fallback to BCE if no positive/negative examples
+        return F.binary_cross_entropy_with_logits(scores, labels.float())
+
+    pos_scores = scores[pos_mask]  # [num_pos]
+    neg_scores = scores[neg_mask]  # [num_neg]
+
+    # For each positive, compute log-softmax over (positive, all negatives)
+    # This is equivalent to: -log(exp(pos) / (exp(pos) + sum(exp(neg))))
+
+    # Numerically stable: log_softmax = pos - logsumexp([pos, neg1, neg2, ...])
+    neg_logsumexp = torch.logsumexp(neg_scores, dim=0)  # scalar
+
+    # For each positive: loss = -pos + log(exp(pos) + exp(neg_logsumexp))
+    #                         = -pos + logsumexp([pos, neg_logsumexp])
+    losses = -pos_scores + torch.logsumexp(
+        torch.stack([pos_scores, neg_logsumexp.expand_as(pos_scores)], dim=0),
+        dim=0
+    )
+
+    return losses.mean()
+
+
+def margin_ranking_loss(
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    margin: float = 1.0,
+    num_pairs: int = 16,
+) -> torch.Tensor:
+    """
+    Pairwise margin ranking loss for clause selection.
+
+    Sample (positive, negative) pairs and train positive to score higher.
+
+    Args:
+        scores: [batch_size] clause scores from model
+        labels: [batch_size] binary labels (1=proof clause, 0=not)
+        margin: margin between positive and negative scores
+        num_pairs: number of pairs to sample per positive
+
+    Returns:
+        Scalar loss
+    """
+    pos_mask = labels.bool()
+    neg_mask = ~pos_mask
+
+    num_pos = pos_mask.sum()
+    num_neg = neg_mask.sum()
+
+    if num_pos == 0 or num_neg == 0:
+        return F.binary_cross_entropy_with_logits(scores, labels.float())
+
+    pos_scores = scores[pos_mask]  # [num_pos]
+    neg_scores = scores[neg_mask]  # [num_neg]
+
+    # Sample negative indices for each positive
+    neg_indices = torch.randint(0, num_neg, (num_pos, num_pairs), device=scores.device)
+    sampled_neg = neg_scores[neg_indices]  # [num_pos, num_pairs]
+
+    # Expand positive scores for pairwise comparison
+    pos_expanded = pos_scores.unsqueeze(1).expand(-1, num_pairs)  # [num_pos, num_pairs]
+
+    # Margin ranking loss: max(0, margin - (pos - neg))
+    losses = F.relu(margin - (pos_expanded - sampled_neg))
+
+    return losses.mean()
+
+
+# =============================================================================
 # Dataset
 # =============================================================================
 
@@ -110,7 +209,10 @@ def collate_clause_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
             pool_matrix[i, offset:offset + n] = 1.0 / n
             offset += n
 
-    labels = torch.tensor([b["label"] for b in batch], dtype=torch.long)
+    # Labels can be binary (0/1) or indices - handle both
+    raw_labels = [b["label"] for b in batch]
+    # Use long for indices (legacy), but the loss functions handle conversion
+    labels = torch.tensor(raw_labels, dtype=torch.long)
 
     return {
         "node_features": node_features,
@@ -147,29 +249,71 @@ if LIGHTNING_AVAILABLE:
             # Track whether model needs adjacency matrix
             self.needs_adj = config.model.type in ["gcn", "gat", "graphsage", "gnn_transformer"]
 
+            # Loss configuration
+            self.loss_type = getattr(config.training, 'loss_type', 'info_nce')
+            self.temperature = getattr(config.training, 'temperature', 1.0)
+
         def forward(self, node_features, adj, pool_matrix):
             if self.needs_adj:
                 return self.model(node_features, adj, pool_matrix)
             else:
                 return self.model(node_features, pool_matrix)
 
+        def _compute_loss(self, scores, labels):
+            """Compute loss based on configuration."""
+            if self.loss_type == 'info_nce':
+                return info_nce_loss(scores, labels, temperature=self.temperature)
+            elif self.loss_type == 'margin':
+                return margin_ranking_loss(scores, labels)
+            elif self.loss_type == 'bce':
+                return F.binary_cross_entropy_with_logits(scores, labels.float())
+            else:
+                # Legacy: cross-entropy for multi-class selection
+                return F.cross_entropy(scores, labels)
+
+        def _compute_metrics(self, scores, labels):
+            """Compute ranking metrics."""
+            pos_mask = labels.bool()
+            neg_mask = ~pos_mask
+
+            num_pos = pos_mask.sum()
+            num_neg = neg_mask.sum()
+
+            if num_pos == 0 or num_neg == 0:
+                return {"acc": torch.tensor(0.0), "mrr": torch.tensor(0.0)}
+
+            pos_scores = scores[pos_mask]
+            neg_scores = scores[neg_mask]
+
+            # Binary accuracy: predict positive if score > 0
+            preds = (scores > 0).float()
+            acc = (preds == labels.float()).float().mean()
+
+            # Mean Reciprocal Rank: for each positive, what's its rank among all?
+            # Higher score = better rank (rank 1 is best)
+            all_scores = scores.unsqueeze(0)  # [1, batch]
+            pos_ranks = (scores.unsqueeze(1) < all_scores).sum(dim=1).float() + 1  # [batch]
+            pos_ranks = pos_ranks[pos_mask]  # ranks of positive examples
+            mrr = (1.0 / pos_ranks).mean()
+
+            return {"acc": acc, "mrr": mrr}
+
         def training_step(self, batch, batch_idx):
             scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
-            loss = F.cross_entropy(scores, batch["labels"])
+            loss = self._compute_loss(scores, batch["labels"])
 
             self.log("train_loss", loss, prog_bar=True, sync_dist=True)
             return loss
 
         def validation_step(self, batch, batch_idx):
             scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
-            loss = F.cross_entropy(scores, batch["labels"])
+            loss = self._compute_loss(scores, batch["labels"])
 
-            # Accuracy
-            preds = scores.argmax(dim=-1)
-            acc = (preds == batch["labels"]).float().mean()
+            metrics = self._compute_metrics(scores, batch["labels"])
 
             self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-            self.log("val_acc", acc, prog_bar=True, sync_dist=True)
+            self.log("val_acc", metrics["acc"], prog_bar=True, sync_dist=True)
+            self.log("val_mrr", metrics["mrr"], prog_bar=True, sync_dist=True)
             return loss
 
         def configure_optimizers(self):

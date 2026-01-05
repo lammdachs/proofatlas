@@ -171,6 +171,9 @@ class TrainingParams:
     max_epochs: int = 100
     patience: int = 10
     gradient_clip: float = 1.0
+    # Loss configuration
+    loss_type: str = "info_nce"  # info_nce, margin, bce, cross_entropy
+    temperature: float = 1.0  # Temperature for InfoNCE loss
 
 
 @dataclass
