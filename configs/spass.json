@@ -32,24 +32,24 @@
       "Select": 2
     },
 
-    "memory_sel20": {
-      "description": "64MB memory limit with Select=0 (all maximal)",
-      "TimeLimit": 3600,
-      "Memory": 64,
+    "steps_sel20": {
+      "description": "512 loops with Select=0 (all maximal)",
+      "TimeLimit": 600,
+      "Loops": 512,
       "Select": 0
     },
 
-    "memory_sel21": {
-      "description": "64MB memory limit with Select=1 (prefer negative)",
-      "TimeLimit": 3600,
-      "Memory": 64,
+    "steps_sel21": {
+      "description": "512 loops with Select=1 (prefer negative)",
+      "TimeLimit": 600,
+      "Loops": 512,
       "Select": 1
     },
 
-    "memory_sel22": {
-      "description": "64MB memory limit with Select=2 (neg max-weight)",
-      "TimeLimit": 3600,
-      "Memory": 64,
+    "steps_sel22": {
+      "description": "512 loops with Select=2 (neg max-weight)",
+      "TimeLimit": 600,
+      "Loops": 512,
       "Select": 2
     }
   }

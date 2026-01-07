@@ -44,34 +44,34 @@
       "avatar": "off"
     },
 
-    "memory_sel0": {
-      "description": "64MB memory limit with selection 0",
-      "time_limit": 3600,
-      "memory_limit": 64,
+    "steps_sel0": {
+      "description": "512 activations with selection 0",
+      "time_limit": 600,
+      "activation_limit": 512,
       "selection": 0,
       "avatar": "off"
     },
 
-    "memory_sel20": {
-      "description": "64MB memory limit with selection 20",
-      "time_limit": 3600,
-      "memory_limit": 64,
+    "steps_sel20": {
+      "description": "512 activations with selection 20",
+      "time_limit": 600,
+      "activation_limit": 512,
       "selection": 20,
       "avatar": "off"
     },
 
-    "memory_sel21": {
-      "description": "64MB memory limit with selection 21",
-      "time_limit": 3600,
-      "memory_limit": 64,
+    "steps_sel21": {
+      "description": "512 activations with selection 21",
+      "time_limit": 600,
+      "activation_limit": 512,
       "selection": 21,
       "avatar": "off"
     },
 
-    "memory_sel22": {
-      "description": "64MB memory limit with selection 22",
-      "time_limit": 3600,
-      "memory_limit": 64,
+    "steps_sel22": {
+      "description": "512 activations with selection 22",
+      "time_limit": 600,
+      "activation_limit": 512,
       "selection": 22,
       "avatar": "off"
     }

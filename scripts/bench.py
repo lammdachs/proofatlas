@@ -188,6 +188,8 @@ def clear_job_status(base_dir: Path):
 
 
 def kill_job(base_dir: Path) -> bool:
+    import subprocess
+
     job = get_job_status(base_dir)
 
     # Step 1: Clear job status to stop spawning new processes
@@ -200,15 +202,22 @@ def kill_job(base_dir: Path) -> bool:
         except (OSError, ProcessLookupError):
             pass
 
-    # Step 3: Keep killing tracked PIDs until none are left (Unix only)
+    # Step 3: Kill tracked PIDs and worker processes (Unix only)
     if sys.platform != "win32":
+        # Kill any proofatlas-bench worker processes
+        subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--preset"], capture_output=True)
+
+        # Kill tracked prover PIDs
         max_iterations = 10
         for _ in range(max_iterations):
             killed = kill_tracked_pids(base_dir)
             if killed == 0:
                 break
-            # Brief pause to let new PIDs get registered by dying workers
             time.sleep(0.2)
+
+        # Kill any remaining prover processes from this project
+        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".vampire")], capture_output=True)
+        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".spass")], capture_output=True)
 
     return job is not None
 
@@ -892,6 +901,7 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
     selection = preset.get("selection", 21)
     avatar = preset.get("avatar", "off")
     memory_limit = preset.get("memory_limit")
+    activation_limit = preset.get("activation_limit")
 
     cmd = [
         str(binary),
@@ -903,6 +913,9 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
 
     if memory_limit is not None:
         cmd.extend(["--memory_limit", str(memory_limit)])
+
+    if activation_limit is not None:
+        cmd.extend(["--activation_limit", str(activation_limit)])
 
     cmd.append(str(problem))
 
@@ -916,7 +929,9 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         )
         register_pid(base_dir, proc.pid)
         try:
-            stdout, stderr = proc.communicate(timeout=timeout + 5)
+            # timeout=0 means no time limit, use None for communicate
+            proc_timeout = None if timeout == 0 else timeout + 5
+            stdout, stderr = proc.communicate(timeout=proc_timeout)
             output = stdout + stderr
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -936,6 +951,8 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         status = "timeout"
     elif "Termination reason: Memory limit" in output:
         status = "timeout"  # Memory limit treated as resource limit
+    elif "Termination reason: Activation limit" in output:
+        status = "timeout"  # Activation limit treated as resource limit
     else:
         status = "error"
 
@@ -949,6 +966,7 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
     timeout = preset.get("TimeLimit", 10)
     selection = preset.get("Select", 1)
     memory = preset.get("Memory")
+    loops = preset.get("Loops")
 
     # SPASS requires TPTP format with -TPTP flag
     cmd = [
@@ -960,6 +978,9 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
 
     if memory is not None:
         cmd.append(f"-Memory={memory}")
+
+    if loops is not None:
+        cmd.append(f"-Loops={loops}")
 
     cmd.append(str(problem))
 
@@ -974,7 +995,9 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
         )
         register_pid(base_dir, proc.pid)
         try:
-            stdout, stderr = proc.communicate(timeout=timeout + 5)
+            # timeout=0 means no time limit, use None for communicate
+            proc_timeout = None if timeout == 0 else timeout + 5
+            stdout, stderr = proc.communicate(timeout=proc_timeout)
             output = stdout + stderr
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -991,6 +1014,8 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
         status = "proof"
     elif "Completion found" in output:
         status = "saturated"
+    elif "Maximal number of loops exceeded" in output:
+        status = "timeout"  # Loop limit treated as resource limit
     elif elapsed >= timeout or "SPASS broke down" in output:
         status = "timeout"
     else:
