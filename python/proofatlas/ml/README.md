@@ -109,21 +109,20 @@ Compute statistics about a clause graph.
 - `VARIABLE` (4): Variable
 - `CONSTANT` (5): Constant
 
-### Node Features (20 dimensions)
+### Node Features (8 dimensions)
 
-| Index | Feature | Description |
-|-------|---------|-------------|
-| 0-5 | Type one-hot | Node type encoding |
-| 6 | Arity | Function/predicate arity |
-| 7 | Depth | Depth in syntax tree |
-| 8-11 | Structural | Reserved for future use |
-| 12 | Polarity | Literal polarity (1=positive, 0=negative) |
-| 13 | Is equality | Equality predicate flag |
-| 14 | Is unit | Unit clause flag |
-| 15 | Is Horn | Horn clause flag |
-| 16 | Is ground | Ground clause flag (no variables) |
-| 17-18 | Symbol hash | Hash values for symbol identity |
-| 19 | Reserved | Future use |
+Raw features - encoding (one-hot, sinusoidal) is done in the model's FeatureEmbedding layer.
+
+| Index | Feature | Type | Description |
+|-------|---------|------|-------------|
+| 0 | node_type | int 0-5 | clause, literal, predicate, function, variable, constant |
+| 1 | arity | int | Number of arguments |
+| 2 | arg_position | int | Position in parent's argument list |
+| 3 | depth | int | Depth in the clause tree |
+| 4 | age | float 0-1 | Clause age (normalized by max_age) |
+| 5 | role | int 0-4 | axiom, hypothesis, definition, negated_conjecture, derived |
+| 6 | polarity | binary | 1=positive literal, 0=negative |
+| 7 | is_equality | binary | 1 if equality predicate |
 
 ### Edge Structure
 

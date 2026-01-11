@@ -5,7 +5,7 @@ Initial clauses:
 [2] mult(mult(X,Y),Z) = mult(X,mult(Y,Z))
 [3] ~inv(e) = e
 
-✓ PROOF FOUND in 0.101s
+✓ PROOF FOUND in 0.120s
 Generated 67 clauses
 Empty clause at index: 49
 
@@ -70,33 +70,33 @@ Empty clause at index: 49
     Rule: Superposition
     Parents: [1, 4]
 
-[9] mult(inv(e),Z_2_2) = Z_2_2
-    Rule: Superposition
-    Parents: [0, 4]
-
-[10] Z_2 = Z_2
+[9] Z_2 = Z_2
     Rule: Superposition
     Parents: [4, 2]
 
-[11] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = Z_2_2
+[10] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = Z_2_2
     Rule: Superposition
     Parents: [2, 4]
+
+[11] mult(inv(e),Z_2_2) = Z_2_2
+    Rule: Superposition
+    Parents: [0, 4]
 
 [12] mult(inv(inv(Y_2_1)),Z_2_1) = mult(Y_2_1,Z_2_1)
     Rule: Superposition
     Parents: [4, 4]
 
-[10] Z_2 = Z_2
+[9] Z_2 = Z_2
     Rule: GivenClauseSelection
     Parents: []
 
-[9] mult(inv(e),Z_2_2) = Z_2_2
+[11] mult(inv(e),Z_2_2) = Z_2_2
     Rule: GivenClauseSelection
     Parents: []
 
 [13] mult(inv(inv(e)),Z_2_2) = Z_2_2
     Rule: Superposition
-    Parents: [9, 4]
+    Parents: [11, 4]
 
 [6] mult(X_2,e) = mult(X_2,e)
     Rule: GivenClauseSelection
@@ -114,53 +114,53 @@ Empty clause at index: 49
     Rule: Superposition
     Parents: [8, 4]
 
-[11] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = Z_2_2
+[10] mult(inv(mult(X_1,Y_1)),mult(X_1,mult(Y_1,Z_2_2))) = Z_2_2
     Rule: GivenClauseSelection
     Parents: []
 
 [15] mult(inv(mult(inv(mult(Y_1_2,Z_2_2_2)),Y_1_2)),e) = Z_2_2_2
     Rule: Superposition
-    Parents: [1, 11]
+    Parents: [1, 10]
 
 [16] mult(inv(mult(X_1_2,inv(Z_2_2_2))),mult(X_1_2,e)) = Z_2_2_2
     Rule: Superposition
-    Parents: [1, 11]
+    Parents: [1, 10]
 
-[17] mult(inv(mult(X_1_2,e)),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
+[17] mult(inv(mult(X_1,mult(Y_1,Y_1_2))),mult(X_1,mult(Y_1,mult(Y_1_2,Z_2_2_2)))) = Z_2_2_2
     Rule: Superposition
-    Parents: [0, 11]
+    Parents: [2, 10]
 
-[18] mult(inv(Z_2_2_1),mult(inv(inv(Z_2_2_1)),Z_2_2_2)) = Z_2_2_2
+[18] mult(inv(inv(mult(X_1_1,Y_1_1))),Z_2_2_1) = mult(X_1_1,mult(Y_1_1,Z_2_2_1))
     Rule: Superposition
-    Parents: [8, 11]
+    Parents: [10, 4]
 
-[19] mult(inv(mult(X_1_2,inv(inv(Z_2_2_1)))),mult(X_1_2,Z_2_2_1)) = e
+[19] mult(inv(mult(X_1_2,inv(Y_2_1))),mult(X_1_2,Z_2_1)) = mult(Y_2_1,Z_2_1)
     Rule: Superposition
-    Parents: [8, 11]
+    Parents: [4, 10]
 
-[20] mult(inv(inv(mult(X_1_1,Y_1_1))),Z_2_2_1) = mult(X_1_1,mult(Y_1_1,Z_2_2_1))
+[20] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
     Rule: Superposition
-    Parents: [11, 4]
+    Parents: [11, 10]
 
-[21] mult(inv(mult(X_1_2,inv(Y_2_1))),mult(X_1_2,Z_2_1)) = mult(Y_2_1,Z_2_1)
+[21] mult(inv(Z_2_2_1),mult(inv(inv(Z_2_2_1)),Z_2_2_2)) = Z_2_2_2
     Rule: Superposition
-    Parents: [4, 11]
+    Parents: [8, 10]
 
-[22] mult(inv(mult(X_1_2,inv(e))),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
+[22] mult(inv(mult(X_1_2,inv(inv(Z_2_2_1)))),mult(X_1_2,Z_2_2_1)) = e
     Rule: Superposition
-    Parents: [9, 11]
+    Parents: [8, 10]
 
-[23] mult(inv(mult(X_1,mult(Y_1,Y_1_2))),mult(X_1,mult(Y_1,mult(Y_1_2,Z_2_2_2)))) = Z_2_2_2
+[23] mult(inv(mult(X_1_2,e)),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
     Rule: Superposition
-    Parents: [2, 11]
+    Parents: [0, 10]
 
 [24] mult(inv(mult(inv(mult(Y_1_2,Y_1_1)),Y_1_2)),Z_2_2_1) = mult(Y_1_1,Z_2_2_1)
     Rule: Superposition
-    Parents: [11, 11]
+    Parents: [10, 10]
 
 [25] mult(inv(mult(X_1_2,inv(mult(X_1_1,Y_1_1)))),mult(X_1_2,Z_2_2_1)) = mult(X_1_1,mult(Y_1_1,Z_2_2_1))
     Rule: Superposition
-    Parents: [11, 11]
+    Parents: [10, 10]
 
 [13] mult(inv(inv(e)),Z_2_2) = Z_2_2
     Rule: GivenClauseSelection
@@ -170,13 +170,13 @@ Empty clause at index: 49
     Rule: Superposition
     Parents: [13, 1]
 
-[27] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
-    Rule: Superposition
-    Parents: [13, 11]
-
-[28] mult(inv(inv(inv(e))),Z_2_2) = Z_2_2
+[27] mult(inv(inv(inv(e))),Z_2_2) = Z_2_2
     Rule: Superposition
     Parents: [13, 4]
+
+[28] mult(inv(mult(X_1_2,inv(inv(e)))),mult(X_1_2,Z_2_2_2)) = Z_2_2_2
+    Rule: Superposition
+    Parents: [13, 10]
 
 [12] mult(inv(inv(Y_2_1)),Z_2_1) = mult(Y_2_1,Z_2_1)
     Rule: GivenClauseSelection
@@ -190,49 +190,49 @@ Empty clause at index: 49
     Rule: Superposition
     Parents: [12, 1]
 
-[31] mult(inv(mult(X_1_2,inv(inv(Y_2_1_1)))),mult(X_1_2,mult(Y_2_1_1,Z_2_2_2))) = Z_2_2_2
-    Rule: Superposition
-    Parents: [12, 11]
-
-[32] mult(Y_2_1_1,mult(inv(Y_2_1_1),Z_2_2)) = Z_2_2
+[31] mult(Y_2_1_1,mult(inv(Y_2_1_1),Z_2_2)) = Z_2_2
     Rule: Superposition
     Parents: [12, 4]
+
+[32] mult(inv(mult(X_1_2,inv(inv(Y_2_1_1)))),mult(X_1_2,mult(Y_2_1_1,Z_2_2_2))) = Z_2_2_2
+    Rule: Superposition
+    Parents: [12, 10]
 
 [15] mult(inv(mult(inv(mult(Y_1_2,Z_2_2_2)),Y_1_2)),e) = Z_2_2_2
     Rule: GivenClauseSelection
     Parents: []
 
-[33] mult(inv(mult(inv(Z_2_2_2_2),e)),e) = Z_2_2_2_2
+[33] mult(inv(mult(inv(mult(X_1,mult(Y_1,Z_2_2_2_2))),mult(X_1,Y_1))),e) = Z_2_2_2_2
     Rule: Superposition
-    Parents: [0, 15]
+    Parents: [2, 15]
 
-[34] mult(inv(mult(inv(mult(Y_2_1_1,Z_2_2_2_2)),inv(inv(Y_2_1_1)))),e) = Z_2_2_2_2
-    Rule: Superposition
-    Parents: [12, 15]
-
-[35] mult(inv(Z_2_2_2_1),mult(inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)),Z_2_2_2)) = Z_2_2_2
-    Rule: Superposition
-    Parents: [15, 11]
-
-[36] mult(inv(mult(X_1_2,inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)))),mult(X_1_2,Z_2_2_2_1)) = e
-    Rule: Superposition
-    Parents: [15, 11]
-
-[37] mult(inv(mult(inv(Z_2_2_1),inv(mult(X_1_1,Y_1_1)))),e) = mult(X_1_1,mult(Y_1_1,Z_2_2_1))
-    Rule: Superposition
-    Parents: [11, 15]
-
-[38] mult(inv(mult(inv(Z_2_1),inv(Y_2_1))),e) = mult(Y_2_1,Z_2_1)
+[34] mult(inv(mult(inv(Z_2_1),inv(Y_2_1))),e) = mult(Y_2_1,Z_2_1)
     Rule: Superposition
     Parents: [4, 15]
 
-[39] mult(inv(mult(inv(Z_2_2_2_2),inv(e))),e) = Z_2_2_2_2
+[35] mult(inv(mult(inv(Z_2_2_2_2),inv(e))),e) = Z_2_2_2_2
     Rule: Superposition
-    Parents: [9, 15]
+    Parents: [11, 15]
 
-[40] mult(inv(mult(inv(mult(X_1,mult(Y_1,Z_2_2_2_2))),mult(X_1,Y_1))),e) = Z_2_2_2_2
+[36] mult(inv(Z_2_2_2_1),mult(inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)),Z_2_2_2)) = Z_2_2_2
     Rule: Superposition
-    Parents: [2, 15]
+    Parents: [15, 10]
+
+[37] mult(inv(mult(X_1_2,inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)))),mult(X_1_2,Z_2_2_2_1)) = e
+    Rule: Superposition
+    Parents: [15, 10]
+
+[38] mult(inv(mult(inv(Z_2_2_1),inv(mult(X_1_1,Y_1_1)))),e) = mult(X_1_1,mult(Y_1_1,Z_2_2_1))
+    Rule: Superposition
+    Parents: [10, 15]
+
+[39] mult(inv(mult(inv(mult(Y_2_1_1,Z_2_2_2_2)),inv(inv(Y_2_1_1)))),e) = Z_2_2_2_2
+    Rule: Superposition
+    Parents: [12, 15]
+
+[40] mult(inv(mult(inv(Z_2_2_2_2),e)),e) = Z_2_2_2_2
+    Rule: Superposition
+    Parents: [0, 15]
 
 [41] mult(inv(mult(inv(Z_2_2_2_1),inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)))),e) = e
     Rule: Superposition
@@ -242,29 +242,29 @@ Empty clause at index: 49
     Rule: GivenClauseSelection
     Parents: []
 
-[42] mult(inv(mult(inv(Z_2_2_2_1),inv(mult(X_1_2_1,inv(Z_2_2_2_1))))),e) = mult(X_1_2_1,e)
+[42] mult(inv(mult(X_1,mult(Y_1,inv(Z_2_2_2_2)))),mult(X_1,mult(Y_1,e))) = Z_2_2_2_2
+    Rule: Superposition
+    Parents: [2, 16]
+
+[43] mult(inv(mult(inv(Z_2_2_2_1),inv(mult(X_1_2_1,inv(Z_2_2_2_1))))),e) = mult(X_1_2_1,e)
     Rule: Superposition
     Parents: [16, 15]
 
-[43] mult(inv(mult(inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)),inv(Z_2_2_2_2))),Z_2_2_2_1) = Z_2_2_2_2
+[44] mult(inv(mult(inv(mult(inv(mult(Y_1_2_1,Z_2_2_2_1)),Y_1_2_1)),inv(Z_2_2_2_2))),Z_2_2_2_1) = Z_2_2_2_2
     Rule: Superposition
     Parents: [15, 16]
 
-[44] mult(inv(Z_2_2_2_1),mult(inv(mult(X_1_2_1,inv(Z_2_2_2_1))),mult(X_1_2_1,Z_2_2_2))) = Z_2_2_2
+[45] mult(inv(Z_2_2_2_1),mult(inv(mult(X_1_2_1,inv(Z_2_2_2_1))),mult(X_1_2_1,Z_2_2_2))) = Z_2_2_2
     Rule: Superposition
-    Parents: [16, 11]
+    Parents: [16, 10]
 
-[45] mult(inv(mult(inv(mult(Y_1_2,inv(Z_2_2_2_1))),Y_1_2)),Z_2_2_2_1) = e
+[46] mult(inv(mult(inv(mult(Y_1_2,inv(Z_2_2_2_1))),Y_1_2)),Z_2_2_2_1) = e
     Rule: Superposition
-    Parents: [16, 11]
+    Parents: [16, 10]
 
-[46] mult(inv(mult(X_1_2,inv(mult(X_1_2_1,inv(Z_2_2_2_1))))),mult(X_1_2,Z_2_2_2_1)) = mult(X_1_2_1,e)
+[47] mult(inv(mult(X_1_2,inv(mult(X_1_2_1,inv(Z_2_2_2_1))))),mult(X_1_2,Z_2_2_2_1)) = mult(X_1_2_1,e)
     Rule: Superposition
-    Parents: [16, 11]
-
-[47] mult(inv(mult(X_1,mult(Y_1,inv(Z_2_2_2_2)))),mult(X_1,mult(Y_1,e))) = Z_2_2_2_2
-    Rule: Superposition
-    Parents: [2, 16]
+    Parents: [16, 10]
 
 [26] inv(e) = e
     Rule: GivenClauseSelection

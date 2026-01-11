@@ -29,28 +29,29 @@ ProofAtlas is a high-performance theorem prover with ML-guided clause selection.
 pip install -e ".[dev]"
 
 # Build Rust prover
-cd rust && cargo build --release
+cargo build --release
 ```
 
 ## Project Structure
 
 ```
 proofatlas/
-├── rust/                     # Core theorem prover
-│   ├── src/
-│   │   ├── core/            # Terms, literals, clauses, substitutions
-│   │   ├── inference/       # Resolution, superposition, demodulation
-│   │   ├── saturation/      # Saturation loop, subsumption
-│   │   ├── parser/          # TPTP parser
-│   │   └── selection/       # Clause/literal selection strategies
-│   └── tests/
+├── crates/proofatlas/        # Core theorem prover (Rust)
+│   └── src/
+│       ├── core/             # Terms, literals, clauses, substitutions
+│       ├── inference/        # Resolution, superposition, demodulation
+│       ├── saturation/       # Saturation loop, subsumption
+│       ├── parser/           # TPTP parser
+│       ├── selectors/        # Clause/literal selection strategies
+│       └── ml/               # Graph building, weight loading
 ├── python/                   # Python package
 │   ├── proofatlas/
-│   │   ├── cli/             # Command-line tools
-│   │   └── ml/              # ML training infrastructure
+│   │   ├── cli/              # Command-line tools
+│   │   ├── ml/               # ML training infrastructure
+│   │   └── selectors/        # PyTorch model implementations
 │   └── tests/
 ├── configs/                  # Prover and benchmark configurations
-├── scripts/                  # Utility scripts (bench.py, etc.)
+├── scripts/                  # Utility scripts (bench.py, export.py)
 └── .tptp/                    # TPTP problem library
 ```
 
@@ -72,7 +73,6 @@ proofatlas/
 
 **Rust:**
 ```bash
-cd rust
 cargo test                    # Run all tests
 cargo test --test '*'         # Integration tests only
 cargo test -- --nocapture     # With output
@@ -109,16 +109,16 @@ Add literal selection strategy 21
 
 ### New Literal Selection Strategies
 
-1. Add implementation in `rust/src/selection/literal.rs`
+1. Add implementation in `crates/proofatlas/src/saturation/literal_selection.rs`
 2. Register in the CLI options
-3. Add tests in `rust/tests/`
+3. Add tests
 4. Document the strategy behavior
 
 ### New Inference Rules
 
-1. Add implementation in `rust/src/inference/`
-2. Create tests in `rust/tests/`
-3. Integrate with saturation loop in `rust/src/saturation/state.rs`
+1. Add implementation in `crates/proofatlas/src/rules/`
+2. Create tests
+3. Integrate with saturation loop in `crates/proofatlas/src/saturation/loop.rs`
 
 ### Benchmark Configurations
 

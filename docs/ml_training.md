@@ -23,30 +23,33 @@ Training Pipeline:
 
 ## Graph Representation
 
-Clauses are represented as tree-structured graphs with 13-dimensional node features.
+Clauses are represented as tree-structured graphs with 8-dimensional raw node features.
+The model's `FeatureEmbedding` layer converts these to a richer representation with one-hot and sinusoidal encodings.
 
-### Node Types (one-hot encoded, dims 0-5)
+### Raw Feature Layout (8 dims)
 
-| Type | Description |
-|------|-------------|
-| clause | Root node for each clause |
-| literal | Positive or negative atom |
-| predicate | Predicate symbol |
-| function | Function application |
-| variable | Logic variable |
-| constant | Constant symbol |
+| Index | Feature | Type | Description |
+|-------|---------|------|-------------|
+| 0 | node_type | int 0-5 | clause, literal, predicate, function, variable, constant |
+| 1 | arity | int | Number of arguments |
+| 2 | arg_position | int | Position in parent's argument list |
+| 3 | depth | int | Depth in the tree structure |
+| 4 | age | float 0-1 | Clause age (normalized by max_age) |
+| 5 | role | int 0-4 | axiom, hypothesis, definition, negated_conjecture, derived |
+| 6 | polarity | binary | 1=positive literal, 0=negative |
+| 7 | is_equality | binary | 1 if equality predicate |
 
-### Additional Features (dims 6-12)
+### Model-Side Encoding (FeatureEmbedding)
 
-| Feature | Description |
-|---------|-------------|
-| arity | Number of arguments (normalized) |
-| arg_position | Position in parent's argument list |
-| depth | Depth in the tree structure |
-| age | Clause age (normalized by max_age) |
-| role | Clause role (axiom, conjecture, etc.) |
-| polarity | Literal polarity (positive/negative) |
-| is_equality | Whether predicate is equality |
+The model transforms raw features to:
+- **Node type**: one-hot (6 dims)
+- **Arity**: log1p scaled (1 dim)
+- **Arg position**: sinusoidal (sin_dim dims)
+- **Depth**: sinusoidal (sin_dim dims)
+- **Age**: sinusoidal (sin_dim dims)
+- **Role**: one-hot (5 dims)
+- **Polarity**: kept (1 dim)
+- **Is equality**: kept (1 dim)
 
 ### Graph Structure
 

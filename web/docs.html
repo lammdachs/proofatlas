@@ -30,6 +30,7 @@
                     <li><a href="#calculus">Inference Calculus</a></li>
                     <li><a href="#selection">Literal Selection</a></li>
                     <li><a href="#simplification">Simplification Rules</a></li>
+                    <li><a href="#ml">Machine Learning</a></li>
                     <li><a href="#examples">Examples</a></li>
                 </ul>
             </div>
@@ -279,6 +280,253 @@
                             Clauses that are always true (e.g., <code>P(X) ∨ ¬P(X)</code>) are removed.
                         </p>
                     </div>
+                </section>
+
+                <section id="ml">
+                    <h2>Machine Learning for Clause Selection</h2>
+                    <p>
+                        ProofAtlas explores using <strong>graph neural networks</strong> to learn clause selection
+                        strategies. Instead of hand-crafted heuristics, we train models to predict which clauses
+                        are likely to be useful for finding a proof.
+                    </p>
+
+                    <h3>Research Question</h3>
+                    <p>
+                        <em>How can we best represent logical clauses as graphs and learn to select useful
+                        clauses during proof search?</em>
+                    </p>
+
+                    <div class="algorithm-box">
+                        <h4>Training Pipeline</h4>
+                        <ol>
+                            <li><strong>Trace Collection:</strong> Run the prover on TPTP problems, recording which clauses were used in successful proofs</li>
+                            <li><strong>Graph Construction:</strong> Convert each clause to a tree-structured graph</li>
+                            <li><strong>Labeling:</strong> Mark clauses in the proof DAG as positive (+1), others as negative (0)</li>
+                            <li><strong>Training:</strong> Train a GNN to score positive clauses higher than negatives</li>
+                            <li><strong>Inference:</strong> Use the trained model to guide clause selection during proof search</li>
+                        </ol>
+                    </div>
+
+                    <h3>Graph Representation</h3>
+                    <p>
+                        Each clause is converted to a <strong>tree-structured graph</strong> where nodes represent
+                        syntactic elements and edges represent parent-child relationships.
+                    </p>
+
+                    <div class="strategy-box">
+                        <h4>Node Types</h4>
+                        <table class="feature-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                            <tr>
+                                <th style="text-align: left; padding: 8px; border-bottom: 1px solid #dee2e6;">Type</th>
+                                <th style="text-align: left; padding: 8px; border-bottom: 1px solid #dee2e6;">Description</th>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>clause</code></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Root node for each clause</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>literal</code></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Positive or negative atom</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>predicate</code></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Predicate symbol (e.g., P, Q, =)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>function</code></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Function application (e.g., f(x))</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>variable</code></td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Logic variable (e.g., X, Y)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px;"><code>constant</code></td>
+                                <td style="padding: 8px;">Constant symbol (e.g., a, b, e)</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="strategy-box">
+                        <h4>Node Features (13 dimensions)</h4>
+                        <table class="feature-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                            <tr>
+                                <th style="text-align: left; padding: 8px; border-bottom: 1px solid #dee2e6;">Dims</th>
+                                <th style="text-align: left; padding: 8px; border-bottom: 1px solid #dee2e6;">Feature</th>
+                                <th style="text-align: left; padding: 8px; border-bottom: 1px solid #dee2e6;">Description</th>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">0-5</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Node type</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">One-hot encoding of node type</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">6</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Arity</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Number of arguments</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">7</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Arg position</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Position in parent's argument list</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">8</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Depth</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Distance from clause root</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">9</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Age</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Clause age (normalized)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">10</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Role</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">axiom / hypothesis / negated_conjecture / derived</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">11</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Polarity</td>
+                                <td style="padding: 8px; border-bottom: 1px solid #eee;">Positive (+1) or negative (0)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px;">12</td>
+                                <td style="padding: 8px;">Is equality</td>
+                                <td style="padding: 8px;">Whether predicate is equality (=)</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="example-box">
+                        <h4>Example: Graph for <code>P(X, a) ∨ ¬Q(f(Y))</code></h4>
+                        <pre style="font-family: monospace; line-height: 1.6;">
+clause
+├── literal (polarity=+)
+│   └── predicate "P"
+│       ├── variable "X"
+│       └── constant "a"
+└── literal (polarity=-)
+    └── predicate "Q"
+        └── function "f"
+            └── variable "Y"</pre>
+                        <p style="margin-top: 10px; color: #7f8c8d;">
+                            Edges are bidirectional, allowing message passing in both directions during GNN computation.
+                        </p>
+                    </div>
+
+                    <h3>Model Architectures</h3>
+
+                    <div class="inference-rule">
+                        <h4>Graph Convolutional Network (GCN)</h4>
+                        <p>
+                            The default architecture uses a multi-layer GCN to learn node embeddings:
+                        </p>
+                        <pre class="tptp-code" style="background: #f8f9fa; padding: 15px; border-radius: 4px;">
+h' = LayerNorm(ReLU(A · h · W))   # Per layer
+clause_emb = pool(h, clause_mask)  # Pool node embeddings
+score = MLP(clause_emb)            # Score each clause</pre>
+                        <p class="rule-description">
+                            <strong>Parameters:</strong> hidden_dim=64, num_layers=3, dropout=0.1
+                        </p>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h4>Multi-Layer Perceptron (MLP)</h4>
+                        <p>
+                            A simpler baseline that pools node features directly without message passing:
+                        </p>
+                        <pre class="tptp-code" style="background: #f8f9fa; padding: 15px; border-radius: 4px;">
+clause_emb = pool(node_features, clause_mask)
+score = MLP(clause_emb)</pre>
+                        <p class="rule-description">
+                            Faster inference, useful for understanding the value of graph structure.
+                        </p>
+                    </div>
+
+                    <div class="inference-rule">
+                        <h4>Graph Attention Network (GAT)</h4>
+                        <p>
+                            Uses attention mechanisms to weight neighbor contributions:
+                        </p>
+                        <pre class="tptp-code" style="background: #f8f9fa; padding: 15px; border-radius: 4px;">
+α_ij = softmax(LeakyReLU(a · [Wh_i || Wh_j]))
+h'_i = Σ_j α_ij · Wh_j</pre>
+                        <p class="rule-description">
+                            <strong>Parameters:</strong> hidden_dim=64, num_layers=3, num_heads=4
+                        </p>
+                    </div>
+
+                    <h3>Training</h3>
+
+                    <div class="simplification-box">
+                        <h4>Loss Function: InfoNCE (Contrastive)</h4>
+                        <p>
+                            We use contrastive learning to train the model to rank proof clauses higher than non-proof clauses:
+                        </p>
+                        <pre class="tptp-code" style="background: #f8f9fa; padding: 15px; border-radius: 4px; font-size: 14px;">
+L = -log( exp(s_pos/τ) / (exp(s_pos/τ) + Σ exp(s_neg/τ)) )</pre>
+                        <p>
+                            For each positive clause (in proof), it should score higher than all negatives.
+                            Temperature τ controls the sharpness of the distribution.
+                        </p>
+                    </div>
+
+                    <div class="simplification-box">
+                        <h4>Data Collection</h4>
+                        <p>
+                            Training data is collected by running the prover with a heuristic selector (age-weight):
+                        </p>
+                        <ul>
+                            <li><strong>Positive labels:</strong> Clauses in the proof DAG (backward reachable from empty clause)</li>
+                            <li><strong>Negative labels:</strong> Clauses generated but not used in the proof</li>
+                        </ul>
+                        <p class="note">
+                            <strong>Note:</strong> This creates a learning-to-imitate setup. The model learns to predict
+                            which clauses a successful proof search would select.
+                        </p>
+                    </div>
+
+                    <h3>Inference Integration</h3>
+                    <p>
+                        During proof search, the trained model replaces the heuristic clause selector:
+                    </p>
+
+                    <div class="algorithm-box">
+                        <h4>ML-Guided Selection</h4>
+                        <ol>
+                            <li>Convert all unprocessed clauses to graphs</li>
+                            <li>Run GNN forward pass to get clause embeddings</li>
+                            <li>Score each clause with the MLP head</li>
+                            <li>Sample from softmax distribution over scores</li>
+                            <li>Return selected clause as next given clause</li>
+                        </ol>
+                    </div>
+
+                    <p class="note">
+                        <strong>Performance:</strong> The Rust implementation uses the
+                        <a href="https://burn.dev/">Burn</a> framework for efficient inference.
+                        Embeddings are cached to avoid recomputation.
+                    </p>
+
+                    <h3>Quick Start</h3>
+                    <pre class="tptp-code" style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px;">
+# 1. Collect traces (runs prover, saves proof data)
+proofatlas-bench --prover proofatlas --preset time_sel21
+
+# 2. Train a GCN model
+proofatlas-bench --prover proofatlas --preset gcn --force-train
+
+# 3. Evaluate the trained model
+proofatlas-bench --prover proofatlas --preset gcn
+
+# 4. View training metrics
+# Open training.html in browser</pre>
+
+                    <p>
+                        See <a href="./training.html">Training</a> for interactive visualization of training runs,
+                        and <a href="./results.html">Results</a> for benchmark comparisons.
+                    </p>
                 </section>
 
                 <section id="examples">

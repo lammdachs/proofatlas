@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProofAtlas Training Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+            --accent-secondary: #00d9ff;
+            --success: #00c853;
+            --warning: #ffd600;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        .sidebar {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .sidebar h2 {
+            font-size: 1rem;
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .run-list {
+            list-style: none;
+        }
+
+        .run-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .run-item:hover {
+            background: var(--bg-primary);
+        }
+
+        .run-item.active {
+            border-color: var(--accent);
+        }
+
+        .run-item .name {
+            font-weight: 500;
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+
+        .run-item .meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .run-item .status {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .run-item .status.running {
+            background: var(--accent);
+            color: white;
+        }
+
+        .run-item .status.completed {
+            background: var(--success);
+            color: white;
+        }
+
+        .main-content {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .no-run-selected {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .run-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        .run-title h2 {
+            font-size: 1.4rem;
+            margin-bottom: 8px;
+        }
+
+        .run-title .model-type {
+            display: inline-block;
+            padding: 4px 12px;
+            background: var(--accent-secondary);
+            color: var(--bg-primary);
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .run-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent-secondary);
+        }
+
+        .stat-card .label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .chart-container {
+            background: var(--bg-tertiary);
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .chart-container h3 {
+            font-size: 1rem;
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 250px;
+        }
+
+        .config-section {
+            margin-top: 25px;
+        }
+
+        .config-section h3 {
+            font-size: 1rem;
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .config-item {
+            background: var(--bg-tertiary);
+            padding: 10px 15px;
+            border-radius: 6px;
+        }
+
+        .config-item .key {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-item .value {
+            font-size: 0.95rem;
+            margin-top: 2px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .refresh-btn {
+            background: var(--bg-tertiary);
+            border: none;
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: var(--accent);
+        }
+
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                position: static;
+            }
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            .run-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ProofAtlas Training Viewer</h1>
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>Live updates enabled</span>
+            </div>
+        </header>
+
+        <div class="layout">
+            <aside class="sidebar">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2>Training Runs</h2>
+                    <button class="refresh-btn" onclick="loadRuns()">Refresh</button>
+                </div>
+                <ul class="run-list" id="runList">
+                    <li class="empty-state">Loading runs...</li>
+                </ul>
+            </aside>
+
+            <main class="main-content" id="mainContent">
+                <div class="no-run-selected">
+                    <h2>Select a training run</h2>
+                    <p>Choose a run from the sidebar to view its metrics</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        let currentRun = null;
+        let eventSource = null;
+        let lossChart = null;
+        let accChart = null;
+        let lrChart = null;
+        let mrrChart = null;
+
+        // Chart.js dark theme defaults
+        Chart.defaults.color = '#aaa';
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.1)';
+
+        async function loadRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const runs = await response.json();
+                renderRunList(runs);
+            } catch (error) {
+                console.error('Failed to load runs:', error);
+            }
+        }
+
+        function renderRunList(runs) {
+            const list = document.getElementById('runList');
+
+            if (runs.length === 0) {
+                list.innerHTML = '<li class="empty-state">No training runs found.<br>Start training to see runs here.</li>';
+                return;
+            }
+
+            list.innerHTML = runs.map(run => `
+                <li class="run-item ${currentRun === run.name ? 'active' : ''}"
+                    onclick="selectRun('${run.name}')">
+                    <div class="name">${run.name}</div>
+                    <div class="meta">
+                        <span>${run.model_type || 'unknown'}</span>
+                        <span class="status ${run.status}">${run.status}</span>
+                    </div>
+                    <div class="meta">
+                        <span>${run.num_epochs || 0} epochs</span>
+                        <span>${run.best_val_loss ? run.best_val_loss.toFixed(4) : '-'}</span>
+                    </div>
+                    ${run.termination_reason ? `<div class="meta" style="font-size: 0.7rem; opacity: 0.7;">${run.termination_reason}</div>` : ''}
+                </li>
+            `).join('');
+        }
+
+        async function selectRun(runName) {
+            currentRun = runName;
+
+            // Update active state in sidebar
+            document.querySelectorAll('.run-item').forEach(item => {
+                item.classList.toggle('active', item.querySelector('.name').textContent === runName);
+            });
+
+            // Close existing event source
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            // Load initial data
+            try {
+                const response = await fetch(`/api/runs/${runName}`);
+                const data = await response.json();
+                renderRunDetails(data);
+
+                // Start streaming for live updates if run is still in progress
+                if (!data.end_time) {
+                    startStreaming(runName);
+                }
+            } catch (error) {
+                console.error('Failed to load run:', error);
+            }
+        }
+
+        function startStreaming(runName) {
+            eventSource = new EventSource(`/api/runs/${runName}/stream`);
+
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                renderRunDetails(data);
+                loadRuns(); // Refresh run list
+            };
+
+            eventSource.onerror = () => {
+                eventSource.close();
+            };
+        }
+
+        function renderRunDetails(data) {
+            const main = document.getElementById('mainContent');
+            const epochs = data.epochs || [];
+            const config = data.config || {};
+            const modelConfig = config.model || {};
+            const trainingConfig = config.training || {};
+
+            const lastEpoch = epochs[epochs.length - 1] || {};
+            const bestValLoss = data.best_val_loss || Math.min(...epochs.map(e => e.val_loss || Infinity));
+
+            main.innerHTML = `
+                <div class="run-header">
+                    <div class="run-title">
+                        <h2>${data.run_name || currentRun}</h2>
+                        <span class="model-type">${modelConfig.type || 'unknown'}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        ${data.end_time ?
+                            `<span style="color: var(--success);">Completed</span>` :
+                            `<span style="color: var(--accent);">Running...</span>`
+                        }
+                        ${data.termination_reason ?
+                            `<div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">${data.termination_reason}</div>` : ''
+                        }
+                    </div>
+                </div>
+
+                <div class="run-stats">
+                    <div class="stat-card">
+                        <div class="value">${epochs.length}</div>
+                        <div class="label">Epochs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value">${bestValLoss.toFixed(4)}</div>
+                        <div class="label">Best Val Loss</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value">${(lastEpoch.val_acc * 100 || 0).toFixed(1)}%</div>
+                        <div class="label">Val Accuracy</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="value">${formatTime(data.total_time_seconds)}</div>
+                        <div class="label">Training Time</div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <h3>Loss</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="lossChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Accuracy</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="accChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Learning Rate</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="lrChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Mean Reciprocal Rank</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="mrrChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>Configuration</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <div class="key">Model Type</div>
+                            <div class="value">${modelConfig.type || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Hidden Dim</div>
+                            <div class="value">${modelConfig.hidden_dim || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Num Layers</div>
+                            <div class="value">${modelConfig.num_layers || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Num Heads</div>
+                            <div class="value">${modelConfig.num_heads || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Batch Size</div>
+                            <div class="value">${trainingConfig.batch_size || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Learning Rate</div>
+                            <div class="value">${trainingConfig.learning_rate || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Loss Type</div>
+                            <div class="value">${trainingConfig.loss_type || '-'}</div>
+                        </div>
+                        <div class="config-item">
+                            <div class="key">Scorer Type</div>
+                            <div class="value">${modelConfig.scorer_type || '-'}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Render charts
+            renderCharts(epochs);
+        }
+
+        function renderCharts(epochs) {
+            const epochLabels = epochs.map((_, i) => i + 1);
+
+            // Loss chart
+            const lossCtx = document.getElementById('lossChart').getContext('2d');
+            if (lossChart) lossChart.destroy();
+            lossChart = new Chart(lossCtx, {
+                type: 'line',
+                data: {
+                    labels: epochLabels,
+                    datasets: [
+                        {
+                            label: 'Train Loss',
+                            data: epochs.map(e => e.train_loss),
+                            borderColor: '#e94560',
+                            backgroundColor: 'rgba(233, 69, 96, 0.1)',
+                            tension: 0.3,
+                            fill: true,
+                        },
+                        {
+                            label: 'Val Loss',
+                            data: epochs.map(e => e.val_loss),
+                            borderColor: '#00d9ff',
+                            backgroundColor: 'rgba(0, 217, 255, 0.1)',
+                            tension: 0.3,
+                            fill: true,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { beginAtZero: false } },
+                },
+            });
+
+            // Accuracy chart
+            const accCtx = document.getElementById('accChart').getContext('2d');
+            if (accChart) accChart.destroy();
+            accChart = new Chart(accCtx, {
+                type: 'line',
+                data: {
+                    labels: epochLabels,
+                    datasets: [{
+                        label: 'Val Accuracy',
+                        data: epochs.map(e => (e.val_acc || 0) * 100),
+                        borderColor: '#00c853',
+                        backgroundColor: 'rgba(0, 200, 83, 0.1)',
+                        tension: 0.3,
+                        fill: true,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { beginAtZero: true, max: 100 } },
+                },
+            });
+
+            // Learning rate chart
+            const lrCtx = document.getElementById('lrChart').getContext('2d');
+            if (lrChart) lrChart.destroy();
+            lrChart = new Chart(lrCtx, {
+                type: 'line',
+                data: {
+                    labels: epochLabels,
+                    datasets: [{
+                        label: 'Learning Rate',
+                        data: epochs.map(e => e.learning_rate),
+                        borderColor: '#ffd600',
+                        backgroundColor: 'rgba(255, 214, 0, 0.1)',
+                        tension: 0.3,
+                        fill: true,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { type: 'logarithmic' } },
+                },
+            });
+
+            // MRR chart (if available)
+            const mrrCtx = document.getElementById('mrrChart').getContext('2d');
+            if (mrrChart) mrrChart.destroy();
+            const mrrData = epochs.map(e => e.val_mrr).filter(v => v !== undefined);
+            mrrChart = new Chart(mrrCtx, {
+                type: 'line',
+                data: {
+                    labels: epochLabels.slice(0, mrrData.length),
+                    datasets: [{
+                        label: 'Val MRR',
+                        data: mrrData,
+                        borderColor: '#9c27b0',
+                        backgroundColor: 'rgba(156, 39, 176, 0.1)',
+                        tension: 0.3,
+                        fill: true,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { beginAtZero: true, max: 1 } },
+                },
+            });
+        }
+
+        function formatTime(seconds) {
+            if (!seconds) return '-';
+            if (seconds < 60) return `${seconds.toFixed(0)}s`;
+            if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+            return `${(seconds / 3600).toFixed(1)}h`;
+        }
+
+        // Initial load
+        loadRuns();
+
+        // Refresh run list every 10 seconds
+        setInterval(loadRuns, 10000);
+    </script>
+</body>
+</html>

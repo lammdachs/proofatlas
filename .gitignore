@@ -1,3 +1,6 @@
+# Paper (separate repo)
+/IJCAR26/
+
 # Data directories (runtime, gitignored)
 /.data/
 /.logs/

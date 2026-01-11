@@ -153,12 +153,19 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model architecture configuration (PyTorch implementation)."""
-    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp
+    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp, sentence
     hidden_dim: int = 64
     num_layers: int = 3
     num_heads: int = 4
     dropout: float = 0.1
-    input_dim: int = 13
+    input_dim: int = 8  # raw feature dimension from graph.rs (compact format)
+    # Scorer configuration
+    scorer_type: str = "mlp"  # mlp, attention, transformer, cross_attention
+    scorer_num_heads: int = 4
+    scorer_num_layers: int = 2
+    # Sentence model configuration
+    sentence_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # HuggingFace model name
+    freeze_encoder: bool = False  # freeze pretrained encoder weights
 
 
 @dataclass

@@ -11,10 +11,10 @@ cd proofatlas
 pip install -e .
 
 # Build the Rust prover
-cd rust && cargo build --release && cd ..
+cargo build --release
 
 # Verify installation
-./rust/target/release/prove --help
+./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
 ```
 
 ## Prerequisites
@@ -43,20 +43,19 @@ This includes pytest, black, ruff, mypy for development.
 The core theorem prover is written in Rust:
 
 ```bash
-cd rust
 cargo build --release
 ```
 
-The binary will be at `rust/target/release/prove`.
+The binary will be at `target/release/prove`.
 
 ## Running the Prover
 
 ```bash
 # Run on a TPTP problem
-./rust/target/release/prove path/to/problem.p
+./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
 
 # With options
-./rust/target/release/prove problem.p --timeout 60 --literal-selection 21
+./target/release/prove problem.p --timeout 60 --literal-selection 21
 ```
 
 ## Benchmarking
@@ -111,9 +110,9 @@ Results are written to `web/data/benchmarks.json`.
 
 ```
 proofatlas/
-├── rust/           # Core theorem prover (Rust)
-├── python/         # Python package and bindings
-├── configs/        # Prover and benchmark configurations
-├── scripts/        # Utility scripts
-└── .tptp/          # TPTP problem library (after setup)
+├── crates/proofatlas/   # Core theorem prover (Rust)
+├── python/              # Python package and bindings
+├── configs/             # Prover and benchmark configurations
+├── scripts/             # Utility scripts
+└── .tptp/               # TPTP problem library (after setup)
 ```

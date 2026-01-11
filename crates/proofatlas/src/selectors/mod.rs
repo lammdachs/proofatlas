@@ -12,10 +12,12 @@
 //! ## ML-based selectors (Burn framework):
 //! - [`BurnGcnSelector`] / [`NdarrayGcnSelector`] - GCN-based clause selection
 //! - [`BurnMlpSelector`] / [`NdarrayMlpSelector`] - MLP-based clause selection
+//! - [`BurnSentenceSelector`] / [`NdarraySentenceSelector`] - Sentence transformer selection (requires `sentence` feature)
 
 pub mod age_weight;
 pub mod burn_gcn;
 pub mod burn_mlp;
+pub mod burn_sentence;
 pub mod clause;
 
 pub use age_weight::AgeWeightSelector;
@@ -27,4 +29,7 @@ pub use burn_mlp::{
     create_ndarray_mlp_selector, load_ndarray_mlp_selector, BurnMlpSelector, MlpModel,
     NdarrayMlpSelector,
 };
+pub use burn_sentence::SentenceModel;
+#[cfg(feature = "sentence")]
+pub use burn_sentence::{load_ndarray_sentence_selector, BurnSentenceSelector, NdarraySentenceSelector};
 pub use clause::ClauseSelector;

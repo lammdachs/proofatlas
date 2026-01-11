@@ -1,14 +1,23 @@
 //! Graph representation of logical clauses for GNN training
 //!
-//! Feature layout (13 dimensions):
-//! - 0-5: Node type one-hot (clause, literal, predicate, function, variable, constant)
-//! - 6: Arity (for predicates and functions)
-//! - 7: Argument position (0-indexed position as argument to parent)
-//! - 8: Depth in the clause tree
-//! - 9: Clause age (normalized, 0-1 range based on max_age parameter)
-//! - 10: Clause role (0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived)
-//! - 11: Literal polarity (1=positive, 0=negative)
-//! - 12: Is equality predicate
+//! ## Feature Layout (8 dimensions)
+//!
+//! Raw feature values - encoding (one-hot, sinusoidal) is done in the model.
+//!
+//! | Index | Feature | Type | Description |
+//! |-------|---------|------|-------------|
+//! | 0 | Node type | int 0-5 | clause, literal, predicate, function, variable, constant |
+//! | 1 | Arity | int | Number of arguments (for predicates/functions) |
+//! | 2 | Arg position | int | 0-indexed position in parent's argument list |
+//! | 3 | Depth | int | Depth in the clause tree |
+//! | 4 | Age | float 0-1 | Normalized clause age (age / max_age) |
+//! | 5 | Role | int 0-4 | axiom, hypothesis, definition, negated_conjecture, derived |
+//! | 6 | Polarity | binary | 1=positive literal, 0=negative |
+//! | 7 | Is equality | binary | 1 if equality predicate |
+//!
+//! The model's FeatureEmbedding layer converts these to a richer representation:
+//! - Node type/role → one-hot or learned embeddings
+//! - Arity/position/depth/age → sinusoidal encoding
 
 use crate::core::{Clause, Literal, Term};
 
@@ -29,18 +38,19 @@ pub const NODE_TYPES: [&str; 6] = [
     "constant",
 ];
 
-/// Feature dimension
-pub const FEATURE_DIM: usize = 13;
+/// Feature dimension (raw features, encoding done in model)
+pub const FEATURE_DIM: usize = 8;
 
 /// Feature indices
-pub const FEAT_NODE_TYPE_START: usize = 0;
-pub const FEAT_ARITY: usize = 6;
-pub const FEAT_ARG_POSITION: usize = 7;
-pub const FEAT_DEPTH: usize = 8;
-pub const FEAT_AGE: usize = 9;
-pub const FEAT_ROLE: usize = 10;
-pub const FEAT_POLARITY: usize = 11;
-pub const FEAT_IS_EQUALITY: usize = 12;
+pub const FEAT_NODE_TYPE: usize = 0;
+pub const FEAT_ARITY: usize = 1;
+pub const FEAT_ARG_POSITION: usize = 2;
+pub const FEAT_DEPTH: usize = 3;
+pub const FEAT_AGE: usize = 4;
+pub const FEAT_ROLE: usize = 5;
+pub const FEAT_POLARITY: usize = 6;
+pub const FEAT_IS_EQUALITY: usize = 7;
+
 
 /// Sparse graph representation of a clause
 #[derive(Debug, Clone)]
@@ -141,15 +151,9 @@ impl GraphBuilder {
         self.node_names.push(name.to_string());
         self.node_depths.push(depth);
 
-        // Initialize features with type one-hot encoding
+        // Initialize features with raw values (encoding done in model)
         let mut features = [0.0f32; FEATURE_DIM];
-
-        // Type one-hot (indices 0-5)
-        if (node_type as usize) < 6 {
-            features[FEAT_NODE_TYPE_START + node_type as usize] = 1.0;
-        }
-
-        // Depth
+        features[FEAT_NODE_TYPE] = node_type as f32;
         features[FEAT_DEPTH] = depth as f32;
 
         self.features.push(features);

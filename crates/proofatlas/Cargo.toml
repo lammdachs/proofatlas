@@ -29,6 +29,9 @@ burn = "0.19"
 burn-ndarray = "0.19"
 burn-import = "0.19"
 
+# Tokenizers (for sentence encoder)
+tokenizers = { version = "0.20", optional = true }
+
 # Model weight downloading (native only, not wasm)
 ureq = { version = "2.9", features = ["json"], optional = true }
 dirs = { version = "5.0", optional = true }
@@ -43,6 +46,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 default = ["download"]
 python = ["pyo3", "numpy", "download"]
 download = ["ureq", "dirs", "sha2"]
+sentence = ["tokenizers", "download"]
 wasm = []
 
 [dev-dependencies]
