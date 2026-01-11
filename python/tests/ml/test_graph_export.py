@@ -21,7 +21,7 @@ class TestBasicGraphExport:
         # Expected: clause -> literal -> predicate -> variable
         assert graph.num_nodes() == 4
         assert graph.num_edges() == 3
-        assert graph.feature_dim() == 13
+        assert graph.feature_dim() == 8
 
     def test_two_literal_clause(self):
         """Test graph export for clause with two literals: P(x) | Q(a)"""
@@ -45,8 +45,8 @@ class TestBasicGraphExport:
         node_features = graph.node_features()
 
         # Find literal node (should be node 1)
-        # Feature index 11 is polarity
-        literal_polarity = node_features[1, 11]
+        # Feature index 6 is polarity
+        literal_polarity = node_features[1, 6]
         assert literal_polarity == 0.0  # negative literal
 
     def test_invalid_clause_id(self):
@@ -166,8 +166,8 @@ class TestFunctionHandling:
 
         assert func_idx is not None, "Function f not found"
 
-        # Feature index 6 is arity
-        arity = node_features[func_idx, 6]
+        # Feature index 1 is arity
+        arity = node_features[func_idx, 1]
         assert arity == 2.0
 
 
@@ -193,8 +193,8 @@ class TestEqualityHandling:
 
         assert pred_idx is not None
 
-        # Feature index 12 is is_equality
-        is_equality = node_features[pred_idx, 12]
+        # Feature index 7 is is_equality
+        is_equality = node_features[pred_idx, 7]
         assert is_equality == 1.0
 
     def test_complex_equality(self):
@@ -252,8 +252,8 @@ class TestClauseFeatures:
         literal_indices = [i for i, t in enumerate(node_types) if t == 1]
         assert len(literal_indices) == 2
 
-        # Check polarities (index 11)
-        polarities = [node_features[i, 11] for i in literal_indices]
+        # Check polarities (index 6)
+        polarities = [node_features[i, 6] for i in literal_indices]
         # One negative, one positive
         assert 0.0 in polarities and 1.0 in polarities
 
@@ -353,7 +353,7 @@ class TestFeatureArrays:
         graph = state.clause_to_graph(clause_ids[0])
         node_features = graph.node_features()
 
-        assert node_features.shape == (graph.num_nodes(), 13)
+        assert node_features.shape == (graph.num_nodes(), 8)
         assert node_features.dtype == np.float32
 
     def test_node_types_shape(self):
@@ -369,7 +369,7 @@ class TestFeatureArrays:
         assert node_types.dtype == np.uint8
 
     def test_feature_type_encoding(self):
-        """Test that node type is one-hot encoded in features"""
+        """Test that node type is encoded as raw value in feature 0"""
         state = ProofState()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
@@ -378,16 +378,11 @@ class TestFeatureArrays:
         node_features = graph.node_features()
         node_types = graph.node_types()
 
-        # For each node, check that features[0:6] is one-hot encoding of type
+        # For each node, check that feature 0 matches the node type
         for i in range(graph.num_nodes()):
             type_idx = node_types[i]
-            type_features = node_features[i, :6]
-
-            # Should be one-hot: all zeros except at type_idx
-            expected = np.zeros(6, dtype=np.float32)
-            expected[type_idx] = 1.0
-
-            np.testing.assert_array_equal(type_features, expected)
+            # Feature 0 is the raw node type value
+            assert node_features[i, 0] == float(type_idx)
 
     def test_depth_feature(self):
         """Test that depth feature is correctly set"""
@@ -398,15 +393,15 @@ class TestFeatureArrays:
         graph = state.clause_to_graph(clause_ids[0])
         node_features = graph.node_features()
 
-        # Feature index 8 is depth
+        # Feature index 3 is depth
         # Clause root should have depth 0
-        assert node_features[0, 8] == 0.0
+        assert node_features[0, 3] == 0.0
 
         # Literal should have depth 1
-        assert node_features[1, 8] == 1.0
+        assert node_features[1, 3] == 1.0
 
         # Predicate should have depth 2
-        assert node_features[2, 8] == 2.0
+        assert node_features[2, 3] == 2.0
 
     def test_arg_position_feature(self):
         """Test that arg_position feature is correctly set for function arguments"""
@@ -420,14 +415,14 @@ class TestFeatureArrays:
         node_names = graph.node_names()
 
         # Find constant nodes and check their arg positions
-        # Feature index 7 is arg_position
+        # Feature index 2 is arg_position
         for i, name in enumerate(node_names):
             if name == 'a':
-                assert node_features[i, 7] == 0.0  # first arg
+                assert node_features[i, 2] == 0.0  # first arg
             elif name == 'b':
-                assert node_features[i, 7] == 1.0  # second arg
+                assert node_features[i, 2] == 1.0  # second arg
             elif name == 'c':
-                assert node_features[i, 7] == 2.0  # third arg
+                assert node_features[i, 2] == 2.0  # third arg
 
     def test_role_feature(self):
         """Test that role feature distinguishes axiom from negated_conjecture"""
@@ -438,14 +433,14 @@ class TestFeatureArrays:
         """
         clause_ids = state.add_clauses_from_tptp(tptp)
 
-        # Feature index 10 is role
+        # Feature index 5 is role
         # Role encoding: 0=axiom, 1=hypothesis, 2=definition, 3=negated_conjecture, 4=derived
         graph1 = state.clause_to_graph(clause_ids[0])
         graph2 = state.clause_to_graph(clause_ids[1])
 
         # Clause root is node 0, check its role feature
-        assert graph1.node_features()[0, 10] == 0.0  # axiom
-        assert graph2.node_features()[0, 10] == 3.0  # negated_conjecture
+        assert graph1.node_features()[0, 5] == 0.0  # axiom
+        assert graph2.node_features()[0, 5] == 3.0  # negated_conjecture
 
     def test_age_feature(self):
         """Test that age feature is correctly computed"""
@@ -457,10 +452,10 @@ class TestFeatureArrays:
         cnf(c3, axiom, r(c)).
         """)
 
-        # Feature index 9 is age
+        # Feature index 4 is age
         # Initial clauses have raw age 0, so normalized age is 0/max_age = 0
         graph0 = state.clause_to_graph(0)
-        age0 = graph0.node_features()[0, 9]
+        age0 = graph0.node_features()[0, 4]
 
         # Age feature should be non-negative
         assert age0 >= 0.0
@@ -575,11 +570,11 @@ class TestRealWorldExamples:
         num_functions = np.sum(node_types == 3)
         assert num_functions == 3  # mult, inv, mult
 
-        # Should detect equality (feature index 12)
+        # Should detect equality (feature index 7)
         node_features = graph.node_features()
         pred_nodes = np.where(node_types == 2)[0]
         assert len(pred_nodes) > 0
-        is_equality = node_features[pred_nodes[0], 12]
+        is_equality = node_features[pred_nodes[0], 7]
         assert is_equality == 1.0
 
     def test_resolution_example(self):

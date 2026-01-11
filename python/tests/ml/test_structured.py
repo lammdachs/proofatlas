@@ -107,8 +107,8 @@ class TestClauseToGraph:
         assert result["x"].shape[0] == result["num_nodes"]
         assert result["node_types"].shape[0] == result["num_nodes"]
 
-        # Check feature dimension (13 features)
-        assert result["x"].shape[1] == 13
+        # Check feature dimension (8 features, matching Rust)
+        assert result["x"].shape[1] == 8
 
     def test_node_types(self, sample_clause):
         from proofatlas.ml.structured import clause_to_graph

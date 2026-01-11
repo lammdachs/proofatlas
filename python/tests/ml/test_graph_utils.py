@@ -72,7 +72,7 @@ class TestBasicConversion:
 
         # Shapes
         assert tensors['edge_index'].shape == (2, num_edges)
-        assert tensors['x'].shape == (num_nodes, 13)
+        assert tensors['x'].shape == (num_nodes, 8)
         assert tensors['node_types'].shape == (num_nodes,)
 
         # Data types
@@ -438,7 +438,7 @@ class TestUtilityFunctions:
 
         # Extract only variable features
         variable_features = tensors['x'][masks['variable']]
-        assert variable_features.shape[1] == 13  # Feature dimension
+        assert variable_features.shape[1] == 8  # Feature dimension
 
         # Should have at least one variable
         assert variable_features.shape[0] > 0
@@ -455,7 +455,7 @@ class TestUtilityFunctions:
         assert 'num_nodes' in stats
         assert 'num_edges' in stats
         assert 'feature_dim' in stats
-        assert stats['feature_dim'] == 13
+        assert stats['feature_dim'] == 8
 
     def test_graph_statistics_node_type_counts(self):
         """Test node type counts in statistics"""

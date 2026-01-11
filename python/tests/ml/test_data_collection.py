@@ -93,7 +93,7 @@ class TestTrainingDataExtraction:
             tensors = to_torch_tensors(graph)
             assert "x" in tensors
             assert "edge_index" in tensors
-            assert tensors["x"].shape[1] == 13  # Node feature dimension
+            assert tensors["x"].shape[1] == 8  # Node feature dimension
 
     def test_proof_statistics(self):
         """Test proof statistics computation"""

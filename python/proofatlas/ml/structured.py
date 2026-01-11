@@ -39,6 +39,16 @@ TYPE_FUNCTION = 3
 TYPE_VARIABLE = 4
 TYPE_CONSTANT = 5
 
+# Feature indices (matching Rust GraphBuilder - 8 features)
+FEAT_NODE_TYPE = 0
+FEAT_ARITY = 1
+FEAT_ARG_POSITION = 2
+FEAT_DEPTH = 3
+FEAT_AGE = 4
+FEAT_ROLE = 5
+FEAT_POLARITY = 6
+FEAT_IS_EQUALITY = 7
+
 
 def clause_to_string(clause: Dict[str, Any]) -> str:
     """Convert structured clause to TPTP-style string.
@@ -126,7 +136,7 @@ class _GraphBuilder:
     """Build graph representation from structured clause."""
 
     # Feature dimension (matching Rust GraphBuilder)
-    FEATURE_DIM = 13
+    FEATURE_DIM = 8
 
     def __init__(self, max_age: int = 1000):
         self.max_age = max_age
@@ -146,7 +156,6 @@ class _GraphBuilder:
             node_type=TYPE_CLAUSE,
             arity=len(literals),
             depth=0,
-            is_root=True,
             age=age,
             role=role,
             name="clause"
@@ -245,48 +254,45 @@ class _GraphBuilder:
         arity: int = 0,
         depth: int = 0,
         arg_pos: int = 0,
-        is_root: bool = False,
         is_equality: bool = False,
         polarity: bool = True,
         age: int = 0,
         role: str = "derived",
         name: str = ""
     ) -> int:
-        """Add a node with feature vector."""
-        # Build 13-dimensional feature vector (matching Rust)
+        """Add a node with feature vector (8 features, matching Rust)."""
         features = np.zeros(self.FEATURE_DIM, dtype=np.float32)
 
-        # One-hot node type (features 0-5)
-        if node_type < 6:
-            features[node_type] = 1.0
+        # Feature 0: Node type (raw value)
+        features[FEAT_NODE_TYPE] = float(node_type)
 
-        # Arity (feature 6, normalized)
-        features[6] = min(arity, 10) / 10.0
+        # Feature 1: Arity
+        features[FEAT_ARITY] = float(arity)
 
-        # Depth (feature 7, normalized)
-        features[7] = min(depth, 20) / 20.0
+        # Feature 2: Argument position
+        features[FEAT_ARG_POSITION] = float(arg_pos)
 
-        # Argument position (feature 8, normalized)
-        features[8] = min(arg_pos, 10) / 10.0
+        # Feature 3: Depth
+        features[FEAT_DEPTH] = float(depth)
 
-        # Is root (feature 9)
-        features[9] = 1.0 if is_root else 0.0
+        # Feature 4: Age (normalized)
+        features[FEAT_AGE] = float(age) / float(max(self.max_age, 1))
 
-        # Is equality (feature 10)
-        features[10] = 1.0 if is_equality else 0.0
-
-        # Polarity (feature 11)
-        features[11] = 1.0 if polarity else 0.0
-
-        # Role (feature 12)
+        # Feature 5: Role (encoded as float)
         role_map = {
             "axiom": 0.0,
-            "hypothesis": 0.25,
-            "definition": 0.5,
-            "negated_conjecture": 0.75,
-            "derived": 1.0
+            "hypothesis": 1.0,
+            "definition": 2.0,
+            "negated_conjecture": 3.0,
+            "derived": 4.0
         }
-        features[12] = role_map.get(role, 1.0)
+        features[FEAT_ROLE] = role_map.get(role, 4.0)
+
+        # Feature 6: Polarity (1.0 = positive, 0.0 = negative)
+        features[FEAT_POLARITY] = 1.0 if polarity else 0.0
+
+        # Feature 7: Is equality predicate
+        features[FEAT_IS_EQUALITY] = 1.0 if is_equality else 0.0
 
         idx = len(self.nodes)
         self.nodes.append(features)
