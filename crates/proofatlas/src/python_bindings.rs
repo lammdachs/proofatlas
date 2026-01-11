@@ -820,6 +820,59 @@ impl ProofState {
 
         stats
     }
+
+    /// Extract training data in structured JSON format (model-independent)
+    ///
+    /// Returns a JSON string with the trace data that can be converted
+    /// to graphs or strings at training time.
+    ///
+    /// Format:
+    /// ```json
+    /// {
+    ///   "proof_found": true,
+    ///   "time_seconds": 1.23,
+    ///   "clauses": [
+    ///     {
+    ///       "literals": [{"polarity": true, "atom": {"predicate": "=", "args": [...]}}],
+    ///       "label": 1,
+    ///       "age": 0,
+    ///       "role": "axiom"
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
+        use crate::core::json::{TraceJson, TrainingClauseJson};
+
+        let examples = self.extract_training_examples();
+
+        // Build proof clause set for labeling
+        let proof_clauses: HashSet<usize> = examples
+            .iter()
+            .filter(|e| e.label == 1)
+            .map(|e| e.clause_idx)
+            .collect();
+
+        // Build structured clauses
+        let clauses: Vec<TrainingClauseJson> = self
+            .clauses
+            .iter()
+            .enumerate()
+            .map(|(idx, clause)| {
+                let in_proof = proof_clauses.contains(&idx);
+                TrainingClauseJson::from_clause(clause, in_proof)
+            })
+            .collect();
+
+        let trace = TraceJson {
+            proof_found: self.contains_empty_clause(),
+            time_seconds,
+            clauses,
+        };
+
+        serde_json::to_string(&trace)
+            .map_err(|e| PyValueError::new_err(format!("JSON serialization failed: {}", e)))
+    }
 }
 
 impl ProofState {

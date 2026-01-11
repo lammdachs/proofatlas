@@ -473,14 +473,22 @@ def is_learned_selector(selector_config: dict) -> bool:
 
 # Trace collection and training
 
-def save_trace(base_dir: Path, preset: str, problem: str, trace_data: dict):
-    """Save proof trace for training."""
+def save_trace(base_dir: Path, preset: str, problem: str, trace_json: str):
+    """Save proof trace for training in structured JSON format.
+
+    Args:
+        base_dir: Project root directory
+        preset: Preset name for trace subdirectory
+        problem: Problem file name
+        trace_json: Structured JSON string from extract_structured_trace()
+    """
     try:
-        import torch
         traces_dir = base_dir / ".data" / "traces" / preset
         traces_dir.mkdir(parents=True, exist_ok=True)
         problem_name = Path(problem).stem
-        torch.save(trace_data, traces_dir / f"{problem_name}.pt")
+        json_path = traces_dir / f"{problem_name}.json"
+        with open(json_path, "w") as f:
+            f.write(trace_json)
     except Exception:
         pass
 
@@ -496,30 +504,38 @@ def load_traces(base_dir: Path, preset: str, problem_names: set[str] = None):
     Returns:
         Dict with 'problems' list and 'num_problems' count.
     """
-    import torch
+    sys.path.insert(0, str(base_dir / "python"))
+    from proofatlas.ml.structured import clause_to_graph
 
     traces_dir = base_dir / ".data" / "traces" / preset
     if not traces_dir.exists():
         return {"problems": [], "num_problems": 0}
 
     problems = []
-    for trace_file in sorted(traces_dir.glob("*.pt")):
+    for trace_file in sorted(traces_dir.glob("*.json")):
         # Filter by problem set if specified
         if problem_names is not None and trace_file.stem not in problem_names:
             continue
 
         try:
-            trace = torch.load(trace_file, weights_only=False)
+            with open(trace_file) as f:
+                trace = json.load(f)
         except Exception:
             continue
 
-        if not trace.get("proof_found") or not trace.get("graphs"):
+        if not trace.get("proof_found") or not trace.get("clauses"):
             continue
+
+        # Convert structured clauses to graph tensors
+        clauses = trace["clauses"]
+        max_age = len(clauses)
+        graphs = [clause_to_graph(c, max_age) for c in clauses]
+        labels = [c.get("label", 0) for c in clauses]
 
         problems.append({
             "name": trace_file.stem,
-            "graphs": trace["graphs"],
-            "labels": trace["labels"],
+            "graphs": graphs,
+            "labels": labels,
         })
 
     return {"problems": problems, "num_problems": len(problems)}
@@ -805,22 +821,8 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Collect trace for training
     if collect_trace and proof_found and trace_preset:
         try:
-            from proofatlas.ml.graph_utils import to_torch_tensors
-            examples = state.extract_training_examples()
-            if examples:
-                clause_ids = [e.clause_idx for e in examples]
-                graphs = state.clauses_to_graphs(clause_ids)
-                graph_tensors = [to_torch_tensors(g) for g in graphs]
-                labels = [e.label for e in examples]
-                trace_data = {
-                    "proof_found": True,
-                    "time": elapsed,
-                    "graphs": graph_tensors,
-                    "labels": labels,
-                }
-                save_trace(base_dir, trace_preset, problem.name, trace_data)
-                # Free memory
-                del examples, clause_ids, graphs, graph_tensors, labels, trace_data
+            trace_json = state.extract_structured_trace(elapsed)
+            save_trace(base_dir, trace_preset, problem.name, trace_json)
         except Exception:
             pass
 

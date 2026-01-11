@@ -80,6 +80,49 @@ impl From<&Clause> for ClauseJson {
     }
 }
 
+/// JSON representation of a clause with training metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainingClauseJson {
+    /// The clause literals
+    pub literals: Vec<LiteralJson>,
+    /// Whether this clause is in the proof (1) or not (0)
+    pub label: u8,
+    /// Age of the clause (derivation step, 0 for input clauses)
+    pub age: usize,
+    /// Role: "axiom", "hypothesis", "definition", "negated_conjecture", "derived"
+    pub role: String,
+}
+
+impl TrainingClauseJson {
+    /// Create from a Clause with a label
+    pub fn from_clause(clause: &Clause, label: bool) -> Self {
+        let role = match clause.role {
+            super::ClauseRole::Axiom => "axiom",
+            super::ClauseRole::Hypothesis => "hypothesis",
+            super::ClauseRole::Definition => "definition",
+            super::ClauseRole::NegatedConjecture => "negated_conjecture",
+            super::ClauseRole::Derived => "derived",
+        };
+        TrainingClauseJson {
+            literals: clause.literals.iter().map(|l| l.into()).collect(),
+            label: if label { 1 } else { 0 },
+            age: clause.age,
+            role: role.to_string(),
+        }
+    }
+}
+
+/// JSON representation of a proof trace for ML training
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceJson {
+    /// Whether a proof was found
+    pub proof_found: bool,
+    /// Time taken in seconds
+    pub time_seconds: f64,
+    /// All clauses with training labels
+    pub clauses: Vec<TrainingClauseJson>,
+}
+
 /// JSON representation of an inference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceJson {

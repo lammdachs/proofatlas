@@ -129,8 +129,240 @@ def margin_ranking_loss(
 
 
 # =============================================================================
+# Per-Proof Loss Functions
+# =============================================================================
+
+
+def info_nce_loss_per_proof(
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    proof_ids: torch.Tensor,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """
+    InfoNCE loss computed separately for each proof, then averaged.
+
+    This is the correct formulation: positives and negatives should come
+    from the same proof search, not mixed across different problems.
+
+    Args:
+        scores: [total_clauses] clause scores from model
+        labels: [total_clauses] binary labels (1=proof clause, 0=not)
+        proof_ids: [total_clauses] which proof each clause belongs to
+        temperature: softmax temperature (lower = sharper)
+
+    Returns:
+        Scalar loss (mean over proofs)
+    """
+    unique_proofs = proof_ids.unique()
+    losses = []
+
+    for proof_id in unique_proofs:
+        mask = proof_ids == proof_id
+        proof_scores = scores[mask]
+        proof_labels = labels[mask]
+
+        loss = info_nce_loss(proof_scores, proof_labels, temperature)
+        losses.append(loss)
+
+    return torch.stack(losses).mean()
+
+
+# =============================================================================
 # Dataset
 # =============================================================================
+
+
+class ProofDataset(torch.utils.data.Dataset):
+    """
+    Dataset that loads structured JSON traces and converts to graphs/strings.
+
+    Each item is a random prefix of a proof search, simulating the
+    partial information available during actual inference. This ensures
+    the training distribution matches the inference distribution.
+
+    The structured format preserves all symbol names and clause structure,
+    enabling both graph-based and sentence-based training from the same data.
+    """
+
+    def __init__(
+        self,
+        trace_dir: Path,
+        output_type: str = "graph",  # "graph" or "string"
+        min_prefix_clauses: int = 10,
+        sample_prefix: bool = True,
+        max_clauses: Optional[int] = None,
+    ):
+        """
+        Args:
+            trace_dir: Directory containing .json trace files
+            output_type: "graph" for GNN models, "string" for sentence models
+            min_prefix_clauses: Minimum prefix length to sample
+            sample_prefix: If True, sample random prefix; if False, use full proof
+            max_clauses: Optional limit on clauses per proof (for memory)
+        """
+        self.trace_dir = Path(trace_dir)
+        self.trace_files = sorted(self.trace_dir.glob("*.json"))
+        self.output_type = output_type
+        self.min_prefix_clauses = min_prefix_clauses
+        self.sample_prefix = sample_prefix
+        self.max_clauses = max_clauses
+
+        if not self.trace_files:
+            raise ValueError(f"No JSON trace files found in {trace_dir}")
+
+        # Lazy-load converters
+        self._clause_to_graph = None
+        self._clause_to_string = None
+
+    def __len__(self):
+        return len(self.trace_files)
+
+    def __getitem__(self, idx):
+        import json
+        import random
+
+        with open(self.trace_files[idx]) as f:
+            trace = json.load(f)
+
+        clauses = trace["clauses"]
+        n_clauses = len(clauses)
+
+        # Sample a random prefix to simulate partial proof search
+        if self.sample_prefix and n_clauses > self.min_prefix_clauses:
+            prefix_len = random.randint(self.min_prefix_clauses, n_clauses)
+            clauses = clauses[:prefix_len]
+
+        # Apply max_clauses limit if needed
+        if self.max_clauses and len(clauses) > self.max_clauses:
+            # Keep all positives, sample negatives
+            pos_indices = [i for i, c in enumerate(clauses) if c.get("label", 0) == 1]
+            neg_indices = [i for i, c in enumerate(clauses) if c.get("label", 0) == 0]
+
+            max_neg = self.max_clauses - len(pos_indices)
+            if max_neg > 0 and len(neg_indices) > max_neg:
+                neg_indices = random.sample(neg_indices, max_neg)
+
+            indices = sorted(pos_indices + neg_indices)
+            clauses = [clauses[i] for i in indices]
+
+        # Extract labels
+        labels = [c.get("label", 0) for c in clauses]
+
+        if self.output_type == "graph":
+            # Convert to graph tensors
+            if self._clause_to_graph is None:
+                from .structured import clause_to_graph
+                self._clause_to_graph = clause_to_graph
+
+            max_age = len(clauses)
+            graphs = [self._clause_to_graph(c, max_age) for c in clauses]
+
+            return {
+                "graphs": graphs,
+                "labels": labels,
+                "problem": self.trace_files[idx].stem,
+            }
+        else:
+            # Convert to strings
+            if self._clause_to_string is None:
+                from .structured import clause_to_string
+                self._clause_to_string = clause_to_string
+
+            strings = [self._clause_to_string(c) for c in clauses]
+
+            return {
+                "strings": strings,
+                "labels": labels,
+                "problem": self.trace_files[idx].stem,
+            }
+
+
+def collate_sentence_batch(batch: List[Dict]) -> Dict[str, Any]:
+    """
+    Collate function for sentence-based batches.
+
+    Returns clause strings and labels with proof_ids for per-proof loss.
+    """
+    all_strings = []
+    all_labels = []
+    all_proof_ids = []
+
+    for proof_idx, item in enumerate(batch):
+        strings = item["strings"]
+        labels = item["labels"]
+
+        all_strings.extend(strings)
+        all_labels.extend(labels)
+        all_proof_ids.extend([proof_idx] * len(strings))
+
+    return {
+        "strings": all_strings,
+        "labels": torch.tensor(all_labels, dtype=torch.float32),
+        "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
+    }
+
+
+def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """
+    Collate function for proof batches.
+
+    Combines all clauses from all proofs into single tensors,
+    with proof_ids to track which proof each clause belongs to.
+    """
+    all_node_features = []
+    all_edge_indices = []
+    all_labels = []
+    all_proof_ids = []
+
+    node_offset = 0
+
+    for proof_idx, item in enumerate(batch):
+        graphs = item["graphs"]
+        labels = item["labels"]
+
+        for graph, label in zip(graphs, labels):
+            # Offset edge indices
+            edge_index = graph["edge_index"] + node_offset
+            all_edge_indices.append(edge_index)
+
+            all_node_features.append(graph["x"])
+            all_labels.append(label)
+            all_proof_ids.append(proof_idx)
+
+            node_offset += graph["num_nodes"]
+
+    # Concatenate all
+    node_features = torch.cat(all_node_features, dim=0)
+    edge_index = torch.cat(all_edge_indices, dim=1)
+    labels = torch.tensor(all_labels, dtype=torch.float32)
+    proof_ids = torch.tensor(all_proof_ids, dtype=torch.long)
+
+    # Build adjacency matrix
+    num_nodes = node_features.size(0)
+    adj = edge_index_to_adjacency(edge_index, num_nodes, add_self_loops=True)
+    adj_norm = normalize_adjacency(adj, add_self_loops=False)
+
+    # Build pool matrix (one row per clause)
+    num_clauses = len(all_labels)
+    pool_matrix = torch.zeros(num_clauses, num_nodes)
+
+    clause_idx = 0
+    node_offset = 0
+    for item in batch:
+        for graph in item["graphs"]:
+            n = graph["num_nodes"]
+            pool_matrix[clause_idx, node_offset:node_offset + n] = 1.0 / n
+            clause_idx += 1
+            node_offset += n
+
+    return {
+        "node_features": node_features,
+        "adj": adj_norm,
+        "pool_matrix": pool_matrix,
+        "labels": labels,
+        "proof_ids": proof_ids,
+    }
 
 
 class ClauseDataset(torch.utils.data.Dataset):
@@ -145,7 +377,7 @@ class ClauseDataset(torch.utils.data.Dataset):
     ):
         """
         Args:
-            node_features: List of [num_nodes, 13] tensors
+            node_features: List of [num_nodes, 8] tensors (raw features)
             edge_indices: List of [2, num_edges] tensors
             labels: List of selected clause indices
             pool_matrices: Optional pre-computed pool matrices
@@ -259,10 +491,15 @@ if LIGHTNING_AVAILABLE:
             else:
                 return self.model(node_features, pool_matrix)
 
-        def _compute_loss(self, scores, labels):
+        def _compute_loss(self, scores, labels, proof_ids=None):
             """Compute loss based on configuration."""
             if self.loss_type == 'info_nce':
-                return info_nce_loss(scores, labels, temperature=self.temperature)
+                if proof_ids is not None:
+                    # Per-proof InfoNCE (correct formulation)
+                    return info_nce_loss_per_proof(scores, labels, proof_ids, temperature=self.temperature)
+                else:
+                    # Legacy: mixed clauses from different proofs
+                    return info_nce_loss(scores, labels, temperature=self.temperature)
             elif self.loss_type == 'margin':
                 return margin_ranking_loss(scores, labels)
             elif self.loss_type == 'bce':
@@ -280,7 +517,7 @@ if LIGHTNING_AVAILABLE:
             num_neg = neg_mask.sum()
 
             if num_pos == 0 or num_neg == 0:
-                return {"acc": torch.tensor(0.0), "mrr": torch.tensor(0.0)}
+                return {"acc": torch.tensor(0.0, device=scores.device), "mrr": torch.tensor(0.0, device=scores.device)}
 
             pos_scores = scores[pos_mask]
             neg_scores = scores[neg_mask]
@@ -300,14 +537,16 @@ if LIGHTNING_AVAILABLE:
 
         def training_step(self, batch, batch_idx):
             scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
-            loss = self._compute_loss(scores, batch["labels"])
+            proof_ids = batch.get("proof_ids")
+            loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
             self.log("train_loss", loss, prog_bar=True, sync_dist=True)
             return loss
 
         def validation_step(self, batch, batch_idx):
             scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
-            loss = self._compute_loss(scores, batch["labels"])
+            proof_ids = batch.get("proof_ids")
+            loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
             metrics = self._compute_metrics(scores, batch["labels"])
 
@@ -381,11 +620,12 @@ class JSONLogger:
         })
         self._save()
 
-    def log_final(self, best_epoch: int, best_val_loss: float, total_time: float):
+    def log_final(self, best_epoch: int, best_val_loss: float, total_time: float, termination_reason: str = "unknown"):
         self.metrics["end_time"] = datetime.now().isoformat()
         self.metrics["best_epoch"] = best_epoch
         self.metrics["best_val_loss"] = best_val_loss
         self.metrics["total_time_seconds"] = total_time
+        self.metrics["termination_reason"] = termination_reason
         self._save()
 
     def _save(self):
@@ -532,16 +772,59 @@ if LIGHTNING_AVAILABLE:
 # =============================================================================
 
 
+def train_from_traces(
+    train_trace_dir: Path,
+    val_trace_dir: Path,
+    config: SelectorConfig,
+    max_clauses_per_proof: Optional[int] = 1000,
+    min_prefix_clauses: int = 10,
+) -> Tuple[nn.Module, Dict]:
+    """
+    Train a clause selection model from trace directories.
+
+    This is the recommended training function. Each trace file contains
+    one complete proof search in structured JSON format. During training,
+    random prefixes are sampled to match the partial-information setting
+    at inference time.
+
+    Args:
+        train_trace_dir: Directory with training trace files (.json)
+        val_trace_dir: Directory with validation trace files (.json)
+        config: Training configuration
+        max_clauses_per_proof: Limit clauses per proof (for memory)
+        min_prefix_clauses: Minimum prefix length to sample
+
+    Returns:
+        (trained_model, metrics_dict)
+    """
+    train_dataset = ProofDataset(
+        train_trace_dir,
+        output_type="graph",
+        max_clauses=max_clauses_per_proof,
+        min_prefix_clauses=min_prefix_clauses,
+        sample_prefix=True,  # Training: sample random prefixes
+    )
+    val_dataset = ProofDataset(
+        val_trace_dir,
+        output_type="graph",
+        max_clauses=max_clauses_per_proof,
+        min_prefix_clauses=min_prefix_clauses,
+        sample_prefix=False,  # Validation: use full proofs for consistent metrics
+    )
+
+    return train(train_dataset, val_dataset, config)
+
+
 def train(
-    train_dataset: ClauseDataset,
-    val_dataset: ClauseDataset,
+    train_dataset,
+    val_dataset,
     config: SelectorConfig,
 ) -> Tuple[nn.Module, Dict]:
     """
     Train a clause selection model.
 
     Args:
-        train_dataset: Training dataset
+        train_dataset: Training dataset (ProofDataset or ClauseDataset)
         val_dataset: Validation dataset
         config: Training configuration
 
@@ -555,12 +838,18 @@ def train(
     if not config.name:
         config.name = f"{config.model.type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+    # Select collate function based on dataset type
+    if isinstance(train_dataset, ProofDataset):
+        collate_fn = collate_proof_batch
+    else:
+        collate_fn = collate_clause_batch
+
     # Create data loaders
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=config.training.batch_size,
         shuffle=True,
-        collate_fn=collate_clause_batch,
+        collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
     )
@@ -568,7 +857,7 @@ def train(
         val_dataset,
         batch_size=config.training.batch_size,
         shuffle=False,
-        collate_fn=collate_clause_batch,
+        collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
     )
@@ -630,6 +919,17 @@ def train(
     trainer.fit(module, train_loader, val_loader)
     total_time = time.time() - start_time
 
+    # Determine termination reason
+    early_stop_callback = next(
+        (cb for cb in trainer.callbacks if isinstance(cb, EarlyStopping)), None
+    )
+    if early_stop_callback and early_stop_callback.stopped_epoch > 0:
+        termination_reason = f"early_stopping (patience={config.training.patience})"
+    elif trainer.current_epoch >= config.training.max_epochs - 1:
+        termination_reason = f"max_epochs ({config.training.max_epochs})"
+    else:
+        termination_reason = "interrupted"
+
     # Log final metrics
     best_checkpoint = trainer.checkpoint_callback.best_model_path
     best_val_loss = trainer.checkpoint_callback.best_model_score
@@ -637,6 +937,7 @@ def train(
         best_epoch=trainer.current_epoch,
         best_val_loss=float(best_val_loss) if best_val_loss else 0.0,
         total_time=total_time,
+        termination_reason=termination_reason,
     )
 
     # Load best model

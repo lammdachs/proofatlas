@@ -345,8 +345,8 @@ def compute_graph_statistics(graph) -> Dict[str, int]:
     for i, name in enumerate(TYPE_NAMES):
         stats[f'num_{name}s'] = type_counts.get(i, 0)
 
-    # Compute depth (depth is at feature index 8)
+    # Compute depth (depth is at feature index 3 in the 8-dim format)
     node_features = graph.node_features()
-    stats['max_depth'] = int(node_features[:, 8].max())
+    stats['max_depth'] = int(node_features[:, 3].max())
 
     return stats

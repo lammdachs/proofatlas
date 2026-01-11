@@ -2,6 +2,7 @@
 
 This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
+- Structured data: JSON trace format with converters
 - Data collection: extract training data from proofs
 - Training: training loop and utilities
 - Config: configuration loading for data and selectors
@@ -27,6 +28,13 @@ from .data_collection import (
 )
 
 from .training import (
+    # Per-proof training (recommended)
+    ProofDataset,
+    collate_proof_batch,
+    collate_sentence_batch,
+    train_from_traces,
+    info_nce_loss_per_proof,
+    # Legacy per-clause training
     ClauseDataset,
     collate_clause_batch,
     JSONLogger,
@@ -55,6 +63,16 @@ from .config import (
     merge_configs,
 )
 
+from .structured import (
+    # Conversion functions
+    clause_to_string,
+    clause_to_graph,
+    clauses_to_strings,
+    clauses_to_graphs,
+    load_structured_trace,
+    batch_graphs as batch_structured_graphs,
+)
+
 __all__ = [
     # Graph utilities
     "to_torch_tensors",
@@ -69,7 +87,13 @@ __all__ = [
     "collect_from_problem",
     "collect_from_directory",
     "load_training_dataset",
-    # Training
+    # Training (per-proof, recommended)
+    "ProofDataset",
+    "collate_proof_batch",
+    "collate_sentence_batch",
+    "train_from_traces",
+    "info_nce_loss_per_proof",
+    # Training (legacy per-clause)
     "ClauseDataset",
     "collate_clause_batch",
     "JSONLogger",
@@ -93,4 +117,11 @@ __all__ = [
     # Config utilities
     "list_configs",
     "merge_configs",
+    # Structured data conversion
+    "clause_to_string",
+    "clause_to_graph",
+    "clauses_to_strings",
+    "clauses_to_graphs",
+    "load_structured_trace",
+    "batch_structured_graphs",
 ]
