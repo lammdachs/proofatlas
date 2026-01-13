@@ -96,8 +96,23 @@ python scripts/bench.py --prover proofatlas --preset quick
 python scripts/bench.py --prover proofatlas --trace
 
 # Train a GCN selector
-python scripts/train.py --training gcn
+python scripts/train.py --traces steps_sel22 --model gcn
 ```
+
+### Local Web Interface
+
+```bash
+# Export benchmark and training data to web/data/
+proofatlas-export
+
+# Serve locally (Python)
+python -m http.server 8000 --directory web
+
+# Or with Node.js
+npx serve web
+```
+
+Then open http://localhost:8000 in your browser.
 
 ## Clause Selection
 

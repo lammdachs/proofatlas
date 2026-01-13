@@ -6,7 +6,6 @@ USAGE:
     proofatlas-train --traces steps_sel22              # Train on traces
     proofatlas-train --traces steps_sel22 --model gcn  # Specify model type
     proofatlas-train --traces steps_sel22 --overparameterized  # Large model
-    proofatlas-train --viewer                          # Start viewer only
 
 MODEL SIZES:
     --small        : hidden_dim=32,  num_layers=2  (fast iteration)
@@ -235,27 +234,6 @@ def train_model(
 
 
 # =============================================================================
-# Viewer
-# =============================================================================
-
-
-def start_viewer(log_dir: Path, port: int = 5000, host: str = "127.0.0.1"):
-    """Start the training viewer web server."""
-    try:
-        from proofatlas.ml.viewer import create_app
-    except ImportError as e:
-        print(f"Error: Viewer dependencies not available. Install with: pip install flask")
-        print(f"  {e}")
-        sys.exit(1)
-
-    app = create_app(log_dir)
-    print(f"\nStarting training viewer at http://{host}:{port}")
-    print(f"  Log directory: {log_dir}")
-    print(f"  Press Ctrl+C to stop\n")
-    app.run(host=host, port=port, debug=False)
-
-
-# =============================================================================
 # CLI
 # =============================================================================
 
@@ -299,12 +277,6 @@ def main():
 
     # Run options
     parser.add_argument("--name", type=str, help="Run name (default: auto-generated)")
-
-    # Viewer
-    parser.add_argument("--viewer", action="store_true", help="Start the training viewer only")
-    parser.add_argument("--port", type=int, default=5000, help="Viewer port (default: 5000)")
-
-    # Paths
     parser.add_argument("--log-dir", type=Path, help="Log directory (default: .logs)")
 
     args = parser.parse_args()
@@ -313,14 +285,9 @@ def main():
     log_dir = args.log_dir if args.log_dir else ROOT / ".logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Viewer only mode
-    if args.viewer:
-        start_viewer(log_dir, port=args.port)
-        return
-
     # Training mode requires --traces
     if not args.traces:
-        parser.error("--traces is required for training (or use --viewer)")
+        parser.error("--traces is required")
 
     # Resolve trace directory
     if "/" in args.traces or "\\" in args.traces:

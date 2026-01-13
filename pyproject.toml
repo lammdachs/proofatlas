@@ -37,7 +37,6 @@ proofatlas-prove = "proofatlas.cli.prove:main"
 proofatlas-bench = "proofatlas.cli.bench:main"
 proofatlas-export = "proofatlas.cli.export:main"
 proofatlas-train = "proofatlas.cli.train:main"
-proofatlas-viewer = "proofatlas.ml.viewer:main"
 
 [project.urls]
 Homepage = "https://github.com/lexpk/proofatlas"
@@ -67,10 +66,6 @@ examples = [
     "matplotlib>=3.0",
 ]
 
-viewer = [
-    "flask>=2.0",
-]
-
 [tool.setuptools]
 zip-safe = false
 
@@ -80,7 +75,7 @@ include = ["proofatlas*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-proofatlas = ["*.so", "*.pyd", "*.dylib", "ml/viewer/templates/*.html", "ml/viewer/static/*"]
+proofatlas = ["*.so", "*.pyd", "*.dylib"]
 
 [[tool.setuptools-rust.ext-modules]]
 target = "proofatlas.proofatlas"

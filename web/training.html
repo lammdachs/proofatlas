@@ -298,37 +298,31 @@
 
         async function loadRuns() {
             try {
-                // Try to load runs index
-                const response = await fetch('data/runs.json');
+                // Load training.json (exported by proofatlas-export)
+                const response = await fetch('data/training.json');
                 if (!response.ok) {
                     showNoData();
                     return;
                 }
 
-                const runsIndex = await response.json();
+                const data = await response.json();
+                const runs = data.runs || [];
 
-                // Load each run's metrics
-                for (const runName of runsIndex.runs) {
-                    try {
-                        const metricsResponse = await fetch(`data/${runName}/metrics.json`);
-                        if (metricsResponse.ok) {
-                            allRuns[runName] = await metricsResponse.json();
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to load ${runName}:`, e);
-                    }
-                }
-
-                if (Object.keys(allRuns).length === 0) {
+                if (runs.length === 0) {
                     showNoData();
                     return;
+                }
+
+                // Convert to allRuns format
+                for (const run of runs) {
+                    allRuns[run.name] = run;
                 }
 
                 populateRunSelector();
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('results-content').style.display = 'block';
 
-                // Select first run
+                // Select first run (most recent)
                 const firstRun = Object.keys(allRuns)[0];
                 document.getElementById('run-select').value = firstRun;
                 displayRun(firstRun);
@@ -361,13 +355,18 @@
             if (!currentRun) return;
 
             // Update run info
-            document.getElementById('run-name').textContent = currentRun.run_name || runName;
+            document.getElementById('run-name').textContent = currentRun.name || runName;
 
             // Meta information
+            const model = currentRun.model || {};
             const metaHtml = `
                 <div class="meta-item">
                     <div class="label">Model Type</div>
-                    <div class="value">${currentRun.config?.model_type || 'N/A'}</div>
+                    <div class="value">${model.type || 'N/A'}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="label">Architecture</div>
+                    <div class="value">${model.hidden_dim || '?'}h × ${model.num_layers || '?'}L</div>
                 </div>
                 <div class="meta-item">
                     <div class="label">Best Epoch</div>
@@ -385,14 +384,21 @@
                     <div class="label">Epochs</div>
                     <div class="value">${currentRun.epochs?.length ?? 0}</div>
                 </div>
+                <div class="meta-item">
+                    <div class="label">Termination</div>
+                    <div class="value">${currentRun.termination_reason || 'N/A'}</div>
+                </div>
             `;
             document.getElementById('run-meta').innerHTML = metaHtml;
 
-            // Config
-            const config = currentRun.config || {};
-            const configHtml = Object.entries(config)
-                .filter(([k, v]) => !Array.isArray(v) && typeof v !== 'object')
-                .map(([k, v]) => `<div class="config-item"><span class="key">${k}:</span> <span class="val">${v}</span></div>`)
+            // Config - combine model and training params
+            const training = currentRun.training || {};
+            const configItems = [
+                ...Object.entries(model).map(([k, v]) => ({ key: `model.${k}`, val: v })),
+                ...Object.entries(training).map(([k, v]) => ({ key: `training.${k}`, val: v })),
+            ].filter(item => item.val !== null && item.val !== undefined);
+            const configHtml = configItems
+                .map(item => `<div class="config-item"><span class="key">${item.key}:</span> <span class="val">${item.val}</span></div>`)
                 .join('');
             document.getElementById('config-grid').innerHTML = configHtml;
 
@@ -579,8 +585,11 @@
                 const run = allRuns[runName];
                 if (!run.epochs) return;
 
+                const label = run.model?.type
+                    ? `${run.model.type} (${run.model.hidden_dim}h×${run.model.num_layers}L)`
+                    : runName;
                 datasets.push({
-                    label: run.config?.model_type || runName,
+                    label: label,
                     data: run.epochs.map(e => ({ x: e.epoch, y: e.val_loss })),
                     borderColor: colors[i % colors.length],
                     fill: false,

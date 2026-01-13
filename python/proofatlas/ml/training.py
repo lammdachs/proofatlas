@@ -929,6 +929,7 @@ def train(
         devices=devices,
         strategy=config.distributed.strategy if torch.cuda.device_count() > 1 else "auto",
         callbacks=callbacks,
+        logger=False,  # We use our own JSONLogger
         enable_progress_bar=config.logging.enable_progress_bar,
         log_every_n_steps=config.logging.log_every_n_steps,
     )
