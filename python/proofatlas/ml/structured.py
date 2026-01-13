@@ -39,15 +39,24 @@ TYPE_FUNCTION = 3
 TYPE_VARIABLE = 4
 TYPE_CONSTANT = 5
 
-# Feature indices (matching Rust GraphBuilder - 8 features)
+# Node feature indices (3 features per node for GCN encoder)
 FEAT_NODE_TYPE = 0
 FEAT_ARITY = 1
 FEAT_ARG_POSITION = 2
-FEAT_DEPTH = 3
-FEAT_AGE = 4
-FEAT_ROLE = 5
-FEAT_POLARITY = 6
-FEAT_IS_EQUALITY = 7
+
+# Clause feature indices (3 features per clause for scorer, sinusoidal encoded)
+CLAUSE_FEAT_AGE = 0
+CLAUSE_FEAT_ROLE = 1
+CLAUSE_FEAT_SIZE = 2
+
+# Role encoding
+ROLE_MAP = {
+    "axiom": 0,
+    "hypothesis": 1,
+    "definition": 2,
+    "negated_conjecture": 3,
+    "derived": 4,
+}
 
 
 def clause_to_string(clause: Dict[str, Any]) -> str:
@@ -115,13 +124,23 @@ def clause_to_graph(
 ) -> Dict[str, Any]:
     """Convert structured clause to graph tensors.
 
+    The new architecture separates node-level and clause-level features:
+    - Node features (3d): type, arity, arg_pos (for GCN encoder)
+    - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
+
     Args:
         clause: Structured clause dict
         max_age: Maximum age for normalization
         device: PyTorch device
 
     Returns:
-        Dictionary with edge_index, x, node_types, num_nodes, etc.
+        Dictionary with:
+            edge_index: [2, num_edges] edge indices
+            x: [num_nodes, 3] node features (type, arity, arg_pos)
+            node_types: [num_nodes] node type indices
+            num_nodes: int
+            num_edges: int
+            clause_features: [3] raw clause features (age, role, size)
     """
     if not TORCH_AVAILABLE:
         raise ImportError("PyTorch required for graph conversion")
@@ -129,14 +148,22 @@ def clause_to_graph(
     builder = _GraphBuilder(max_age)
     builder.build_clause(clause)
 
-    return builder.to_tensors(device)
+    return builder.to_tensors(clause, device)
 
 
 class _GraphBuilder:
-    """Build graph representation from structured clause."""
+    """Build graph representation from structured clause.
 
-    # Feature dimension (matching Rust GraphBuilder)
-    FEATURE_DIM = 8
+    New architecture (from IJCAR26 plan):
+    - Node features (3d): type, arity, arg_pos (for GCN encoder)
+    - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
+    """
+
+    # Node feature dimension (type, arity, arg_pos)
+    NODE_FEATURE_DIM = 3
+
+    # Clause feature dimension (age, role, size)
+    CLAUSE_FEATURE_DIM = 3
 
     def __init__(self, max_age: int = 1000):
         self.max_age = max_age
@@ -148,27 +175,23 @@ class _GraphBuilder:
     def build_clause(self, clause: Dict[str, Any]) -> int:
         """Build graph for clause, return root node index."""
         literals = clause.get("literals", [])
-        age = clause.get("age", 0)
-        role = clause.get("role", "derived")
 
         # Create clause node
         clause_idx = self._add_node(
             node_type=TYPE_CLAUSE,
             arity=len(literals),
-            depth=0,
-            age=age,
-            role=role,
+            arg_pos=0,
             name="clause"
         )
 
         # Add literals
         for lit_pos, lit in enumerate(literals):
-            lit_idx = self._build_literal(lit, depth=1, arg_pos=lit_pos)
+            lit_idx = self._build_literal(lit, arg_pos=lit_pos)
             self.edges.append((clause_idx, lit_idx))
 
         return clause_idx
 
-    def _build_literal(self, lit: Dict[str, Any], depth: int, arg_pos: int) -> int:
+    def _build_literal(self, lit: Dict[str, Any], arg_pos: int) -> int:
         """Build graph for literal."""
         polarity = lit.get("polarity", True)
         atom = lit["atom"]
@@ -179,9 +202,7 @@ class _GraphBuilder:
         lit_idx = self._add_node(
             node_type=TYPE_LITERAL,
             arity=1,  # Literal has one child (predicate)
-            depth=depth,
             arg_pos=arg_pos,
-            polarity=polarity,
             name=f"{'~' if not polarity else ''}{pred}"
         )
 
@@ -189,21 +210,19 @@ class _GraphBuilder:
         pred_idx = self._add_node(
             node_type=TYPE_PREDICATE,
             arity=len(args),
-            depth=depth + 1,
             arg_pos=0,
-            is_equality=(pred == "="),
             name=pred
         )
         self.edges.append((lit_idx, pred_idx))
 
         # Add arguments
-        for arg_pos, arg in enumerate(args):
-            arg_idx = self._build_term(arg, depth=depth + 2, arg_pos=arg_pos)
+        for child_pos, arg in enumerate(args):
+            arg_idx = self._build_term(arg, arg_pos=child_pos)
             self.edges.append((pred_idx, arg_idx))
 
         return lit_idx
 
-    def _build_term(self, term: Dict[str, Any], depth: int, arg_pos: int) -> int:
+    def _build_term(self, term: Dict[str, Any], arg_pos: int) -> int:
         """Build graph for term."""
         term_type = term["type"]
 
@@ -211,7 +230,6 @@ class _GraphBuilder:
             return self._add_node(
                 node_type=TYPE_VARIABLE,
                 arity=0,
-                depth=depth,
                 arg_pos=arg_pos,
                 name=term["name"]
             )
@@ -219,7 +237,6 @@ class _GraphBuilder:
             return self._add_node(
                 node_type=TYPE_CONSTANT,
                 arity=0,
-                depth=depth,
                 arg_pos=arg_pos,
                 name=term["name"]
             )
@@ -228,13 +245,12 @@ class _GraphBuilder:
             func_idx = self._add_node(
                 node_type=TYPE_FUNCTION,
                 arity=len(args),
-                depth=depth,
                 arg_pos=arg_pos,
                 name=term["name"]
             )
 
             for child_pos, child in enumerate(args):
-                child_idx = self._build_term(child, depth=depth + 1, arg_pos=child_pos)
+                child_idx = self._build_term(child, arg_pos=child_pos)
                 self.edges.append((func_idx, child_idx))
 
             return func_idx
@@ -243,7 +259,6 @@ class _GraphBuilder:
             return self._add_node(
                 node_type=TYPE_CONSTANT,
                 arity=0,
-                depth=depth,
                 arg_pos=arg_pos,
                 name=f"?{term_type}"
             )
@@ -252,16 +267,11 @@ class _GraphBuilder:
         self,
         node_type: int,
         arity: int = 0,
-        depth: int = 0,
         arg_pos: int = 0,
-        is_equality: bool = False,
-        polarity: bool = True,
-        age: int = 0,
-        role: str = "derived",
         name: str = ""
     ) -> int:
-        """Add a node with feature vector (8 features, matching Rust)."""
-        features = np.zeros(self.FEATURE_DIM, dtype=np.float32)
+        """Add a node with 3-dim feature vector (type, arity, arg_pos)."""
+        features = np.zeros(self.NODE_FEATURE_DIM, dtype=np.float32)
 
         # Feature 0: Node type (raw value)
         features[FEAT_NODE_TYPE] = float(node_type)
@@ -272,28 +282,6 @@ class _GraphBuilder:
         # Feature 2: Argument position
         features[FEAT_ARG_POSITION] = float(arg_pos)
 
-        # Feature 3: Depth
-        features[FEAT_DEPTH] = float(depth)
-
-        # Feature 4: Age (normalized)
-        features[FEAT_AGE] = float(age) / float(max(self.max_age, 1))
-
-        # Feature 5: Role (encoded as float)
-        role_map = {
-            "axiom": 0.0,
-            "hypothesis": 1.0,
-            "definition": 2.0,
-            "negated_conjecture": 3.0,
-            "derived": 4.0
-        }
-        features[FEAT_ROLE] = role_map.get(role, 4.0)
-
-        # Feature 6: Polarity (1.0 = positive, 0.0 = negative)
-        features[FEAT_POLARITY] = 1.0 if polarity else 0.0
-
-        # Feature 7: Is equality predicate
-        features[FEAT_IS_EQUALITY] = 1.0 if is_equality else 0.0
-
         idx = len(self.nodes)
         self.nodes.append(features)
         self.node_types.append(node_type)
@@ -301,16 +289,24 @@ class _GraphBuilder:
 
         return idx
 
-    def to_tensors(self, device: str = "cpu") -> Dict[str, Any]:
-        """Convert to PyTorch tensors."""
+    def to_tensors(self, clause: Dict[str, Any], device: str = "cpu") -> Dict[str, Any]:
+        """Convert to PyTorch tensors.
+
+        Args:
+            clause: Original clause dict (for extracting clause-level features)
+            device: PyTorch device
+
+        Returns:
+            Dictionary with node features, edge index, and clause features
+        """
         import torch
 
         num_nodes = len(self.nodes)
         num_edges = len(self.edges)
 
-        # Node features
+        # Node features (3-dim)
         x = torch.tensor(
-            np.stack(self.nodes) if self.nodes else np.zeros((0, self.FEATURE_DIM)),
+            np.stack(self.nodes) if self.nodes else np.zeros((0, self.NODE_FEATURE_DIM)),
             dtype=torch.float32,
             device=device
         )
@@ -332,12 +328,28 @@ class _GraphBuilder:
             device=device
         )
 
+        # Clause-level features (raw values, will be sinusoidal encoded by scorer)
+        age = clause.get("age", 0)
+        role = clause.get("role", "derived")
+        size = len(clause.get("literals", []))
+
+        # Normalize age by max_age for consistency
+        normalized_age = float(age) / float(max(self.max_age, 1))
+        role_idx = float(ROLE_MAP.get(role, 4))
+
+        clause_features = torch.tensor(
+            [normalized_age, role_idx, float(size)],
+            dtype=torch.float32,
+            device=device
+        )
+
         return {
             'edge_index': edge_index,
             'x': x,
             'node_types': node_types,
             'num_nodes': num_nodes,
             'num_edges': num_edges,
+            'clause_features': clause_features,
         }
 
 
@@ -401,7 +413,7 @@ def batch_graphs(
         device: PyTorch device
 
     Returns:
-        Batched graph dict with batch indices
+        Batched graph dict with batch indices and clause features
     """
     if not TORCH_AVAILABLE:
         raise ImportError("PyTorch required for batching")
@@ -414,6 +426,7 @@ def batch_graphs(
     all_x = []
     all_edges = []
     all_types = []
+    all_clause_features = []
     batch_indices = []
 
     node_offset = 0
@@ -429,15 +442,23 @@ def batch_graphs(
         all_types.append(types)
         batch_indices.extend([i] * num_nodes)
 
+        # Collect clause features if present
+        if 'clause_features' in g:
+            all_clause_features.append(g['clause_features'])
+
         node_offset += num_nodes
 
     result = {
-        'x': torch.cat(all_x, dim=0) if all_x else torch.zeros(0, _GraphBuilder.FEATURE_DIM),
+        'x': torch.cat(all_x, dim=0) if all_x else torch.zeros(0, _GraphBuilder.NODE_FEATURE_DIM),
         'edge_index': torch.cat(all_edges, dim=1) if all_edges else torch.zeros(2, 0, dtype=torch.long),
         'node_types': torch.cat(all_types, dim=0) if all_types else torch.zeros(0, dtype=torch.uint8),
         'batch': torch.tensor(batch_indices, dtype=torch.long, device=device),
         'num_graphs': len(graphs),
     }
+
+    # Stack clause features if present
+    if all_clause_features:
+        result['clause_features'] = torch.stack(all_clause_features, dim=0)
 
     if labels is not None:
         result['y'] = torch.tensor(labels, dtype=torch.float, device=device)

@@ -12,29 +12,20 @@ import torch.nn.functional as F
 from .scorers import create_scorer, MLPScorer
 
 
-class FeatureEmbedding(nn.Module):
+class NodeFeatureEmbedding(nn.Module):
     """
-    Embeds raw node features into a richer representation.
+    Embeds node-level features into a richer representation.
 
-    Raw feature layout (8 dims from graph.rs):
+    New architecture (IJCAR26 plan):
+    Raw feature layout (3 dims):
         0: Node type (int 0-5: clause, literal, predicate, function, variable, constant)
         1: Arity (raw int)
         2: Arg position (raw int)
-        3: Depth (raw int)
-        4: Age (normalized 0-1)
-        5: Role (int 0-4: axiom, hypothesis, definition, negated_conjecture, derived)
-        6: Polarity (binary)
-        7: Is equality (binary)
 
     Output layout:
         - Node type: one-hot (6 dims)
         - Arity: log1p scaled (1 dim)
         - Arg position: sinusoidal (sin_dim dims)
-        - Depth: sinusoidal (sin_dim dims)
-        - Age: sinusoidal (sin_dim dims)
-        - Role: one-hot (5 dims)
-        - Polarity: kept (1 dim)
-        - Is equality: kept (1 dim)
     """
 
     def __init__(self, sin_dim: int = 8):
@@ -47,12 +38,10 @@ class FeatureEmbedding(nn.Module):
         assert sin_dim % 2 == 0, "sin_dim must be even"
         self.sin_dim = sin_dim
 
-        # Output dim: 6 (type) + 1 (arity) + 3*sin_dim (pos, depth, age) + 5 (role) + 2 (polarity, eq)
-        self.output_dim = 6 + 1 + 3 * sin_dim + 5 + 2
+        # Output dim: 6 (type) + 1 (arity) + sin_dim (arg_pos)
+        self.output_dim = 6 + 1 + sin_dim
 
         # Precompute div_term for sinusoidal encoding
-        # PE(pos, 2i) = sin(pos / 10000^(2i/d))
-        # PE(pos, 2i+1) = cos(pos / 10000^(2i/d))
         div_term = torch.exp(torch.arange(0, sin_dim, 2).float() * (-math.log(10000.0) / sin_dim))
         self.register_buffer('div_term', div_term)
 
@@ -81,23 +70,18 @@ class FeatureEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Embed raw features.
+        Embed raw node features.
 
         Args:
-            x: [N, 8] raw node features
+            x: [N, 3] raw node features (type, arity, arg_pos)
 
         Returns:
             [N, output_dim] embedded features
         """
-        # Extract raw features (8-dim compact format)
+        # Extract raw features (3-dim format)
         node_type = x[:, 0].long()  # int 0-5
         arity = x[:, 1]             # raw int
         arg_pos = x[:, 2]           # raw int
-        depth = x[:, 3]             # raw int
-        age = x[:, 4]               # normalized 0-1
-        role = x[:, 5].long()       # int 0-4
-        polarity = x[:, 6:7]        # binary
-        is_equality = x[:, 7:8]     # binary
 
         # Node type to one-hot
         node_type_onehot = F.one_hot(node_type.clamp(0, 5), num_classes=6).float()  # [N, 6]
@@ -105,23 +89,92 @@ class FeatureEmbedding(nn.Module):
         # Encode continuous features
         arity_enc = torch.log1p(arity).unsqueeze(-1)  # [N, 1]
         arg_pos_enc = self.sinusoidal_encode(arg_pos)  # [N, sin_dim]
-        depth_enc = self.sinusoidal_encode(depth)      # [N, sin_dim]
-        age_enc = self.sinusoidal_encode(age * 100)    # [N, sin_dim], scale to 0-100
-
-        # Role to one-hot
-        role_onehot = F.one_hot(role.clamp(0, 4), num_classes=5).float()  # [N, 5]
 
         # Concatenate all
         return torch.cat([
             node_type_onehot,  # 6
             arity_enc,         # 1
             arg_pos_enc,       # sin_dim
-            depth_enc,         # sin_dim
-            age_enc,           # sin_dim
-            role_onehot,       # 5
-            polarity,          # 1
-            is_equality,       # 1
         ], dim=-1)
+
+
+class ClauseFeatureEmbedding(nn.Module):
+    """
+    Embeds clause-level features into a representation for the scorer.
+
+    New architecture (IJCAR26 plan):
+    Raw feature layout (3 dims):
+        0: Age (normalized 0-1)
+        1: Role (int 0-4: axiom, hypothesis, definition, negated_conjecture, derived)
+        2: Size (number of literals)
+
+    Output layout:
+        - Age: sinusoidal (sin_dim dims)
+        - Role: one-hot (5 dims)
+        - Size: sinusoidal (sin_dim dims)
+    """
+
+    def __init__(self, sin_dim: int = 8):
+        """
+        Args:
+            sin_dim: Dimension of sinusoidal encoding for continuous features.
+        """
+        super().__init__()
+        assert sin_dim % 2 == 0, "sin_dim must be even"
+        self.sin_dim = sin_dim
+
+        # Output dim: sin_dim (age) + 5 (role) + sin_dim (size)
+        self.output_dim = sin_dim + 5 + sin_dim
+
+        # Precompute div_term for sinusoidal encoding
+        div_term = torch.exp(torch.arange(0, sin_dim, 2).float() * (-math.log(10000.0) / sin_dim))
+        self.register_buffer('div_term', div_term)
+
+    def sinusoidal_encode(self, values: torch.Tensor) -> torch.Tensor:
+        """Apply sinusoidal positional encoding."""
+        if values.dim() == 1:
+            values = values.unsqueeze(-1)
+
+        scaled = values * self.div_term
+        sin_enc = torch.sin(scaled)
+        cos_enc = torch.cos(scaled)
+        return torch.stack([sin_enc, cos_enc], dim=-1).flatten(-2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Embed raw clause features.
+
+        Args:
+            x: [num_clauses, 3] raw clause features (age, role, size)
+
+        Returns:
+            [num_clauses, output_dim] embedded features
+        """
+        age = x[:, 0]           # normalized 0-1
+        role = x[:, 1].long()   # int 0-4
+        size = x[:, 2]          # number of literals
+
+        # Encode features
+        age_enc = self.sinusoidal_encode(age * 100)  # Scale to 0-100
+        role_onehot = F.one_hot(role.clamp(0, 4), num_classes=5).float()
+        size_enc = self.sinusoidal_encode(size)
+
+        return torch.cat([age_enc, role_onehot, size_enc], dim=-1)
+
+
+# Legacy alias for backwards compatibility
+class FeatureEmbedding(NodeFeatureEmbedding):
+    """Legacy alias for NodeFeatureEmbedding.
+
+    For backwards compatibility with 8-dim features, this class accepts
+    8-dim input but only uses the first 3 dimensions (type, arity, arg_pos).
+    """
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Handle both 3-dim (new) and 8-dim (legacy) input
+        if x.size(-1) == 8:
+            x = x[:, :3]  # Use only type, arity, arg_pos
+        return super().forward(x)
 
 
 class GCNLayer(nn.Module):
@@ -269,16 +322,18 @@ class ClauseGCN(nn.Module):
     """
     Graph Convolutional Network for clause scoring.
 
-    Architecture:
-        raw_features → feature_embedding → GCN layers → pool to clauses → scorer → scores
+    New architecture (IJCAR26 plan):
+        Node features (3d) → node_embedding → GCN layers → pool to clauses
+        Clause features (3d) → clause_embedding
+        Concatenate(pooled, clause_emb) → scorer → scores
 
-    The feature embedding applies sinusoidal encoding to continuous features
-    (arg_position, depth, age) and one-hot encoding to categorical features (role).
+    This separates structural information (encoded by GCN) from
+    clause-level metadata (age, role, size) which is sinusoidal encoded.
     """
 
     def __init__(
         self,
-        node_feature_dim: int = 13,
+        node_feature_dim: int = 3,
         hidden_dim: int = 64,
         num_layers: int = 3,
         dropout: float = 0.1,
@@ -286,15 +341,18 @@ class ClauseGCN(nn.Module):
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
         sin_dim: int = 8,
+        use_clause_features: bool = True,
     ):
         super().__init__()
         self.num_layers = num_layers
         self.dropout = dropout
+        self.use_clause_features = use_clause_features
 
-        # Feature embedding: raw 13-dim → richer representation
-        self.feature_embedding = FeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.feature_embedding.output_dim
+        # Node feature embedding: raw 3-dim → richer representation
+        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
+        embed_dim = self.node_embedding.output_dim
 
+        # GCN layers
         self.convs = nn.ModuleList()
         self.convs.append(GCNLayer(embed_dim, hidden_dim))
         for _ in range(num_layers - 1):
@@ -302,6 +360,17 @@ class ClauseGCN(nn.Module):
 
         self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
 
+        # Clause feature embedding (optional)
+        if use_clause_features:
+            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
+            # Project concatenated features back to hidden_dim for scorer
+            concat_dim = hidden_dim + self.clause_embedding.output_dim
+            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
+        else:
+            self.clause_embedding = None
+            self.clause_proj = None
+
+        # Scorer always receives hidden_dim inputs
         self.scorer = create_scorer(
             scorer_type,
             hidden_dim,
@@ -310,24 +379,35 @@ class ClauseGCN(nn.Module):
             dropout=dropout,
         )
 
+        # Keep reference to feature embedding for backwards compatibility
+        self.feature_embedding = self.node_embedding
+
     def forward(
         self,
         node_features: torch.Tensor,
         adj: torch.Tensor,
         pool_matrix: torch.Tensor,
+        clause_features: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Args:
-            node_features: [total_nodes, 13] raw features from graph.rs
+            node_features: [total_nodes, 3] raw node features (type, arity, arg_pos)
             adj: Normalized adjacency matrix [total_nodes, total_nodes]
             pool_matrix: [num_clauses, total_nodes] for pooling nodes to clauses
+            clause_features: [num_clauses, 3] raw clause features (age, role, size)
+                            Optional for backwards compatibility
 
         Returns:
             Scores [num_clauses]
         """
-        # Embed raw features
-        x = self.feature_embedding(node_features)
+        # Handle legacy 8-dim features
+        if node_features.size(-1) == 8:
+            node_features = node_features[:, :3]
 
+        # Embed node features
+        x = self.node_embedding(node_features)
+
+        # GCN message passing
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
             x = conv(x, adj)
             x = norm(x)
@@ -335,7 +415,23 @@ class ClauseGCN(nn.Module):
             if i < self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
+        # Pool to clause level
         clause_emb = torch.mm(pool_matrix, x)
+
+        # Add clause features if available and model expects them
+        if self.use_clause_features and self.clause_embedding is not None:
+            if clause_features is not None:
+                clause_feat_emb = self.clause_embedding(clause_features)
+            else:
+                # Generate zero clause features if not provided (for backwards compat)
+                num_clauses = pool_matrix.size(0)
+                clause_feat_emb = torch.zeros(
+                    num_clauses, self.clause_embedding.output_dim,
+                    device=clause_emb.device, dtype=clause_emb.dtype
+                )
+            # Concatenate and project back to hidden_dim
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
+
         return self.scorer(clause_emb).squeeze(-1)
 
 
@@ -343,13 +439,15 @@ class ClauseGAT(nn.Module):
     """
     Graph Attention Network for clause scoring.
 
-    Architecture:
-        raw_features → feature_embedding → GAT layers → pool to clauses → scorer → scores
+    New architecture (IJCAR26 plan):
+        Node features (3d) → node_embedding → GAT layers → pool to clauses
+        Clause features (3d) → clause_embedding
+        Concatenate(pooled, clause_emb) → scorer → scores
     """
 
     def __init__(
         self,
-        node_feature_dim: int = 13,
+        node_feature_dim: int = 3,
         hidden_dim: int = 64,
         num_layers: int = 2,
         num_heads: int = 4,
@@ -358,14 +456,16 @@ class ClauseGAT(nn.Module):
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
         sin_dim: int = 8,
+        use_clause_features: bool = True,
     ):
         super().__init__()
         self.num_layers = num_layers
         self.dropout = dropout
+        self.use_clause_features = use_clause_features
 
-        # Feature embedding
-        self.feature_embedding = FeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.feature_embedding.output_dim
+        # Node feature embedding
+        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
+        embed_dim = self.node_embedding.output_dim
 
         self.convs = nn.ModuleList()
         self.convs.append(GATLayer(embed_dim, hidden_dim, num_heads=num_heads, concat=True, dropout=dropout))
@@ -379,6 +479,15 @@ class ClauseGAT(nn.Module):
             self.norms.append(nn.LayerNorm(hidden_dim * num_heads))
         self.norms.append(nn.LayerNorm(hidden_dim))
 
+        # Clause feature embedding (optional)
+        if use_clause_features:
+            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
+            concat_dim = hidden_dim + self.clause_embedding.output_dim
+            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
+        else:
+            self.clause_embedding = None
+            self.clause_proj = None
+
         self.scorer = create_scorer(
             scorer_type,
             hidden_dim,
@@ -387,22 +496,31 @@ class ClauseGAT(nn.Module):
             dropout=dropout,
         )
 
+        # Legacy alias
+        self.feature_embedding = self.node_embedding
+
     def forward(
         self,
         node_features: torch.Tensor,
         adj: torch.Tensor,
         pool_matrix: torch.Tensor,
+        clause_features: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Args:
-            node_features: [total_nodes, 13] raw features
+            node_features: [total_nodes, 3] raw node features
             adj: Binary adjacency matrix [total_nodes, total_nodes] (with self-loops)
             pool_matrix: [num_clauses, total_nodes]
+            clause_features: [num_clauses, 3] raw clause features (optional)
 
         Returns:
             Scores [num_clauses]
         """
-        x = self.feature_embedding(node_features)
+        # Handle legacy 8-dim features
+        if node_features.size(-1) == 8:
+            node_features = node_features[:, :3]
+
+        x = self.node_embedding(node_features)
 
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
             x = conv(x, adj)
@@ -412,6 +530,19 @@ class ClauseGAT(nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
         clause_emb = torch.mm(pool_matrix, x)
+
+        # Add clause features if available and model expects them
+        if self.use_clause_features and self.clause_embedding is not None:
+            if clause_features is not None:
+                clause_feat_emb = self.clause_embedding(clause_features)
+            else:
+                num_clauses = pool_matrix.size(0)
+                clause_feat_emb = torch.zeros(
+                    num_clauses, self.clause_embedding.output_dim,
+                    device=clause_emb.device, dtype=clause_emb.dtype
+                )
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
+
         return self.scorer(clause_emb)
 
 
@@ -419,13 +550,15 @@ class ClauseGraphSAGE(nn.Module):
     """
     GraphSAGE for clause scoring.
 
-    Architecture:
-        raw_features → feature_embedding → GraphSAGE layers → pool to clauses → scorer → scores
+    New architecture (IJCAR26 plan):
+        Node features (3d) → node_embedding → GraphSAGE layers → pool to clauses
+        Clause features (3d) → clause_embedding
+        Concatenate(pooled, clause_emb) → scorer → scores
     """
 
     def __init__(
         self,
-        node_feature_dim: int = 13,
+        node_feature_dim: int = 3,
         hidden_dim: int = 64,
         num_layers: int = 3,
         dropout: float = 0.1,
@@ -433,14 +566,16 @@ class ClauseGraphSAGE(nn.Module):
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
         sin_dim: int = 8,
+        use_clause_features: bool = True,
     ):
         super().__init__()
         self.num_layers = num_layers
         self.dropout = dropout
+        self.use_clause_features = use_clause_features
 
-        # Feature embedding
-        self.feature_embedding = FeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.feature_embedding.output_dim
+        # Node feature embedding
+        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
+        embed_dim = self.node_embedding.output_dim
 
         self.convs = nn.ModuleList()
         self.convs.append(GraphSAGELayer(embed_dim, hidden_dim))
@@ -448,6 +583,15 @@ class ClauseGraphSAGE(nn.Module):
             self.convs.append(GraphSAGELayer(hidden_dim, hidden_dim))
 
         self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+
+        # Clause feature embedding (optional)
+        if use_clause_features:
+            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
+            concat_dim = hidden_dim + self.clause_embedding.output_dim
+            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
+        else:
+            self.clause_embedding = None
+            self.clause_proj = None
 
         self.scorer = create_scorer(
             scorer_type,
@@ -457,22 +601,31 @@ class ClauseGraphSAGE(nn.Module):
             dropout=dropout,
         )
 
+        # Legacy alias
+        self.feature_embedding = self.node_embedding
+
     def forward(
         self,
         node_features: torch.Tensor,
         adj: torch.Tensor,
         pool_matrix: torch.Tensor,
+        clause_features: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Args:
-            node_features: [total_nodes, 13] raw features
-            adj: Normalized adjacency matrix [total_nodes, total_nodes] (without self-loops for neighbor agg)
+            node_features: [total_nodes, 3] raw node features
+            adj: Normalized adjacency matrix [total_nodes, total_nodes]
             pool_matrix: [num_clauses, total_nodes]
+            clause_features: [num_clauses, 3] raw clause features (optional)
 
         Returns:
             Scores [num_clauses]
         """
-        x = self.feature_embedding(node_features)
+        # Handle legacy 8-dim features
+        if node_features.size(-1) == 8:
+            node_features = node_features[:, :3]
+
+        x = self.node_embedding(node_features)
 
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
             x = conv(x, adj)
@@ -482,4 +635,17 @@ class ClauseGraphSAGE(nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
         clause_emb = torch.mm(pool_matrix, x)
+
+        # Add clause features if available and model expects them
+        if self.use_clause_features and self.clause_embedding is not None:
+            if clause_features is not None:
+                clause_feat_emb = self.clause_embedding(clause_features)
+            else:
+                num_clauses = pool_matrix.size(0)
+                clause_feat_emb = torch.zeros(
+                    num_clauses, self.clause_embedding.output_dim,
+                    device=clause_emb.device, dtype=clause_emb.dtype
+                )
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
+
         return self.scorer(clause_emb).squeeze(-1)

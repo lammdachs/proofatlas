@@ -309,9 +309,14 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
     Combines all clauses from all proofs into single tensors,
     with proof_ids to track which proof each clause belongs to.
+
+    New architecture (IJCAR26 plan):
+    - Node features (3d): type, arity, arg_pos (for GCN encoder)
+    - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
     """
     all_node_features = []
     all_edge_indices = []
+    all_clause_features = []
     all_labels = []
     all_proof_ids = []
 
@@ -329,6 +334,10 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
             all_node_features.append(graph["x"])
             all_labels.append(label)
             all_proof_ids.append(proof_idx)
+
+            # Collect clause features if present
+            if "clause_features" in graph:
+                all_clause_features.append(graph["clause_features"])
 
             node_offset += graph["num_nodes"]
 
@@ -356,13 +365,19 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
             clause_idx += 1
             node_offset += n
 
-    return {
+    result = {
         "node_features": node_features,
         "adj": adj_norm,
         "pool_matrix": pool_matrix,
         "labels": labels,
         "proof_ids": proof_ids,
     }
+
+    # Stack clause features if present
+    if all_clause_features:
+        result["clause_features"] = torch.stack(all_clause_features, dim=0)
+
+    return result
 
 
 class ClauseDataset(torch.utils.data.Dataset):
@@ -485,11 +500,11 @@ if LIGHTNING_AVAILABLE:
             self.loss_type = getattr(config.training, 'loss_type', 'info_nce')
             self.temperature = getattr(config.training, 'temperature', 1.0)
 
-        def forward(self, node_features, adj, pool_matrix):
+        def forward(self, node_features, adj, pool_matrix, clause_features=None):
             if self.needs_adj:
-                return self.model(node_features, adj, pool_matrix)
+                return self.model(node_features, adj, pool_matrix, clause_features)
             else:
-                return self.model(node_features, pool_matrix)
+                return self.model(node_features, pool_matrix, clause_features)
 
         def _compute_loss(self, scores, labels, proof_ids=None):
             """Compute loss based on configuration."""
@@ -536,7 +551,8 @@ if LIGHTNING_AVAILABLE:
             return {"acc": acc, "mrr": mrr}
 
         def training_step(self, batch, batch_idx):
-            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
+            clause_features = batch.get("clause_features")
+            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
             proof_ids = batch.get("proof_ids")
             loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
@@ -544,7 +560,8 @@ if LIGHTNING_AVAILABLE:
             return loss
 
         def validation_step(self, batch, batch_idx):
-            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"])
+            clause_features = batch.get("clause_features")
+            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
             proof_ids = batch.get("proof_ids")
             loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
@@ -839,7 +856,9 @@ def train(
         config.name = f"{config.model.type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # Select collate function based on dataset type
-    if isinstance(train_dataset, ProofDataset):
+    # Check if dataset returns proof-style batches (with 'graphs' key)
+    is_proof_dataset = isinstance(train_dataset, ProofDataset) or hasattr(train_dataset, '_clause_to_graph')
+    if is_proof_dataset:
         collate_fn = collate_proof_batch
     else:
         collate_fn = collate_clause_batch

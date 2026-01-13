@@ -3,7 +3,6 @@
 This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
 - Structured data: JSON trace format with converters
-- Data collection: extract training data from proofs
 - Training: training loop and utilities
 - Config: configuration loading for data and selectors
 
@@ -17,14 +16,6 @@ from .graph_utils import (
     extract_graph_embeddings,
     get_node_type_masks,
     compute_graph_statistics,
-)
-
-from .data_collection import (
-    TrainingDataset,
-    run_saturation_loop,
-    collect_from_problem,
-    collect_from_directory,
-    load_training_dataset,
 )
 
 from .training import (
@@ -81,12 +72,6 @@ __all__ = [
     "extract_graph_embeddings",
     "get_node_type_masks",
     "compute_graph_statistics",
-    # Data collection
-    "TrainingDataset",
-    "run_saturation_loop",
-    "collect_from_problem",
-    "collect_from_directory",
-    "load_training_dataset",
     # Training (per-proof, recommended)
     "ProofDataset",
     "collate_proof_batch",

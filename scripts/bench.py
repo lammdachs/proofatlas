@@ -1472,7 +1472,7 @@ def main():
                     # First collect traces with age_weight if none exist
                     traces_dir = base_dir / ".data" / "traces" / trace_preset
                     proofatlas_presets = prover_config.get("presets", {})
-                    if not traces_dir.exists() or not list(traces_dir.glob("*.pt")):
+                    if not traces_dir.exists() or not list(traces_dir.glob("*.json")):
                         print("Collecting traces with age_weight...")
                         trace_source_preset = proofatlas_presets.get(trace_preset, preset)
                         run_evaluation(

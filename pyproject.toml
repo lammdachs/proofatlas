@@ -36,6 +36,7 @@ dependencies = [
 proofatlas-prove = "proofatlas.cli.prove:main"
 proofatlas-bench = "proofatlas.cli.bench:main"
 proofatlas-export = "proofatlas.cli.export:main"
+proofatlas-train = "proofatlas.cli.train:main"
 proofatlas-viewer = "proofatlas.ml.viewer:main"
 
 [project.urls]
@@ -48,6 +49,7 @@ Issues = "https://github.com/lexpk/proofatlas/issues"
 # For ML model training (not needed for inference - weights downloaded automatically)
 ml = [
     "torch>=2.0.0",
+    "lightning>=2.0.0",
     "safetensors",
 ]
 

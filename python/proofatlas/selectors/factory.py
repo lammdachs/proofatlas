@@ -13,13 +13,17 @@ from .sentence import SentenceEncoder, HAS_TRANSFORMERS
 
 def create_model(
     model_type: str = "gcn",
-    node_feature_dim: int = 13,
+    node_feature_dim: int = 3,
     hidden_dim: int = 64,
     num_layers: int = 3,
     **kwargs,
 ) -> nn.Module:
     """
     Factory function to create a clause scoring model.
+
+    New architecture (IJCAR26 plan):
+    - Node features (3d): type, arity, arg_pos (for GCN encoder)
+    - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
 
     Args:
         model_type: One of:
@@ -31,7 +35,7 @@ def create_model(
             - "mlp": Simple MLP baseline
             - "age_weight": Age-weight heuristic
             - "sentence": Pretrained sentence encoder (requires transformers)
-        node_feature_dim: Input feature dimension (default: 13)
+        node_feature_dim: Input feature dimension (default: 3, legacy: 8 or 13)
         hidden_dim: Hidden layer dimension
         num_layers: Number of layers
         **kwargs: Model-specific arguments:
@@ -40,7 +44,9 @@ def create_model(
             - scorer_type: Scoring head type: "mlp", "attention", "transformer", "cross_attention"
             - scorer_num_heads: Attention heads for attention-based scorers (default: 4)
             - scorer_num_layers: Layers for transformer scorer (default: 2)
-            - sentence_model: Pretrained model name for "sentence" type (default: "sentence-transformers/all-MiniLM-L6-v2")
+            - use_clause_features: Use clause-level features in scorer (default: True)
+            - sin_dim: Sinusoidal encoding dimension (default: 8)
+            - sentence_model: Pretrained model name for "sentence" type
             - freeze_encoder: Freeze pretrained encoder (default: False)
 
     Returns:
@@ -53,12 +59,18 @@ def create_model(
         'scorer_num_layers': kwargs.get('scorer_num_layers', 2),
     }
 
+    # New architecture parameters
+    use_clause_features = kwargs.get('use_clause_features', True)
+    sin_dim = kwargs.get('sin_dim', 8)
+
     if model_type == "gcn":
         return ClauseGCN(
             node_feature_dim=node_feature_dim,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
             dropout=kwargs.get('dropout', 0.1),
+            use_clause_features=use_clause_features,
+            sin_dim=sin_dim,
             **scorer_kwargs,
         )
     elif model_type == "gat":
@@ -68,6 +80,8 @@ def create_model(
             num_layers=num_layers,
             num_heads=kwargs.get('num_heads', 4),
             dropout=kwargs.get('dropout', 0.1),
+            use_clause_features=use_clause_features,
+            sin_dim=sin_dim,
             **scorer_kwargs,
         )
     elif model_type == "graphsage":
@@ -76,6 +90,8 @@ def create_model(
             hidden_dim=hidden_dim,
             num_layers=num_layers,
             dropout=kwargs.get('dropout', 0.1),
+            use_clause_features=use_clause_features,
+            sin_dim=sin_dim,
             **scorer_kwargs,
         )
     elif model_type == "transformer":

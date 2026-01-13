@@ -101,14 +101,18 @@ class TestClauseToGraph:
         assert isinstance(result["edge_index"], torch.Tensor)
         assert isinstance(result["x"], torch.Tensor)
         assert isinstance(result["node_types"], torch.Tensor)
+        assert isinstance(result["clause_features"], torch.Tensor)
 
         # Check shapes
         assert result["edge_index"].shape[0] == 2
         assert result["x"].shape[0] == result["num_nodes"]
         assert result["node_types"].shape[0] == result["num_nodes"]
 
-        # Check feature dimension (8 features, matching Rust)
-        assert result["x"].shape[1] == 8
+        # Check node feature dimension (3 features: type, arity, arg_pos)
+        assert result["x"].shape[1] == 3
+
+        # Check clause feature dimension (3 features: age, role, size)
+        assert result["clause_features"].shape[0] == 3
 
     def test_node_types(self, sample_clause):
         from proofatlas.ml.structured import clause_to_graph

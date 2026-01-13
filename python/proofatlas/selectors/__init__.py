@@ -16,6 +16,9 @@ from .gnn import (
     GCNLayer,
     GATLayer,
     GraphSAGELayer,
+    NodeFeatureEmbedding,
+    ClauseFeatureEmbedding,
+    FeatureEmbedding,  # Legacy alias
 )
 from .transformer import ClauseTransformer, ClauseGNNTransformer
 from .baseline import NodeMLP, AgeWeightHeuristic
@@ -31,6 +34,10 @@ __all__ = [
     "GCNLayer",
     "GATLayer",
     "GraphSAGELayer",
+    # Feature embeddings (IJCAR26 architecture)
+    "NodeFeatureEmbedding",
+    "ClauseFeatureEmbedding",
+    "FeatureEmbedding",  # Legacy alias
     # Transformer models
     "ClauseTransformer",
     "ClauseGNNTransformer",
