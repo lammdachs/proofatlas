@@ -559,27 +559,37 @@ def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log
     from proofatlas.selectors import create_model
 
     # Load configs
-    with open(base_dir / "configs" / "models.json") as f:
-        models_config = json.load(f)
+    with open(base_dir / "configs" / "embeddings.json") as f:
+        embeddings_config = json.load(f)
+    with open(base_dir / "configs" / "scorers.json") as f:
+        scorers_config = json.load(f)
     with open(base_dir / "configs" / "training.json") as f:
         training_config = json.load(f)
 
     # Get model and training config from preset
-    model_name = preset.get("model")
+    embedding_name = preset.get("embedding", preset.get("model"))  # fallback to "model" for compat
+    scorer_name = preset.get("scorer", "mlp")
     training_name = preset.get("training", "standard")
 
-    # Get model architecture
-    arch = models_config["architectures"].get(model_name)
-    if not arch:
-        raise ValueError(f"Unknown model: {model_name}")
+    # Get embedding architecture
+    embedding_arch = embeddings_config["architectures"].get(embedding_name)
+    if not embedding_arch:
+        raise ValueError(f"Unknown embedding: {embedding_name}")
+
+    # Get scorer architecture
+    scorer_arch = scorers_config["architectures"].get(scorer_name)
+    if not scorer_arch:
+        raise ValueError(f"Unknown scorer: {scorer_name}")
 
     # Get training config
     training_defaults = training_config.get("defaults", {})
     training_overrides = training_config.get("configs", {}).get(training_name, {})
 
-    # Merge: training defaults < training overrides < model architecture
-    config = {**training_defaults, **training_overrides, **arch}
-    config["input_dim"] = models_config.get("input_dim", 13)
+    # Merge configs
+    config = {**training_defaults, **training_overrides}
+    config["embedding"] = embedding_arch
+    config["scorer"] = scorer_arch
+    config["input_dim"] = embeddings_config.get("input_dim", 8)
 
     problems = data["problems"]
     if not problems:

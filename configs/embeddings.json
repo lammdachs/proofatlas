@@ -1,0 +1,20 @@
+{
+  "input_dim": 8,
+
+  "architectures": {
+    "gcn": {
+      "type": "gcn",
+      "hidden_dim": 256,
+      "num_layers": 6,
+      "dropout": 0.1
+    },
+
+    "sentence_transformer": {
+      "type": "sentence_transformer"
+    },
+
+    "none": {
+      "type": "none"
+    }
+  }
+}

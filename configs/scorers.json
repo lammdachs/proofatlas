@@ -1,0 +1,23 @@
+{
+  "architectures": {
+    "mlp": {
+      "type": "mlp",
+      "hidden_dim": 64,
+      "num_layers": 2,
+      "dropout": 0.1
+    },
+
+    "attention": {
+      "type": "attention",
+      "num_heads": 4
+    },
+
+    "transformer": {
+      "type": "transformer",
+      "hidden_dim": 64,
+      "num_layers": 2,
+      "num_heads": 4,
+      "dropout": 0.1
+    }
+  }
+}

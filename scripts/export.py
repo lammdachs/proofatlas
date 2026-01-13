@@ -446,12 +446,12 @@ def load_available_weights(weights_dir: Path) -> list:
     return weights
 
 
-def load_architectures(models_config_path: Path) -> dict:
-    """Load available model architectures from config."""
-    if not models_config_path.exists():
+def load_architectures(config_path: Path) -> dict:
+    """Load available architectures from config."""
+    if not config_path.exists():
         return {}
 
-    with open(models_config_path) as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     return config.get("architectures", {})
@@ -461,7 +461,8 @@ def export_training(root: Path, output_path: Path):
     """Export training results to JSON."""
     logs_dir = root / ".logs"
     weights_dir = root / ".weights"
-    models_config = root / "configs" / "models.json"
+    embeddings_config = root / "configs" / "embeddings.json"
+    scorers_config = root / "configs" / "scorers.json"
 
     print(f"Loading training runs from {logs_dir}...")
     runs = load_training_runs(logs_dir)
@@ -471,9 +472,10 @@ def export_training(root: Path, output_path: Path):
     weights = load_available_weights(weights_dir)
     print(f"  Found {len(weights)} weight files")
 
-    print(f"Loading model architectures...")
-    architectures = load_architectures(models_config)
-    print(f"  Found {len(architectures)} architectures")
+    print(f"Loading architectures...")
+    embeddings = load_architectures(embeddings_config)
+    scorers = load_architectures(scorers_config)
+    print(f"  Found {len(embeddings)} embeddings, {len(scorers)} scorers")
 
     # Find best run by val_loss
     best_run = None
@@ -492,7 +494,8 @@ def export_training(root: Path, output_path: Path):
             "best_run": best_run["name"] if best_run else None,
             "best_val_loss": best_run["best_val_loss"] if best_run else None,
         },
-        "architectures": architectures,
+        "embeddings": embeddings,
+        "scorers": scorers,
         "weights": weights,
         "runs": runs,
     }

@@ -10,7 +10,8 @@ ProofAtlas uses JSON configuration files in the `configs/` directory. This guide
 | `vampire.json` | Vampire prover presets |
 | `spass.json` | SPASS prover presets |
 | `tptp.json` | TPTP library paths and problem sets |
-| `models.json` | ML model architectures |
+| `embeddings.json` | Clause embedding architectures |
+| `scorers.json` | Clause scorer architectures |
 | `training.json` | ML training hyperparameters |
 
 ---
@@ -212,53 +213,105 @@ Configures TPTP library paths and problem sets.
 
 ---
 
-## models.json
+## embeddings.json
 
-Defines ML model architectures.
+Defines clause embedding architectures that convert clause graphs to vector representations.
 
 ### Structure
 
 ```json
 {
-  "input_dim": 21,
+  "input_dim": 8,
   "architectures": {
-    "model_name": { ... }
+    "embedding_name": { ... }
   }
 }
 ```
 
-### Architecture Options
+### Embedding Types
+
+| Type | Description |
+|------|-------------|
+| `gcn` | Graph Convolutional Network |
+| `sentence_transformer` | Sentence transformer for text-based embeddings |
+| `none` | Use raw clause features directly |
+
+### GCN Options
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `type` | string | Model type: `gcn`, `gat`, `mlp` |
 | `hidden_dim` | int | Hidden layer dimension |
-| `num_layers` | int | Number of GNN/MLP layers |
-| `num_heads` | int | Attention heads (GAT only) |
+| `num_layers` | int | Number of GCN layers |
 | `dropout` | float | Dropout probability |
 
-### Example Architectures
+### Example
 
 ```json
 {
-  "gcn": {
-    "type": "gcn",
-    "hidden_dim": 64,
-    "num_layers": 3,
-    "dropout": 0.1
-  },
-  "gat": {
-    "type": "gat",
-    "hidden_dim": 64,
-    "num_layers": 3,
-    "num_heads": 4,
-    "dropout": 0.1
-  },
-  "mlp": {
-    "type": "mlp",
-    "hidden_dim": 128,
-    "num_layers": 3,
-    "dropout": 0.1
+  "input_dim": 8,
+  "architectures": {
+    "gcn": {
+      "type": "gcn",
+      "hidden_dim": 256,
+      "num_layers": 6,
+      "dropout": 0.1
+    },
+    "sentence_transformer": {
+      "type": "sentence_transformer"
+    },
+    "none": {
+      "type": "none"
+    }
+  }
+}
+```
+
+---
+
+## scorers.json
+
+Defines scorer architectures that rank clauses from their embeddings.
+
+### Structure
+
+```json
+{
+  "architectures": {
+    "scorer_name": { ... }
+  }
+}
+```
+
+### Scorer Types
+
+| Type | Description |
+|------|-------------|
+| `mlp` | Multi-layer perceptron |
+| `attention` | Attention-based scoring |
+| `transformer` | Transformer encoder |
+
+### Example
+
+```json
+{
+  "architectures": {
+    "mlp": {
+      "type": "mlp",
+      "hidden_dim": 64,
+      "num_layers": 2,
+      "dropout": 0.1
+    },
+    "attention": {
+      "type": "attention",
+      "num_heads": 4
+    },
+    "transformer": {
+      "type": "transformer",
+      "hidden_dim": 64,
+      "num_layers": 2,
+      "num_heads": 4,
+      "dropout": 0.1
+    }
   }
 }
 ```
@@ -329,8 +382,9 @@ Here's how the configuration files work together:
 
 1. **tptp.json** defines what problems to evaluate
 2. **proofatlas.json** defines how to run the prover
-3. **models.json** defines ML model architecture
-4. **training.json** defines how to train models
+3. **embeddings.json** defines clause embedding architecture
+4. **scorers.json** defines clause scorer architecture
+5. **training.json** defines how to train models
 
 Running:
 ```bash
@@ -340,6 +394,6 @@ proofatlas-bench --prover proofatlas --preset gcn --problem-set unit_equality
 This will:
 1. Load problems matching `unit_equality` filters from `tptp.json`
 2. Use the `gcn` preset from `proofatlas.json`
-3. Train using `gcn` architecture from `models.json`
+3. Use embedding and scorer from `embeddings.json` / `scorers.json`
 4. Apply `standard` training config from `training.json`
 5. Evaluate the trained model on the problem set

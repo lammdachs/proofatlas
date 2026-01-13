@@ -223,7 +223,8 @@ selector.clear_cache();  // Call when starting new problem
 | `crates/proofatlas/src/selectors/` | Rust/Burn selector implementations |
 | `python/proofatlas/ml/` | Training infrastructure |
 | `python/proofatlas/selectors/` | PyTorch model definitions |
-| `configs/models.json` | Model architecture presets |
+| `configs/embeddings.json` | Clause embedding architectures |
+| `configs/scorers.json` | Clause scorer architectures |
 | `configs/training.json` | Training hyperparameter presets |
 | `.weights/` | Trained model weights |
 | `.data/traces/` | Collected proof traces |

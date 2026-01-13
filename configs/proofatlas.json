@@ -68,39 +68,13 @@
       "age_weight_ratio": 0.167
     },
 
-    "gcn_quick_val": {
-      "description": "10s with GCN clause selector and validation",
-      "timeout": 10,
-      "literal_selection": 21,
-      "model": "gcn",
-      "training": "with_val",
-      "traces": "time_sel21"
-    },
-
-    "mlp": {
-      "description": "10s with MLP clause selector",
-      "timeout": 10,
-      "literal_selection": 21,
-      "model": "mlp",
-      "training": "standard",
-      "traces": "time_sel21"
-    },
-
-    "gat": {
-      "description": "10s with GAT clause selector",
-      "timeout": 10,
-      "literal_selection": 21,
-      "model": "gat",
-      "training": "standard",
-      "traces": "time_sel21"
-    },
-
-    "gcn_overparam_steps_sel22": {
-      "description": "512 steps with overparameterized GCN (256 hidden, 6 layers) + MLP clause selector",
+    "gcn_mlp": {
+      "description": "512 steps with GCN embedding + MLP scorer",
       "timeout": 600,
       "max_clauses": 512,
       "literal_selection": 22,
-      "model": "gcn"
+      "embedding": "gcn",
+      "scorer": "mlp"
     }
   }
 }

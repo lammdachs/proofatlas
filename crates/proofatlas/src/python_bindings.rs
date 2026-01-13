@@ -552,8 +552,8 @@ impl ProofState {
                     })?
                 };
 
-                // Load model (using defaults from models.json)
-                let selector = load_ndarray_gcn_selector(&weights, 13, 64, 3)
+                // Load model (TODO: read from embeddings.json)
+                let selector = load_ndarray_gcn_selector(&weights, 8, 256, 6)
                     .map_err(|e| PyValueError::new_err(format!("Failed to load GCN: {}", e)))?;
                 Box::new(selector)
             }
@@ -567,8 +567,8 @@ impl ProofState {
                     })?
                 };
 
-                // Load model (using defaults from models.json)
-                let selector = load_ndarray_mlp_selector(&weights, 13, 128, 3)
+                // Load model (TODO: read from embeddings.json)
+                let selector = load_ndarray_mlp_selector(&weights, 8, 128, 3)
                     .map_err(|e| PyValueError::new_err(format!("Failed to load MLP: {}", e)))?;
                 Box::new(selector)
             }
