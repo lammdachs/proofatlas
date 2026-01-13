@@ -346,48 +346,65 @@ def export_benchmarks(
 # Training export
 
 def load_training_runs(logs_dir: Path) -> list:
-    """Load all training results from .logs/bench_* directories."""
+    """Load all training results from .logs/*/metrics.json."""
     runs = []
 
     if not logs_dir.exists():
         return runs
 
-    # Look for bench_* directories (unified bench.py output)
-    for run_dir in sorted(logs_dir.glob("bench_*")):
+    # Look for directories with metrics.json (new format from proofatlas-train)
+    for run_dir in sorted(logs_dir.iterdir()):
         if not run_dir.is_dir():
             continue
 
-        results_file = run_dir / "summary.json"
-        if not results_file.exists():
+        metrics_file = run_dir / "metrics.json"
+        if not metrics_file.exists():
             continue
 
         try:
-            with open(results_file) as f:
-                results = json.load(f)
+            with open(metrics_file) as f:
+                metrics = json.load(f)
 
-            # Parse training progress from log file
-            log_file = run_dir / "bench.log"
-            loss_history = []
-            if log_file.exists():
-                with open(log_file) as f:
-                    for line in f:
-                        if line.startswith("TRAIN:"):
-                            parts = line.strip().split(":")
-                            if len(parts) >= 4:
-                                loss_history.append({
-                                    "epoch": int(parts[1]),
-                                    "max_epochs": int(parts[2]),
-                                    "train_loss": float(parts[3]),
-                                })
+            config = metrics.get("config", {})
+            model_config = config.get("model", {})
+            training_config = config.get("training", {})
+            epochs = metrics.get("epochs", [])
+
+            # Build epoch history
+            epoch_history = []
+            for e in epochs:
+                epoch_history.append({
+                    "epoch": e.get("epoch", 0),
+                    "train_loss": e.get("train_loss"),
+                    "val_loss": e.get("val_loss"),
+                    "val_acc": e.get("val_acc"),
+                    "val_mrr": e.get("val_mrr"),
+                    "learning_rate": e.get("learning_rate"),
+                })
 
             runs.append({
-                "name": run_dir.name,
-                "preset": results.get("preset", "unknown"),
-                "proofs": results.get("proofs", 0),
-                "total": results.get("total", 0),
-                "proof_rate": results.get("proof_rate", "0%"),
-                "weights": results.get("weights"),
-                "loss_history": loss_history,
+                "name": metrics.get("run_name", run_dir.name),
+                "start_time": metrics.get("start_time"),
+                "end_time": metrics.get("end_time"),
+                "total_time_seconds": metrics.get("total_time_seconds"),
+                "termination_reason": metrics.get("termination_reason"),
+                "best_epoch": metrics.get("best_epoch"),
+                "best_val_loss": metrics.get("best_val_loss"),
+                "model": {
+                    "type": model_config.get("type", "unknown"),
+                    "hidden_dim": model_config.get("hidden_dim"),
+                    "num_layers": model_config.get("num_layers"),
+                    "input_dim": model_config.get("input_dim"),
+                    "scorer_type": model_config.get("scorer_type"),
+                },
+                "training": {
+                    "batch_size": training_config.get("batch_size"),
+                    "learning_rate": training_config.get("learning_rate"),
+                    "max_epochs": training_config.get("max_epochs"),
+                    "patience": training_config.get("patience"),
+                    "loss_type": training_config.get("loss_type"),
+                },
+                "epochs": epoch_history,
             })
         except Exception as e:
             print(f"  Warning: Failed to load {run_dir.name}: {e}")
@@ -458,25 +475,22 @@ def export_training(root: Path, output_path: Path):
     architectures = load_architectures(models_config)
     print(f"  Found {len(architectures)} architectures")
 
-    # Find best run by proof rate
+    # Find best run by val_loss
     best_run = None
     if runs:
         for run in runs:
-            rate_str = run.get("proof_rate", "0%").rstrip("%")
-            try:
-                rate = float(rate_str)
-                if best_run is None or rate > float(best_run.get("proof_rate", "0%").rstrip("%")):
+            val_loss = run.get("best_val_loss")
+            if val_loss is not None:
+                if best_run is None or val_loss < best_run.get("best_val_loss", float("inf")):
                     best_run = run
-            except ValueError:
-                pass
 
     output = {
         "generated": datetime.now().isoformat(),
         "total_runs": len(runs),
         "total_weights": len(weights),
         "summary": {
-            "best_preset": best_run["preset"] if best_run else None,
-            "best_proof_rate": best_run["proof_rate"] if best_run else None,
+            "best_run": best_run["name"] if best_run else None,
+            "best_val_loss": best_run["best_val_loss"] if best_run else None,
         },
         "architectures": architectures,
         "weights": weights,
@@ -488,6 +502,21 @@ def export_training(root: Path, output_path: Path):
         json.dump(output, f, indent=2)
 
     print(f"Exported training to {output_path}")
+
+    if runs:
+        print("\nTraining Runs:")
+        print(f"{'Name':<35} {'Model':<8} {'Epochs':>7} {'Val Loss':>10} {'Val Acc':>8}")
+        print("-" * 75)
+        for r in runs:
+            model_type = r.get("model", {}).get("type", "?")
+            num_epochs = len(r.get("epochs", []))
+            val_loss = r.get("best_val_loss")
+            val_loss_str = f"{val_loss:.4f}" if val_loss else "N/A"
+            # Get final val_acc from last epoch
+            epochs = r.get("epochs", [])
+            val_acc = epochs[-1].get("val_acc") if epochs else None
+            val_acc_str = f"{val_acc*100:.1f}%" if val_acc else "N/A"
+            print(f"{r['name']:<35} {model_type:<8} {num_epochs:>7} {val_loss_str:>10} {val_acc_str:>8}")
 
     if weights:
         print("\nAvailable Weights:")
