@@ -37,41 +37,41 @@
     },
 
     "steps_sel0": {
-      "description": "512 steps with sel0",
+      "description": "128 steps with sel0",
       "timeout": 600,
-      "max_clauses": 512,
+      "max_clauses": 128,
       "literal_selection": 0,
       "age_weight_ratio": 0.167
     },
 
     "steps_sel20": {
-      "description": "512 steps with sel20",
+      "description": "128 steps with sel20",
       "timeout": 600,
-      "max_clauses": 512,
+      "max_clauses": 128,
       "literal_selection": 20,
       "age_weight_ratio": 0.167
     },
 
     "steps_sel21": {
-      "description": "512 steps with sel21",
+      "description": "128 steps with sel21",
       "timeout": 600,
-      "max_clauses": 512,
+      "max_clauses": 128,
       "literal_selection": 21,
       "age_weight_ratio": 0.167
     },
 
     "steps_sel22": {
-      "description": "512 steps with sel22",
+      "description": "128 steps with sel22",
       "timeout": 600,
-      "max_clauses": 512,
+      "max_clauses": 128,
       "literal_selection": 22,
       "age_weight_ratio": 0.167
     },
 
     "gcn_mlp": {
-      "description": "512 steps with GCN embedding + MLP scorer",
+      "description": "128 steps with GCN embedding + MLP scorer",
       "timeout": 600,
-      "max_clauses": 512,
+      "max_clauses": 128,
       "literal_selection": 22,
       "embedding": "gcn",
       "scorer": "mlp"
