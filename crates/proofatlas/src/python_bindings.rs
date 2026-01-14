@@ -553,7 +553,7 @@ impl ProofState {
                 };
 
                 // Load model (TODO: read from embeddings.json)
-                let selector = load_ndarray_gcn_selector(&weights, 8, 256, 6)
+                let selector = load_ndarray_gcn_selector(&weights, 256, 6)
                     .map_err(|e| PyValueError::new_err(format!("Failed to load GCN: {}", e)))?;
                 Box::new(selector)
             }

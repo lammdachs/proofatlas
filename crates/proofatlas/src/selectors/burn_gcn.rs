@@ -14,12 +14,158 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use crate::core::Clause;
-use crate::ml::{GraphBuilder, FEATURE_DIM};
 
 use super::ClauseSelector;
 
+/// Node feature embedding: 3-dim raw → 15-dim embedded
+/// Matches PyTorch NodeFeatureEmbedding structure (div_term directly on struct)
+#[derive(Module, Debug)]
+pub struct NodeFeatureEmbedding<B: Backend> {
+    /// Precomputed div_term for sinusoidal encoding
+    div_term: Tensor<B, 1>,
+    /// sin_dim for encoding
+        sin_dim: usize,
+    /// Output dimension: 6 (type one-hot) + 1 (log arity) + sin_dim (arg_pos)
+        output_dim: usize,
+}
+
+impl<B: Backend> NodeFeatureEmbedding<B> {
+    pub fn new(device: &B::Device, sin_dim: usize) -> Self {
+        let half_dim = sin_dim / 2;
+        let mut div_term_data = Vec::with_capacity(half_dim);
+        let log_10000 = 10000.0_f32.ln();
+        for i in 0..half_dim {
+            let val = (2.0 * i as f32 * (-log_10000) / sin_dim as f32).exp();
+            div_term_data.push(val);
+        }
+        let div_term = Tensor::from_floats(div_term_data.as_slice(), device);
+        let output_dim = 6 + 1 + sin_dim;
+        Self { div_term, sin_dim, output_dim }
+    }
+
+    /// Encode values using sinusoidal positional encoding
+    fn sinusoidal_encode(&self, values: Tensor<B, 1>) -> Tensor<B, 2> {
+        let n = values.dims()[0];
+        let half_dim = self.sin_dim / 2;
+        let values = values.reshape([n, 1]);
+        let div_term = self.div_term.clone().reshape([1, half_dim]);
+        let scaled = values.matmul(div_term);
+        let sin_enc = scaled.clone().sin();
+        let cos_enc = scaled.cos();
+        let stacked = Tensor::stack::<3>(vec![sin_enc, cos_enc], 2);
+        stacked.reshape([n, self.sin_dim])
+    }
+
+    /// Embed raw node features
+    /// Input: [N, 3] (type, arity, arg_pos)
+    /// Output: [N, output_dim]
+    pub fn forward(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
+        let device = x.device();
+        let n = x.dims()[0];
+
+        // Extract features
+        let node_type = x.clone().slice([0..n, 0..1]).flatten(0, 1);
+        let arity = x.clone().slice([0..n, 1..2]).flatten(0, 1);
+        let arg_pos = x.slice([0..n, 2..3]).flatten(0, 1);
+
+        // Node type to one-hot (6 classes)
+        let node_type_int = node_type.int();
+        let node_type_clamped = node_type_int.clamp(0, 5);
+        let type_onehot = one_hot::<B>(node_type_clamped, 6, &device);
+
+        // Arity: log1p scaled
+        let ones = Tensor::<B, 1>::ones([n], &device);
+        let arity_enc = (arity + ones).log().reshape([n, 1]);
+
+        // Arg position: sinusoidal encoded
+        let arg_pos_enc = self.sinusoidal_encode(arg_pos);
+
+        Tensor::cat(vec![type_onehot, arity_enc, arg_pos_enc], 1)
+    }
+}
+
+/// Clause feature embedding: 3-dim raw → 21-dim embedded
+/// Matches PyTorch ClauseFeatureEmbedding structure (div_term directly on struct)
+#[derive(Module, Debug)]
+pub struct ClauseFeatureEmbedding<B: Backend> {
+    /// Precomputed div_term for sinusoidal encoding
+    div_term: Tensor<B, 1>,
+    /// sin_dim for encoding
+        sin_dim: usize,
+    /// Output dimension: sin_dim (age) + 5 (role one-hot) + sin_dim (size)
+        output_dim: usize,
+}
+
+impl<B: Backend> ClauseFeatureEmbedding<B> {
+    pub fn new(device: &B::Device, sin_dim: usize) -> Self {
+        let half_dim = sin_dim / 2;
+        let mut div_term_data = Vec::with_capacity(half_dim);
+        let log_10000 = 10000.0_f32.ln();
+        for i in 0..half_dim {
+            let val = (2.0 * i as f32 * (-log_10000) / sin_dim as f32).exp();
+            div_term_data.push(val);
+        }
+        let div_term = Tensor::from_floats(div_term_data.as_slice(), device);
+        let output_dim = sin_dim + 5 + sin_dim;
+        Self { div_term, sin_dim, output_dim }
+    }
+
+    /// Encode values using sinusoidal positional encoding
+    fn sinusoidal_encode(&self, values: Tensor<B, 1>) -> Tensor<B, 2> {
+        let n = values.dims()[0];
+        let half_dim = self.sin_dim / 2;
+        let values = values.reshape([n, 1]);
+        let div_term = self.div_term.clone().reshape([1, half_dim]);
+        let scaled = values.matmul(div_term);
+        let sin_enc = scaled.clone().sin();
+        let cos_enc = scaled.cos();
+        let stacked = Tensor::stack::<3>(vec![sin_enc, cos_enc], 2);
+        stacked.reshape([n, self.sin_dim])
+    }
+
+    /// Embed raw clause features
+    /// Input: [num_clauses, 3] (age, role, size)
+    /// Output: [num_clauses, output_dim]
+    pub fn forward(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
+        let device = x.device();
+        let n = x.dims()[0];
+
+        // Extract features
+        let age = x.clone().slice([0..n, 0..1]).flatten(0, 1);
+        let role = x.clone().slice([0..n, 1..2]).flatten(0, 1);
+        let size = x.slice([0..n, 2..3]).flatten(0, 1);
+
+        // Age: sinusoidal encoded (scaled by 100)
+        let age_scaled = age * 100.0;
+        let age_enc = self.sinusoidal_encode(age_scaled);
+
+        // Role: one-hot (5 classes)
+        let role_int = role.int();
+        let role_clamped = role_int.clamp(0, 4);
+        let role_onehot = one_hot::<B>(role_clamped, 5, &device);
+
+        // Size: sinusoidal encoded
+        let size_enc = self.sinusoidal_encode(size);
+
+        Tensor::cat(vec![age_enc, role_onehot, size_enc], 1)
+    }
+}
+
+/// One-hot encoding helper
+fn one_hot<B: Backend>(indices: Tensor<B, 1, Int>, num_classes: usize, device: &B::Device) -> Tensor<B, 2> {
+    let n = indices.dims()[0];
+    let indices_data: Vec<i64> = indices.to_data().to_vec().unwrap();
+
+    let mut result = vec![0.0f32; n * num_classes];
+    for (i, &idx) in indices_data.iter().enumerate() {
+        let idx = idx.max(0).min(num_classes as i64 - 1) as usize;
+        result[i * num_classes + idx] = 1.0;
+    }
+
+    Tensor::<B, 1>::from_floats(result.as_slice(), device).reshape([n, num_classes])
+}
+
 /// GCN layer: h' = σ(A · h · W)
-/// Where A is the normalized adjacency matrix
 #[derive(Module, Debug)]
 pub struct GcnLayer<B: Backend> {
     linear: Linear<B>,
@@ -31,11 +177,8 @@ impl<B: Backend> GcnLayer<B> {
         Self { linear }
     }
 
-    /// Forward pass: A @ x @ W
     pub fn forward(&self, x: Tensor<B, 2>, adj: Tensor<B, 2>) -> Tensor<B, 2> {
-        // Message passing: aggregate neighbor features
         let h = adj.matmul(x);
-        // Linear transformation
         self.linear.forward(h)
     }
 }
@@ -57,85 +200,96 @@ impl<B: Backend> ScorerHead<B> {
     pub fn forward(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
         let h = self.linear1.forward(x);
         let h = relu(h);
-        // Note: dropout is only used during training, not inference
         self.linear2.forward(h)
     }
 }
 
 /// GCN-based clause selection model
 ///
-/// Architecture:
-///   node_features → GCN layers → LayerNorm → ReLU → pool → scorer → logits
+/// New architecture matching PyTorch ClauseGCN:
+///   node_features (3d) → node_embedding (15d) → GCN layers → pool
+///   clause_features (3d) → clause_embedding (21d)
+///   concat(pooled, clause_emb) → clause_proj → scorer → logits
 #[derive(Module, Debug)]
 pub struct GcnModel<B: Backend> {
+    /// Node feature embedding (3d → 15d)
+    node_embedding: NodeFeatureEmbedding<B>,
+    /// Clause feature embedding (3d → 21d)
+    clause_embedding: ClauseFeatureEmbedding<B>,
     /// GCN convolutional layers
     convs: Vec<GcnLayer<B>>,
     /// Layer normalization after each conv
     norms: Vec<LayerNorm<B>>,
+    /// Projection from concat(pooled, clause_emb) to hidden_dim
+    clause_proj: Linear<B>,
     /// Scoring head MLP
     scorer: ScorerHead<B>,
     /// Hidden dimension
     hidden_dim: usize,
+    /// Feature embedding alias for weight loading
+    feature_embedding: NodeFeatureEmbedding<B>,
 }
 
 impl<B: Backend> GcnModel<B> {
     /// Create a new GCN model with random initialization
     pub fn new(
         device: &B::Device,
-        input_dim: usize,
         hidden_dim: usize,
         num_layers: usize,
+        sin_dim: usize,
     ) -> Self {
+        // Node embedding: 3d → 6 + 1 + sin_dim = 15d (for sin_dim=8)
+        let node_embedding = NodeFeatureEmbedding::new(device, sin_dim);
+        let node_embed_dim = node_embedding.output_dim;
+
+        // Clause embedding: 3d → sin_dim + 5 + sin_dim = 21d (for sin_dim=8)
+        let clause_embedding = ClauseFeatureEmbedding::new(device, sin_dim);
+        let clause_embed_dim = clause_embedding.output_dim;
+
+        // GCN layers
         let mut convs = Vec::new();
         let mut norms = Vec::new();
 
-        // First layer: input_dim -> hidden_dim
-        convs.push(GcnLayer::new(device, input_dim, hidden_dim));
+        // First layer: node_embed_dim → hidden_dim
+        convs.push(GcnLayer::new(device, node_embed_dim, hidden_dim));
         norms.push(LayerNormConfig::new(hidden_dim).init(device));
 
-        // Remaining layers: hidden_dim -> hidden_dim
+        // Remaining layers: hidden_dim → hidden_dim
         for _ in 1..num_layers {
             convs.push(GcnLayer::new(device, hidden_dim, hidden_dim));
             norms.push(LayerNormConfig::new(hidden_dim).init(device));
         }
 
+        // Clause projection: hidden_dim + clause_embed_dim → hidden_dim
+        let clause_proj = LinearConfig::new(hidden_dim + clause_embed_dim, hidden_dim).init(device);
+
         let scorer = ScorerHead::new(device, hidden_dim);
 
+        // Feature embedding alias (same as node_embedding for weight loading)
+        let feature_embedding = NodeFeatureEmbedding::new(device, sin_dim);
+
         Self {
+            node_embedding,
+            clause_embedding,
             convs,
             norms,
+            clause_proj,
             scorer,
             hidden_dim,
+            feature_embedding,
         }
     }
 
     /// Load model weights from a safetensors file exported from PyTorch
-    ///
-    /// The safetensors file should contain weights with PyTorch naming:
-    /// - `convs.{i}.linear.weight` / `convs.{i}.linear.bias` for GCN layers
-    /// - `norms.{i}.weight` / `norms.{i}.bias` for LayerNorm
-    /// - `scorer.0.weight` / `scorer.0.bias` for first scorer linear
-    /// - `scorer.3.weight` / `scorer.3.bias` for second scorer linear
-    ///
-    /// # Arguments
-    /// * `path` - Path to the safetensors file
-    /// * `device` - Device to load the model on
-    /// * `input_dim` - Input feature dimension (default 13)
-    /// * `hidden_dim` - Hidden layer dimension
-    /// * `num_layers` - Number of GCN layers
-    ///
-    /// # Returns
-    /// * `Ok(Self)` if weights load successfully
-    /// * `Err(String)` with error message if loading fails
     pub fn load_from_safetensors<P: AsRef<Path>>(
         path: P,
         device: &B::Device,
-        input_dim: usize,
         hidden_dim: usize,
         num_layers: usize,
+        sin_dim: usize,
     ) -> Result<Self, String> {
-        // First create a model with the correct architecture
-        let model = Self::new(device, input_dim, hidden_dim, num_layers);
+        // Create model with correct architecture
+        let model = Self::new(device, hidden_dim, num_layers, sin_dim);
 
         // Load weights from safetensors with PyTorch adapter
         let load_args = LoadArgs::new(path.as_ref().into()).with_adapter_type(AdapterType::PyTorch);
@@ -144,442 +298,333 @@ impl<B: Backend> GcnModel<B> {
             .load(load_args, device)
             .map_err(|e| format!("Failed to load safetensors: {}", e))?;
 
-        // Load the record into the model
         Ok(model.load_record(record))
     }
 
     /// Encode clauses to embeddings (GCN layers + pooling)
-    ///
-    /// # Arguments
-    /// * `node_features` - [total_nodes, input_dim]
-    /// * `adj` - Normalized adjacency matrix [total_nodes, total_nodes]
-    /// * `pool_matrix` - [num_clauses, total_nodes] for mean pooling
-    ///
-    /// # Returns
-    /// * Clause embeddings [num_clauses, hidden_dim]
     pub fn encode(
         &self,
         node_features: Tensor<B, 2>,
         adj: Tensor<B, 2>,
         pool_matrix: Tensor<B, 2>,
     ) -> Tensor<B, 2> {
-        let num_layers = self.convs.len();
-        let mut x = node_features;
+        // Embed node features: [N, 3] → [N, 15]
+        let mut x = self.node_embedding.forward(node_features);
 
         // Apply GCN layers with LayerNorm and ReLU
-        for (i, (conv, norm)) in self.convs.iter().zip(self.norms.iter()).enumerate() {
+        for (conv, norm) in self.convs.iter().zip(self.norms.iter()) {
             x = conv.forward(x, adj.clone());
             x = norm.forward(x);
             x = relu(x);
-            let _ = i < num_layers - 1; // placeholder for dropout logic
         }
 
         // Pool to clause embeddings: [num_clauses, hidden_dim]
         pool_matrix.matmul(x)
     }
 
-    /// Score clause embeddings
-    ///
-    /// # Arguments
-    /// * `clause_emb` - [num_clauses, hidden_dim]
-    ///
-    /// # Returns
-    /// * Logits [num_clauses, 1]
-    pub fn score(&self, clause_emb: Tensor<B, 2>) -> Tensor<B, 2> {
-        self.scorer.forward(clause_emb)
-    }
-
-    /// Forward pass (encode + score)
-    ///
-    /// # Arguments
-    /// * `node_features` - [total_nodes, input_dim]
-    /// * `adj` - Normalized adjacency matrix [total_nodes, total_nodes]
-    /// * `pool_matrix` - [num_clauses, total_nodes] for mean pooling
-    ///
-    /// # Returns
-    /// * Logits [num_clauses, 1]
+    /// Forward pass: node_features + clause_features → scores
     pub fn forward(
         &self,
         node_features: Tensor<B, 2>,
         adj: Tensor<B, 2>,
         pool_matrix: Tensor<B, 2>,
+        clause_features: Tensor<B, 2>,
     ) -> Tensor<B, 2> {
+        // Encode node features through GCN
         let clause_emb = self.encode(node_features, adj, pool_matrix);
-        self.score(clause_emb)
+
+        // Embed clause features
+        let clause_feat_emb = self.clause_embedding.forward(clause_features);
+
+        // Concatenate and project
+        let concat = Tensor::cat(vec![clause_emb, clause_feat_emb], 1);
+        let projected = self.clause_proj.forward(concat);
+
+        // Score
+        self.scorer.forward(projected)
+    }
+
+    /// Score clauses (returns logits, not probabilities)
+    pub fn score(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
+        self.scorer.forward(x)
     }
 }
 
-/// Burn-based GCN clause selector with embedding cache for incremental updates
+/// NdArray-backed GCN selector type
+pub type NdarrayGcnSelector = BurnGcnSelector<burn_ndarray::NdArray<f32>>;
+
+/// GCN-based clause selector using Burn
 pub struct BurnGcnSelector<B: Backend> {
     model: GcnModel<B>,
     device: B::Device,
-    /// Maximum age for normalization
-    max_age: usize,
-    /// Random number generator state (simple LCG)
-    rng_state: u64,
-    /// Hidden dimension for embeddings
-    hidden_dim: usize,
-    /// Cache of clause embeddings: clause_index -> embedding vector
-    embedding_cache: HashMap<usize, Vec<f32>>,
+    /// Clause age tracking
+    clause_ages: HashMap<usize, usize>,
+    /// Current step counter for age calculation
+    current_step: usize,
+    /// Cached GCN embeddings per clause (hidden_dim floats)
+    clause_gcn_cache: HashMap<usize, Vec<f32>>,
 }
 
 impl<B: Backend> BurnGcnSelector<B> {
-    /// Create a new GCN selector with the given model
     pub fn new(model: GcnModel<B>, device: B::Device) -> Self {
-        let hidden_dim = model.hidden_dim;
         Self {
             model,
             device,
-            max_age: 1000,
-            rng_state: 12345,
-            hidden_dim,
-            embedding_cache: HashMap::new(),
+            clause_ages: HashMap::new(),
+            current_step: 0,
+            clause_gcn_cache: HashMap::new(),
         }
     }
 
-    /// Set the maximum age for normalization
-    pub fn with_max_age(mut self, max_age: usize) -> Self {
-        self.max_age = max_age;
-        self
+    /// Register a clause and its creation time
+    pub fn register_clause(&mut self, clause_id: usize) {
+        self.clause_ages.insert(clause_id, self.current_step);
     }
 
-    /// Clear the embedding cache (call when starting a new problem)
-    pub fn clear_cache(&mut self) {
-        self.embedding_cache.clear();
-    }
+    /// Compute GCN embedding for a single clause and cache it
+    fn compute_and_cache_embedding(&mut self, clause_id: usize, clause: &Clause) {
+        use crate::ml::GraphBuilder;
 
-    /// Generate a random float in [0, 1)
-    fn next_random(&mut self) -> f64 {
-        self.rng_state = self
-            .rng_state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1);
-        (self.rng_state >> 33) as f64 / (1u64 << 31) as f64
-    }
-
-    /// Sample an index from logits using softmax sampling
-    fn sample_from_logits(&mut self, logits: &[f32]) -> usize {
-        if logits.is_empty() {
-            return 0;
-        }
-        if logits.len() == 1 {
-            return 0;
+        if self.clause_gcn_cache.contains_key(&clause_id) {
+            return;
         }
 
-        // Find max for numerical stability
-        let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let graph = GraphBuilder::build_from_clause_with_context(clause, 1);
+        let num_nodes = graph.node_features.len();
 
-        // Compute softmax
-        let exp_scores: Vec<f64> = logits
-            .iter()
-            .map(|&x| ((x - max_logit) as f64).exp())
+        if num_nodes == 0 {
+            // Empty clause - cache zeros
+            self.clause_gcn_cache.insert(clause_id, vec![0.0; self.model.hidden_dim]);
+            return;
+        }
+
+        // Build node features tensor [num_nodes, 3]
+        let node_feat_flat: Vec<f32> = graph.node_features.iter()
+            .flat_map(|f| [f[0], f[1], f[2]])
             .collect();
-        let sum: f64 = exp_scores.iter().sum();
-        let probs: Vec<f64> = exp_scores.iter().map(|&e| e / sum).collect();
+        let node_features = Tensor::<B, 1>::from_floats(node_feat_flat.as_slice(), &self.device)
+            .reshape([num_nodes, 3]);
 
-        // Sample from distribution
-        let r = self.next_random();
-        let mut cumsum = 0.0;
+        // Build adjacency matrix for single clause
+        let adj = self.build_single_adjacency(&graph.edge_indices, num_nodes);
 
-        for (i, &p) in probs.iter().enumerate() {
-            cumsum += p;
-            if r < cumsum {
-                return i;
-            }
-        }
+        // Build pool matrix [1, num_nodes] - mean pooling
+        let weight = 1.0 / num_nodes as f32;
+        let pool_data: Vec<f32> = vec![weight; num_nodes];
+        let pool_matrix = Tensor::<B, 1>::from_floats(pool_data.as_slice(), &self.device)
+            .reshape([1, num_nodes]);
 
-        logits.len() - 1
+        // Run GCN encode (node_embedding + GCN layers + pooling)
+        let embedding = self.model.encode(node_features, adj, pool_matrix);
+
+        // Cache the embedding [1, hidden_dim] -> Vec<f32>
+        let embedding_data: Vec<f32> = embedding.to_data().to_vec().unwrap();
+        self.clause_gcn_cache.insert(clause_id, embedding_data);
     }
 
-    /// Encode a batch of clauses to embeddings using GCN
-    fn encode_clauses(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
-        if clauses.is_empty() {
-            return Vec::new();
-        }
+    /// Build adjacency matrix for a single clause
+    fn build_single_adjacency(&self, edges: &[(usize, usize)], num_nodes: usize) -> Tensor<B, 2> {
+        let mut adj_data = vec![0.0f32; num_nodes * num_nodes];
 
-        // Build graphs and collect node features
-        let mut all_node_features: Vec<f32> = Vec::new();
-        let mut clause_node_counts: Vec<usize> = Vec::new();
-        let mut all_edges: Vec<(usize, usize)> = Vec::new();
-        let mut node_offset: usize = 0;
-
-        for clause in clauses {
-            let graph = GraphBuilder::build_from_clause_with_context(clause, self.max_age);
-            clause_node_counts.push(graph.num_nodes);
-
-            for features in &graph.node_features {
-                all_node_features.extend_from_slice(features);
-            }
-
-            for &(src, dst) in &graph.edge_indices {
-                all_edges.push((src + node_offset, dst + node_offset));
-            }
-
-            node_offset += graph.num_nodes;
-        }
-
-        let total_nodes = clause_node_counts.iter().sum::<usize>();
-        let num_clauses = clauses.len();
-
-        if total_nodes == 0 {
-            return vec![vec![0.0; self.hidden_dim]; num_clauses];
-        }
-
-        // Build adjacency matrix with self-loops and normalize
-        let mut adj_data = vec![0.0f32; total_nodes * total_nodes];
-
-        for i in 0..total_nodes {
-            adj_data[i * total_nodes + i] = 1.0;
-        }
-
-        for &(src, dst) in &all_edges {
-            adj_data[src * total_nodes + dst] = 1.0;
-            adj_data[dst * total_nodes + src] = 1.0;
-        }
-
-        let mut degrees: Vec<f32> = vec![0.0; total_nodes];
-        for i in 0..total_nodes {
-            for j in 0..total_nodes {
-                degrees[i] += adj_data[i * total_nodes + j];
+        // Add edges (bidirectional)
+        for &(src, dst) in edges {
+            if src < num_nodes && dst < num_nodes {
+                adj_data[src * num_nodes + dst] = 1.0;
+                adj_data[dst * num_nodes + src] = 1.0;
             }
         }
 
-        for i in 0..total_nodes {
-            for j in 0..total_nodes {
-                if adj_data[i * total_nodes + j] > 0.0 {
-                    let norm = (degrees[i] * degrees[j]).sqrt();
-                    if norm > 0.0 {
-                        adj_data[i * total_nodes + j] /= norm;
-                    }
+        // Add self-loops
+        for i in 0..num_nodes {
+            adj_data[i * num_nodes + i] = 1.0;
+        }
+
+        // Normalize: D^(-1/2) A D^(-1/2)
+        let mut degrees = vec![0.0f32; num_nodes];
+        for i in 0..num_nodes {
+            for j in 0..num_nodes {
+                degrees[i] += adj_data[i * num_nodes + j];
+            }
+        }
+
+        for i in 0..num_nodes {
+            for j in 0..num_nodes {
+                if degrees[i] > 0.0 && degrees[j] > 0.0 {
+                    adj_data[i * num_nodes + j] /= (degrees[i] * degrees[j]).sqrt();
                 }
             }
         }
 
-        // Build pool matrix
-        let mut pool_matrix_data = vec![0.0f32; num_clauses * total_nodes];
-        let mut current_start = 0usize;
-        for (clause_idx, &num_nodes) in clause_node_counts.iter().enumerate() {
-            if num_nodes > 0 {
-                let weight = 1.0 / num_nodes as f32;
-                for node_idx in current_start..current_start + num_nodes {
-                    pool_matrix_data[clause_idx * total_nodes + node_idx] = weight;
-                }
-            }
-            current_start += num_nodes;
-        }
-
-        // Create tensors and encode
-        let node_features_tensor =
-            Tensor::<B, 1>::from_floats(all_node_features.as_slice(), &self.device)
-                .reshape([total_nodes, FEATURE_DIM]);
-
-        let adj_tensor = Tensor::<B, 1>::from_floats(adj_data.as_slice(), &self.device)
-            .reshape([total_nodes, total_nodes]);
-
-        let pool_tensor = Tensor::<B, 1>::from_floats(pool_matrix_data.as_slice(), &self.device)
-            .reshape([num_clauses, total_nodes]);
-
-        // Get embeddings (not scores)
-        let embeddings = self.model.encode(node_features_tensor, adj_tensor, pool_tensor);
-
-        // Convert to Vec<Vec<f32>>
-        let flat_data: Vec<f32> = embeddings.into_data().to_vec().unwrap();
-        flat_data
-            .chunks(self.hidden_dim)
-            .map(|chunk| chunk.to_vec())
-            .collect()
+        Tensor::<B, 1>::from_floats(adj_data.as_slice(), &self.device).reshape([num_nodes, num_nodes])
     }
 
-    /// Score embeddings using the model's scorer head
-    fn score_embeddings(&self, embeddings: &[Vec<f32>]) -> Vec<f32> {
-        if embeddings.is_empty() {
-            return Vec::new();
+    /// Score clauses using cached GCN embeddings
+    fn score_clauses(&self, clause_ids: &[usize], clauses: &[Clause]) -> Option<Vec<f32>> {
+        let num_clauses = clause_ids.len();
+        if num_clauses == 0 {
+            return None;
         }
 
-        let num_clauses = embeddings.len();
-        let flat_emb: Vec<f32> = embeddings.iter().flatten().cloned().collect();
+        let hidden_dim = self.model.hidden_dim;
+        let max_age = self.current_step.max(1);
 
-        let emb_tensor = Tensor::<B, 1>::from_floats(flat_emb.as_slice(), &self.device)
-            .reshape([num_clauses, self.hidden_dim]);
+        // Build tensors from cached embeddings
+        let mut gcn_emb_flat = Vec::with_capacity(num_clauses * hidden_dim);
+        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
 
-        let logits = self.model.score(emb_tensor);
-        logits.into_data().to_vec().unwrap()
-    }
+        for &clause_id in clause_ids {
+            // Get cached GCN embedding
+            let gcn_emb = self.clause_gcn_cache.get(&clause_id)?;
+            gcn_emb_flat.extend_from_slice(gcn_emb);
 
-    /// Score clauses with caching - only encode uncached clauses
-    fn score_clauses_cached(
-        &mut self,
-        clause_indices: &[usize],
-        clauses: &[Clause],
-    ) -> Vec<f32> {
-        if clause_indices.is_empty() {
-            return Vec::new();
+            // Compute clause features (age changes over time)
+            let clause = &clauses[clause_id];
+            let age = self.clause_ages.get(&clause_id).copied().unwrap_or(0);
+            let age_normalized = age as f32 / max_age as f32;
+            let role = clause.role.to_feature_value();
+            let size = clause.literals.len() as f32;
+            clause_feat_flat.extend_from_slice(&[age_normalized, role, size]);
         }
 
-        // Find which clauses need encoding
-        let mut uncached_indices: Vec<usize> = Vec::new();
-        let mut uncached_clauses: Vec<&Clause> = Vec::new();
+        // Build tensors
+        let gcn_embeddings = Tensor::<B, 1>::from_floats(gcn_emb_flat.as_slice(), &self.device)
+            .reshape([num_clauses, hidden_dim]);
+        let clause_features = Tensor::<B, 1>::from_floats(clause_feat_flat.as_slice(), &self.device)
+            .reshape([num_clauses, 3]);
 
-        for &idx in clause_indices {
-            if !self.embedding_cache.contains_key(&idx) {
-                uncached_indices.push(idx);
-                uncached_clauses.push(&clauses[idx]);
-            }
-        }
+        // Embed clause features
+        let clause_feat_emb = self.model.clause_embedding.forward(clause_features);
 
-        // Encode uncached clauses and store in cache
-        if !uncached_clauses.is_empty() {
-            let new_embeddings = self.encode_clauses(&uncached_clauses);
-            for (idx, emb) in uncached_indices.into_iter().zip(new_embeddings) {
-                self.embedding_cache.insert(idx, emb);
-            }
-        }
+        // Concatenate and project
+        let concat = Tensor::cat(vec![gcn_embeddings, clause_feat_emb], 1);
+        let projected = self.model.clause_proj.forward(concat);
 
-        // Gather all embeddings in order
-        let embeddings: Vec<Vec<f32>> = clause_indices
-            .iter()
-            .map(|&idx| self.embedding_cache.get(&idx).unwrap().clone())
-            .collect();
-
-        // Score all embeddings
-        self.score_embeddings(&embeddings)
+        // Score
+        let scores = self.model.scorer.forward(projected);
+        Some(scores.to_data().to_vec().unwrap())
     }
 }
 
-impl<B: Backend> ClauseSelector for BurnGcnSelector<B>
-where
-    B: Backend,
-    B::Device: Clone,
-{
+impl<B: Backend> ClauseSelector for BurnGcnSelector<B> {
+    fn name(&self) -> &str {
+        "burn_gcn"
+    }
+
     fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
+        self.current_step += 1;
+
         if unprocessed.is_empty() {
             return None;
         }
 
-        // Collect clause indices for cached scoring
-        let clause_indices: Vec<usize> = unprocessed.iter().cloned().collect();
+        // Collect clause IDs
+        let clause_ids: Vec<usize> = unprocessed.iter().copied().collect();
 
-        // Score clauses using cache
-        let scores = self.score_clauses_cached(&clause_indices, clauses);
-
-        if scores.is_empty() {
-            // Fallback to FIFO
-            return unprocessed.pop_front();
+        // Register new clauses and compute embeddings for uncached ones
+        for &id in &clause_ids {
+            if !self.clause_ages.contains_key(&id) {
+                self.register_clause(id);
+            }
+            // Compute and cache GCN embedding if not already cached
+            self.compute_and_cache_embedding(id, &clauses[id]);
         }
 
-        // Sample from scores
-        let selected_idx = self.sample_from_logits(&scores);
+        // Score all clauses using cached embeddings
+        let scores = self.score_clauses(&clause_ids, clauses)?;
 
-        // Remove and return the selected clause
-        unprocessed.remove(selected_idx)
-    }
+        // Get argmax
+        let (best_idx, _) = scores
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())?;
 
-    fn name(&self) -> &str {
-        "BurnGCN"
+        // Remove selected clause from unprocessed
+        let selected_id = clause_ids[best_idx];
+        unprocessed.retain(|&id| id != selected_id);
+
+        Some(selected_id)
     }
 
     fn reset(&mut self) {
-        self.embedding_cache.clear();
+        self.clause_ages.clear();
+        self.clause_gcn_cache.clear();
+        self.current_step = 0;
     }
 }
 
-// Convenience type aliases for common backends
-pub type NdarrayGcnSelector = BurnGcnSelector<burn_ndarray::NdArray<f32>>;
+// Factory functions
 
-/// Create a GCN selector with the ndarray backend (random initialization)
+/// Create a new GCN selector with random weights (for testing)
 pub fn create_ndarray_gcn_selector(
-    input_dim: usize,
     hidden_dim: usize,
     num_layers: usize,
 ) -> NdarrayGcnSelector {
     let device = burn_ndarray::NdArrayDevice::Cpu;
-    let model = GcnModel::new(&device, input_dim, hidden_dim, num_layers);
+    let model = GcnModel::new(&device, hidden_dim, num_layers, 8);
     BurnGcnSelector::new(model, device)
 }
 
-/// Load a GCN selector from a safetensors file (PyTorch format)
-///
-/// # Arguments
-/// * `path` - Path to the safetensors file
-/// * `input_dim` - Input feature dimension (default 13 for clause graphs)
-/// * `hidden_dim` - Hidden layer dimension
-/// * `num_layers` - Number of GCN layers
-///
-/// # Returns
-/// * `Ok(NdarrayGcnSelector)` if weights load successfully
-/// * `Err(String)` with error message if loading fails
+/// Load a GCN selector from safetensors weights
 pub fn load_ndarray_gcn_selector<P: AsRef<Path>>(
     path: P,
-    input_dim: usize,
     hidden_dim: usize,
     num_layers: usize,
 ) -> Result<NdarrayGcnSelector, String> {
     let device = burn_ndarray::NdArrayDevice::Cpu;
-    let model = GcnModel::load_from_safetensors(path, &device, input_dim, hidden_dim, num_layers)?;
+    let model = GcnModel::load_from_safetensors(path, &device, hidden_dim, num_layers, 8)?;
     Ok(BurnGcnSelector::new(model, device))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Literal, PredicateSymbol, Term, Variable};
+    use crate::core::{Atom, ClauseRole, Literal, PredicateSymbol, Term, Variable};
 
-    fn make_test_clause(name: &str, num_args: usize) -> Clause {
+    fn make_test_clause(id: usize, name: &str, num_args: usize) -> Clause {
         let args: Vec<Term> = (0..num_args)
-            .map(|j| {
-                Term::Variable(Variable {
-                    name: format!("X{}", j),
-                })
-            })
+            .map(|j| Term::Variable(Variable { name: format!("X{}", j) }))
             .collect();
 
-        let atom = Atom {
-            predicate: PredicateSymbol {
-                name: name.to_string(),
-                arity: num_args,
-            },
-            args,
-        };
-
-        Clause::new(vec![Literal::positive(atom)])
+        Clause {
+            literals: vec![Literal::positive(Atom {
+                predicate: PredicateSymbol { name: name.to_string(), arity: num_args },
+                args,
+            })],
+            id: Some(id),
+            role: ClauseRole::Derived,
+            age: 0,
+        }
     }
 
     #[test]
-    fn test_gcn_model_forward() {
+    fn test_gcn_model_creation() {
         let device = burn_ndarray::NdArrayDevice::Cpu;
-        let model: GcnModel<burn_ndarray::NdArray<f32>> = GcnModel::new(&device, 13, 64, 3);
-
-        // Create simple input
-        let node_features = Tensor::zeros([5, 13], &device);
-        let adj = Tensor::ones([5, 5], &device) / 5.0f32;
-        let pool = Tensor::ones([2, 5], &device) / 5.0f32;
-
-        let output = model.forward(node_features, adj, pool);
-        assert_eq!(output.dims(), [2, 1]);
+        let model: GcnModel<burn_ndarray::NdArray<f32>> = GcnModel::new(&device, 256, 6, 8);
+        assert_eq!(model.hidden_dim, 256);
+        assert_eq!(model.convs.len(), 6);
     }
 
     #[test]
     fn test_gcn_selector_basic() {
-        let mut selector = create_ndarray_gcn_selector(13, 64, 3);
-        let clauses = vec![
-            make_test_clause("P", 2),
-            make_test_clause("Q", 1),
-            make_test_clause("R", 3),
-        ];
-        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+        let mut selector = create_ndarray_gcn_selector(64, 3);
 
-        // Should select something
-        let selected = selector.select(&mut unprocessed, &clauses);
-        assert!(selected.is_some());
-        assert_eq!(unprocessed.len(), 2);
+        let clause1 = make_test_clause(0, "p", 2);
+        let clause2 = make_test_clause(1, "q", 1);
+
+        let clauses = vec![clause1, clause2];
+        let mut unprocessed: VecDeque<usize> = vec![0, 1].into_iter().collect();
+
+        let result = selector.select(&mut unprocessed, &clauses);
+
+        assert!(result.is_some());
+        assert_eq!(unprocessed.len(), 1); // One was selected and removed
     }
 
     #[test]
     fn test_gcn_selector_empty() {
-        let mut selector = create_ndarray_gcn_selector(13, 64, 3);
+        let mut selector = create_ndarray_gcn_selector(64, 3);
         let clauses: Vec<Clause> = vec![];
         let mut unprocessed: VecDeque<usize> = VecDeque::new();
-
-        assert_eq!(selector.select(&mut unprocessed, &clauses), None);
+        assert!(selector.select(&mut unprocessed, &clauses).is_none());
     }
 }
