@@ -257,6 +257,9 @@ impl SaturationState {
 
             iterations += 1;
 
+            // Otter loop: Forward-simplify the given clause before generating inferences
+            let given_idx = self.forward_simplify_given(given_idx);
+
             // Process the given clause
             let given_clause = &self.clauses[given_idx];
 
@@ -267,6 +270,11 @@ impl SaturationState {
                     empty_clause_idx: given_idx,
                     all_clauses: self.clauses.clone(),
                 });
+            }
+
+            // Check if subsumed after simplification
+            if self.subsumption_checker.is_subsumed_by_processed(given_idx, &given_clause) {
+                continue;
             }
 
             // Record the selection of the given clause as a proof step
@@ -330,6 +338,71 @@ impl SaturationState {
     fn select_given_clause(&mut self) -> Option<usize> {
         self.clause_selector
             .select(&mut self.unprocessed, &self.clauses)
+    }
+
+    /// Otter loop: Forward-simplify the given clause using processed unit equalities
+    /// Returns the index of the (possibly new) simplified clause
+    fn forward_simplify_given(&mut self, given_idx: usize) -> usize {
+        let given_clause = self.clauses[given_idx].clone();
+
+        // Apply demodulation with all processed unit equalities
+        let mut current_clause = given_clause.clone();
+        let mut changed = true;
+        let mut rewrite_premise = None;
+
+        while changed {
+            changed = false;
+            for &unit_idx in &self.processed {
+                let unit_clause = &self.clauses[unit_idx];
+
+                // Check if it's a unit equality
+                if unit_clause.literals.len() == 1
+                    && unit_clause.literals[0].polarity
+                    && unit_clause.literals[0].atom.is_equality()
+                {
+                    let results =
+                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, given_idx);
+                    if !results.is_empty() {
+                        current_clause = results[0].conclusion.clone();
+                        rewrite_premise = Some(unit_idx);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If unchanged, return original index
+        if current_clause == given_clause {
+            return given_idx;
+        }
+
+        // Orient the simplified clause
+        orient_clause_equalities(&mut current_clause);
+
+        // Create a new clause entry for the simplified version
+        let new_idx = self.clauses.len();
+        current_clause.id = Some(new_idx);
+
+        // Track clause memory
+        self.clause_memory_bytes += current_clause.memory_bytes();
+
+        // Add to subsumption checker
+        self.subsumption_checker.add_clause(current_clause.clone());
+
+        self.clauses.push(current_clause.clone());
+
+        // Record the simplification as a proof step
+        self.proof_steps.push(ProofStep {
+            inference: InferenceResult {
+                rule: InferenceRule::Demodulation,
+                premises: vec![rewrite_premise.unwrap_or(given_idx), given_idx],
+                conclusion: current_clause,
+            },
+            clause_idx: new_idx,
+        });
+
+        new_idx
     }
 
     /// Generate all inferences between given clause and processed clauses
@@ -404,7 +477,7 @@ impl SaturationState {
         results
     }
 
-    /// Add a new clause if it's not redundant
+    /// Add a new clause if it's not redundant (otter-style: no forward simplification)
     fn add_clause(&mut self, inference: InferenceResult) -> Option<usize> {
         // Check clause size limit
         if inference.conclusion.literals.len() > self.config.max_clause_size {
@@ -420,23 +493,21 @@ impl SaturationState {
         let mut oriented_clause = inference.conclusion.clone();
         orient_clause_equalities(&mut oriented_clause);
 
-        // Apply demodulation with all unit equalities
-        let demodulated_clause = self.demodulate_clause(oriented_clause.clone(), &inference);
-
+        // Otter loop: Don't apply demodulation here - clauses are simplified when selected
         // Check subsumption for redundancy elimination
-        if self.subsumption_checker.is_subsumed(&demodulated_clause) {
+        if self.subsumption_checker.is_subsumed(&oriented_clause) {
             return None;
         }
 
         // Add the clause
         let new_idx = self.clauses.len();
-        let mut clause_with_id = demodulated_clause.clone();
+        let mut clause_with_id = oriented_clause.clone();
         clause_with_id.id = Some(new_idx);
 
         // Add to subsumption checker
         let idx_from_subsumption = self
             .subsumption_checker
-            .add_clause(demodulated_clause.clone());
+            .add_clause(oriented_clause.clone());
         assert_eq!(idx_from_subsumption, new_idx);
 
         // Track clause memory
@@ -454,40 +525,6 @@ impl SaturationState {
         });
 
         Some(new_idx)
-    }
-
-    /// Apply demodulation to a clause using all available unit equalities
-    fn demodulate_clause(&self, clause: Clause, _original_inference: &InferenceResult) -> Clause {
-        let mut changed = true;
-        let mut current_clause = clause;
-
-        // Keep applying demodulation until no more changes
-        while changed {
-            changed = false;
-
-            // Try demodulation with each processed unit equality
-            for &unit_idx in &self.processed {
-                let unit_clause = &self.clauses[unit_idx];
-
-                // Check if it's a unit equality
-                if unit_clause.literals.len() == 1
-                    && unit_clause.literals[0].polarity
-                    && unit_clause.literals[0].atom.is_equality()
-                {
-                    // Try to demodulate
-                    let results =
-                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, 0);
-                    if !results.is_empty() {
-                        // Apply the first demodulation (there should be at most one)
-                        current_clause = results[0].conclusion.clone();
-                        changed = true;
-                        break; // Start over with the new clause
-                    }
-                }
-            }
-        }
-
-        current_clause
     }
 
     /// Perform backward demodulation using a newly processed unit equality

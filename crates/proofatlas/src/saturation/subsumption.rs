@@ -131,6 +131,47 @@ impl SubsumptionChecker {
         false
     }
 
+    /// Check if a clause is subsumed by any processed clause (excluding itself)
+    /// Used in otter loop to check if the simplified given clause is redundant
+    pub fn is_subsumed_by_processed(&self, exclude_idx: usize, clause: &Clause) -> bool {
+        // Check for variants (excluding self)
+        for (idx, existing) in self.clauses.iter().enumerate() {
+            if idx == exclude_idx {
+                continue;
+            }
+            if existing.literals.len() != clause.literals.len() {
+                continue;
+            }
+            if are_variants(existing, clause) {
+                return true;
+            }
+        }
+
+        // Unit subsumption (excluding self)
+        for (unit, idx) in &self.units {
+            if *idx == exclude_idx {
+                continue;
+            }
+            if subsumes_unit(unit, clause) {
+                return true;
+            }
+        }
+
+        // Full subsumption for small clauses (excluding self)
+        if clause.literals.len() <= 3 {
+            for (idx, existing) in self.clauses.iter().enumerate() {
+                if idx == exclude_idx {
+                    continue;
+                }
+                if existing.literals.len() < clause.literals.len() && subsumes(existing, clause) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Check if we have a variant of this clause
     fn has_variant(&self, clause: &Clause) -> bool {
         // Get the clause's "shape" (predicate symbols and polarities)
