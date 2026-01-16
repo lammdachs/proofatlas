@@ -800,7 +800,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     literal_selection = str(preset.get("literal_selection", 21))
     state.set_literal_selection(literal_selection)
 
-    max_clauses = preset.get("max_clauses", 0)  # 0 means no limit
+    max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
     is_learned = "embedding" in preset or "model" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
@@ -813,7 +813,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     try:
         proof_found, status = state.run_saturation(
-            max_clauses,
+            max_iterations,
             float(remaining_timeout),
             float(age_weight_ratio) if not is_learned else None,
             selector,
