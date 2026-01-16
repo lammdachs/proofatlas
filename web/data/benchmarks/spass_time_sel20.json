@@ -1,0 +1,15 @@
+{
+  "generated": "2026-01-16T13:55:25.583573",
+  "prover": "spass",
+  "preset": "time_sel20",
+  "completed": 8398,
+  "total": 8398,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 4465,
+    "saturated": 0,
+    "timeout": 3913,
+    "error": 20
+  },
+  "proof_rate": 53.16742081447964
+}

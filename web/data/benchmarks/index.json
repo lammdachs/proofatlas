@@ -1,0 +1,27 @@
+{
+  "generated": "2026-01-16T13:57:55.210974",
+  "runs": [
+    "proofatlas_steps_sel0",
+    "proofatlas_steps_sel20",
+    "proofatlas_steps_sel21",
+    "proofatlas_steps_sel22",
+    "proofatlas_time_sel0",
+    "proofatlas_time_sel20",
+    "proofatlas_time_sel21",
+    "proofatlas_time_sel22",
+    "spass_steps_sel20",
+    "spass_steps_sel21",
+    "spass_steps_sel22",
+    "spass_time_sel20",
+    "spass_time_sel21",
+    "spass_time_sel22",
+    "vampire_steps_sel0",
+    "vampire_steps_sel20",
+    "vampire_steps_sel21",
+    "vampire_steps_sel22",
+    "vampire_time_sel0",
+    "vampire_time_sel20",
+    "vampire_time_sel21",
+    "vampire_time_sel22"
+  ]
+}

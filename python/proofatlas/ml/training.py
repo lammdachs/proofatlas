@@ -679,6 +679,115 @@ if LIGHTNING_AVAILABLE:
 
 
 # =============================================================================
+# Export Callback for Web Visualization
+# =============================================================================
+
+
+if LIGHTNING_AVAILABLE:
+
+    class ExportCallback(Callback):
+        """Export current training run to web/data/training/<run_name>.json after each epoch."""
+
+        def __init__(self, run_name: str, metrics_file: Path, output_dir: Path):
+            self.run_name = run_name
+            self.metrics_file = metrics_file
+            self.output_dir = output_dir
+
+        def on_train_epoch_end(self, trainer, pl_module):
+            # Only run on rank 0
+            if trainer.global_rank != 0:
+                return
+
+            try:
+                self._export_current_run()
+            except Exception:
+                # Don't fail training if export fails
+                pass
+
+        def _export_current_run(self):
+            """Export current run to individual JSON file."""
+            import json as json_module
+            from datetime import datetime as dt
+
+            if not self.metrics_file.exists():
+                return
+
+            # Load current run's metrics
+            with open(self.metrics_file) as f:
+                metrics = json_module.load(f)
+
+            config = metrics.get("config", {})
+            model_config = config.get("model", {})
+            training_config = config.get("training", {})
+            epochs = metrics.get("epochs", [])
+
+            epoch_history = [{
+                "epoch": e.get("epoch", 0),
+                "train_loss": e.get("train_loss"),
+                "val_loss": e.get("val_loss"),
+                "val_acc": e.get("val_acc"),
+                "val_mrr": e.get("val_mrr"),
+                "learning_rate": e.get("learning_rate"),
+            } for e in epochs]
+
+            output = {
+                "generated": dt.now().isoformat(),
+                "name": metrics.get("run_name", self.run_name),
+                "start_time": metrics.get("start_time"),
+                "end_time": metrics.get("end_time"),
+                "total_time_seconds": metrics.get("total_time_seconds"),
+                "termination_reason": metrics.get("termination_reason"),
+                "best_epoch": metrics.get("best_epoch"),
+                "best_val_loss": metrics.get("best_val_loss"),
+                "model": {
+                    "type": model_config.get("type", "unknown"),
+                    "hidden_dim": model_config.get("hidden_dim"),
+                    "num_layers": model_config.get("num_layers"),
+                    "input_dim": model_config.get("input_dim"),
+                    "scorer_type": model_config.get("scorer_type"),
+                },
+                "training": {
+                    "batch_size": training_config.get("batch_size"),
+                    "learning_rate": training_config.get("learning_rate"),
+                    "max_epochs": training_config.get("max_epochs"),
+                    "patience": training_config.get("patience"),
+                    "loss_type": training_config.get("loss_type"),
+                },
+                "epochs": epoch_history,
+            }
+
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = self.output_dir / f"{self.run_name}.json"
+            with open(output_file, "w") as f:
+                json_module.dump(output, f, indent=2)
+
+            # Update index file with list of all runs
+            self._update_index()
+
+        def _update_index(self):
+            """Update index.json with list of all available runs."""
+            import json as json_module
+            from datetime import datetime as dt
+
+            index_file = self.output_dir / "index.json"
+            runs = []
+
+            # Scan directory for run files
+            for f in sorted(self.output_dir.glob("*.json")):
+                if f.name == "index.json":
+                    continue
+                runs.append(f.stem)
+
+            index = {
+                "generated": dt.now().isoformat(),
+                "runs": runs,
+            }
+
+            with open(index_file, "w") as f:
+                json_module.dump(index, f, indent=2)
+
+
+# =============================================================================
 # Proof Evaluation Callback
 # =============================================================================
 
@@ -889,10 +998,19 @@ def train(
     json_logger.log_config(config)
 
     # Callbacks
+    log_dir_path = Path(config.logging.log_dir)
+    project_root = log_dir_path.parent if log_dir_path.name == ".logs" else log_dir_path.parent.parent
+    metrics_file = log_dir_path / config.name / "metrics.json"
+
     callbacks = [
         JSONLoggingCallback(json_logger),
+        ExportCallback(
+            run_name=config.name,
+            metrics_file=metrics_file,
+            output_dir=project_root / "web" / "data" / "training",
+        ),
         ModelCheckpoint(
-            dirpath=Path(config.logging.log_dir) / config.name / "checkpoints",
+            dirpath=log_dir_path / config.name / "checkpoints",
             filename="{epoch}-{val_loss:.4f}",
             monitor=config.checkpointing.monitor,
             mode=config.checkpointing.mode,

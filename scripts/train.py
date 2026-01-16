@@ -3,20 +3,19 @@
 Train clause selection models.
 
 USAGE:
-    proofatlas-train --traces steps_sel22              # Train on traces
-    proofatlas-train --traces steps_sel22 --model gcn  # Specify model type
-    proofatlas-train --traces steps_sel22 --overparameterized  # Large model
+    proofatlas-train --traces steps_sel22 --preset gcn_mlp   # Use preset from proofatlas.json
+    proofatlas-train --traces steps_sel22 --embedding gcn --scorer mlp  # Specify directly
+    proofatlas-train --traces steps_sel22                    # Uses default preset
 
-MODEL SIZES:
-    --small        : hidden_dim=32,  num_layers=2  (fast iteration)
-    --default      : hidden_dim=64,  num_layers=3  (standard)
-    --large        : hidden_dim=128, num_layers=4  (more capacity)
-    --overparameterized : hidden_dim=256, num_layers=6  (for overfitting experiments)
+CONFIG FILES:
+    configs/proofatlas.json  - Presets with embedding/scorer combinations
+    configs/embeddings.json  - Embedding architecture configs (gcn, etc.)
+    configs/scorers.json     - Scorer architecture configs (mlp, attention, etc.)
 
 OUTPUT:
     .logs/<run_name>/              - Training logs and checkpoints
     .logs/<run_name>/metrics.json  - Metrics for web visualization
-    .weights/<run_name>.safetensors - Exported model weights (when --export)
+    .weights/<run_name>.safetensors - Exported model weights
 """
 
 import argparse
@@ -48,16 +47,71 @@ ROOT = find_project_root()
 
 
 # =============================================================================
-# Model Size Presets
+# Config Loading
 # =============================================================================
 
 
-MODEL_SIZES = {
-    "small": {"hidden_dim": 32, "num_layers": 2},
-    "default": {"hidden_dim": 64, "num_layers": 3},
-    "large": {"hidden_dim": 128, "num_layers": 4},
-    "overparameterized": {"hidden_dim": 256, "num_layers": 6},
-}
+def load_configs(root: Path) -> tuple[dict, dict, dict]:
+    """Load proofatlas, embeddings, and scorers configs."""
+    configs_dir = root / "configs"
+
+    with open(configs_dir / "proofatlas.json") as f:
+        proofatlas_config = json.load(f)
+
+    with open(configs_dir / "embeddings.json") as f:
+        embeddings_config = json.load(f)
+
+    with open(configs_dir / "scorers.json") as f:
+        scorers_config = json.load(f)
+
+    return proofatlas_config, embeddings_config, scorers_config
+
+
+def get_model_config(
+    proofatlas_config: dict,
+    embeddings_config: dict,
+    scorers_config: dict,
+    preset: Optional[str] = None,
+    embedding: Optional[str] = None,
+    scorer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Get model configuration from preset or explicit embedding/scorer.
+
+    Returns dict with keys: embedding_type, embedding_config, scorer_type, scorer_config
+    """
+    # If preset specified, get embedding/scorer from it
+    if preset:
+        if preset not in proofatlas_config.get("presets", {}):
+            available = list(proofatlas_config.get("presets", {}).keys())
+            raise ValueError(f"Unknown preset '{preset}'. Available: {available}")
+        preset_config = proofatlas_config["presets"][preset]
+        embedding = preset_config.get("embedding", embedding)
+        scorer = preset_config.get("scorer", scorer)
+
+    # Default to gcn/mlp if not specified
+    if not embedding:
+        embedding = "gcn"
+    if not scorer:
+        scorer = "mlp"
+
+    # Look up embedding config
+    if embedding not in embeddings_config.get("architectures", {}):
+        available = list(embeddings_config.get("architectures", {}).keys())
+        raise ValueError(f"Unknown embedding '{embedding}'. Available: {available}")
+    embedding_config = embeddings_config["architectures"][embedding]
+
+    # Look up scorer config
+    if scorer not in scorers_config.get("architectures", {}):
+        available = list(scorers_config.get("architectures", {}).keys())
+        raise ValueError(f"Unknown scorer '{scorer}'. Available: {available}")
+    scorer_config = scorers_config["architectures"][scorer]
+
+    return {
+        "embedding_type": embedding,
+        "embedding_config": embedding_config,
+        "scorer_type": scorer,
+        "scorer_config": scorer_config,
+    }
 
 
 # =============================================================================
@@ -124,9 +178,7 @@ class ProofDatasetFromFiles:
 
 def train_model(
     trace_dir: Path,
-    model_type: str = "gcn",
-    hidden_dim: int = 64,
-    num_layers: int = 3,
+    model_config: Dict[str, Any],
     batch_size: int = 32,
     max_epochs: int = 100,
     learning_rate: float = 0.001,
@@ -138,9 +190,7 @@ def train_model(
 
     Args:
         trace_dir: Directory with JSON trace files
-        model_type: Model architecture (gcn, mlp, gat, etc.)
-        hidden_dim: Hidden dimension size
-        num_layers: Number of layers
+        model_config: Dict from get_model_config with embedding/scorer configs
         batch_size: Training batch size
         max_epochs: Maximum training epochs
         learning_rate: Initial learning rate
@@ -163,15 +213,27 @@ def train_model(
     if log_dir is None:
         log_dir = ROOT / ".logs"
 
+    embedding_type = model_config["embedding_type"]
+    embedding_cfg = model_config["embedding_config"]
+    scorer_type = model_config["scorer_type"]
+    scorer_cfg = model_config["scorer_config"]
+
     if run_name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_name = f"{model_type}_{trace_dir.name}_{timestamp}"
+        run_name = f"{embedding_type}_{scorer_type}_{trace_dir.name}_{timestamp}"
 
     print(f"\n{'='*60}")
     print(f"Training: {run_name}")
     print(f"{'='*60}")
     print(f"  Trace dir: {trace_dir}")
-    print(f"  Model: {model_type}, hidden_dim={hidden_dim}, num_layers={num_layers}")
+    print(f"  Embedding: {embedding_type}")
+    for k, v in embedding_cfg.items():
+        if k != "type":
+            print(f"    {k}: {v}")
+    print(f"  Scorer: {scorer_type}")
+    for k, v in scorer_cfg.items():
+        if k != "type":
+            print(f"    {k}: {v}")
     print(f"  Batch size: {batch_size}, LR: {learning_rate}")
     print(f"  Max epochs: {max_epochs}, Patience: {patience}")
     print()
@@ -201,13 +263,18 @@ def train_model(
 
     print(f"  Train: {len(train_dataset)} proofs, Val: {len(val_dataset)} proofs")
 
-    # Build config
+    # Build config - combine embedding type with scorer type for factory
+    # The factory will interpret this and create the right architecture
     config = SelectorConfig(
         name=run_name,
         model=ModelConfig(
-            type=model_type,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
+            type=embedding_type,  # Main type is the embedding
+            hidden_dim=embedding_cfg.get("hidden_dim", 64),
+            num_layers=embedding_cfg.get("num_layers", 3),
+            dropout=embedding_cfg.get("dropout", 0.1),
+            scorer_type=scorer_type,
+            scorer_num_layers=scorer_cfg.get("num_layers", 2),
+            scorer_num_heads=scorer_cfg.get("num_heads", 4),
         ),
         training=TrainingParams(
             batch_size=batch_size,
@@ -251,23 +318,23 @@ def main():
         type=str,
         help="Trace directory name (e.g., steps_sel22) or full path",
     )
+
+    # Model selection (from configs)
     parser.add_argument(
-        "--model",
+        "--preset",
         type=str,
-        default="gcn",
-        choices=["gcn", "mlp", "gat", "graphsage", "transformer"],
-        help="Model architecture (default: gcn)",
+        help="Preset name from proofatlas.json (e.g., gcn_mlp)",
     )
-
-    # Model size presets
-    size_group = parser.add_mutually_exclusive_group()
-    size_group.add_argument("--small", action="store_true", help="Small model (32 hidden, 2 layers)")
-    size_group.add_argument("--large", action="store_true", help="Large model (128 hidden, 4 layers)")
-    size_group.add_argument("--overparameterized", action="store_true", help="Overparameterized (256 hidden, 6 layers)")
-
-    # Fine-grained control
-    parser.add_argument("--hidden-dim", type=int, help="Hidden dimension (overrides size preset)")
-    parser.add_argument("--num-layers", type=int, help="Number of layers (overrides size preset)")
+    parser.add_argument(
+        "--embedding",
+        type=str,
+        help="Embedding type from embeddings.json (e.g., gcn, none)",
+    )
+    parser.add_argument(
+        "--scorer",
+        type=str,
+        help="Scorer type from scorers.json (e.g., mlp, attention)",
+    )
 
     # Training params
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size (default: 32)")
@@ -299,25 +366,26 @@ def main():
         print(f"Error: Trace directory not found: {trace_dir}")
         sys.exit(1)
 
-    # Determine model size
-    if args.small:
-        size = MODEL_SIZES["small"]
-    elif args.large:
-        size = MODEL_SIZES["large"]
-    elif args.overparameterized:
-        size = MODEL_SIZES["overparameterized"]
-    else:
-        size = MODEL_SIZES["default"]
+    # Load configs and get model configuration
+    proofatlas_config, embeddings_config, scorers_config = load_configs(ROOT)
 
-    hidden_dim = args.hidden_dim if args.hidden_dim else size["hidden_dim"]
-    num_layers = args.num_layers if args.num_layers else size["num_layers"]
+    try:
+        model_config = get_model_config(
+            proofatlas_config,
+            embeddings_config,
+            scorers_config,
+            preset=args.preset,
+            embedding=args.embedding,
+            scorer=args.scorer,
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
     # Train
     train_model(
         trace_dir=trace_dir,
-        model_type=args.model,
-        hidden_dim=hidden_dim,
-        num_layers=num_layers,
+        model_config=model_config,
         batch_size=args.batch_size,
         max_epochs=args.epochs,
         learning_rate=args.lr,

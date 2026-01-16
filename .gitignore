@@ -52,11 +52,11 @@ MANIFEST
 *.pt
 *.ckpt
 
-# JSON (except configs and test data)
+# JSON (except configs and web data)
 *.json
 !configs/**/*.json
 !web/examples/*.json
-!web/data/*.json
+!web/data/**/*.json
 
 # Node.js
 node_modules/

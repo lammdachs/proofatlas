@@ -1,0 +1,15 @@
+{
+  "generated": "2026-01-16T13:53:56.972918",
+  "prover": "proofatlas",
+  "preset": "time_sel0",
+  "completed": 9547,
+  "total": 9547,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 2574,
+    "saturated": 0,
+    "timeout": 6875,
+    "error": 98
+  },
+  "proof_rate": 26.961349114905207
+}

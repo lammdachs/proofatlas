@@ -33,23 +33,23 @@
     },
 
     "steps_sel20": {
-      "description": "512 loops with Select=0 (all maximal)",
+      "description": "128 loops with Select=0 (all maximal)",
       "TimeLimit": 600,
-      "Loops": 512,
+      "Loops": 128,
       "Select": 0
     },
 
     "steps_sel21": {
-      "description": "512 loops with Select=1 (prefer negative)",
+      "description": "128 loops with Select=1 (prefer negative)",
       "TimeLimit": 600,
-      "Loops": 512,
+      "Loops": 128,
       "Select": 1
     },
 
     "steps_sel22": {
-      "description": "512 loops with Select=2 (neg max-weight)",
+      "description": "128 loops with Select=2 (neg max-weight)",
       "TimeLimit": 600,
-      "Loops": 512,
+      "Loops": 128,
       "Select": 2
     }
   }

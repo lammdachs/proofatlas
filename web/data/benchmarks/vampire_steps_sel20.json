@@ -1,0 +1,15 @@
+{
+  "generated": "2026-01-16T13:56:18.041111",
+  "prover": "vampire",
+  "preset": "steps_sel20",
+  "completed": 8398,
+  "total": 8398,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 4071,
+    "saturated": 0,
+    "timeout": 4327,
+    "error": 0
+  },
+  "proof_rate": 48.475827577994764
+}

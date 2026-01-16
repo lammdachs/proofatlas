@@ -20,60 +20,68 @@
       "description": "10s with selection 0 (all literals)",
       "time_limit": 10,
       "selection": 0,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "time_sel20": {
       "description": "10s with selection 20 (all maximal literals)",
       "time_limit": 10,
       "selection": 20,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "time_sel21": {
       "description": "10s with selection 21 (unique maximal, else neg max-weight, else all maximal)",
       "time_limit": 10,
       "selection": 21,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "time_sel22": {
       "description": "10s with selection 22 (neg max-weight, else all maximal)",
       "time_limit": 10,
       "selection": 22,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "steps_sel0": {
-      "description": "512 activations with selection 0",
+      "description": "128 activations with selection 0",
       "time_limit": 600,
-      "activation_limit": 512,
+      "activation_limit": 128,
       "selection": 0,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "steps_sel20": {
-      "description": "512 activations with selection 20",
+      "description": "128 activations with selection 20",
       "time_limit": 600,
-      "activation_limit": 512,
+      "activation_limit": 128,
       "selection": 20,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "steps_sel21": {
-      "description": "512 activations with selection 21",
+      "description": "128 activations with selection 21",
       "time_limit": 600,
-      "activation_limit": 512,
+      "activation_limit": 128,
       "selection": 21,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     },
 
     "steps_sel22": {
-      "description": "512 activations with selection 22",
+      "description": "128 activations with selection 22",
       "time_limit": 600,
-      "activation_limit": 512,
+      "activation_limit": 128,
       "selection": 22,
-      "avatar": "off"
+      "avatar": "off",
+      "saturation_algorithm": "otter"
     }
   }
 }

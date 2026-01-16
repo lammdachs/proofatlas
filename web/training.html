@@ -298,24 +298,37 @@
 
         async function loadRuns() {
             try {
-                // Load training.json (exported by proofatlas-export)
-                const response = await fetch('data/training.json');
-                if (!response.ok) {
+                // Load index of available runs
+                const indexResponse = await fetch('data/training/index.json');
+                if (!indexResponse.ok) {
                     showNoData();
                     return;
                 }
 
-                const data = await response.json();
-                const runs = data.runs || [];
+                const index = await indexResponse.json();
+                const runNames = index.runs || [];
 
-                if (runs.length === 0) {
+                if (runNames.length === 0) {
                     showNoData();
                     return;
                 }
 
-                // Convert to allRuns format
-                for (const run of runs) {
-                    allRuns[run.name] = run;
+                // Load each run file
+                for (const runName of runNames) {
+                    try {
+                        const response = await fetch(`data/training/${runName}.json`);
+                        if (response.ok) {
+                            const run = await response.json();
+                            allRuns[runName] = run;
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to load run ${runName}:`, e);
+                    }
+                }
+
+                if (Object.keys(allRuns).length === 0) {
+                    showNoData();
+                    return;
                 }
 
                 populateRunSelector();
@@ -323,7 +336,7 @@
                 document.getElementById('results-content').style.display = 'block';
 
                 // Select first run (most recent)
-                const firstRun = Object.keys(allRuns)[0];
+                const firstRun = Object.keys(allRuns).sort().reverse()[0];
                 document.getElementById('run-select').value = firstRun;
                 displayRun(firstRun);
 

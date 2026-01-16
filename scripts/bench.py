@@ -1082,6 +1082,58 @@ def save_run_result(base_dir: Path, prover: str, preset_name: str, result: Bench
         os.fsync(f.fileno())
 
 
+def export_benchmark_progress(base_dir: Path, prover: str, preset_name: str,
+                               stats: dict, completed: int, total: int):
+    """Export current benchmark progress to web/data/benchmarks/<prover>_<preset>.json"""
+    output_dir = base_dir / "web" / "data" / "benchmarks"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"{prover}_{preset_name}.json"
+
+    data = {
+        "generated": datetime.now().isoformat(),
+        "prover": prover,
+        "preset": preset_name,
+        "completed": completed,
+        "total": total,
+        "progress_pct": 100 * completed / total if total else 0,
+        "stats": {
+            "proof": stats.get("proof", 0),
+            "saturated": stats.get("saturated", 0),
+            "timeout": stats.get("timeout", 0),
+            "error": stats.get("error", 0),
+        },
+        "proof_rate": 100 * stats.get("proof", 0) / completed if completed else 0,
+    }
+
+    try:
+        with open(output_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+        # Update index file
+        _update_benchmark_index(output_dir)
+    except Exception:
+        pass  # Don't fail benchmark if export fails
+
+
+def _update_benchmark_index(output_dir: Path):
+    """Update index.json with list of all benchmark runs."""
+    index_file = output_dir / "index.json"
+    runs = []
+
+    for f in sorted(output_dir.glob("*.json")):
+        if f.name == "index.json":
+            continue
+        runs.append(f.stem)
+
+    index = {
+        "generated": datetime.now().isoformat(),
+        "runs": runs,
+    }
+
+    with open(index_file, "w") as f:
+        json.dump(index, f, indent=2)
+
+
 def _run_single_problem(args):
     """Worker function for parallel execution."""
     problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun = args
@@ -1162,6 +1214,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                     log_file.write(f"PROGRESS:{completed}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
                     log_file.flush()
                     sys.stdout.flush()
+                    export_benchmark_progress(base_dir, prover, preset_name, stats, completed, len(problems))
                 except Exception as e:
                     print(f"ERROR: {e}")
                     stats["error"] += 1
@@ -1188,6 +1241,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                 log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
                 log_file.flush()
                 sys.stdout.flush()
+                export_benchmark_progress(base_dir, prover, preset_name, stats, i, len(problems))
             except Exception as e:
                 print(f"ERROR processing {item[0].name}: {e}")
                 sys.stdout.flush()
