@@ -162,7 +162,9 @@ class SentenceEncoder(nn.Module):
         loaded by a Burn implementation of the same architecture.
 
         Weight names are converted to match Burn's field naming convention:
-        - 'encoder.' prefix → 'bert.' prefix
+        - BERT weights → 'encoder.bert.*'
+        - Projection → 'encoder.projection.*'
+        - Scorer → 'scorer.*'
         - 'attention.self.' → 'attention.self_attn.'
         - 'LayerNorm' → 'layer_norm'
 
@@ -174,14 +176,16 @@ class SentenceEncoder(nn.Module):
         state_dict = {}
 
         # Export encoder weights with Burn-compatible naming
+        # Structure: encoder.bert.* for BERT, encoder.projection.* for projection
         for name, param in self.encoder.named_parameters():
             burn_name = self._convert_name_to_burn(name)
-            state_dict[f"bert.{burn_name}"] = param.data
+            state_dict[f"encoder.bert.{burn_name}"] = param.data
 
-        # Export projection and scorer
+        # Export projection (part of encoder in Burn)
         for name, param in self.projection.named_parameters():
-            state_dict[f"projection.{name}"] = param.data
+            state_dict[f"encoder.projection.{name}"] = param.data
 
+        # Export scorer
         for name, param in self.scorer.named_parameters():
             state_dict[f"scorer.{name}"] = param.data
 

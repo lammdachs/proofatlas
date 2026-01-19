@@ -4,6 +4,16 @@
 //! processing during saturation. The choice of clause selector significantly
 //! impacts proof search efficiency.
 //!
+//! # Architecture
+//!
+//! ML-based selectors use a caching architecture that separates embedding from scoring:
+//!
+//! ```text
+//! Clause -> [ClauseEmbedder] -> Embedding (cached) -> [EmbeddingScorer] -> Score
+//! ```
+//!
+//! This allows embeddings to be computed once and reused across selections.
+//!
 //! # Available Selectors
 //!
 //! ## Heuristic selectors:
@@ -18,6 +28,7 @@ pub mod age_weight;
 pub mod burn_gcn;
 pub mod burn_mlp;
 pub mod burn_sentence;
+pub mod cached;
 pub mod clause;
 
 pub use age_weight::AgeWeightSelector;
@@ -32,4 +43,5 @@ pub use burn_mlp::{
 pub use burn_sentence::SentenceModel;
 #[cfg(feature = "sentence")]
 pub use burn_sentence::{load_ndarray_sentence_selector, BurnSentenceSelector, NdarraySentenceSelector};
+pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::ClauseSelector;

@@ -75,6 +75,15 @@
       "literal_selection": 22,
       "embedding": "gcn",
       "scorer": "mlp"
+    },
+
+    "sentence_mlp": {
+      "description": "128 iterations with sentence transformer + MLP scorer",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 22,
+      "embedding": "sentence",
+      "scorer": "mlp"
     }
   }
 }

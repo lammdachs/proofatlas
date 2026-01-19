@@ -532,6 +532,8 @@ impl ProofState {
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
+        #[cfg(feature = "sentence")]
+        use crate::selectors::load_ndarray_sentence_selector;
         use crate::ml::weights::find_model;
         use std::time::Duration;
 
@@ -572,10 +574,44 @@ impl ProofState {
                     .map_err(|e| PyValueError::new_err(format!("Failed to load MLP: {}", e)))?;
                 Box::new(selector)
             }
+            #[cfg(feature = "sentence")]
+            "sentence" => {
+                // Find weights file
+                let weights = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path)
+                } else {
+                    find_model("sentence_mlp").ok_or_else(|| {
+                        PyValueError::new_err("Sentence weights not found. Provide weights_path or place sentence_mlp.safetensors in .weights/")
+                    })?
+                };
+
+                // Tokenizer path (sentence_tokenizer directory with tokenizer.json)
+                let tokenizer_path = weights.parent()
+                    .map(|p| p.join("sentence_tokenizer/tokenizer.json"))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".weights/sentence_tokenizer/tokenizer.json"));
+
+                // MiniLM-L6-v2 model parameters
+                let selector = load_ndarray_sentence_selector(
+                    &weights,
+                    &tokenizer_path,
+                    30522,  // vocab_size
+                    384,    // hidden_dim
+                    6,      // num_layers
+                    12,     // num_heads
+                    1536,   // intermediate_dim
+                    512,    // max_position_embeddings
+                    64,     // scorer_hidden_dim
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load sentence model: {}", e)))?;
+                Box::new(selector)
+            }
             _ => {
+                #[cfg(feature = "sentence")]
+                let available = "'age_weight', 'gcn', 'mlp', or 'sentence'";
+                #[cfg(not(feature = "sentence"))]
+                let available = "'age_weight', 'gcn', or 'mlp'";
                 return Err(PyValueError::new_err(format!(
-                    "Unknown selector: {}. Use 'age_weight', 'gcn', or 'mlp'",
-                    selector_type
+                    "Unknown selector: {}. Use {}",
+                    selector_type, available
                 )));
             }
         };

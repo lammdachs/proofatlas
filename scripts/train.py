@@ -122,12 +122,14 @@ def get_model_config(
 class ProofDatasetFromFiles:
     """Dataset for JSON proof traces, takes file list directly."""
 
-    def __init__(self, files: List[Path], sample_prefix: bool = True, min_prefix: int = 10, max_clauses: int = 200):
+    def __init__(self, files: List[Path], sample_prefix: bool = True, min_prefix: int = 10, max_clauses: int = 200, output_type: str = "graph"):
         self.files = files
         self.sample_prefix = sample_prefix
         self.min_prefix = min_prefix
         self.max_clauses = max_clauses
+        self.output_type = output_type
         self._clause_to_graph = None
+        self._clause_to_string = None
 
     def __len__(self):
         return len(self.files)
@@ -155,20 +157,33 @@ class ProofDatasetFromFiles:
             indices = sorted(pos_indices + neg_indices)
             clauses = [clauses[i] for i in indices]
 
-        # Lazy load converter
-        if self._clause_to_graph is None:
-            from proofatlas.ml.structured import clause_to_graph
-            self._clause_to_graph = clause_to_graph
-
-        max_age = len(clauses)
-        graphs = [self._clause_to_graph(c, max_age) for c in clauses]
         labels = [c.get("label", 0) for c in clauses]
 
-        return {
-            "graphs": graphs,
-            "labels": labels,
-            "problem": self.files[idx].stem,
-        }
+        if self.output_type == "string":
+            # String output for sentence models
+            if self._clause_to_string is None:
+                from proofatlas.ml.structured import clause_to_string
+                self._clause_to_string = clause_to_string
+
+            strings = [self._clause_to_string(c) for c in clauses]
+            return {
+                "strings": strings,
+                "labels": labels,
+                "problem": self.files[idx].stem,
+            }
+        else:
+            # Graph output for GCN models
+            if self._clause_to_graph is None:
+                from proofatlas.ml.structured import clause_to_graph
+                self._clause_to_graph = clause_to_graph
+
+            max_age = len(clauses)
+            graphs = [self._clause_to_graph(c, max_age) for c in clauses]
+            return {
+                "graphs": graphs,
+                "labels": labels,
+                "problem": self.files[idx].stem,
+            }
 
 
 # =============================================================================
@@ -257,9 +272,13 @@ def train_model(
     train_files = json_files[:train_end]
     val_files = json_files[train_end:val_end]
 
+    # Determine output type based on embedding
+    # Sentence models need string output, graph models need graph output
+    output_type = "string" if embedding_type == "sentence" else "graph"
+
     # Create datasets with file lists directly
-    train_dataset = ProofDatasetFromFiles(train_files, sample_prefix=True)
-    val_dataset = ProofDatasetFromFiles(val_files, sample_prefix=False)
+    train_dataset = ProofDatasetFromFiles(train_files, sample_prefix=True, output_type=output_type)
+    val_dataset = ProofDatasetFromFiles(val_files, sample_prefix=False, output_type=output_type)
 
     print(f"  Train: {len(train_dataset)} proofs, Val: {len(val_dataset)} proofs")
 
@@ -275,6 +294,7 @@ def train_model(
             scorer_type=scorer_type,
             scorer_num_layers=scorer_cfg.get("num_layers", 2),
             scorer_num_heads=scorer_cfg.get("num_heads", 4),
+            freeze_encoder=embedding_cfg.get("freeze_encoder", False),  # For sentence models
         ),
         training=TrainingParams(
             batch_size=batch_size,

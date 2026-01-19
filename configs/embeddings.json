@@ -9,8 +9,10 @@
       "dropout": 0.1
     },
 
-    "sentence_transformer": {
-      "type": "sentence_transformer"
+    "sentence": {
+      "type": "sentence",
+      "freeze_encoder": true,
+      "hidden_dim": 64
     },
 
     "none": {

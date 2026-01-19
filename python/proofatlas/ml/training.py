@@ -491,17 +491,22 @@ if LIGHTNING_AVAILABLE:
                 num_layers=config.model.num_layers,
                 num_heads=config.model.num_heads,
                 dropout=config.model.dropout,
+                freeze_encoder=getattr(config.model, 'freeze_encoder', False),  # For sentence models
             )
 
-            # Track whether model needs adjacency matrix
+            # Track model type for forward dispatch
             self.needs_adj = config.model.type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+            self.is_sentence_model = config.model.type == "sentence"
 
             # Loss configuration
             self.loss_type = getattr(config.training, 'loss_type', 'info_nce')
             self.temperature = getattr(config.training, 'temperature', 1.0)
 
-        def forward(self, node_features, adj, pool_matrix, clause_features=None):
-            if self.needs_adj:
+        def forward(self, node_features=None, adj=None, pool_matrix=None, clause_features=None, strings=None):
+            if self.is_sentence_model:
+                # Sentence models take clause strings directly
+                return self.model(strings)
+            elif self.needs_adj:
                 return self.model(node_features, adj, pool_matrix, clause_features)
             else:
                 return self.model(node_features, pool_matrix, clause_features)
@@ -551,8 +556,12 @@ if LIGHTNING_AVAILABLE:
             return {"acc": acc, "mrr": mrr}
 
         def training_step(self, batch, batch_idx):
-            clause_features = batch.get("clause_features")
-            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
+            if self.is_sentence_model:
+                # Sentence batch has "strings" instead of graph features
+                scores = self(strings=batch["strings"])
+            else:
+                clause_features = batch.get("clause_features")
+                scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
             proof_ids = batch.get("proof_ids")
             loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
@@ -560,8 +569,11 @@ if LIGHTNING_AVAILABLE:
             return loss
 
         def validation_step(self, batch, batch_idx):
-            clause_features = batch.get("clause_features")
-            scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
+            if self.is_sentence_model:
+                scores = self(strings=batch["strings"])
+            else:
+                clause_features = batch.get("clause_features")
+                scores = self(batch["node_features"], batch["adj"], batch["pool_matrix"], clause_features)
             proof_ids = batch.get("proof_ids")
             loss = self._compute_loss(scores, batch["labels"], proof_ids)
 
@@ -964,10 +976,14 @@ def train(
     if not config.name:
         config.name = f"{config.model.type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    # Select collate function based on dataset type
-    # Check if dataset returns proof-style batches (with 'graphs' key)
-    is_proof_dataset = isinstance(train_dataset, ProofDataset) or hasattr(train_dataset, '_clause_to_graph')
-    if is_proof_dataset:
+    # Select collate function based on dataset type and model type
+    # Sentence models need string collation, graph models need proof collation
+    is_sentence_model = config.model.type == "sentence"
+    is_proof_dataset = isinstance(train_dataset, ProofDataset) or hasattr(train_dataset, '_clause_to_graph') or hasattr(train_dataset, '_clause_to_string')
+
+    if is_sentence_model:
+        collate_fn = collate_sentence_batch
+    elif is_proof_dataset:
         collate_fn = collate_proof_batch
     else:
         collate_fn = collate_clause_batch

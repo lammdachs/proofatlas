@@ -16,7 +16,7 @@ use burn::tensor::activation::gelu;
 #[cfg(feature = "sentence")]
 use crate::core::Clause;
 #[cfg(feature = "sentence")]
-use super::ClauseSelector;
+use std::path::Path;
 
 // ============================================================================
 // BERT-compatible attention (separate Q, K, V projections)
@@ -381,21 +381,87 @@ impl<B: Backend> BertModel<B> {
 }
 
 // ============================================================================
-// Sentence model (BERT + projection + scorer)
+// Sentence encoder (BERT + projection) - produces cacheable embeddings
+// ============================================================================
+
+/// Sentence encoder: BERT + mean pooling + projection
+///
+/// This produces fixed-size embeddings that can be cached.
+/// The projection maps from BERT hidden dim to scorer hidden dim.
+#[derive(Module, Debug)]
+pub struct SentenceEncoder<B: Backend> {
+    /// BERT encoder (weights from HuggingFace)
+    bert: BertModel<B>,
+    /// Projection to scorer dimension
+    projection: Linear<B>,
+    /// Output embedding dimension
+    embedding_dim: usize,
+}
+
+impl<B: Backend> SentenceEncoder<B> {
+    pub fn new(
+        device: &B::Device,
+        vocab_size: usize,
+        hidden_dim: usize,
+        num_layers: usize,
+        num_heads: usize,
+        intermediate_dim: usize,
+        max_position_embeddings: usize,
+        embedding_dim: usize,
+    ) -> Self {
+        Self {
+            bert: BertModel::new(
+                device,
+                vocab_size,
+                hidden_dim,
+                num_layers,
+                num_heads,
+                intermediate_dim,
+                max_position_embeddings,
+            ),
+            projection: LinearConfig::new(hidden_dim, embedding_dim).init(device),
+            embedding_dim,
+        }
+    }
+
+    /// Encode tokens to embeddings (BERT + mean pooling + projection)
+    pub fn forward(
+        &self,
+        input_ids: Tensor<B, 2, Int>,
+        attention_mask: Tensor<B, 2>,
+    ) -> Tensor<B, 2> {
+        let hidden = self.bert.forward(input_ids, Some(attention_mask.clone()), None);
+        let pooled = self.bert.mean_pooling(hidden, attention_mask);
+        self.projection.forward(pooled)
+    }
+
+    /// Get the output embedding dimension
+    pub fn embedding_dim(&self) -> usize {
+        self.embedding_dim
+    }
+}
+
+// ============================================================================
+// MLP scorer - scores pre-computed embeddings
 // ============================================================================
 
 /// MLP scorer head for clause scoring
+///
+/// Takes pre-computed embeddings and produces scores.
+/// This is fast since embeddings are already computed.
 #[derive(Module, Debug)]
-pub struct ScorerHead<B: Backend> {
+pub struct MlpScorer<B: Backend> {
     linear1: Linear<B>,
     linear2: Linear<B>,
+    input_dim: usize,
 }
 
-impl<B: Backend> ScorerHead<B> {
-    pub fn new(device: &B::Device, hidden_dim: usize) -> Self {
+impl<B: Backend> MlpScorer<B> {
+    pub fn new(device: &B::Device, input_dim: usize) -> Self {
         Self {
-            linear1: LinearConfig::new(hidden_dim, hidden_dim).init(device),
-            linear2: LinearConfig::new(hidden_dim, 1).init(device),
+            linear1: LinearConfig::new(input_dim, input_dim).init(device),
+            linear2: LinearConfig::new(input_dim, 1).init(device),
+            input_dim,
         }
     }
 
@@ -403,7 +469,15 @@ impl<B: Backend> ScorerHead<B> {
         let h = gelu(self.linear1.forward(x));
         self.linear2.forward(h)
     }
+
+    pub fn input_dim(&self) -> usize {
+        self.input_dim
+    }
 }
+
+// ============================================================================
+// Complete sentence model (for backward compatibility)
+// ============================================================================
 
 /// Complete sentence model for clause scoring
 ///
@@ -412,16 +486,15 @@ impl<B: Backend> ScorerHead<B> {
 /// - Mean pooling
 /// - Projection to scorer dimension
 /// - MLP scorer
+///
+/// For new code, prefer using SentenceEncoder + MlpScorer separately
+/// with the CachingSelector for automatic embedding caching.
 #[derive(Module, Debug)]
 pub struct SentenceModel<B: Backend> {
-    /// BERT encoder (weights from HuggingFace)
-    bert: BertModel<B>,
-    /// Projection to scorer dimension
-    projection: Linear<B>,
+    /// Sentence encoder (BERT + projection)
+    encoder: SentenceEncoder<B>,
     /// Scoring head
-    scorer: ScorerHead<B>,
-    /// Scorer hidden dimension
-    scorer_hidden_dim: usize,
+    scorer: MlpScorer<B>,
 }
 
 impl<B: Backend> SentenceModel<B> {
@@ -436,7 +509,7 @@ impl<B: Backend> SentenceModel<B> {
         scorer_hidden_dim: usize,
     ) -> Self {
         Self {
-            bert: BertModel::new(
+            encoder: SentenceEncoder::new(
                 device,
                 vocab_size,
                 hidden_dim,
@@ -444,21 +517,39 @@ impl<B: Backend> SentenceModel<B> {
                 num_heads,
                 intermediate_dim,
                 max_position_embeddings,
+                scorer_hidden_dim,
             ),
-            projection: LinearConfig::new(hidden_dim, scorer_hidden_dim).init(device),
-            scorer: ScorerHead::new(device, scorer_hidden_dim),
-            scorer_hidden_dim,
+            scorer: MlpScorer::new(device, scorer_hidden_dim),
         }
     }
 
-    /// Encode clauses to embeddings (before projection)
-    pub fn encode(
+    /// Get the encoder component
+    pub fn encoder(&self) -> &SentenceEncoder<B> {
+        &self.encoder
+    }
+
+    /// Get the scorer component
+    pub fn scorer(&self) -> &MlpScorer<B> {
+        &self.scorer
+    }
+
+    /// Get the embedding dimension
+    pub fn embedding_dim(&self) -> usize {
+        self.encoder.embedding_dim()
+    }
+
+    /// Encode and project to scorer dimension (cacheable)
+    pub fn encode_and_project(
         &self,
         input_ids: Tensor<B, 2, Int>,
         attention_mask: Tensor<B, 2>,
     ) -> Tensor<B, 2> {
-        let hidden = self.bert.forward(input_ids, Some(attention_mask.clone()), None);
-        self.bert.mean_pooling(hidden, attention_mask)
+        self.encoder.forward(input_ids, attention_mask)
+    }
+
+    /// Score pre-computed projected embeddings (fast, just MLP)
+    pub fn score(&self, projected: Tensor<B, 2>) -> Tensor<B, 2> {
+        self.scorer.forward(projected)
     }
 
     /// Forward pass: encode and score
@@ -467,42 +558,41 @@ impl<B: Backend> SentenceModel<B> {
         input_ids: Tensor<B, 2, Int>,
         attention_mask: Tensor<B, 2>,
     ) -> Tensor<B, 2> {
-        let embeddings = self.encode(input_ids, attention_mask);
-        let projected = self.projection.forward(embeddings);
-        self.scorer.forward(projected)
+        let embeddings = self.encoder.forward(input_ids, attention_mask);
+        self.scorer.forward(embeddings)
+    }
+
+    /// Consume the model and return its components
+    ///
+    /// This is useful for creating a CachingSelector from a loaded model.
+    pub fn into_parts(self) -> (SentenceEncoder<B>, MlpScorer<B>) {
+        (self.encoder, self.scorer)
     }
 }
 
 // ============================================================================
-// Type aliases for ndarray backend
+// Sentence embedder - implements ClauseEmbedder trait
 // ============================================================================
 
-/// Sentence selector with ndarray backend
+/// Sentence embedder that converts clauses to embeddings using BERT
+///
+/// This implements the ClauseEmbedder trait, allowing it to be used with
+/// CachingSelector for automatic embedding caching.
 #[cfg(feature = "sentence")]
-pub type NdarraySentenceSelector = BurnSentenceSelector<burn_ndarray::NdArray<f32>>;
-
-// ============================================================================
-// Sentence selector with tokenizer
-// ============================================================================
-
-/// Sentence encoder selector with tokenizer
-#[cfg(feature = "sentence")]
-pub struct BurnSentenceSelector<B: Backend> {
-    model: SentenceModel<B>,
+pub struct SentenceEmbedder<B: Backend> {
+    encoder: SentenceEncoder<B>,
     tokenizer: tokenizers::Tokenizer,
     device: B::Device,
-    rng_state: u64,
     max_length: usize,
 }
 
 #[cfg(feature = "sentence")]
-impl<B: Backend> BurnSentenceSelector<B> {
-    pub fn new(model: SentenceModel<B>, tokenizer: tokenizers::Tokenizer, device: B::Device) -> Self {
+impl<B: Backend> SentenceEmbedder<B> {
+    pub fn new(encoder: SentenceEncoder<B>, tokenizer: tokenizers::Tokenizer, device: B::Device) -> Self {
         Self {
-            model,
+            encoder,
             tokenizer,
             device,
-            rng_state: 12345,
             max_length: 128,
         }
     }
@@ -510,18 +600,6 @@ impl<B: Backend> BurnSentenceSelector<B> {
     pub fn with_max_length(mut self, max_length: usize) -> Self {
         self.max_length = max_length;
         self
-    }
-
-    fn next_random(&mut self) -> f64 {
-        self.rng_state = self
-            .rng_state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1);
-        (self.rng_state >> 33) as f64 / (1u64 << 31) as f64
-    }
-
-    fn clause_to_string(&self, clause: &Clause) -> String {
-        clause.to_string()
     }
 
     fn tokenize_clauses(&self, clause_strings: &[String]) -> (Vec<Vec<i64>>, Vec<Vec<f32>>) {
@@ -557,25 +635,17 @@ impl<B: Backend> BurnSentenceSelector<B> {
 }
 
 #[cfg(feature = "sentence")]
-impl<B: Backend> ClauseSelector for BurnSentenceSelector<B> {
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
-        if unprocessed.is_empty() {
-            return None;
-        }
-
-        if unprocessed.len() == 1 {
-            return unprocessed.pop_front();
+impl<B: Backend> super::cached::ClauseEmbedder for SentenceEmbedder<B> {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
         }
 
         // Convert clauses to strings
-        let clause_strings: Vec<String> = unprocessed
-            .iter()
-            .map(|&idx| self.clause_to_string(&clauses[idx]))
-            .collect();
+        let clause_strings: Vec<String> = clauses.iter().map(|c| c.to_string()).collect();
 
         // Tokenize
         let (input_ids, attention_masks) = self.tokenize_clauses(&clause_strings);
-
         let batch_size = input_ids.len();
         let seq_len = input_ids[0].len();
 
@@ -593,39 +663,94 @@ impl<B: Backend> ClauseSelector for BurnSentenceSelector<B> {
             &self.device,
         );
 
-        // Get scores
-        let scores = self.model.forward(input_tensor, mask_tensor);
-        let scores: Vec<f32> = scores.into_data().to_vec().unwrap();
+        // Encode to embeddings
+        let embeddings = self.encoder.forward(input_tensor, mask_tensor);
+        let embedding_data: Vec<f32> = embeddings.into_data().to_vec().unwrap();
+        let embedding_dim = self.encoder.embedding_dim();
 
-        // Softmax sampling
-        let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let exp_scores: Vec<f64> = scores.iter().map(|&s| ((s - max_score) as f64).exp()).collect();
-        let sum: f64 = exp_scores.iter().sum();
-        let probs: Vec<f64> = exp_scores.iter().map(|&e| e / sum).collect();
+        // Split into individual embeddings
+        embedding_data
+            .chunks(embedding_dim)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
 
-        // Sample
-        let r = self.next_random();
-        let mut cumsum = 0.0;
-        for (i, &p) in probs.iter().enumerate() {
-            cumsum += p;
-            if r < cumsum {
-                return unprocessed.remove(i);
-            }
-        }
-
-        unprocessed.pop_back()
+    fn embedding_dim(&self) -> usize {
+        self.encoder.embedding_dim()
     }
 
     fn name(&self) -> &str {
-        "burn_sentence"
+        "sentence"
     }
 }
+
+// ============================================================================
+// Burn MLP scorer - implements EmbeddingScorer trait
+// ============================================================================
+
+/// MLP scorer wrapper that implements EmbeddingScorer trait
+#[cfg(feature = "sentence")]
+pub struct BurnMlpScorerWrapper<B: Backend> {
+    scorer: MlpScorer<B>,
+    device: B::Device,
+}
+
+#[cfg(feature = "sentence")]
+impl<B: Backend> BurnMlpScorerWrapper<B> {
+    pub fn new(scorer: MlpScorer<B>, device: B::Device) -> Self {
+        Self { scorer, device }
+    }
+}
+
+#[cfg(feature = "sentence")]
+impl<B: Backend> super::cached::EmbeddingScorer for BurnMlpScorerWrapper<B> {
+    fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
+        if embeddings.is_empty() {
+            return vec![];
+        }
+
+        let batch_size = embeddings.len();
+        let embedding_dim = embeddings[0].len();
+
+        // Flatten embeddings
+        let flat: Vec<f32> = embeddings.iter().flat_map(|e| e.iter().copied()).collect();
+
+        // Create tensor
+        let tensor: Tensor<B, 2> = Tensor::from_data(
+            burn::tensor::TensorData::new(flat, [batch_size, embedding_dim]),
+            &self.device,
+        );
+
+        // Score
+        let scores = self.scorer.forward(tensor);
+        scores.into_data().to_vec().unwrap()
+    }
+
+    fn name(&self) -> &str {
+        "mlp"
+    }
+}
+
+// ============================================================================
+// Type aliases for caching selector
+// ============================================================================
+
+/// Sentence selector with caching - the recommended way to use sentence embeddings
+#[cfg(feature = "sentence")]
+pub type BurnSentenceSelector<B> = super::cached::CachingSelector<SentenceEmbedder<B>, BurnMlpScorerWrapper<B>>;
+
+/// Sentence selector with ndarray backend
+#[cfg(feature = "sentence")]
+pub type NdarraySentenceSelector = BurnSentenceSelector<burn_ndarray::NdArray<f32>>;
 
 // ============================================================================
 // Weight loading
 // ============================================================================
 
 /// Load sentence selector from safetensors and tokenizer files
+///
+/// Creates a CachingSelector with SentenceEmbedder and MLP scorer.
+/// Embeddings are automatically cached for efficient clause selection.
 #[cfg(feature = "sentence")]
 pub fn load_ndarray_sentence_selector<P: AsRef<Path>>(
     weights_path: P,
@@ -643,6 +768,7 @@ pub fn load_ndarray_sentence_selector<P: AsRef<Path>>(
 
     let device = burn_ndarray::NdArrayDevice::Cpu;
 
+    // Create model structure
     let model = SentenceModel::new(
         &device,
         vocab_size,
@@ -667,7 +793,15 @@ pub fn load_ndarray_sentence_selector<P: AsRef<Path>>(
     let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.as_ref())
         .map_err(|e| format!("Failed to load tokenizer: {}", e))?;
 
-    Ok(BurnSentenceSelector::new(model, tokenizer, device))
+    // Split model into encoder and scorer for caching architecture
+    let (encoder, scorer) = model.into_parts();
+
+    // Create embedder and scorer wrappers
+    let embedder = SentenceEmbedder::new(encoder, tokenizer, device.clone());
+    let scorer_wrapper = BurnMlpScorerWrapper::new(scorer, device);
+
+    // Create caching selector
+    Ok(super::cached::CachingSelector::new(embedder, scorer_wrapper))
 }
 
 // ============================================================================
