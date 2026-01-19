@@ -1,15 +1,15 @@
 {
-  "generated": "2026-01-16T18:56:55.431309",
+  "generated": "2026-01-16T20:54:53.736872",
   "prover": "proofatlas",
   "preset": "steps_sel20",
-  "completed": 162,
+  "completed": 8398,
   "total": 8398,
-  "progress_pct": 1.929030721600381,
+  "progress_pct": 100.0,
   "stats": {
-    "proof": 9,
-    "saturated": 0,
-    "timeout": 149,
-    "error": 4
+    "proof": 2408,
+    "saturated": 1,
+    "timeout": 5961,
+    "error": 28
   },
-  "proof_rate": 5.555555555555555
+  "proof_rate": 28.673493688973565
 }
