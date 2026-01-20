@@ -5,6 +5,33 @@ This module provides Python bindings to the Rust-based ProofAtlas theorem prover
 """
 
 from typing import Dict, Any
+import os
+import sys
+
+# Set up library paths for torch before importing the native extension
+def _setup_torch_libs():
+    """Add PyTorch library paths to enable tch-rs CUDA support."""
+    try:
+        import torch
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+        if os.path.isdir(torch_lib):
+            # Add to LD_LIBRARY_PATH for current and child processes
+            current = os.environ.get('LD_LIBRARY_PATH', '')
+            if torch_lib not in current:
+                os.environ['LD_LIBRARY_PATH'] = f"{torch_lib}:{current}" if current else torch_lib
+
+            # Preload libtorch to ensure it's available
+            import ctypes
+            libtorch_cpu = os.path.join(torch_lib, 'libtorch_cpu.so')
+            if os.path.exists(libtorch_cpu):
+                ctypes.CDLL(libtorch_cpu, mode=ctypes.RTLD_GLOBAL)
+            libc10 = os.path.join(torch_lib, 'libc10.so')
+            if os.path.exists(libc10):
+                ctypes.CDLL(libc10, mode=ctypes.RTLD_GLOBAL)
+    except ImportError:
+        pass  # torch not installed, skip
+
+_setup_torch_libs()
 
 # Import from the compiled Rust extension
 try:
