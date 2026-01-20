@@ -78,12 +78,19 @@
     },
 
     "sentence_mlp": {
-      "description": "128 iterations with sentence transformer + MLP scorer",
+      "description": "128 iterations with sentence transformer + MLP scorer (CPU)",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 22,
-      "embedding": "sentence",
-      "scorer": "mlp"
+      "selector": "sentence"
+    },
+
+    "sentence_onnx": {
+      "description": "128 iterations with ONNX GPU sentence transformer + MLP scorer",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 22,
+      "selector": "sentence_onnx"
     }
   }
 }

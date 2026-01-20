@@ -98,6 +98,8 @@ def main():
     literal_selection = preset.get("literal_selection", 0)
     max_clauses = preset.get("max_clauses", 0)
     age_weight_ratio = preset.get("age_weight_ratio", 0.5)
+    selector = preset.get("selector", "age_weight")
+    max_iterations = preset.get("max_iterations", 0)
 
     state = ProofState()
 
@@ -137,10 +139,10 @@ def main():
 
     try:
         proof_found, status = state.run_saturation(
-            max_clauses,
+            max_iterations if max_iterations > 0 else max_clauses,
             remaining_timeout,
             age_weight_ratio,
-            "age_weight",
+            selector,
             None,
         )
     except Exception as e:

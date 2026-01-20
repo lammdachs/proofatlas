@@ -43,5 +43,7 @@ pub use burn_mlp::{
 pub use burn_sentence::SentenceModel;
 #[cfg(feature = "sentence")]
 pub use burn_sentence::{load_ndarray_sentence_selector, BurnSentenceSelector, NdarraySentenceSelector};
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+pub use burn_sentence::{load_onnx_sentence_selector, OnnxSentenceEmbedder, OnnxSentenceSelector};
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::ClauseSelector;

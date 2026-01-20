@@ -534,6 +534,8 @@ impl ProofState {
         use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
         #[cfg(feature = "sentence")]
         use crate::selectors::load_ndarray_sentence_selector;
+        #[cfg(all(feature = "sentence", feature = "onnx"))]
+        use crate::selectors::load_onnx_sentence_selector;
         use crate::ml::weights::find_model;
         use std::time::Duration;
 
@@ -604,8 +606,42 @@ impl ProofState {
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load sentence model: {}", e)))?;
                 Box::new(selector)
             }
+            #[cfg(all(feature = "sentence", feature = "onnx"))]
+            "sentence_onnx" => {
+                // Find ONNX encoder and scorer weights
+                let weights_dir = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path).parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
+                } else {
+                    std::path::PathBuf::from(".weights")
+                };
+
+                let onnx_path = weights_dir.join("sentence_encoder.onnx");
+                let scorer_path = weights_dir.join("sentence_scorer.safetensors");
+                let tokenizer_path = weights_dir.join("sentence_tokenizer/tokenizer.json");
+
+                if !onnx_path.exists() {
+                    return Err(PyValueError::new_err(format!(
+                        "ONNX encoder not found at {}. Export with: python -c \"...\"",
+                        onnx_path.display()
+                    )));
+                }
+
+                // Sentence encoder with projection outputs 64-dim embeddings
+                let selector = load_onnx_sentence_selector(
+                    &onnx_path,
+                    &scorer_path,
+                    &tokenizer_path,
+                    64,     // embedding_dim (after projection)
+                    64,     // scorer_hidden_dim
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load ONNX sentence model: {}", e)))?;
+                Box::new(selector)
+            }
             _ => {
-                #[cfg(feature = "sentence")]
+                #[cfg(all(feature = "sentence", feature = "onnx"))]
+                let available = "'age_weight', 'gcn', 'mlp', 'sentence', or 'sentence_onnx'";
+                #[cfg(all(feature = "sentence", not(feature = "onnx")))]
                 let available = "'age_weight', 'gcn', 'mlp', or 'sentence'";
                 #[cfg(not(feature = "sentence"))]
                 let available = "'age_weight', 'gcn', or 'mlp'";

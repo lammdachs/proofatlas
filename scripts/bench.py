@@ -802,10 +802,10 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
-    is_learned = "embedding" in preset or "model" in preset
+    is_learned = "embedding" in preset or "model" in preset or "selector" in preset
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
-    # Use embedding type as selector (gcn, mlp, etc.), fallback to model for compat
-    selector = preset.get("embedding", preset.get("model", "age_weight")) if is_learned else "age_weight"
+    # Use selector key directly if present, otherwise use embedding/model for learned selectors
+    selector = preset.get("selector", preset.get("embedding", preset.get("model", "age_weight")) if is_learned else "age_weight")
 
     # Remaining time after parsing
     elapsed_parsing = time.time() - start
@@ -1173,7 +1173,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
-        selector_type = preset.get("embedding", preset.get("model", "age_weight"))
+        selector_type = preset.get("selector", preset.get("embedding", preset.get("model", "age_weight")))
         print(f"\nEvaluating {len(problems)} problems with {selector_type}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")

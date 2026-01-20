@@ -805,6 +805,207 @@ pub fn load_ndarray_sentence_selector<P: AsRef<Path>>(
     Ok(super::cached::CachingSelector::new(embedder, scorer_wrapper))
 }
 
+// ============================================================================
+// ONNX Runtime GPU embedder
+// ============================================================================
+
+/// ONNX-based sentence embedder for GPU-accelerated inference
+///
+/// Uses ONNX Runtime with CUDA execution provider for fast GPU inference.
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+pub struct OnnxSentenceEmbedder {
+    session: std::sync::Mutex<ort::session::Session>,
+    tokenizer: tokenizers::Tokenizer,
+    hidden_dim: usize,
+    max_length: usize,
+}
+
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+impl OnnxSentenceEmbedder {
+    pub fn new<P: AsRef<Path>>(
+        onnx_path: P,
+        tokenizer_path: P,
+        hidden_dim: usize,
+    ) -> Result<Self, String> {
+        use ort::execution_providers::{CUDAExecutionProvider, CPUExecutionProvider};
+        use ort::session::Session;
+
+        // Initialize ONNX Runtime with CUDA provider (falls back to CPU if CUDA unavailable)
+        let session = Session::builder()
+            .map_err(|e| format!("Failed to create session builder: {}", e))?
+            .with_execution_providers([
+                CUDAExecutionProvider::default().build(),
+                CPUExecutionProvider::default().build(),
+            ])
+            .map_err(|e| format!("Failed to set execution providers: {}", e))?
+            .commit_from_file(onnx_path.as_ref())
+            .map_err(|e| format!("Failed to load ONNX model: {}", e))?;
+
+        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.as_ref())
+            .map_err(|e| format!("Failed to load tokenizer: {}", e))?;
+
+        Ok(Self {
+            session: std::sync::Mutex::new(session),
+            tokenizer,
+            hidden_dim,
+            max_length: 128,
+        })
+    }
+
+    fn tokenize_clauses(&self, clause_strings: &[String]) -> (Vec<Vec<i64>>, Vec<Vec<i64>>) {
+        let encodings = self
+            .tokenizer
+            .encode_batch(clause_strings.to_vec(), true)
+            .expect("Tokenization failed");
+
+        let mut all_ids = Vec::new();
+        let mut all_masks = Vec::new();
+
+        for encoding in encodings {
+            let ids: Vec<i64> = encoding.get_ids().iter().map(|&x| x as i64).collect();
+            let mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&x| x as i64).collect();
+            all_ids.push(ids);
+            all_masks.push(mask);
+        }
+
+        // Pad to max length in batch
+        let max_len = all_ids.iter().map(|v| v.len()).max().unwrap_or(0).min(self.max_length);
+
+        for ids in &mut all_ids {
+            ids.truncate(max_len);
+            ids.resize(max_len, 0);
+        }
+        for mask in &mut all_masks {
+            mask.truncate(max_len);
+            mask.resize(max_len, 0);
+        }
+
+        (all_ids, all_masks)
+    }
+
+    fn mean_pooling(&self, hidden_states: &[f32], attention_mask: &[i64], batch_size: usize, seq_len: usize) -> Vec<Vec<f32>> {
+        let mut results = Vec::with_capacity(batch_size);
+
+        for b in 0..batch_size {
+            let mut sum = vec![0.0f32; self.hidden_dim];
+            let mut count = 0.0f32;
+
+            for s in 0..seq_len {
+                let mask_val = attention_mask[b * seq_len + s] as f32;
+                if mask_val > 0.0 {
+                    for h in 0..self.hidden_dim {
+                        sum[h] += hidden_states[b * seq_len * self.hidden_dim + s * self.hidden_dim + h];
+                    }
+                    count += 1.0;
+                }
+            }
+
+            if count > 0.0 {
+                for h in 0..self.hidden_dim {
+                    sum[h] /= count;
+                }
+            }
+
+            results.push(sum);
+        }
+
+        results
+    }
+}
+
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+impl super::cached::ClauseEmbedder for OnnxSentenceEmbedder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        use ort::value::Tensor;
+
+        if clauses.is_empty() {
+            return vec![];
+        }
+
+        // Convert clauses to strings
+        let clause_strings: Vec<String> = clauses.iter().map(|c| c.to_string()).collect();
+
+        // Tokenize
+        let (input_ids, attention_masks) = self.tokenize_clauses(&clause_strings);
+        let batch_size = input_ids.len();
+        let seq_len = input_ids[0].len();
+
+        // Flatten for tensor creation
+        let flat_ids: Vec<i64> = input_ids.into_iter().flatten().collect();
+        let flat_mask: Vec<i64> = attention_masks.iter().flatten().copied().collect();
+
+        // Create ONNX tensors using ort's Tensor type
+        let ids_tensor = Tensor::from_array(([batch_size, seq_len], flat_ids.clone()))
+            .expect("Failed to create input_ids tensor");
+        let mask_tensor = Tensor::from_array(([batch_size, seq_len], flat_mask.clone()))
+            .expect("Failed to create attention_mask tensor");
+
+        // Run inference with named inputs
+        let mut session = self.session.lock().expect("Session lock poisoned");
+        let outputs = session.run(ort::inputs![
+            "input_ids" => ids_tensor,
+            "attention_mask" => mask_tensor,
+        ]).expect("ONNX inference failed");
+
+        // Extract embeddings [batch, hidden_dim] - already mean-pooled and projected
+        let embeddings_view: ndarray::ArrayViewD<f32> = outputs[0]
+            .try_extract_array()
+            .expect("Failed to extract tensor");
+
+        // Split into individual embeddings
+        let embedding_dim = self.hidden_dim;
+        embeddings_view
+            .as_slice()
+            .unwrap()
+            .chunks(embedding_dim)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    fn embedding_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    fn name(&self) -> &str {
+        "onnx_sentence"
+    }
+}
+
+/// ONNX sentence selector with GPU acceleration
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+pub type OnnxSentenceSelector = super::cached::CachingSelector<OnnxSentenceEmbedder, BurnMlpScorerWrapper<burn_ndarray::NdArray<f32>>>;
+
+/// Load ONNX GPU-accelerated sentence selector
+///
+/// Uses ONNX Runtime with CUDA for the encoder and Burn ndarray for the MLP scorer.
+#[cfg(all(feature = "sentence", feature = "onnx"))]
+pub fn load_onnx_sentence_selector<P: AsRef<Path>>(
+    onnx_path: P,
+    scorer_weights_path: P,
+    tokenizer_path: P,
+    hidden_dim: usize,
+    scorer_hidden_dim: usize,
+) -> Result<OnnxSentenceSelector, String> {
+    use burn::record::{FullPrecisionSettings, Recorder};
+    use burn_import::safetensors::{AdapterType, LoadArgs, SafetensorsFileRecorder};
+
+    // Create ONNX embedder
+    let embedder = OnnxSentenceEmbedder::new(&onnx_path, &tokenizer_path, hidden_dim)?;
+
+    // Load MLP scorer weights with Burn
+    let device = burn_ndarray::NdArrayDevice::Cpu;
+    let scorer = MlpScorer::new(&device, scorer_hidden_dim);
+
+    let load_args = LoadArgs::new(scorer_weights_path.as_ref().into()).with_adapter_type(AdapterType::PyTorch);
+    let record = SafetensorsFileRecorder::<FullPrecisionSettings>::default()
+        .load(load_args, &device)
+        .map_err(|e| format!("Failed to load scorer weights: {}", e))?;
+    let scorer = scorer.load_record(record);
+
+    let scorer_wrapper = BurnMlpScorerWrapper::new(scorer, device);
+
+    Ok(super::cached::CachingSelector::new(embedder, scorer_wrapper))
+}
 
 // ============================================================================
 // Tests

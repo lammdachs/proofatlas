@@ -29,6 +29,11 @@ burn = "0.19"
 burn-ndarray = "0.19"
 burn-import = "0.19"
 
+# ONNX Runtime (for GPU-accelerated inference)
+# Using load-dynamic to avoid glibc version issues with static linking
+ort = { version = "2.0.0-rc.11", optional = true, default-features = false, features = ["std", "ndarray", "load-dynamic", "cuda"] }
+ndarray = { version = "0.17", optional = true }
+
 # Tokenizers (for sentence encoder)
 tokenizers = { version = "0.20", optional = true }
 
@@ -47,6 +52,7 @@ default = ["download"]
 python = ["pyo3", "numpy", "download"]
 download = ["ureq", "dirs", "sha2"]
 sentence = ["tokenizers", "download"]
+onnx = ["ort", "ndarray"]
 wasm = []
 
 [dev-dependencies]
