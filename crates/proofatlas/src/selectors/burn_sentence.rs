@@ -739,9 +739,10 @@ impl<B: Backend> super::cached::EmbeddingScorer for BurnMlpScorerWrapper<B> {
 #[cfg(feature = "sentence")]
 pub type BurnSentenceSelector<B> = super::cached::CachingSelector<SentenceEmbedder<B>, BurnMlpScorerWrapper<B>>;
 
-/// Sentence selector with ndarray backend
+/// Sentence selector with ndarray backend (CPU)
 #[cfg(feature = "sentence")]
 pub type NdarraySentenceSelector = BurnSentenceSelector<burn_ndarray::NdArray<f32>>;
+
 
 // ============================================================================
 // Weight loading
@@ -803,6 +804,7 @@ pub fn load_ndarray_sentence_selector<P: AsRef<Path>>(
     // Create caching selector
     Ok(super::cached::CachingSelector::new(embedder, scorer_wrapper))
 }
+
 
 // ============================================================================
 // Tests
