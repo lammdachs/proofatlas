@@ -45,5 +45,7 @@ pub use burn_sentence::SentenceModel;
 pub use burn_sentence::{load_ndarray_sentence_selector, BurnSentenceSelector, NdarraySentenceSelector};
 #[cfg(all(feature = "sentence", feature = "onnx"))]
 pub use burn_sentence::{load_onnx_sentence_selector, OnnxSentenceEmbedder, OnnxSentenceSelector};
+#[cfg(all(feature = "sentence", feature = "torch"))]
+pub use burn_sentence::{load_tch_sentence_selector, PassThroughScorer, TchSentenceEmbedder, TchSentenceSelector};
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::ClauseSelector;

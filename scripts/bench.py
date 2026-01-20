@@ -807,6 +807,16 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Use selector key directly if present, otherwise use embedding/model for learned selectors
     selector = preset.get("selector", preset.get("embedding", preset.get("model", "age_weight")) if is_learned else "age_weight")
 
+    # Initialize CUDA if using tch-rs torch selector (required for tch to detect CUDA)
+    if selector == "sentence_torch":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.init()
+                _ = torch.tensor([1.0]).cuda()  # Force CUDA context creation
+        except Exception:
+            pass  # If torch not available or CUDA init fails, fall back to CPU
+
     # Remaining time after parsing
     elapsed_parsing = time.time() - start
     remaining_timeout = max(0.1, timeout - elapsed_parsing)

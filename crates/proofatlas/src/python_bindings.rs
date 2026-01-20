@@ -638,10 +638,41 @@ impl ProofState {
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load ONNX sentence model: {}", e)))?;
                 Box::new(selector)
             }
+            #[cfg(all(feature = "sentence", feature = "torch"))]
+            "sentence_torch" => {
+                // Find TorchScript model and tokenizer
+                let weights_dir = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path).parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
+                } else {
+                    std::path::PathBuf::from(".weights")
+                };
+
+                let model_path = weights_dir.join("sentence_encoder.pt");
+                let tokenizer_path = weights_dir.join("sentence_tokenizer/tokenizer.json");
+
+                if !model_path.exists() {
+                    return Err(PyValueError::new_err(format!(
+                        "TorchScript model not found at {}. Export with export_torchscript.py",
+                        model_path.display()
+                    )));
+                }
+
+                // Load TorchScript model with GPU support
+                let selector = crate::selectors::load_tch_sentence_selector(
+                    &model_path,
+                    &tokenizer_path,
+                    true,   // use_cuda
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load TorchScript model: {}", e)))?;
+                Box::new(selector)
+            }
             _ => {
-                #[cfg(all(feature = "sentence", feature = "onnx"))]
+                #[cfg(all(feature = "sentence", feature = "torch"))]
+                let available = "'age_weight', 'gcn', 'mlp', 'sentence', 'sentence_onnx', or 'sentence_torch'";
+                #[cfg(all(feature = "sentence", feature = "onnx", not(feature = "torch")))]
                 let available = "'age_weight', 'gcn', 'mlp', 'sentence', or 'sentence_onnx'";
-                #[cfg(all(feature = "sentence", not(feature = "onnx")))]
+                #[cfg(all(feature = "sentence", not(feature = "onnx"), not(feature = "torch")))]
                 let available = "'age_weight', 'gcn', 'mlp', or 'sentence'";
                 #[cfg(not(feature = "sentence"))]
                 let available = "'age_weight', 'gcn', or 'mlp'";

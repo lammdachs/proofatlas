@@ -25,7 +25,7 @@ pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 numpy = { version = "0.20", optional = true }
 
 # Burn ML framework (for native inference with safetensors weights)
-burn = "0.19"
+burn = { version = "0.19", default-features = false, features = ["std", "autodiff"] }
 burn-ndarray = "0.19"
 burn-import = "0.19"
 
@@ -33,6 +33,10 @@ burn-import = "0.19"
 # Using load-dynamic to avoid glibc version issues with static linking
 ort = { version = "2.0.0-rc.11", optional = true, default-features = false, features = ["std", "ndarray", "load-dynamic", "cuda"] }
 ndarray = { version = "0.17", optional = true }
+
+# PyTorch bindings (for GPU inference via libtorch)
+# Using tch 0.22 which supports PyTorch 2.9
+tch = { version = "0.22", optional = true }
 
 # Tokenizers (for sentence encoder)
 tokenizers = { version = "0.20", optional = true }
@@ -53,6 +57,7 @@ python = ["pyo3", "numpy", "download"]
 download = ["ureq", "dirs", "sha2"]
 sentence = ["tokenizers", "download"]
 onnx = ["ort", "ndarray"]
+torch = ["tch"]
 wasm = []
 
 [dev-dependencies]
