@@ -8,9 +8,8 @@ before invoking the standard setuptools build.
 import os
 import sys
 
-# Set environment variables for tch-rs to find PyTorch's libtorch
+# Set environment variable for tch-rs to find PyTorch's libtorch
 os.environ.setdefault('LIBTORCH_USE_PYTORCH', '1')
-os.environ.setdefault('LIBTORCH_BYPASS_VERSION_CHECK', '1')
 
 # Import and run setuptools
 from setuptools import setup

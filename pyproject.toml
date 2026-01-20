@@ -45,8 +45,9 @@ Issues = "https://github.com/lexpk/proofatlas/issues"
 
 [project.optional-dependencies]
 # For ML model training (not needed for inference - weights downloaded automatically)
+# torch pinned to 2.9.0 for tch-rs 0.22 compatibility
 ml = [
-    "torch>=2.0.0",
+    "torch==2.9.0",
     "lightning>=2.0.0",
     "safetensors",
 ]
