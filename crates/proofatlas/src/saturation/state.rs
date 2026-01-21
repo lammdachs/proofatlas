@@ -1,7 +1,8 @@
 //! Main saturation state and algorithm
 //!
-//! This module implements a three-set saturation loop based on the architecture
-//! described in the Matryoshka project's saturation report (Example 63).
+//! This module implements a three-set saturation loop based on the framework
+//! described by Waldmann et al. in "A Comprehensive Framework for Saturation
+//! Theorem Proving" (IJCAR 2020), specifically Example 63.
 //!
 //! ## Clause Sets
 //!
