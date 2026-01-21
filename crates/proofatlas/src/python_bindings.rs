@@ -545,9 +545,7 @@ impl ProofState {
             "gcn" => {
                 // Find TorchScript GCN model
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path).parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
+                    std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
@@ -571,9 +569,7 @@ impl ProofState {
             "sentence" => {
                 // Find TorchScript model and tokenizer
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path).parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
+                    std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
