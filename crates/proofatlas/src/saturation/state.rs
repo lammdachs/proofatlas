@@ -1,4 +1,49 @@
 //! Main saturation state and algorithm
+//!
+//! This module implements a three-set saturation loop based on the architecture
+//! described in the Matryoshka project's saturation report (Example 63).
+//!
+//! ## Clause Sets
+//!
+//! The prover maintains three clause sets:
+//!
+//! - **New (N)**: Freshly derived clauses awaiting forward simplification
+//! - **Unprocessed (P)**: Clauses that have survived simplification, awaiting selection
+//! - **Processed (A)**: Clauses that have been selected and used for generating inferences
+//!
+//! ## Algorithm
+//!
+//! Each iteration of the main loop:
+//!
+//! 1. **Process New Clauses** (`forward_simplify_new`):
+//!    - For each clause C in N:
+//!      - **Forward Simplification**: Simplify C using unit equalities from A ∪ P
+//!      - **Forward Deletion**: Check if C is subsumed by any clause in A ∪ P
+//!      - If C survives:
+//!        - **Backward Deletion**: Remove clauses in A ∪ P that are subsumed by C
+//!        - **Backward Simplification**: If C is a unit equality, rewrite clauses in A ∪ P
+//!        - **Transfer**: Move C from N to P
+//!
+//! 2. **Select Given Clause**: Choose a clause G from P using the clause selector
+//!
+//! 3. **Generate Inferences**: Apply inference rules between G and clauses in A;
+//!    results go to N
+//!
+//! 4. **Activate**: Move G from P to A
+//!
+//! ## Key Design Decisions
+//!
+//! - **Forward simplification uses A ∪ P**: Unlike simpler loops that only simplify
+//!   by processed clauses, we also use unprocessed clauses. This catches more
+//!   redundancies earlier.
+//!
+//! - **Backward simplification on transfer**: When a clause moves from N to P,
+//!   we immediately use it to simplify existing clauses. This is more aggressive
+//!   than waiting until the clause is selected.
+//!
+//! - **Pending vs Active clauses**: The subsumption checker tracks which clauses
+//!   are "active" (in A ∪ P) vs "pending" (in N). Only active clauses participate
+//!   in subsumption checks, preventing self-subsumption of new clauses.
 
 use super::subsumption::SubsumptionChecker;
 use crate::core::{Clause, Proof, ProofStep};
@@ -105,15 +150,17 @@ impl SaturationResult {
     }
 }
 
-/// Main saturation state
+/// Main saturation state implementing the three-set given-clause algorithm.
+///
+/// See module documentation for algorithm details.
 pub struct SaturationState {
-    /// All clauses (processed and unprocessed)
+    /// Storage for all clauses, indexed by clause ID
     clauses: Vec<Clause>,
-    /// Indices of processed clauses
+    /// Set A: Processed/active clauses (used for generating inferences)
     processed: HashSet<usize>,
-    /// Queue of unprocessed clause indices
+    /// Set P: Unprocessed/passive clauses (awaiting selection)
     unprocessed: VecDeque<usize>,
-    /// New clauses awaiting forward simplification
+    /// Set N: New clauses (awaiting forward simplification)
     new: VecDeque<usize>,
     /// Proof steps
     proof_steps: Vec<ProofStep>,
