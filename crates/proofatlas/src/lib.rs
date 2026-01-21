@@ -30,7 +30,7 @@ pub use inference::{
 pub use selectors::{AgeWeightSelector, ClauseSelector};
 
 #[cfg(feature = "torch")]
-pub use selectors::{load_gcn_selector, GcnSelector};
+pub use selectors::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 
 #[cfg(all(feature = "sentence", feature = "torch"))]
 pub use selectors::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};

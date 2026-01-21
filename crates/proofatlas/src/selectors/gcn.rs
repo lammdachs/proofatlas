@@ -1,13 +1,12 @@
-//! GCN clause selector
+//! GCN clause selector with embedding caching
 //!
 //! This implements a Graph Convolutional Network (GCN) for clause selection,
-//! using PyTorch via tch-rs for inference. Weights are loaded from
-//! TorchScript models exported from PyTorch training.
+//! using PyTorch via tch-rs for inference. Embeddings are cached per clause
+//! to avoid redundant computation.
+//!
+//! The architecture separates embedding computation (GCN forward pass) from
+//! scoring, allowing embeddings to be cached and reused across selections.
 
-#[cfg(feature = "torch")]
-use std::collections::HashMap;
-#[cfg(feature = "torch")]
-use std::collections::VecDeque;
 #[cfg(feature = "torch")]
 use std::path::Path;
 
@@ -17,44 +16,27 @@ use crate::core::Clause;
 use crate::ml::graph::GraphBuilder;
 
 #[cfg(feature = "torch")]
-use super::ClauseSelector;
+use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 
-/// TorchScript-based GCN clause selector using tch-rs
+/// GCN embedder using PyTorch for inference
 ///
-/// Uses a TorchScript model that takes:
-/// - node_features: [N, 3] - node type, arity, arg_pos
-/// - adj: [N, N] - normalized adjacency matrix
-/// - pool_matrix: [C, N] - clause to node pooling
-/// - clause_features: [C, 3] - age, role, size
+/// Computes clause scores using a GCN model. The model operates on a graph
+/// representation of clauses and outputs scores directly. These scores are
+/// treated as 1-dimensional "embeddings" for caching purposes.
 ///
-/// And outputs clause scores [C].
+/// Since clauses in the batch graph are independent (no inter-clause edges),
+/// each clause's score depends only on its own structure, making caching valid.
 #[cfg(feature = "torch")]
-pub struct GcnSelector {
+pub struct GcnEmbedder {
     model: tch::CModule,
     device: tch::Device,
-    /// Clause age tracking
-    clause_ages: HashMap<usize, usize>,
-    /// Current step counter for age calculation
-    current_step: usize,
-    /// Cached GCN embeddings per clause (hidden_dim floats)
-    #[allow(dead_code)]
-    clause_gcn_cache: HashMap<usize, Vec<f32>>,
+    /// Fixed max_age for normalization (default: 10000)
+    max_age: usize,
 }
 
 #[cfg(feature = "torch")]
-impl std::fmt::Debug for GcnSelector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GcnSelector")
-            .field("device", &format!("{:?}", self.device))
-            .field("clause_ages", &self.clause_ages.len())
-            .field("current_step", &self.current_step)
-            .finish()
-    }
-}
-
-#[cfg(feature = "torch")]
-impl GcnSelector {
-    /// Create a new GCN selector from a TorchScript model
+impl GcnEmbedder {
+    /// Create a new GCN embedder from a TorchScript model
     pub fn new<P: AsRef<Path>>(model_path: P, use_cuda: bool) -> Result<Self, String> {
         let device = if use_cuda && tch::Cuda::is_available() {
             tch::Device::Cuda(0)
@@ -68,48 +50,34 @@ impl GcnSelector {
         Ok(Self {
             model,
             device,
-            clause_ages: HashMap::new(),
-            current_step: 0,
-            clause_gcn_cache: HashMap::new(),
+            max_age: 10000,
         })
     }
 
-    /// Register a clause and its creation time
-    fn register_clause(&mut self, clause_id: usize) {
-        self.clause_ages.insert(clause_id, self.current_step);
-    }
-
-    /// Build tensors for the full batch of clauses
+    /// Build tensors for batch inference
     fn build_batch_tensors(
         &self,
-        clause_ids: &[usize],
-        clauses: &[Clause],
+        clauses: &[&Clause],
     ) -> (tch::Tensor, tch::Tensor, tch::Tensor, tch::Tensor) {
-        let num_clauses = clause_ids.len();
-        let max_age = self.current_step.max(1);
+        let num_clauses = clauses.len();
 
         // Build combined graph for all clauses
-        let selected_clauses: Vec<&Clause> = clause_ids.iter().map(|&id| &clauses[id]).collect();
-
-        // Build graph from clauses
-        let graph = GraphBuilder::build_from_clauses(&selected_clauses);
+        let graph = GraphBuilder::build_from_clauses(clauses);
         let num_nodes = graph.num_nodes;
 
         if num_nodes == 0 {
             // Empty graph - return zeros
             let node_features = tch::Tensor::zeros([1, 3], (tch::Kind::Float, self.device));
             let adj = tch::Tensor::eye(1, (tch::Kind::Float, self.device));
-            let pool_matrix = tch::Tensor::ones([num_clauses as i64, 1], (tch::Kind::Float, self.device));
-            let clause_features = tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
+            let pool_matrix =
+                tch::Tensor::ones([num_clauses as i64, 1], (tch::Kind::Float, self.device));
+            let clause_features =
+                tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
             return (node_features, adj, pool_matrix, clause_features);
         }
 
         // Build node features tensor [num_nodes, 3]
-        let node_feat_flat: Vec<f32> = graph
-            .node_features
-            .iter()
-            .flat_map(|f| *f)
-            .collect();
+        let node_feat_flat: Vec<f32> = graph.node_features.iter().flat_map(|f| *f).collect();
         let node_features = tch::Tensor::from_slice(&node_feat_flat)
             .view([num_nodes as i64, 3])
             .to_device(self.device);
@@ -118,17 +86,16 @@ impl GcnSelector {
         let adj = self.build_adjacency(&graph.edge_indices, num_nodes);
 
         // Build pool matrix from clause_boundaries
-        let pool_matrix = self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
+        let pool_matrix =
+            self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
 
-        // Build clause features [num_clauses, 3]
+        // Build clause features [num_clauses, 3]: age_normalized, role, size
         let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
-        for &clause_id in clause_ids {
-            let clause = &clauses[clause_id];
-            let age = self.clause_ages.get(&clause_id).copied().unwrap_or(0);
-            let age_normalized = age as f32 / max_age as f32;
+        for clause in clauses {
+            let age_normalized = clause.age as f32 / self.max_age as f32;
             let role = clause.role.to_feature_value();
             let size = clause.literals.len() as f32;
-            clause_feat_flat.extend_from_slice(&[age_normalized, role, size]);
+            clause_feat_flat.extend_from_slice(&[age_normalized.min(1.0), role, size]);
         }
         let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
             .view([num_clauses as i64, 3])
@@ -203,31 +170,14 @@ impl GcnSelector {
 }
 
 #[cfg(feature = "torch")]
-impl ClauseSelector for GcnSelector {
-    fn name(&self) -> &str {
-        "gcn"
-    }
-
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
-        self.current_step += 1;
-
-        if unprocessed.is_empty() {
-            return None;
-        }
-
-        // Collect clause IDs
-        let clause_ids: Vec<usize> = unprocessed.iter().copied().collect();
-
-        // Register new clauses
-        for &id in &clause_ids {
-            if !self.clause_ages.contains_key(&id) {
-                self.register_clause(id);
-            }
+impl ClauseEmbedder for GcnEmbedder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
         }
 
         // Build batch tensors
-        let (node_features, adj, pool_matrix, clause_features) =
-            self.build_batch_tensors(&clause_ids, clauses);
+        let (node_features, adj, pool_matrix, clause_features) = self.build_batch_tensors(clauses);
 
         // Run inference
         let scores = tch::no_grad(|| {
@@ -236,40 +186,65 @@ impl ClauseSelector for GcnSelector {
                 .expect("GCN forward failed")
         });
 
-        // Get scores as Vec<f32>
+        // Convert scores to 1-element embeddings for caching
         let scores_cpu = scores.to_device(tch::Device::Cpu).view([-1]);
-        let scores_vec: Vec<f32> = Vec::<f32>::try_from(&scores_cpu)
-            .expect("Failed to convert scores to Vec<f32>");
+        let scores_vec: Vec<f32> =
+            Vec::<f32>::try_from(&scores_cpu).expect("Failed to convert scores to Vec<f32>");
 
-        // Get argmax
-        let (best_idx, _) = scores_vec
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())?;
-
-        // Remove selected clause from unprocessed
-        let selected_id = clause_ids[best_idx];
-        unprocessed.retain(|&id| id != selected_id);
-
-        Some(selected_id)
+        scores_vec.iter().map(|&s| vec![s]).collect()
     }
 
-    fn reset(&mut self) {
-        self.clause_ages.clear();
-        self.clause_gcn_cache.clear();
-        self.current_step = 0;
+    fn embedding_dim(&self) -> usize {
+        1 // Scores are treated as 1-dim embeddings
+    }
+
+    fn name(&self) -> &str {
+        "gcn"
     }
 }
 
-// Factory function
+/// Pass-through scorer for GCN embedder
+///
+/// Since the TorchScript model outputs scores directly (treated as embeddings),
+/// this scorer simply returns them unchanged.
+#[cfg(feature = "torch")]
+pub struct GcnScorer;
+
+#[cfg(feature = "torch")]
+impl EmbeddingScorer for GcnScorer {
+    fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
+        // Embeddings are already scores (1-element each)
+        embeddings.iter().map(|e| e[0]).collect()
+    }
+
+    fn name(&self) -> &str {
+        "gcn_scorer"
+    }
+}
+
+/// GCN selector with embedding caching
+///
+/// This type alias combines the GCN embedder with the caching infrastructure.
+/// Embeddings (scores) are computed once per clause and cached by clause string.
+#[cfg(feature = "torch")]
+pub type GcnSelector = CachingSelector<GcnEmbedder, GcnScorer>;
 
 /// Load a GCN selector from a TorchScript model
+///
+/// # Arguments
+/// * `model_path` - Path to the TorchScript model (.pt file)
+/// * `use_cuda` - Whether to use CUDA for inference
+///
+/// # Returns
+/// A GCN selector with embedding caching enabled
 #[cfg(feature = "torch")]
 pub fn load_gcn_selector<P: AsRef<Path>>(
     model_path: P,
     use_cuda: bool,
 ) -> Result<GcnSelector, String> {
-    GcnSelector::new(model_path, use_cuda)
+    let embedder = GcnEmbedder::new(model_path, use_cuda)?;
+    let scorer = GcnScorer;
+    Ok(CachingSelector::new(embedder, scorer))
 }
 
 #[cfg(test)]
@@ -287,6 +262,65 @@ mod tests {
         }
 
         let selector = load_gcn_selector(model_path, false);
-        assert!(selector.is_ok(), "Failed to create selector: {:?}", selector);
+        assert!(
+            selector.is_ok(),
+            "Failed to create selector: {:?}",
+            selector
+        );
+    }
+
+    #[test]
+    fn test_gcn_selector_caching() {
+        use crate::core::{Atom, Literal, PredicateSymbol, Term, Constant};
+        use std::collections::VecDeque;
+        use super::super::ClauseSelector;
+
+        // Skip if model doesn't exist
+        let model_path = std::path::Path::new(".weights/gcn_model.pt");
+        if !model_path.exists() {
+            println!("Skipping test: gcn_model.pt not found");
+            return;
+        }
+
+        let mut selector = load_gcn_selector(model_path, false).unwrap();
+
+        // Create test clauses
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+        let a = Term::Constant(Constant {
+            name: "a".to_string(),
+        });
+        let b = Term::Constant(Constant {
+            name: "b".to_string(),
+        });
+
+        let clause1 = Clause::new(vec![Literal::positive(Atom {
+            predicate: p.clone(),
+            args: vec![a.clone()],
+        })]);
+        let clause2 = Clause::new(vec![Literal::positive(Atom {
+            predicate: p.clone(),
+            args: vec![b.clone()],
+        })]);
+        let clause3 = Clause::new(vec![Literal::positive(Atom {
+            predicate: p.clone(),
+            args: vec![a.clone()],
+        }), Literal::positive(Atom {
+            predicate: p.clone(),
+            args: vec![b.clone()],
+        })]);
+
+        let clauses = vec![clause1, clause2, clause3];
+        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+
+        // First selection should populate cache
+        let _ = selector.select(&mut unprocessed, &clauses);
+        assert_eq!(selector.cache_size(), 3);
+
+        // Reset should clear cache
+        selector.reset();
+        assert_eq!(selector.cache_size(), 0);
     }
 }

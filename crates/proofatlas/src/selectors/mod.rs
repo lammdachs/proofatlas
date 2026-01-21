@@ -25,6 +25,6 @@ pub use age_weight::AgeWeightSelector;
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::ClauseSelector;
 #[cfg(feature = "torch")]
-pub use gcn::{load_gcn_selector, GcnSelector};
+pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(all(feature = "sentence", feature = "torch"))]
 pub use sentence::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
