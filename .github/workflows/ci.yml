@@ -80,9 +80,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install PyTorch (for tch-rs build)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure Cargo for tch-rs
+        run: python scripts/setup_cargo.py
+
       - name: Basic Python import test
         run: |
-          pip install -e .
+          pip install --no-build-isolation -e ".[ml]"
           python -c "from proofatlas import ProofState; print('OK')"
 
   # Tier 2: Selective tests based on changes (always run on schedule)
