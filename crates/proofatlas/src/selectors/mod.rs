@@ -30,6 +30,7 @@ pub mod burn_mlp;
 pub mod burn_sentence;
 pub mod cached;
 pub mod clause;
+pub mod tch_gcn;
 
 pub use age_weight::AgeWeightSelector;
 pub use burn_gcn::{
@@ -49,3 +50,5 @@ pub use burn_sentence::{load_onnx_sentence_selector, OnnxSentenceEmbedder, OnnxS
 pub use burn_sentence::{load_tch_sentence_selector, PassThroughScorer, TchSentenceEmbedder, TchSentenceSelector};
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::ClauseSelector;
+#[cfg(feature = "torch")]
+pub use tch_gcn::{load_tch_gcn_selector, TchGcnSelector};

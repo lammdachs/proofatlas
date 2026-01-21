@@ -667,14 +667,43 @@ impl ProofState {
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load TorchScript model: {}", e)))?;
                 Box::new(selector)
             }
+            #[cfg(feature = "torch")]
+            "gcn_torch" => {
+                // Find TorchScript GCN model
+                let weights_dir = if let Some(path) = weights_path.as_ref() {
+                    std::path::PathBuf::from(path).parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
+                } else {
+                    std::path::PathBuf::from(".weights")
+                };
+
+                let model_path = weights_dir.join("gcn_model.pt");
+
+                if !model_path.exists() {
+                    return Err(PyValueError::new_err(format!(
+                        "TorchScript GCN model not found at {}. Export with export_gcn_torchscript.py",
+                        model_path.display()
+                    )));
+                }
+
+                // Load TorchScript GCN model (can use GPU if available)
+                let selector = crate::selectors::load_tch_gcn_selector(
+                    &model_path,
+                    true,   // use_cuda
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load TorchScript GCN model: {}", e)))?;
+                Box::new(selector)
+            }
             _ => {
                 #[cfg(all(feature = "sentence", feature = "torch"))]
-                let available = "'age_weight', 'gcn', 'mlp', 'sentence', 'sentence_onnx', or 'sentence_torch'";
+                let available = "'age_weight', 'gcn', 'gcn_torch', 'mlp', 'sentence', 'sentence_onnx', or 'sentence_torch'";
                 #[cfg(all(feature = "sentence", feature = "onnx", not(feature = "torch")))]
                 let available = "'age_weight', 'gcn', 'mlp', 'sentence', or 'sentence_onnx'";
                 #[cfg(all(feature = "sentence", not(feature = "onnx"), not(feature = "torch")))]
                 let available = "'age_weight', 'gcn', 'mlp', or 'sentence'";
-                #[cfg(not(feature = "sentence"))]
+                #[cfg(all(feature = "torch", not(feature = "sentence")))]
+                let available = "'age_weight', 'gcn', 'gcn_torch', or 'mlp'";
+                #[cfg(all(not(feature = "sentence"), not(feature = "torch")))]
                 let available = "'age_weight', 'gcn', or 'mlp'";
                 return Err(PyValueError::new_err(format!(
                     "Unknown selector: {}. Use {}",

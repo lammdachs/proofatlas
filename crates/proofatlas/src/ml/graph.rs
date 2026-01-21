@@ -265,6 +265,65 @@ impl Default for GraphBuilder {
     }
 }
 
+/// Multi-clause graph representation for batch inference
+#[derive(Debug, Clone)]
+pub struct BatchClauseGraph {
+    /// Total number of nodes across all clauses
+    pub num_nodes: usize,
+
+    /// Edge list: (source_idx, target_idx) pairs
+    pub edge_indices: Vec<(usize, usize)>,
+
+    /// Node feature matrix: (num_nodes, 3) - only type, arity, arg_pos
+    /// Clause features (age, role, size) are provided separately
+    pub node_features: Vec<[f32; 3]>,
+
+    /// Clause boundaries: (start_node, end_node) for each clause
+    /// Used to build the pool matrix
+    pub clause_boundaries: Vec<(usize, usize)>,
+}
+
+impl GraphBuilder {
+    /// Build a combined graph from multiple clauses for batch inference
+    ///
+    /// Returns a BatchClauseGraph with node features limited to [type, arity, arg_pos]
+    /// since clause-level features (age, role, size) are provided separately.
+    pub fn build_from_clauses(clauses: &[&Clause]) -> BatchClauseGraph {
+        let mut all_features: Vec<[f32; 3]> = Vec::new();
+        let mut all_edges: Vec<(usize, usize)> = Vec::new();
+        let mut clause_boundaries: Vec<(usize, usize)> = Vec::new();
+
+        let mut node_offset = 0;
+
+        for clause in clauses {
+            let graph = Self::build_from_clause(clause);
+
+            let start = node_offset;
+            let end = node_offset + graph.num_nodes;
+            clause_boundaries.push((start, end));
+
+            // Add node features (only first 3 dimensions: type, arity, arg_pos)
+            for f in &graph.node_features {
+                all_features.push([f[0], f[1], f[2]]);
+            }
+
+            // Add edges with offset
+            for (src, dst) in &graph.edge_indices {
+                all_edges.push((src + node_offset, dst + node_offset));
+            }
+
+            node_offset = end;
+        }
+
+        BatchClauseGraph {
+            num_nodes: node_offset,
+            edge_indices: all_edges,
+            node_features: all_features,
+            clause_boundaries,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
