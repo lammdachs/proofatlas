@@ -15,6 +15,7 @@
 # Rust build artifacts
 **/target/
 Cargo.lock
+.cargo/config.toml
 *.so
 *.dylib
 *.dll

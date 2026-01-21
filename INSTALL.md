@@ -48,6 +48,28 @@ cargo build --release
 
 The binary will be at `target/release/prove`.
 
+### With ML Features (GCN/Sentence selectors)
+
+To build with ML-based clause selection:
+
+```bash
+# Install PyTorch
+pip install -e ".[ml]"
+
+# Configure Cargo for tch-rs
+python scripts/setup_cargo.py
+
+# Build with ML features
+cargo build --release --features torch
+```
+
+The `setup_cargo.py` script configures the build to find PyTorch automatically.
+Re-run it if you change Python environments.
+
+Feature flags:
+- `torch` - GCN selector (graph neural network)
+- `sentence` - Sentence transformer selector (requires `torch`)
+
 ## Running the Prover
 
 ```bash
