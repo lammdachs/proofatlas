@@ -39,8 +39,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 [features]
 default = []
 python = ["pyo3", "numpy"]
-sentence = ["tokenizers"]
-torch = ["tch"]
+ml = ["tch", "tokenizers"]
 wasm = []
 
 [dev-dependencies]

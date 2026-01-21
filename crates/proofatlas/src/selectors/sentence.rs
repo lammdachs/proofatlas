@@ -6,10 +6,10 @@
 //!
 //! Requires the `sentence` and `torch` features.
 
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 use std::path::Path;
 
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 use crate::core::Clause;
 
 /// Sentence embedder using PyTorch for inference
@@ -17,7 +17,7 @@ use crate::core::Clause;
 /// Uses a TorchScript model that includes the encoder, projection, and scorer.
 /// The model outputs scores directly, but we use it via the CachingSelector
 /// which expects embeddings, so we output the projected embeddings instead.
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 pub struct SentenceEmbedder {
     model: tch::CModule,
     tokenizer: tokenizers::Tokenizer,
@@ -25,7 +25,7 @@ pub struct SentenceEmbedder {
     max_length: usize,
 }
 
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 impl SentenceEmbedder {
     pub fn new<P: AsRef<Path>>(
         model_path: P,
@@ -96,7 +96,7 @@ impl SentenceEmbedder {
     }
 }
 
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 impl super::cached::ClauseEmbedder for SentenceEmbedder {
     fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
         if clauses.is_empty() {
@@ -139,10 +139,10 @@ impl super::cached::ClauseEmbedder for SentenceEmbedder {
 /// Simple pass-through scorer for SentenceEmbedder
 ///
 /// Since the TorchScript model already computes scores, this scorer just returns them.
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 pub struct PassThroughScorer;
 
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 impl super::cached::EmbeddingScorer for PassThroughScorer {
     fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
         // Embeddings are already scores (1-element each)
@@ -155,11 +155,11 @@ impl super::cached::EmbeddingScorer for PassThroughScorer {
 }
 
 /// Sentence selector with GPU acceleration
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 pub type SentenceSelector = super::cached::CachingSelector<SentenceEmbedder, PassThroughScorer>;
 
 /// Load sentence selector
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 pub fn load_sentence_selector<P: AsRef<Path>>(
     model_path: P,
     tokenizer_path: P,
@@ -171,7 +171,7 @@ pub fn load_sentence_selector<P: AsRef<Path>>(
 }
 
 #[cfg(test)]
-#[cfg(all(feature = "sentence", feature = "torch"))]
+#[cfg(feature = "ml")]
 mod tests {
     use super::*;
 
