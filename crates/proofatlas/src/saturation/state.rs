@@ -113,6 +113,8 @@ pub struct SaturationState {
     processed: HashSet<usize>,
     /// Queue of unprocessed clause indices
     unprocessed: VecDeque<usize>,
+    /// New clauses awaiting forward simplification
+    new: VecDeque<usize>,
     /// Proof steps
     proof_steps: Vec<ProofStep>,
     /// Configuration
@@ -140,13 +142,14 @@ impl SaturationState {
         clause_selector: Box<dyn ClauseSelector>,
     ) -> Self {
         let mut clauses = Vec::new();
-        let mut unprocessed = VecDeque::new();
+        let mut new = VecDeque::new();
         let mut subsumption_checker = SubsumptionChecker::new();
         let mut clause_memory_bytes = 0usize;
 
         let mut proof_steps = Vec::new();
 
         // Add initial clauses with IDs, filtering tautologies
+        // Note: clauses in N are added as pending (not active for subsumption)
         let mut clause_idx = 0;
         for mut clause in initial_clauses.into_iter() {
             // Orient equalities before adding
@@ -163,8 +166,8 @@ impl SaturationState {
             // Track clause memory
             clause_memory_bytes += clause.memory_bytes();
 
-            // Add to subsumption checker
-            let idx = subsumption_checker.add_clause(oriented.clone());
+            // Add to subsumption checker as pending (not active yet)
+            let idx = subsumption_checker.add_clause_pending(oriented.clone());
             assert_eq!(idx, clause_idx);
 
             // Create proof step for initial clause
@@ -178,7 +181,7 @@ impl SaturationState {
             });
 
             clauses.push(clause);
-            unprocessed.push_back(clause_idx);
+            new.push_back(clause_idx);
             clause_idx += 1;
         }
 
@@ -197,7 +200,8 @@ impl SaturationState {
         SaturationState {
             clauses,
             processed: HashSet::new(),
-            unprocessed,
+            unprocessed: VecDeque::new(),
+            new,
             subsumption_checker,
             proof_steps,
             config,
@@ -227,7 +231,24 @@ impl SaturationState {
         let start_time = Instant::now();
         let mut iterations = 0;
 
-        while let Some(given_idx) = self.select_given_clause() {
+        loop {
+            // Forward simplification: process new clauses until fixed point, move to unprocessed
+            if let Some(result) = self.forward_simplify_new() {
+                return result;
+            }
+
+            // Select given clause from unprocessed
+            let given_idx = match self.select_given_clause() {
+                Some(idx) => idx,
+                None => {
+                    // No more clauses to process
+                    return SaturationResult::Saturated(
+                        self.proof_steps.clone(),
+                        self.clauses.clone(),
+                    );
+                }
+            };
+
             // Check clause memory limit (directly comparable across provers)
             if let Some(limit_mb) = self.config.max_clause_memory_mb {
                 if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
@@ -257,13 +278,8 @@ impl SaturationState {
 
             iterations += 1;
 
-            // Otter loop: Forward-simplify the given clause before generating inferences
-            let given_idx = self.forward_simplify_given(given_idx);
-
-            // Process the given clause
+            // Check if given clause is empty
             let given_clause = &self.clauses[given_idx];
-
-            // Check if it's the empty clause
             if given_clause.is_empty() {
                 return SaturationResult::Proof(Proof {
                     steps: self.proof_steps.clone(),
@@ -272,13 +288,7 @@ impl SaturationState {
                 });
             }
 
-            // Check if subsumed after simplification
-            if self.subsumption_checker.is_subsumed_by_processed(given_idx, &given_clause) {
-                continue;
-            }
-
             // Record the selection of the given clause as a proof step
-            // (This helps track the saturation process even when no inferences are generated)
             self.proof_steps.push(ProofStep {
                 inference: InferenceResult {
                     rule: InferenceRule::GivenClauseSelection,
@@ -291,68 +301,43 @@ impl SaturationState {
             // Generate new clauses by inference with processed clauses
             let new_inferences = self.generate_inferences(given_idx);
 
-            // Add given clause to processed
+            // Move given clause to processed
             self.processed.insert(given_idx);
 
-            // If given clause is a unit equality, perform backward demodulation
-            if given_clause.literals.len() == 1
-                && given_clause.literals[0].polarity
-                && given_clause.literals[0].atom.is_equality()
-            {
-                self.backward_demodulate_with_unit(given_idx);
-            }
-
-            // Process new inferences - deduplicate within the batch first
+            // Add new inferences to new set (deduplicate within the batch first)
             let mut seen_in_batch = HashSet::new();
-            let mut unique_inferences = Vec::new();
-
             for inference in new_inferences {
                 // Orient the clause first to get canonical form
                 let mut oriented = inference.conclusion.clone();
                 orient_clause_equalities(&mut oriented);
                 let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
-                    unique_inferences.push(inference);
-                }
-            }
-
-            for inference in unique_inferences {
-                if let Some(new_idx) = self.add_clause(inference) {
-                    // Check if we derived empty clause
-                    if self.clauses[new_idx].is_empty() {
-                        return SaturationResult::Proof(Proof {
-                            steps: self.proof_steps.clone(),
-                            empty_clause_idx: new_idx,
-                            all_clauses: self.clauses.clone(),
-                        });
-                    }
+                    self.add_clause_to_new(inference);
                 }
             }
         }
-
-        // No more clauses to process
-        SaturationResult::Saturated(self.proof_steps.clone(), self.clauses.clone())
     }
 
-    /// Select the next given clause using the configured selector
-    fn select_given_clause(&mut self) -> Option<usize> {
-        self.clause_selector
-            .select(&mut self.unprocessed, &self.clauses)
-    }
+    /// Process new clauses: forward simplify by A ∪ P, then backward simplify A and P
+    /// Returns Some(result) if empty clause found
+    fn forward_simplify_new(&mut self) -> Option<SaturationResult> {
+        while let Some(clause_idx) = self.new.pop_front() {
+            let clause = &self.clauses[clause_idx];
 
-    /// Otter loop: Forward-simplify the given clause using processed unit equalities
-    /// Returns the index of the (possibly new) simplified clause
-    fn forward_simplify_given(&mut self, given_idx: usize) -> usize {
-        let given_clause = self.clauses[given_idx].clone();
+            // SimplifyFwd: try to simplify by A ∪ P (processed and unprocessed)
+            let mut current_clause = clause.clone();
+            let mut simplified = false;
+            let mut demod_premise = None;
 
-        // Apply demodulation with all processed unit equalities
-        let mut current_clause = given_clause.clone();
-        let mut changed = true;
-        let mut rewrite_premise = None;
+            // Collect unit equalities from both processed and unprocessed
+            let all_clauses: Vec<usize> = self
+                .processed
+                .iter()
+                .copied()
+                .chain(self.unprocessed.iter().copied())
+                .collect();
 
-        while changed {
-            changed = false;
-            for &unit_idx in &self.processed {
+            for &unit_idx in &all_clauses {
                 let unit_clause = &self.clauses[unit_idx];
 
                 // Check if it's a unit equality
@@ -361,48 +346,105 @@ impl SaturationState {
                     && unit_clause.literals[0].atom.is_equality()
                 {
                     let results =
-                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, given_idx);
+                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, clause_idx);
                     if !results.is_empty() {
                         current_clause = results[0].conclusion.clone();
-                        rewrite_premise = Some(unit_idx);
-                        changed = true;
+                        orient_clause_equalities(&mut current_clause);
+                        demod_premise = Some(unit_idx);
+                        simplified = true;
                         break;
                     }
                 }
             }
+
+            if simplified {
+                // Check if simplified to tautology
+                if current_clause.is_tautology() {
+                    continue;
+                }
+
+                // Check if subsumed after simplification
+                if self.subsumption_checker.is_subsumed(&current_clause) {
+                    continue;
+                }
+
+                // Add simplified clause as new clause, put back in new set (still pending)
+                let new_idx = self.clauses.len();
+                let mut clause_with_id = current_clause.clone();
+                clause_with_id.id = Some(new_idx);
+
+                let idx_from_subsumption = self
+                    .subsumption_checker
+                    .add_clause_pending(current_clause.clone());
+                assert_eq!(idx_from_subsumption, new_idx);
+
+                self.clause_memory_bytes += clause_with_id.memory_bytes();
+                self.clauses.push(clause_with_id.clone());
+                self.new.push_back(new_idx);
+
+                // Record proof step
+                self.proof_steps.push(ProofStep {
+                    inference: InferenceResult {
+                        rule: InferenceRule::Demodulation,
+                        premises: vec![demod_premise.unwrap(), clause_idx],
+                        conclusion: clause_with_id.clone(),
+                    },
+                    clause_idx: new_idx,
+                });
+
+                // Check if we derived empty clause
+                if clause_with_id.is_empty() {
+                    return Some(SaturationResult::Proof(Proof {
+                        steps: self.proof_steps.clone(),
+                        empty_clause_idx: new_idx,
+                        all_clauses: self.clauses.clone(),
+                    }));
+                }
+            } else {
+                // DeleteFwd: check if subsumed by A ∪ P
+                if self.subsumption_checker.is_subsumed(&current_clause) {
+                    continue;
+                }
+
+                // Clause survives - activate it and do backward simplification before transfer to P
+                self.subsumption_checker.activate_clause(clause_idx);
+
+                // DeleteBwd: remove clauses in P and A subsumed by this clause
+                let all_other: Vec<usize> = self
+                    .processed
+                    .iter()
+                    .copied()
+                    .chain(self.unprocessed.iter().copied())
+                    .collect();
+                let subsumed = self
+                    .subsumption_checker
+                    .find_subsumed_by(clause_idx, &all_other);
+                for idx in subsumed {
+                    self.processed.remove(&idx);
+                    self.unprocessed.retain(|&x| x != idx);
+                }
+
+                // SimplifyBwd: if this clause is a unit equality, simplify P and A
+                let clause = &self.clauses[clause_idx];
+                if clause.literals.len() == 1
+                    && clause.literals[0].polarity
+                    && clause.literals[0].atom.is_equality()
+                {
+                    self.backward_demodulate_with_unit(clause_idx);
+                }
+
+                // Transfer: move to unprocessed (P)
+                self.unprocessed.push_back(clause_idx);
+            }
         }
 
-        // If unchanged, return original index
-        if current_clause == given_clause {
-            return given_idx;
-        }
+        None
+    }
 
-        // Orient the simplified clause
-        orient_clause_equalities(&mut current_clause);
-
-        // Create a new clause entry for the simplified version
-        let new_idx = self.clauses.len();
-        current_clause.id = Some(new_idx);
-
-        // Track clause memory
-        self.clause_memory_bytes += current_clause.memory_bytes();
-
-        // Add to subsumption checker
-        self.subsumption_checker.add_clause(current_clause.clone());
-
-        self.clauses.push(current_clause.clone());
-
-        // Record the simplification as a proof step
-        self.proof_steps.push(ProofStep {
-            inference: InferenceResult {
-                rule: InferenceRule::Demodulation,
-                premises: vec![rewrite_premise.unwrap_or(given_idx), given_idx],
-                conclusion: current_clause,
-            },
-            clause_idx: new_idx,
-        });
-
-        new_idx
+    /// Select the next given clause using the configured selector
+    fn select_given_clause(&mut self) -> Option<usize> {
+        self.clause_selector
+            .select(&mut self.unprocessed, &self.clauses)
     }
 
     /// Generate all inferences between given clause and processed clauses
@@ -477,8 +519,8 @@ impl SaturationState {
         results
     }
 
-    /// Add a new clause if it's not redundant (otter-style: no forward simplification)
-    fn add_clause(&mut self, inference: InferenceResult) -> Option<usize> {
+    /// Add a new clause to the new set (no forward simplification yet)
+    fn add_clause_to_new(&mut self, inference: InferenceResult) -> Option<usize> {
         // Check clause size limit
         if inference.conclusion.literals.len() > self.config.max_clause_size {
             return None;
@@ -490,37 +532,36 @@ impl SaturationState {
         }
 
         // Orient equalities first so we check the canonical form
-        let mut oriented_clause = inference.conclusion.clone();
-        orient_clause_equalities(&mut oriented_clause);
+        let mut current_clause = inference.conclusion.clone();
+        orient_clause_equalities(&mut current_clause);
 
-        // Otter loop: Don't apply demodulation here - clauses are simplified when selected
         // Check subsumption for redundancy elimination
-        if self.subsumption_checker.is_subsumed(&oriented_clause) {
+        if self.subsumption_checker.is_subsumed(&current_clause) {
             return None;
         }
 
-        // Add the clause
+        // Add the clause to new set (pending, not active yet)
         let new_idx = self.clauses.len();
-        let mut clause_with_id = oriented_clause.clone();
+        let mut clause_with_id = current_clause.clone();
         clause_with_id.id = Some(new_idx);
 
-        // Add to subsumption checker
+        // Add to subsumption checker as pending
         let idx_from_subsumption = self
             .subsumption_checker
-            .add_clause(oriented_clause.clone());
+            .add_clause_pending(current_clause.clone());
         assert_eq!(idx_from_subsumption, new_idx);
 
         // Track clause memory
         self.clause_memory_bytes += clause_with_id.memory_bytes();
 
         self.clauses.push(clause_with_id.clone());
-        self.unprocessed.push_back(new_idx);
+        self.new.push_back(new_idx);
 
-        // Record proof step with demodulated clause
-        let mut final_inference = inference;
-        final_inference.conclusion = clause_with_id;
+        // Record proof step
+        let mut inf = inference;
+        inf.conclusion = clause_with_id.clone();
         self.proof_steps.push(ProofStep {
-            inference: final_inference,
+            inference: inf,
             clause_idx: new_idx,
         });
 
@@ -572,16 +613,12 @@ impl SaturationState {
 
         // Now process replacements
         for (old_idx, _new_clause, inference_result) in replaced_clauses {
-            // Remove old clause from subsumption checker
-            // Note: We'll add the new clause through the normal add_clause process
-
             // Mark old clause as inactive by removing from processed/unprocessed
             self.processed.remove(&old_idx);
             self.unprocessed.retain(|&idx| idx != old_idx);
 
-            // Add the simplified clause as a new clause
-            // This will apply orientation, subsumption checking, etc.
-            self.add_clause(inference_result);
+            // Add the simplified clause to the new set
+            self.add_clause_to_new(inference_result);
         }
     }
 

@@ -50,6 +50,9 @@ pub struct SubsumptionChecker {
 
     /// All clauses for subsumption checking
     clauses: Vec<Clause>,
+
+    /// Indices of active clauses (in P ∪ A, not in N)
+    active: HashSet<usize>,
 }
 
 impl SubsumptionChecker {
@@ -58,10 +61,37 @@ impl SubsumptionChecker {
             clause_strings: HashSet::new(),
             units: Vec::new(),
             clauses: Vec::new(),
+            active: HashSet::new(),
         }
     }
 
-    /// Add a clause and return its index
+    /// Add a clause as pending (in N) - not yet active for subsumption
+    pub fn add_clause_pending(&mut self, clause: Clause) -> usize {
+        let idx = self.clauses.len();
+        self.clauses.push(clause);
+        idx
+    }
+
+    /// Activate a pending clause (transfer from N to P)
+    pub fn activate_clause(&mut self, idx: usize) {
+        if self.active.contains(&idx) {
+            return;
+        }
+        self.active.insert(idx);
+
+        let clause = &self.clauses[idx];
+
+        // Add to string index
+        let clause_str = format!("{}", clause);
+        self.clause_strings.insert(clause_str);
+
+        // Add to unit index if applicable
+        if clause.literals.len() == 1 {
+            self.units.push((clause.clone(), idx));
+        }
+    }
+
+    /// Add a clause and return its index (immediately active)
     pub fn add_clause(&mut self, clause: Clause) -> usize {
         let idx = self.clauses.len();
 
@@ -75,12 +105,14 @@ impl SubsumptionChecker {
         }
 
         self.clauses.push(clause);
+        self.active.insert(idx);
         idx
     }
 
-    /// Check if a clause is subsumed
+    /// Check if a clause is subsumed by active clauses (those in P ∪ A)
     pub fn is_subsumed(&self, clause: &Clause) -> bool {
         // 1. Check for exact duplicates (very fast)
+        // Note: clause_strings only contains active clauses
         let clause_str = format!("{}", clause);
         if self.clause_strings.contains(&clause_str) {
             return true;
@@ -92,7 +124,7 @@ impl SubsumptionChecker {
         }
 
         // 3. Unit subsumption (fast and complete)
-        // Check all clauses (including unit clauses) for subsumption by units
+        // Note: units only contains active unit clauses
         for (unit, _) in &self.units {
             if subsumes_unit(unit, clause) {
                 return true;
@@ -101,7 +133,10 @@ impl SubsumptionChecker {
 
         // 4. For small clauses (2-3 literals), do complete subsumption
         if clause.literals.len() <= 3 {
-            for existing in &self.clauses {
+            for (idx, existing) in self.clauses.iter().enumerate() {
+                if !self.active.contains(&idx) {
+                    continue;
+                }
                 if existing.literals.len() < clause.literals.len() && subsumes(existing, clause) {
                     return true;
                 }
@@ -111,7 +146,10 @@ impl SubsumptionChecker {
         // 5. For larger clauses, use a greedy heuristic
         // Only check against clauses with compatible structure
         if clause.literals.len() > 3 {
-            for existing in &self.clauses {
+            for (idx, existing) in self.clauses.iter().enumerate() {
+                if !self.active.contains(&idx) {
+                    continue;
+                }
                 if existing.literals.len() >= clause.literals.len() {
                     continue;
                 }
@@ -172,12 +210,52 @@ impl SubsumptionChecker {
         false
     }
 
-    /// Check if we have a variant of this clause
+    /// Find which clauses from the given indices are subsumed by the subsumer clause
+    /// Returns the indices of subsumed clauses
+    pub fn find_subsumed_by(&self, subsumer_idx: usize, candidate_indices: &[usize]) -> Vec<usize> {
+        let subsumer = &self.clauses[subsumer_idx];
+        let mut subsumed = Vec::new();
+
+        for &idx in candidate_indices {
+            if idx == subsumer_idx {
+                continue;
+            }
+            let candidate = &self.clauses[idx];
+
+            // Quick check: subsumer can't be larger
+            if subsumer.literals.len() > candidate.literals.len() {
+                continue;
+            }
+
+            // Check if subsumer subsumes candidate
+            if subsumer.literals.len() == 1 {
+                if subsumes_unit(subsumer, candidate) {
+                    subsumed.push(idx);
+                }
+            } else if subsumer.literals.len() <= 3 {
+                if subsumes(subsumer, candidate) {
+                    subsumed.push(idx);
+                }
+            } else {
+                // Use greedy heuristic for larger clauses
+                if subsumes_greedy(subsumer, candidate) {
+                    subsumed.push(idx);
+                }
+            }
+        }
+
+        subsumed
+    }
+
+    /// Check if we have a variant of this clause among active clauses
     fn has_variant(&self, clause: &Clause) -> bool {
         // Get the clause's "shape" (predicate symbols and polarities)
         let shape = get_clause_shape(clause);
 
-        for existing in &self.clauses {
+        for (idx, existing) in self.clauses.iter().enumerate() {
+            if !self.active.contains(&idx) {
+                continue;
+            }
             if existing.literals.len() != clause.literals.len() {
                 continue;
             }
