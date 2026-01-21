@@ -133,7 +133,7 @@ impl SaturationState {
     /// # Arguments
     /// * `initial_clauses` - The initial clause set
     /// * `config` - Saturation configuration
-    /// * `clause_selector` - ONNX-based clause selector
+    /// * `clause_selector` - Clause selection strategy
     pub fn new(
         initial_clauses: Vec<Clause>,
         config: SaturationConfig,

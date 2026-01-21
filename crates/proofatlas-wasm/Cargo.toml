@@ -14,5 +14,5 @@ proofatlas = { path = "../proofatlas", default-features = false, features = ["wa
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["Performance", "Window", "console"] }
 js-sys = "=0.3.77"
-# Required for Burn's dependency chain in WASM
+# Required for random number generation in WASM
 getrandom = { version = "0.3", features = ["wasm_js"] }

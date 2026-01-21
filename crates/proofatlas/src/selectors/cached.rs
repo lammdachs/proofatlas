@@ -68,6 +68,16 @@ pub struct CachingSelector<E: ClauseEmbedder, S: EmbeddingScorer> {
     rng_state: u64,
 }
 
+impl<E: ClauseEmbedder, S: EmbeddingScorer> std::fmt::Debug for CachingSelector<E, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachingSelector")
+            .field("embedder", &self.embedder.name())
+            .field("scorer", &self.scorer.name())
+            .field("cache_size", &self.cache.len())
+            .finish()
+    }
+}
+
 impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
     /// Create a new caching selector
     pub fn new(embedder: E, scorer: S) -> Self {

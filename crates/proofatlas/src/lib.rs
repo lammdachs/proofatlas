@@ -27,11 +27,13 @@ pub use inference::{
     SelectUniqueMaximalOrNegOrMaximal,
 };
 
-pub use selectors::{
-    create_ndarray_gcn_selector, create_ndarray_mlp_selector, load_ndarray_gcn_selector,
-    load_ndarray_mlp_selector, AgeWeightSelector, BurnGcnSelector, BurnMlpSelector, ClauseSelector,
-    GcnModel, MlpModel, NdarrayGcnSelector, NdarrayMlpSelector,
-};
+pub use selectors::{AgeWeightSelector, ClauseSelector};
+
+#[cfg(feature = "torch")]
+pub use selectors::{load_gcn_selector, GcnSelector};
+
+#[cfg(all(feature = "sentence", feature = "torch"))]
+pub use selectors::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
 
 pub use saturation::{
     saturate, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,

@@ -1,7 +1,7 @@
-//! tch-rs based GCN clause selector
+//! GCN clause selector
 //!
 //! This implements a Graph Convolutional Network (GCN) for clause selection,
-//! using tch-rs (PyTorch bindings) for inference. Weights are loaded from
+//! using PyTorch via tch-rs for inference. Weights are loaded from
 //! TorchScript models exported from PyTorch training.
 
 #[cfg(feature = "torch")]
@@ -29,7 +29,7 @@ use super::ClauseSelector;
 ///
 /// And outputs clause scores [C].
 #[cfg(feature = "torch")]
-pub struct TchGcnSelector {
+pub struct GcnSelector {
     model: tch::CModule,
     device: tch::Device,
     /// Clause age tracking
@@ -42,7 +42,18 @@ pub struct TchGcnSelector {
 }
 
 #[cfg(feature = "torch")]
-impl TchGcnSelector {
+impl std::fmt::Debug for GcnSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GcnSelector")
+            .field("device", &format!("{:?}", self.device))
+            .field("clause_ages", &self.clause_ages.len())
+            .field("current_step", &self.current_step)
+            .finish()
+    }
+}
+
+#[cfg(feature = "torch")]
+impl GcnSelector {
     /// Create a new GCN selector from a TorchScript model
     pub fn new<P: AsRef<Path>>(model_path: P, use_cuda: bool) -> Result<Self, String> {
         let device = if use_cuda && tch::Cuda::is_available() {
@@ -192,9 +203,9 @@ impl TchGcnSelector {
 }
 
 #[cfg(feature = "torch")]
-impl ClauseSelector for TchGcnSelector {
+impl ClauseSelector for GcnSelector {
     fn name(&self) -> &str {
-        "tch_gcn"
+        "gcn"
     }
 
     fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
@@ -254,42 +265,20 @@ impl ClauseSelector for TchGcnSelector {
 
 /// Load a GCN selector from a TorchScript model
 #[cfg(feature = "torch")]
-pub fn load_tch_gcn_selector<P: AsRef<Path>>(
+pub fn load_gcn_selector<P: AsRef<Path>>(
     model_path: P,
     use_cuda: bool,
-) -> Result<TchGcnSelector, String> {
-    TchGcnSelector::new(model_path, use_cuda)
+) -> Result<GcnSelector, String> {
+    GcnSelector::new(model_path, use_cuda)
 }
 
 #[cfg(test)]
 #[cfg(feature = "torch")]
 mod tests {
     use super::*;
-    use crate::core::{Atom, ClauseRole, Literal, PredicateSymbol, Term, Variable};
-
-    fn make_test_clause(id: usize, name: &str, num_args: usize) -> Clause {
-        let args: Vec<Term> = (0..num_args)
-            .map(|j| Term::Variable(Variable {
-                name: format!("X{}", j),
-            }))
-            .collect();
-
-        Clause {
-            literals: vec![Literal::positive(Atom {
-                predicate: PredicateSymbol {
-                    name: name.to_string(),
-                    arity: num_args,
-                },
-                args,
-            })],
-            id: Some(id),
-            role: ClauseRole::Derived,
-            age: 0,
-        }
-    }
 
     #[test]
-    fn test_tch_gcn_selector_creation() {
+    fn test_gcn_selector_creation() {
         // Skip if model doesn't exist
         let model_path = std::path::Path::new(".weights/gcn_model.pt");
         if !model_path.exists() {
@@ -297,7 +286,7 @@ mod tests {
             return;
         }
 
-        let selector = load_tch_gcn_selector(model_path, false);
+        let selector = load_gcn_selector(model_path, false);
         assert!(selector.is_ok(), "Failed to create selector: {:?}", selector);
     }
 }

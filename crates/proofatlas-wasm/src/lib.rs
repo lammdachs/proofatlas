@@ -119,22 +119,10 @@ impl ProofAtlasWasm {
         web_sys::console::log_1(&"Config created, creating clause selector...".into());
 
         // Create clause selector based on options
+        // Note: ML selectors (gcn, sentence) require libtorch which is not available in WASM
         let clause_selector: Box<dyn ClauseSelector> = match options.selector_type.as_deref() {
-            Some("gcn") => {
-                // GCN selector requires weights
-                let _weights = options.selector_weights.as_ref()
-                    .ok_or_else(|| JsError::new("GCN selector requires selector_weights"))?;
-
-                // TODO: Add load_from_bytes method to Burn selectors for WASM support
-                return Err(JsError::new("GCN selector with safetensors not yet supported in WASM. Use age_weight instead."));
-            }
-            Some("mlp") => {
-                // MLP selector requires weights
-                let _weights = options.selector_weights.as_ref()
-                    .ok_or_else(|| JsError::new("MLP selector requires selector_weights"))?;
-
-                // TODO: Add load_from_bytes method to Burn selectors for WASM support
-                return Err(JsError::new("MLP selector with safetensors not yet supported in WASM. Use age_weight instead."));
+            Some("gcn") | Some("sentence") => {
+                return Err(JsError::new("ML selectors (gcn, sentence) are not supported in WASM. Use age_weight instead."));
             }
             _ => {
                 // Default to age_weight selector (no model needed)

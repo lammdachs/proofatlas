@@ -68,45 +68,20 @@
       "age_weight_ratio": 0.167
     },
 
-    "gcn_mlp": {
-      "description": "128 iterations with GCN embedding + MLP scorer",
+    "gcn": {
+      "description": "128 iterations with GCN clause selector",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 22,
-      "embedding": "gcn",
-      "scorer": "mlp"
+      "selector": "gcn"
     },
 
-    "sentence_mlp": {
-      "description": "128 iterations with sentence transformer + MLP scorer (CPU)",
+    "sentence": {
+      "description": "128 iterations with sentence transformer selector",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 22,
       "selector": "sentence"
-    },
-
-    "sentence_onnx": {
-      "description": "128 iterations with ONNX GPU sentence transformer + MLP scorer",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 22,
-      "selector": "sentence_onnx"
-    },
-
-    "sentence_torch": {
-      "description": "128 iterations with PyTorch GPU sentence transformer + MLP scorer",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 22,
-      "selector": "sentence_torch"
-    },
-
-    "gcn_torch": {
-      "description": "128 iterations with PyTorch GCN clause selector",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 22,
-      "selector": "gcn_torch"
     }
   }
 }

@@ -1,8 +1,11 @@
 {
-  "generated": "2026-01-19T04:31:37.484390",
+  "generated": "2026-01-21T01:41:08.539490",
   "runs": [
     "proofatlas_gcn_mlp",
+    "proofatlas_gcn_torch",
     "proofatlas_sentence_mlp",
+    "proofatlas_sentence_onnx",
+    "proofatlas_sentence_torch",
     "proofatlas_steps_sel0",
     "proofatlas_steps_sel20",
     "proofatlas_steps_sel21",

@@ -513,8 +513,8 @@ impl ProofState {
     ///     max_iterations: Maximum number of saturation steps
     ///     timeout_secs: Optional timeout in seconds
     ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
-    ///     selector: Clause selector type: "age_weight" (default), "gcn", or "mlp"
-    ///     weights_path: Path to safetensors weights file (required for gcn/mlp)
+    ///     selector: Clause selector type: "age_weight" (default), "gcn", or "sentence"
+    ///     weights_path: Path to model weights directory
     ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
     ///
     /// Returns:
@@ -531,12 +531,7 @@ impl ProofState {
         max_clause_memory_mb: Option<usize>,
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
-        use crate::selectors::{AgeWeightSelector, load_ndarray_gcn_selector, load_ndarray_mlp_selector};
-        #[cfg(feature = "sentence")]
-        use crate::selectors::load_ndarray_sentence_selector;
-        #[cfg(all(feature = "sentence", feature = "onnx"))]
-        use crate::selectors::load_onnx_sentence_selector;
-        use crate::ml::weights::find_model;
+        use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
 
         // Create clause selector based on selector type
@@ -546,69 +541,9 @@ impl ProofState {
                 let ratio = age_weight_ratio.unwrap_or(0.5);
                 Box::new(AgeWeightSelector::new(ratio))
             }
+            #[cfg(feature = "torch")]
             "gcn" => {
-                // Find weights file
-                let weights = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    find_model("gcn").ok_or_else(|| {
-                        PyValueError::new_err("GCN weights not found. Provide weights_path or place gcn.safetensors in .weights/")
-                    })?
-                };
-
-                // Load model (TODO: read from embeddings.json)
-                let selector = load_ndarray_gcn_selector(&weights, 256, 6)
-                    .map_err(|e| PyValueError::new_err(format!("Failed to load GCN: {}", e)))?;
-                Box::new(selector)
-            }
-            "mlp" => {
-                // Find weights file
-                let weights = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    find_model("mlp").ok_or_else(|| {
-                        PyValueError::new_err("MLP weights not found. Provide weights_path or place mlp.safetensors in .weights/")
-                    })?
-                };
-
-                // Load model (TODO: read from embeddings.json)
-                let selector = load_ndarray_mlp_selector(&weights, 8, 128, 3)
-                    .map_err(|e| PyValueError::new_err(format!("Failed to load MLP: {}", e)))?;
-                Box::new(selector)
-            }
-            #[cfg(feature = "sentence")]
-            "sentence" => {
-                // Find weights file
-                let weights = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    find_model("sentence_mlp").ok_or_else(|| {
-                        PyValueError::new_err("Sentence weights not found. Provide weights_path or place sentence_mlp.safetensors in .weights/")
-                    })?
-                };
-
-                // Tokenizer path (sentence_tokenizer directory with tokenizer.json)
-                let tokenizer_path = weights.parent()
-                    .map(|p| p.join("sentence_tokenizer/tokenizer.json"))
-                    .unwrap_or_else(|| std::path::PathBuf::from(".weights/sentence_tokenizer/tokenizer.json"));
-
-                // MiniLM-L6-v2 model parameters
-                let selector = load_ndarray_sentence_selector(
-                    &weights,
-                    &tokenizer_path,
-                    30522,  // vocab_size
-                    384,    // hidden_dim
-                    6,      // num_layers
-                    12,     // num_heads
-                    1536,   // intermediate_dim
-                    512,    // max_position_embeddings
-                    64,     // scorer_hidden_dim
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load sentence model: {}", e)))?;
-                Box::new(selector)
-            }
-            #[cfg(all(feature = "sentence", feature = "onnx"))]
-            "sentence_onnx" => {
-                // Find ONNX encoder and scorer weights
+                // Find TorchScript GCN model
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path).parent()
                         .map(|p| p.to_path_buf())
@@ -617,29 +552,23 @@ impl ProofState {
                     std::path::PathBuf::from(".weights")
                 };
 
-                let onnx_path = weights_dir.join("sentence_encoder.onnx");
-                let scorer_path = weights_dir.join("sentence_scorer.safetensors");
-                let tokenizer_path = weights_dir.join("sentence_tokenizer/tokenizer.json");
+                let model_path = weights_dir.join("gcn_model.pt");
 
-                if !onnx_path.exists() {
+                if !model_path.exists() {
                     return Err(PyValueError::new_err(format!(
-                        "ONNX encoder not found at {}. Export with: python -c \"...\"",
-                        onnx_path.display()
+                        "GCN model not found at {}. Export with scripts/export_gcn.py",
+                        model_path.display()
                     )));
                 }
 
-                // Sentence encoder with projection outputs 64-dim embeddings
-                let selector = load_onnx_sentence_selector(
-                    &onnx_path,
-                    &scorer_path,
-                    &tokenizer_path,
-                    64,     // embedding_dim (after projection)
-                    64,     // scorer_hidden_dim
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load ONNX sentence model: {}", e)))?;
+                let selector = crate::selectors::load_gcn_selector(
+                    &model_path,
+                    true,   // use_cuda
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load GCN model: {}", e)))?;
                 Box::new(selector)
             }
             #[cfg(all(feature = "sentence", feature = "torch"))]
-            "sentence_torch" => {
+            "sentence" => {
                 // Find TorchScript model and tokenizer
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path).parent()
@@ -654,57 +583,25 @@ impl ProofState {
 
                 if !model_path.exists() {
                     return Err(PyValueError::new_err(format!(
-                        "TorchScript model not found at {}. Export with export_torchscript.py",
+                        "Sentence model not found at {}. Export with model.export_torchscript(path)",
                         model_path.display()
                     )));
                 }
 
-                // Load TorchScript model with GPU support
-                let selector = crate::selectors::load_tch_sentence_selector(
+                let selector = crate::selectors::load_sentence_selector(
                     &model_path,
                     &tokenizer_path,
                     true,   // use_cuda
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load TorchScript model: {}", e)))?;
-                Box::new(selector)
-            }
-            #[cfg(feature = "torch")]
-            "gcn_torch" => {
-                // Find TorchScript GCN model
-                let weights_dir = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path).parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from(".weights"))
-                } else {
-                    std::path::PathBuf::from(".weights")
-                };
-
-                let model_path = weights_dir.join("gcn_model.pt");
-
-                if !model_path.exists() {
-                    return Err(PyValueError::new_err(format!(
-                        "TorchScript GCN model not found at {}. Export with export_gcn_torchscript.py",
-                        model_path.display()
-                    )));
-                }
-
-                // Load TorchScript GCN model (can use GPU if available)
-                let selector = crate::selectors::load_tch_gcn_selector(
-                    &model_path,
-                    true,   // use_cuda
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load TorchScript GCN model: {}", e)))?;
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load sentence model: {}", e)))?;
                 Box::new(selector)
             }
             _ => {
                 #[cfg(all(feature = "sentence", feature = "torch"))]
-                let available = "'age_weight', 'gcn', 'gcn_torch', 'mlp', 'sentence', 'sentence_onnx', or 'sentence_torch'";
-                #[cfg(all(feature = "sentence", feature = "onnx", not(feature = "torch")))]
-                let available = "'age_weight', 'gcn', 'mlp', 'sentence', or 'sentence_onnx'";
-                #[cfg(all(feature = "sentence", not(feature = "onnx"), not(feature = "torch")))]
-                let available = "'age_weight', 'gcn', 'mlp', or 'sentence'";
+                let available = "'age_weight', 'gcn', or 'sentence'";
                 #[cfg(all(feature = "torch", not(feature = "sentence")))]
-                let available = "'age_weight', 'gcn', 'gcn_torch', or 'mlp'";
-                #[cfg(all(not(feature = "sentence"), not(feature = "torch")))]
-                let available = "'age_weight', 'gcn', or 'mlp'";
+                let available = "'age_weight' or 'gcn'";
+                #[cfg(not(feature = "torch"))]
+                let available = "'age_weight'";
                 return Err(PyValueError::new_err(format!(
                     "Unknown selector: {}. Use {}",
                     selector_type, available

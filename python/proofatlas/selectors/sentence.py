@@ -142,71 +142,26 @@ class SentenceEncoder(nn.Module):
         # Score
         return self.scorer(clause_emb)
 
-    def _convert_name_to_burn(self, name: str) -> str:
-        """Convert HuggingFace parameter name to Burn naming convention."""
-        # HuggingFace: encoder.layer.0.attention.self.query
-        # Burn:        encoder.layer.0.attention.self_attn.query
-        name = name.replace("attention.self.", "attention.self_attn.")
-
-        # HuggingFace: LayerNorm
-        # Burn:        layer_norm
-        name = name.replace("LayerNorm", "layer_norm")
-
-        return name
-
-    def export_weights(self, path: str):
+    def export_torchscript(self, path: str):
         """
-        Export weights to safetensors format for Burn loading.
-
-        Exports the transformer encoder weights in a format that can be
-        loaded by a Burn implementation of the same architecture.
-
-        Weight names are converted to match Burn's field naming convention:
-        - BERT weights → 'encoder.bert.*'
-        - Projection → 'encoder.projection.*'
-        - Scorer → 'scorer.*'
-        - 'attention.self.' → 'attention.self_attn.'
-        - 'LayerNorm' → 'layer_norm'
+        Export model to TorchScript format for tch-rs inference.
 
         Args:
-            path: Output path for safetensors file
+            path: Output path for TorchScript model (.pt)
         """
-        from safetensors.torch import save_file
+        self.eval()
 
-        state_dict = {}
+        # Create dummy inputs for tracing
+        dummy_input_ids = torch.zeros((1, 32), dtype=torch.long)
+        dummy_attention_mask = torch.ones((1, 32), dtype=torch.long)
 
-        # Export encoder weights with Burn-compatible naming
-        # Structure: encoder.bert.* for BERT, encoder.projection.* for projection
-        for name, param in self.encoder.named_parameters():
-            burn_name = self._convert_name_to_burn(name)
-            state_dict[f"encoder.bert.{burn_name}"] = param.data
+        with torch.no_grad():
+            traced = torch.jit.trace(self, (dummy_input_ids, dummy_attention_mask))
 
-        # Export projection (part of encoder in Burn)
-        for name, param in self.projection.named_parameters():
-            state_dict[f"encoder.projection.{name}"] = param.data
-
-        # Export scorer
-        for name, param in self.scorer.named_parameters():
-            state_dict[f"scorer.{name}"] = param.data
-
-        save_file(state_dict, path)
-        print(f"Exported weights to {path}")
+        traced.save(path)
+        print(f"Exported TorchScript model to {path}")
         print(f"Encoder: {self.model_name}")
         print(f"Encoder dim: {self.encoder_dim}, Hidden dim: {self.hidden_dim}")
-
-    @property
-    def config(self) -> dict:
-        """Return model configuration for Burn reimplementation."""
-        return {
-            "model_name": self.model_name,
-            "vocab_size": self.encoder.config.vocab_size,
-            "encoder_dim": self.encoder_dim,
-            "num_layers": self.encoder.config.num_hidden_layers,
-            "num_heads": self.encoder.config.num_attention_heads,
-            "intermediate_dim": self.encoder.config.intermediate_size,
-            "max_position_embeddings": self.encoder.config.max_position_embeddings,
-            "hidden_dim": self.hidden_dim,
-        }
 
 
 # Backwards compatibility aliases

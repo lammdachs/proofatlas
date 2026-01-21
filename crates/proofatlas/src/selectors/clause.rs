@@ -2,7 +2,8 @@
 //!
 //! Available strategies:
 //! - `AgeWeightSelector` - Classic age-weight ratio heuristic
-//! - `BurnGcnSelector` / `BurnMlpSelector` - Burn-based ML selectors
+//! - `GcnSelector` - GCN-based ML selector (requires `torch` feature)
+//! - `SentenceSelector` - Sentence transformer selector (requires `torch` + `sentence` features)
 
 use crate::core::Clause;
 use std::collections::VecDeque;

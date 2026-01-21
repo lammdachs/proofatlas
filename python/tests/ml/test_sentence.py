@@ -88,22 +88,8 @@ class TestSentenceEncoder:
             scores = model(clause_strings)
             assert scores.shape == (3,)
 
-    def test_config_property(self):
-        from proofatlas.selectors.sentence import SentenceEncoder
-
-        model = SentenceEncoder(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            hidden_dim=64,
-        )
-
-        config = model.config
-        assert config["model_name"] == "sentence-transformers/all-MiniLM-L6-v2"
-        assert config["encoder_dim"] == 384
-        assert config["hidden_dim"] == 64
-        assert config["num_layers"] == 6
-        assert config["num_heads"] == 12
-
-    def test_export_weights(self, tmp_path):
+    def test_export_torchscript(self, tmp_path):
+        """Test TorchScript export for tch-rs inference."""
         from proofatlas.selectors.sentence import SentenceEncoder
 
         model = SentenceEncoder(
@@ -112,46 +98,17 @@ class TestSentenceEncoder:
             freeze_encoder=True,
         )
 
-        path = tmp_path / "model.safetensors"
-        model.export_weights(str(path))
+        path = tmp_path / "model.pt"
+        model.export_torchscript(str(path))
 
         assert path.exists()
 
-        # Check we can load the weights
-        from safetensors.torch import load_file
-        weights = load_file(str(path))
-        # Now uses Burn-compatible naming (bert.* prefix)
-        assert "bert.embeddings.word_embeddings.weight" in weights
-        assert "projection.weight" in weights
-
-    def test_export_weights_burn_naming(self, tmp_path):
-        """Test that exported weight names match Burn's field naming convention."""
-        from proofatlas.selectors.sentence import SentenceEncoder
-        from safetensors import safe_open
-
-        model = SentenceEncoder(hidden_dim=32, freeze_encoder=True)
-        path = tmp_path / "weights.safetensors"
-        model.export_weights(str(path))
-
-        with safe_open(str(path), framework="pt") as f:
-            names = list(f.keys())
-
-        # Verify Burn-compatible naming - BERT weights use 'bert.' prefix
-        bert_names = [n for n in names if n.startswith("bert.")]
-        assert len(bert_names) > 0, "Should have bert.* prefixed weights"
-
-        # Check key naming conventions match Burn field names
-        assert any("bert.embeddings.word_embeddings" in n for n in names)
-        assert any("bert.embeddings.layer_norm" in n for n in names), \
-            "Should convert LayerNorm to layer_norm"
-        assert any("bert.encoder.layer.0.attention.self_attn" in n for n in names), \
-            "Should convert attention.self to attention.self_attn"
-
-        # Check that no HuggingFace naming remains
-        assert not any("LayerNorm" in n for n in names), \
-            "Should convert LayerNorm to layer_norm"
-        assert not any(".self.query" in n for n in names), \
-            "Should convert attention.self to attention.self_attn"
+        # Check we can load and run the model
+        loaded = torch.jit.load(str(path))
+        dummy_ids = torch.zeros((2, 16), dtype=torch.long)
+        dummy_mask = torch.ones((2, 16), dtype=torch.long)
+        scores = loaded(dummy_ids, dummy_mask)
+        assert scores.shape == (2,)
 
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")

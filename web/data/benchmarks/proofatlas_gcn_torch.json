@@ -1,7 +1,7 @@
 {
-  "generated": "2026-01-20T03:48:22.345346",
+  "generated": "2026-01-21T01:41:08.534075",
   "prover": "proofatlas",
-  "preset": "sentence_mlp",
+  "preset": "gcn_torch",
   "completed": 1,
   "total": 384,
   "progress_pct": 0.2604166666666667,
