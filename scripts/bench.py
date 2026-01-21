@@ -439,12 +439,28 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
 # Weights management
 
 def find_weights(base_dir: Path, selector: str) -> Optional[Path]:
-    """Find weights file for a learned selector."""
+    """Find weights file/directory for a learned selector.
+
+    For tch-rs selectors (gcn, sentence), returns the .weights directory
+    if the required model files exist. For legacy selectors, looks for
+    .safetensors files.
+    """
     weights_dir = base_dir / ".weights"
     if not weights_dir.exists():
         return None
 
-    # Check exact name first
+    # tch-rs selectors use TorchScript .pt files
+    if selector == "gcn":
+        model_path = weights_dir / "gcn_model.pt"
+        if model_path.exists():
+            return weights_dir
+    elif selector == "sentence":
+        model_path = weights_dir / "sentence_encoder.pt"
+        tokenizer_path = weights_dir / "sentence_tokenizer" / "tokenizer.json"
+        if model_path.exists() and tokenizer_path.exists():
+            return weights_dir
+
+    # Legacy: check for .safetensors files
     exact = weights_dir / f"{selector}.safetensors"
     if exact.exists():
         return exact
@@ -467,7 +483,12 @@ def find_weights(base_dir: Path, selector: str) -> Optional[Path]:
 
 
 def is_learned_selector(selector_config: dict) -> bool:
-    """Check if selector requires trained weights (has embedding or model field)."""
+    """Check if selector requires trained weights."""
+    # Check for explicit selector field with learned selector name
+    selector = selector_config.get("selector", "")
+    if selector in ("gcn", "sentence"):
+        return True
+    # Legacy: check for embedding or model field
     return "embedding" in selector_config or "model" in selector_config
 
 
@@ -851,12 +872,21 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
 
 def get_num_gpus() -> int:
-    """Get the number of available CUDA GPUs."""
+    """Get the number of available CUDA GPUs.
+
+    Uses nvidia-smi instead of torch to avoid initializing CUDA in the parent
+    process, which would interfere with tch-rs in forked subprocesses.
+    """
+    import subprocess
     try:
-        import torch
-        if torch.cuda.is_available():
-            return torch.cuda.device_count()
-    except ImportError:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            # Count lines that start with "GPU"
+            return sum(1 for line in result.stdout.splitlines() if line.startswith("GPU"))
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
     return 0
 
@@ -1159,9 +1189,19 @@ def _update_benchmark_index(output_dir: Path):
         json.dump(index, f, indent=2)
 
 
-def _run_single_problem(args):
-    """Worker function for parallel execution."""
-    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, gpu_id = args
+# Global variable for worker GPU assignment (set by worker_init)
+_worker_gpu_id = None
+
+
+def _run_single_problem_with_worker_gpu(args):
+    """Wrapper that uses worker's assigned GPU."""
+    global _worker_gpu_id
+    return _run_single_problem(args, gpu_id=_worker_gpu_id)
+
+
+def _run_single_problem(args, gpu_id=None):
+    """Worker function for execution."""
+    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun = args
 
     try:
         # Check if already evaluated (skip unless --rerun)
@@ -1208,24 +1248,39 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     # Always collect traces for proofatlas
     collect_trace = (prover == "proofatlas")
 
-    # Detect GPUs for round-robin distribution
+    # Detect GPUs for worker distribution
     num_gpus = get_num_gpus()
     if num_gpus > 0 and prover == "proofatlas":
-        print(f"Distributing across {num_gpus} GPU(s)")
+        print(f"Distributing workers across {num_gpus} GPU(s)")
 
-    # Prepare work items with GPU assignment (round-robin)
+    # Prepare work items (GPU assigned per-worker, not per-problem)
     work_items = [
-        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun,
-         i % num_gpus if num_gpus > 0 else None)
-        for i, problem in enumerate(problems)
+        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun)
+        for problem in problems
     ]
 
     if n_jobs > 1:
-        # Parallel execution
+        # Parallel execution with GPU assignment per worker
         from concurrent.futures import ProcessPoolExecutor, as_completed
+        import multiprocessing
 
-        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-            futures = {executor.submit(_run_single_problem, item): i for i, item in enumerate(work_items)}
+        # Shared counter for assigning GPUs to workers
+        gpu_counter = multiprocessing.Value('i', 0)
+
+        def worker_init(counter, n_gpus):
+            """Initialize worker with a GPU assignment."""
+            global _worker_gpu_id
+            if n_gpus > 0:
+                with counter.get_lock():
+                    _worker_gpu_id = counter.value % n_gpus
+                    counter.value += 1
+            else:
+                _worker_gpu_id = None
+
+        with ProcessPoolExecutor(max_workers=n_jobs,
+                                 initializer=worker_init,
+                                 initargs=(gpu_counter, num_gpus)) as executor:
+            futures = {executor.submit(_run_single_problem_with_worker_gpu, item): i for i, item in enumerate(work_items)}
             completed = 0
 
             for future in as_completed(futures):
