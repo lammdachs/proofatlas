@@ -60,7 +60,7 @@ pip install torch==2.9.0
 python scripts/setup_cargo.py
 
 # Install with ML features (--no-build-isolation required)
-pip install --no-build-isolation -e ".[ml]"
+SETUPTOOLS_RUST_CARGO_FLAGS="--features ml" pip install --no-build-isolation -e ".[ml]"
 
 # Build Rust with ML features
 cargo build --release --features ml

@@ -80,15 +80,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install PyTorch (for tch-rs build)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure Cargo for tch-rs
-        run: python scripts/setup_cargo.py
-
       - name: Basic Python import test
         run: |
-          pip install --no-build-isolation -e ".[ml]"
+          pip install -e .
           python -c "from proofatlas import ProofState; print('OK')"
 
   # Tier 2: Selective tests based on changes (always run on schedule)
@@ -119,7 +113,7 @@ jobs:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.rust_ml == 'true' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v3
 
@@ -129,12 +123,23 @@ jobs:
           path: |
             ~/.cargo
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-ml-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-ml-
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install PyTorch (for tch-rs)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure Cargo for tch-rs
+        run: python scripts/setup_cargo.py
 
       - name: Run ML tests
-        run: "cargo test -p proofatlas ml::"
+        run: "cargo test -p proofatlas --features ml ml::"
 
   rust-wasm-tests:
     needs: [detect-changes, critical-tests]
