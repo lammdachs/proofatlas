@@ -25,7 +25,7 @@ ProofAtlas is a high-performance theorem prover with ML-guided clause selection.
 │          ▼                 ▼                                    │
 │   ┌────────────┐    ┌────────────┐                              │
 │   │ Age-Weight │    │  ML Model  │                              │
-│   │ Heuristic  │    │  (Burn)    │                              │
+│   │ Heuristic  │    │  (tch-rs)  │                              │
 │   └────────────┘    └────────────┘                              │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -82,12 +82,12 @@ crates/proofatlas/src/
 │
 ├── selectors/             # Clause selection strategies
 │   ├── age_weight.rs      # Age-weight heuristic
-│   ├── burn_gcn.rs        # GCN model (Burn)
-│   └── burn_mlp.rs        # MLP model (Burn)
+│   ├── gcn.rs             # GCN model (tch-rs)
+│   ├── sentence.rs        # Sentence transformer (tch-rs)
+│   └── cached.rs          # Embedding cache
 │
 ├── ml/                    # ML infrastructure
-│   ├── graph.rs           # Clause-to-graph conversion
-│   └── weights.rs         # Weight loading
+│   └── graph.rs           # Clause-to-graph conversion
 │
 └── python_bindings.rs     # PyO3 bindings
 ```
@@ -137,13 +137,13 @@ Unprocessed Clauses → Selector → Selected Clause
 ### 4. ML Training Pipeline
 
 ```
-Proof Traces → PyTorch Training → Safetensors → Burn Inference
+Proof Traces → PyTorch Training → TorchScript → tch-rs Inference (GPU)
 ```
 
 1. **Trace Collection**: During proof search, record clause graphs and labels
 2. **Training**: Train GNN in PyTorch using contrastive loss
-3. **Export**: Save weights to safetensors format
-4. **Inference**: Load weights in Rust/Burn for clause scoring
+3. **Export**: Save model to TorchScript format (.pt)
+4. **Inference**: Load model in Rust/tch-rs for GPU-accelerated scoring
 
 ## Key Design Decisions
 

@@ -27,15 +27,15 @@ proofatlas/
 │   │       ├── saturation/     # Saturation loop, forward/backward subsumption
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion
 │   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── selectors/      # Clause/literal selection strategies (Burn ML)
-│   │       └── ml/             # Graph building from clauses, weight loading
+│   │       ├── selectors/      # Clause/literal selection strategies (tch-rs ML)
+│   │       └── ml/             # Graph building from clauses
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
 ├── python/proofatlas/          # Python package
 │   ├── cli/                    # Command-line interface (bench entry point)
 │   ├── ml/                     # Training configs, data loading, training loops
-│   └── selectors/              # PyTorch model implementations (GCN, MLP)
+│   └── selectors/              # PyTorch model implementations (GCN, Sentence)
 │
 ├── web/                        # Web frontend
 │   ├── index.html              # Main prover interface
@@ -123,14 +123,17 @@ use proofatlas::AgeWeightSelector;
 let selector = AgeWeightSelector::new(0.5); // 50% age, 50% weight
 ```
 
-### ML Selectors (Burn)
+### ML Selectors (tch-rs)
 
 ```rust
-use proofatlas::selection::load_ndarray_gcn_selector;
-let selector = load_ndarray_gcn_selector(
-    ".weights/gcn.safetensors", 13, 64, 3
+use proofatlas::load_gcn_selector;
+let selector = load_gcn_selector(
+    ".weights/gcn_model.pt",
+    true,  // use_cuda
 )?;
 ```
+
+ML selectors require the `torch` feature and use GPU-accelerated inference via tch-rs.
 
 ## Node Features
 

@@ -16,9 +16,9 @@ Training Pipeline:
        ↓
   PyTorch Training (InfoNCE contrastive loss)
        ↓
-  Export to safetensors
+  Export to TorchScript (.pt)
        ↓
-  Burn Inference (Rust)
+  tch-rs Inference (Rust, GPU-accelerated)
 ```
 
 ## Graph Representation
@@ -90,12 +90,12 @@ Scorer (MLP):
 
 ### Available Models
 
-| Model | Description | Burn Support |
-|-------|-------------|--------------|
-| gcn | Graph Convolutional Network | ✓ |
+| Model | Description | Rust Inference |
+|-------|-------------|----------------|
+| gcn | Graph Convolutional Network | ✓ (tch-rs) |
+| sentence | Sentence transformer (MiniLM) | ✓ (tch-rs) |
 | gat | Graph Attention Network | ✗ |
 | graphsage | GraphSAGE (sampling-based) | ✗ |
-| mlp | Simple MLP baseline | ✓ |
 
 ## Training
 
@@ -172,24 +172,26 @@ model, metrics = train(train_dataset, val_dataset, config)
 
 ## Weight Export
 
-Trained PyTorch models are exported to safetensors for Rust inference:
+Trained PyTorch models are exported to TorchScript for Rust inference:
 
 ```python
 import torch
-from safetensors.torch import save_file
 
-# Save model weights
-save_file(model.state_dict(), ".weights/gcn_v1.safetensors")
+# For GCN models, use the export script
+# python scripts/export_gcn.py
+
+# For sentence models, use the export method
+model.export_torchscript(".weights/sentence_encoder.pt")
 ```
 
-The Burn-based selector loads these weights:
+The tch-rs selector loads TorchScript models:
 
 ```rust
-let selector = load_ndarray_gcn_selector(
-    ".weights/gcn_v1.safetensors",
-    13,   // input_dim
-    64,   // hidden_dim
-    3,    // num_layers
+use proofatlas::load_gcn_selector;
+
+let selector = load_gcn_selector(
+    ".weights/gcn_model.pt",
+    true,  // use_cuda
 )?;
 ```
 
@@ -197,9 +199,9 @@ let selector = load_ndarray_gcn_selector(
 
 During saturation, the selector:
 
-1. Builds graphs for unprocessed clauses
-2. Encodes clauses to embeddings (cached)
-3. Scores embeddings with the MLP scorer
+1. Builds graphs/tokenizes clauses
+2. Runs forward pass through TorchScript model (GPU-accelerated)
+3. Scores clauses with learned scorer
 4. Samples from softmax distribution
 
 ```rust
@@ -207,26 +209,26 @@ During saturation, the selector:
 let selected = selector.select(&mut unprocessed, &clauses);
 ```
 
-### Embedding Cache
+### GPU Acceleration
 
-The `BurnGcnSelector` caches clause embeddings to avoid recomputation:
+ML selectors use tch-rs to run inference on GPU when available:
 
 ```rust
-selector.clear_cache();  // Call when starting new problem
+// Automatically uses CUDA if available
+let selector = load_gcn_selector(".weights/gcn_model.pt", true)?;
 ```
 
 ## File Locations
 
 | Path | Description |
 |------|-------------|
-| `crates/proofatlas/src/ml/` | Rust graph building, weight loading |
-| `crates/proofatlas/src/selectors/` | Rust/Burn selector implementations |
+| `crates/proofatlas/src/ml/` | Rust graph building |
+| `crates/proofatlas/src/selectors/` | Rust/tch-rs selector implementations |
 | `python/proofatlas/ml/` | Training infrastructure |
 | `python/proofatlas/selectors/` | PyTorch model definitions |
-| `configs/embeddings.json` | Clause embedding architectures |
-| `configs/scorers.json` | Clause scorer architectures |
+| `scripts/export_gcn.py` | GCN TorchScript export |
 | `configs/training.json` | Training hyperparameter presets |
-| `.weights/` | Trained model weights |
+| `.weights/` | TorchScript models (.pt files) |
 | `.data/traces/` | Collected proof traces |
 
 ## Hyperparameter Recommendations
@@ -249,10 +251,10 @@ selector.clear_cache();  // Call when starting new problem
 
 ### Inference too slow
 - Reduce hidden_dim
-- Use embedding cache (don't clear between selections)
-- Consider MLP baseline for speed
+- Enable CUDA (`use_cuda=true`)
+- Consider sentence model for simpler problems
 
-### Weight loading fails
-- Verify safetensors format (PyTorch export)
-- Check hidden_dim/num_layers match between training and inference
-- Ensure input_dim is 13 (default feature dimension)
+### Model loading fails
+- Verify TorchScript export completed successfully
+- Check that PyTorch version matches (tch-rs 0.22 requires PyTorch 2.9)
+- Set `LIBTORCH_USE_PYTORCH=1` to use Python's PyTorch libraries

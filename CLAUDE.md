@@ -19,15 +19,15 @@ proofatlas/
 │   │       ├── saturation/     # Saturation loop, forward/backward subsumption
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── selectors/      # Clause/literal selection strategies (Burn ML)
-│   │       └── ml/             # Graph building from clauses, weight loading
+│   │       ├── selectors/      # Clause/literal selection strategies (tch-rs ML)
+│   │       └── ml/             # Graph building from clauses
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
 ├── python/proofatlas/          # Python package
 │   ├── cli/                    # Command-line interface (bench entry point)
 │   ├── ml/                     # Training configs, data loading, training loops
-│   └── selectors/              # PyTorch model implementations (GCN, MLP)
+│   └── selectors/              # PyTorch model implementations (GCN, Sentence)
 │
 ├── web/                        # Web frontend (HTML/CSS/JS)
 │
@@ -187,13 +187,15 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 
 ## ML Architecture
 
-**Workflow**: Train in PyTorch → Export to safetensors → Load in Rust/Burn
+**Workflow**: Train in PyTorch → Export to TorchScript → Load in Rust/tch-rs
 
-| Selector | Rust/Burn | PyTorch | Notes |
-|----------|-----------|---------|-------|
+| Selector | Rust | PyTorch | Notes |
+|----------|------|---------|-------|
 | age_weight | ✓ | - | Heuristic, no training |
 | gcn | ✓ | ✓ | Graph Convolutional Network |
-| mlp | ✓ | ✓ | MLP baseline |
+| sentence | ✓ | ✓ | Sentence transformer (MiniLM) |
+
+ML selectors require the `torch` feature and use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference. Models are exported as TorchScript (`.pt` files).
 
 ## Analysis Guidelines
 

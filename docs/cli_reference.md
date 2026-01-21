@@ -137,19 +137,20 @@ proofatlas-bench --kill
 
 ### Workflow for Learned Selectors
 
-When using a preset with ML (e.g., `gcn`, `mlp`):
+When using a preset with ML (e.g., `gcn`, `sentence`):
 
-1. If weights exist in `.weights/`, uses them directly
-2. Otherwise, automatically:
-   - Collects traces with age_weight selector
-   - Trains the model
-   - Saves weights to `.weights/<preset>.safetensors`
+1. If TorchScript models exist in `.weights/`, uses them directly
+2. Otherwise, you need to:
+   - Collect traces with age_weight selector
+   - Train the model in PyTorch
+   - Export to TorchScript (`.pt` file)
 
 ### Output Files
 
 | Path | Description |
 |------|-------------|
-| `.weights/<selector>.safetensors` | Trained model weights |
+| `.weights/gcn_model.pt` | GCN TorchScript model |
+| `.weights/sentence_encoder.pt` | Sentence transformer model |
 | `.data/traces/<preset>/` | Proof traces for training |
 | `.data/runs/<prover>/<preset>/` | Per-problem results (JSON) |
 | `.data/bench.log` | Daemon log file |
