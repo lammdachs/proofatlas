@@ -81,7 +81,7 @@ proofatlas = ["*.so", "*.pyd", "*.dylib"]
 target = "proofatlas.proofatlas"
 path = "crates/proofatlas/Cargo.toml"
 binding = "PyO3"
-features = ["python", "sentence", "onnx", "torch"]
+features = ["python", "ml"]
 
 [tool.ruff]
 line-length = 100

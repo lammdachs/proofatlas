@@ -7,15 +7,15 @@
 //! The architecture separates embedding computation (GCN forward pass) from
 //! scoring, allowing embeddings to be cached and reused across selections.
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 use std::path::Path;
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 use crate::core::Clause;
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 use crate::ml::graph::GraphBuilder;
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 
 /// GCN embedder using PyTorch for inference
@@ -26,7 +26,7 @@ use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 ///
 /// Since clauses in the batch graph are independent (no inter-clause edges),
 /// each clause's score depends only on its own structure, making caching valid.
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 pub struct GcnEmbedder {
     model: tch::CModule,
     device: tch::Device,
@@ -34,7 +34,7 @@ pub struct GcnEmbedder {
     max_age: usize,
 }
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 impl GcnEmbedder {
     /// Create a new GCN embedder from a TorchScript model
     pub fn new<P: AsRef<Path>>(model_path: P, use_cuda: bool) -> Result<Self, String> {
@@ -169,7 +169,7 @@ impl GcnEmbedder {
     }
 }
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 impl ClauseEmbedder for GcnEmbedder {
     fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
         if clauses.is_empty() {
@@ -207,10 +207,10 @@ impl ClauseEmbedder for GcnEmbedder {
 ///
 /// Since the TorchScript model outputs scores directly (treated as embeddings),
 /// this scorer simply returns them unchanged.
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 pub struct GcnScorer;
 
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 impl EmbeddingScorer for GcnScorer {
     fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
         // Embeddings are already scores (1-element each)
@@ -226,7 +226,7 @@ impl EmbeddingScorer for GcnScorer {
 ///
 /// This type alias combines the GCN embedder with the caching infrastructure.
 /// Embeddings (scores) are computed once per clause and cached by clause string.
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 pub type GcnSelector = CachingSelector<GcnEmbedder, GcnScorer>;
 
 /// Load a GCN selector from a TorchScript model
@@ -237,7 +237,7 @@ pub type GcnSelector = CachingSelector<GcnEmbedder, GcnScorer>;
 ///
 /// # Returns
 /// A GCN selector with embedding caching enabled
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 pub fn load_gcn_selector<P: AsRef<Path>>(
     model_path: P,
     use_cuda: bool,
@@ -248,7 +248,7 @@ pub fn load_gcn_selector<P: AsRef<Path>>(
 }
 
 #[cfg(test)]
-#[cfg(feature = "torch")]
+#[cfg(feature = "ml")]
 mod tests {
     use super::*;
 

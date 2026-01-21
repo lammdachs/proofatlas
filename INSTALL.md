@@ -60,15 +60,11 @@ pip install -e ".[ml]"
 python scripts/setup_cargo.py
 
 # Build with ML features
-cargo build --release --features torch
+cargo build --release --features ml
 ```
 
 The `setup_cargo.py` script configures the build to find PyTorch automatically.
 Re-run it if you change Python environments.
-
-Feature flags:
-- `torch` - GCN selector (graph neural network)
-- `sentence` - Sentence transformer selector (requires `torch`)
 
 ## Running the Prover
 

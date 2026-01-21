@@ -541,7 +541,7 @@ impl ProofState {
                 let ratio = age_weight_ratio.unwrap_or(0.5);
                 Box::new(AgeWeightSelector::new(ratio))
             }
-            #[cfg(feature = "torch")]
+            #[cfg(feature = "ml")]
             "gcn" => {
                 // Find TorchScript GCN model
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
@@ -567,7 +567,7 @@ impl ProofState {
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load GCN model: {}", e)))?;
                 Box::new(selector)
             }
-            #[cfg(all(feature = "sentence", feature = "torch"))]
+            #[cfg(feature = "ml")]
             "sentence" => {
                 // Find TorchScript model and tokenizer
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
@@ -596,7 +596,7 @@ impl ProofState {
                 Box::new(selector)
             }
             _ => {
-                #[cfg(all(feature = "sentence", feature = "torch"))]
+                #[cfg(feature = "ml")]
                 let available = "'age_weight', 'gcn', or 'sentence'";
                 #[cfg(all(feature = "torch", not(feature = "sentence")))]
                 let available = "'age_weight' or 'gcn'";
