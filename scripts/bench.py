@@ -850,8 +850,19 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
 
+def get_num_gpus() -> int:
+    """Get the number of available CUDA GPUs."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.device_count()
+    except ImportError:
+        pass
+    return 0
+
+
 def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_path,
-                    collect_trace, trace_preset, result_queue):
+                    collect_trace, trace_preset, result_queue, gpu_id=None):
     """Worker function that runs in subprocess and sends result via queue."""
     # Reset signal handlers inherited from parent daemon process.
     # Without this, if the worker is killed (e.g., timeout), it would run
@@ -860,6 +871,10 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+
+    # Set CUDA device for this worker
+    if gpu_id is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
     try:
         result = _run_proofatlas_inner(
@@ -873,7 +888,7 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
 
 def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                    weights_path: str = None, collect_trace: bool = False,
-                   trace_preset: str = None) -> BenchResult:
+                   trace_preset: str = None, gpu_id: int = None) -> BenchResult:
     """Run ProofAtlas on a problem in a subprocess.
 
     Uses multiprocessing to isolate crashes (e.g., stack overflow on deeply
@@ -888,7 +903,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     proc = multiprocessing.Process(
         target=_worker_process,
         args=(str(problem), str(base_dir), preset, str(tptp_root),
-              weights_path, collect_trace, trace_preset, result_queue)
+              weights_path, collect_trace, trace_preset, result_queue, gpu_id)
     )
 
     start = time.time()
@@ -1146,7 +1161,7 @@ def _update_benchmark_index(output_dir: Path):
 
 def _run_single_problem(args):
     """Worker function for parallel execution."""
-    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun = args
+    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, gpu_id = args
 
     try:
         # Check if already evaluated (skip unless --rerun)
@@ -1158,7 +1173,7 @@ def _run_single_problem(args):
             result = run_proofatlas(
                 problem, base_dir, preset, tptp_root,
                 weights_path=weights_path, collect_trace=collect_trace,
-                trace_preset=trace_preset,
+                trace_preset=trace_preset, gpu_id=gpu_id,
             )
         elif prover == "vampire":
             result = run_vampire(problem, base_dir, preset, binary, tptp_root)
@@ -1193,10 +1208,16 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     # Always collect traces for proofatlas
     collect_trace = (prover == "proofatlas")
 
-    # Prepare work items
+    # Detect GPUs for round-robin distribution
+    num_gpus = get_num_gpus()
+    if num_gpus > 0 and prover == "proofatlas":
+        print(f"Distributing across {num_gpus} GPU(s)")
+
+    # Prepare work items with GPU assignment (round-robin)
     work_items = [
-        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun)
-        for problem in problems
+        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun,
+         i % num_gpus if num_gpus > 0 else None)
+        for i, problem in enumerate(problems)
     ]
 
     if n_jobs > 1:
