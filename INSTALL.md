@@ -53,18 +53,22 @@ The binary will be at `target/release/prove`.
 To build with ML-based clause selection:
 
 ```bash
-# Install PyTorch
-pip install -e ".[ml]"
+# Install PyTorch first
+pip install torch==2.9.0
 
 # Configure Cargo for tch-rs
 python scripts/setup_cargo.py
 
-# Build with ML features
+# Install with ML features (--no-build-isolation required)
+pip install --no-build-isolation -e ".[ml]"
+
+# Build Rust with ML features
 cargo build --release --features ml
 ```
 
-The `setup_cargo.py` script configures the build to find PyTorch automatically.
-Re-run it if you change Python environments.
+The `--no-build-isolation` flag is needed because the Rust build uses your
+installed PyTorch to find libtorch. Re-run `setup_cargo.py` if you change
+Python environments.
 
 ## Running the Prover
 
