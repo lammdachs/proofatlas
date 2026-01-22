@@ -1,12 +1,24 @@
 """
 Clause selector models for theorem proving.
 
-This module contains neural network models for clause selection:
-- GNN-based: ClauseGCN, ClauseGAT, ClauseGraphSAGE
-- Transformer-based: ClauseTransformer, ClauseGNNTransformer
-- Baselines: NodeMLP, AgeWeightHeuristic
+This module provides modular components for clause selection:
 
-All models output clause scores for selection in the given-clause algorithm.
+Modular design (recommended):
+    - Encoders: GCNEncoder, GATEncoder, GraphSAGEEncoder
+    - Scorers: MLPScorer, AttentionScorer, TransformerScorer, CrossAttentionScorer
+    - ClauseSelector: Combines encoder + projection + scorer
+
+Legacy models (convenience wrappers):
+    - ClauseGCN, ClauseGAT, ClauseGraphSAGE
+    - ClauseTransformer, ClauseGNNTransformer
+
+Example:
+    # Modular approach
+    encoder = GCNEncoder(hidden_dim=64, num_layers=3)
+    selector = ClauseSelector(encoder, scorer_type="attention", scorer_dim=64)
+
+    # Or use convenience wrapper
+    model = ClauseGCN(hidden_dim=64, num_layers=3, scorer_type="attention")
 """
 
 from .gnn import (
@@ -20,13 +32,41 @@ from .gnn import (
     ClauseFeatureEmbedding,
     FeatureEmbedding,  # Legacy alias
 )
+from .encoders import (
+    ClauseEncoder,
+    ClauseSelector,
+    GCNEncoder,
+    GATEncoder,
+    GraphSAGEEncoder,
+    create_encoder,
+)
+from .scorers import (
+    MLPScorer,
+    AttentionScorer,
+    TransformerScorer,
+    CrossAttentionScorer,
+    create_scorer,
+)
 from .transformer import ClauseTransformer, ClauseGNNTransformer
 from .baseline import NodeMLP, AgeWeightHeuristic
 from .utils import normalize_adjacency, edge_index_to_adjacency
-from .factory import create_model, export_to_onnx
+from .factory import create_model
 
 __all__ = [
-    # GNN models
+    # Modular components (recommended)
+    "ClauseEncoder",
+    "ClauseSelector",
+    "GCNEncoder",
+    "GATEncoder",
+    "GraphSAGEEncoder",
+    "create_encoder",
+    # Scorers
+    "MLPScorer",
+    "AttentionScorer",
+    "TransformerScorer",
+    "CrossAttentionScorer",
+    "create_scorer",
+    # Legacy GNN models
     "ClauseGCN",
     "ClauseGAT",
     "ClauseGraphSAGE",
@@ -34,10 +74,10 @@ __all__ = [
     "GCNLayer",
     "GATLayer",
     "GraphSAGELayer",
-    # Feature embeddings (IJCAR26 architecture)
+    # Feature embeddings
     "NodeFeatureEmbedding",
     "ClauseFeatureEmbedding",
-    "FeatureEmbedding",  # Legacy alias
+    "FeatureEmbedding",
     # Transformer models
     "ClauseTransformer",
     "ClauseGNNTransformer",
@@ -49,5 +89,4 @@ __all__ = [
     "edge_index_to_adjacency",
     # Factory
     "create_model",
-    "export_to_onnx",
 ]

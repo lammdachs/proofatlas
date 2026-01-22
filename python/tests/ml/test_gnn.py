@@ -14,13 +14,37 @@ from proofatlas.selectors.gnn import (
 )
 
 
+def make_node_features(num_nodes: int) -> torch.Tensor:
+    """Create valid node features: [type (0-5), arity (>=0), arg_pos (>=0)]."""
+    features = torch.zeros(num_nodes, 3)
+    features[:, 0] = torch.randint(0, 6, (num_nodes,)).float()
+    features[:, 1] = torch.randint(0, 5, (num_nodes,)).float()
+    features[:, 2] = torch.randint(0, 10, (num_nodes,)).float()
+    return features
+
+
+def make_clause_features(num_clauses: int) -> torch.Tensor:
+    """Create valid clause features: [age (0-1), role (0-4), size (>=1)]."""
+    features = torch.zeros(num_clauses, 3)
+    features[:, 0] = torch.rand(num_clauses)
+    features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
+    features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+    return features
+
+
+def make_adj(num_nodes: int) -> torch.Tensor:
+    """Create normalized adjacency matrix with self-loops."""
+    adj = torch.eye(num_nodes) + 0.1 * torch.ones(num_nodes, num_nodes)
+    return adj / adj.sum(dim=1, keepdim=True)
+
+
 class TestGCNLayer:
     """Tests for GCNLayer."""
 
     def test_forward_shape(self):
-        layer = GCNLayer(in_dim=13, out_dim=64)
-        x = torch.randn(10, 13)
-        adj = torch.eye(10)  # Simple identity adjacency
+        layer = GCNLayer(in_dim=15, out_dim=64)
+        x = torch.randn(10, 15)  # Embedded features (after NodeFeatureEmbedding)
+        adj = torch.eye(10)
         out = layer(x, adj)
         assert out.shape == (10, 64)
 
@@ -29,15 +53,12 @@ class TestGCNLayer:
         layer = GCNLayer(in_dim=4, out_dim=4)
         x = torch.randn(3, 4)
 
-        # No connections (identity)
         adj_id = torch.eye(3)
         out_id = layer(x, adj_id)
 
-        # Full connections
         adj_full = torch.ones(3, 3) / 3
         out_full = layer(x, adj_full)
 
-        # Outputs should differ
         assert not torch.allclose(out_id, out_full)
 
     def test_gradient_flow(self):
@@ -54,15 +75,15 @@ class TestGATLayer:
     """Tests for GATLayer."""
 
     def test_forward_shape_concat(self):
-        layer = GATLayer(in_dim=13, out_dim=16, num_heads=4, concat=True)
-        x = torch.randn(10, 13)
+        layer = GATLayer(in_dim=15, out_dim=16, num_heads=4, concat=True)
+        x = torch.randn(10, 15)
         adj = torch.eye(10)
         out = layer(x, adj)
         assert out.shape == (10, 16 * 4)
 
     def test_forward_shape_mean(self):
-        layer = GATLayer(in_dim=13, out_dim=16, num_heads=4, concat=False)
-        x = torch.randn(10, 13)
+        layer = GATLayer(in_dim=15, out_dim=16, num_heads=4, concat=False)
+        x = torch.randn(10, 15)
         adj = torch.eye(10)
         out = layer(x, adj)
         assert out.shape == (10, 16)
@@ -71,8 +92,6 @@ class TestGATLayer:
         """Test that disconnected nodes don't attend to each other."""
         layer = GATLayer(in_dim=4, out_dim=4, num_heads=2, concat=False)
         x = torch.randn(3, 4)
-
-        # Only self-connections
         adj = torch.eye(3)
         out = layer(x, adj)
         assert out.shape == (3, 4)
@@ -91,8 +110,8 @@ class TestGraphSAGELayer:
     """Tests for GraphSAGELayer."""
 
     def test_forward_shape(self):
-        layer = GraphSAGELayer(in_dim=13, out_dim=64)
-        x = torch.randn(10, 13)
+        layer = GraphSAGELayer(in_dim=15, out_dim=64)
+        x = torch.randn(10, 15)
         adj = torch.eye(10)
         out = layer(x, adj)
         assert out.shape == (10, 64)
@@ -102,11 +121,9 @@ class TestGraphSAGELayer:
         layer = GraphSAGELayer(in_dim=4, out_dim=4)
         x = torch.randn(3, 4)
 
-        # No neighbors
         adj_empty = torch.zeros(3, 3)
         out_empty = layer(x, adj_empty)
 
-        # With neighbors
         adj_conn = torch.tensor([
             [0., 0.5, 0.5],
             [0.5, 0., 0.5],
@@ -134,13 +151,10 @@ class TestScorerHead:
         scorer.train()
         out1 = scorer(x)
         out2 = scorer(x)
-        # With high dropout, outputs should likely differ
-        # (not guaranteed but very likely with 50% dropout)
 
         scorer.eval()
         out3 = scorer(x)
         out4 = scorer(x)
-        # In eval mode, outputs should be identical
         assert torch.allclose(out3, out4)
 
 
@@ -148,58 +162,66 @@ class TestClauseGCN:
     """Tests for ClauseGCN model."""
 
     def test_forward_shape(self):
-        model = ClauseGCN(node_feature_dim=13, hidden_dim=64, num_layers=3)
-        node_features = torch.randn(20, 13)
-        adj = torch.eye(20)
+        model = ClauseGCN(hidden_dim=64, num_layers=3)
+        node_features = make_node_features(20)
+        adj = make_adj(20)
         pool_matrix = torch.zeros(5, 20)
         for i in range(5):
-            pool_matrix[i, i*4:(i+1)*4] = 0.25  # Pool 4 nodes per clause
+            pool_matrix[i, i*4:(i+1)*4] = 0.25
+        clause_features = make_clause_features(5)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (5,)
+        assert not torch.isnan(scores).any()
 
     def test_single_clause(self):
-        model = ClauseGCN(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(4, 13)
-        adj = torch.eye(4)
+        model = ClauseGCN(hidden_dim=32, num_layers=2)
+        node_features = make_node_features(4)
+        adj = make_adj(4)
         pool_matrix = torch.ones(1, 4) / 4
+        clause_features = make_clause_features(1)
 
-        scores = model(node_features, adj, pool_matrix)
-        # Single clause may return scalar or (1,) depending on squeeze
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.numel() == 1
+        assert not torch.isnan(scores).any()
 
     def test_different_num_layers(self):
         for num_layers in [1, 2, 3, 4]:
-            model = ClauseGCN(node_feature_dim=13, hidden_dim=32, num_layers=num_layers)
-            node_features = torch.randn(10, 13)
-            adj = torch.eye(10)
+            model = ClauseGCN(hidden_dim=32, num_layers=num_layers)
+            node_features = make_node_features(10)
+            adj = make_adj(10)
             pool_matrix = torch.ones(2, 10) / 10
+            clause_features = make_clause_features(2)
 
-            scores = model(node_features, adj, pool_matrix)
+            scores = model(node_features, adj, pool_matrix, clause_features)
             assert scores.shape == (2,)
+            assert not torch.isnan(scores).any()
 
     def test_with_different_scorers(self):
-        for scorer_type in ["mlp", "attention", "transformer"]:
+        for scorer_type in ["mlp", "attention", "transformer", "cross_attention"]:
             model = ClauseGCN(
-                node_feature_dim=13,
                 hidden_dim=64,
                 num_layers=2,
                 scorer_type=scorer_type,
             )
-            node_features = torch.randn(10, 13)
-            adj = torch.eye(10)
+            node_features = make_node_features(10)
+            adj = make_adj(10)
             pool_matrix = torch.ones(3, 10) / 10
+            clause_features = make_clause_features(3)
 
-            scores = model(node_features, adj, pool_matrix)
+            scores = model(node_features, adj, pool_matrix, clause_features)
             assert scores.shape == (3,)
+            assert not torch.isnan(scores).any()
 
     def test_gradient_flow(self):
-        model = ClauseGCN(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(10, 13, requires_grad=True)
-        adj = torch.eye(10)
+        model = ClauseGCN(hidden_dim=32, num_layers=2)
+        node_features = make_node_features(10)
+        node_features.requires_grad_(True)
+        adj = make_adj(10)
         pool_matrix = torch.ones(2, 10) / 10
+        clause_features = make_clause_features(2)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         loss = scores.sum()
         loss.backward()
         assert node_features.grad is not None
@@ -209,34 +231,38 @@ class TestClauseGAT:
     """Tests for ClauseGAT model."""
 
     def test_forward_shape(self):
-        model = ClauseGAT(node_feature_dim=13, hidden_dim=64, num_layers=2, num_heads=4)
-        node_features = torch.randn(20, 13)
-        adj = torch.eye(20)
+        model = ClauseGAT(hidden_dim=64, num_layers=2, num_heads=4)
+        node_features = make_node_features(20)
+        adj = make_adj(20)
         pool_matrix = torch.zeros(5, 20)
         for i in range(5):
             pool_matrix[i, i*4:(i+1)*4] = 0.25
+        clause_features = make_clause_features(5)
 
-        scores = model(node_features, adj, pool_matrix)
-        # ClauseGAT returns (N, 1) shape
-        assert scores.shape == (5, 1) or scores.numel() == 5
+        scores = model(node_features, adj, pool_matrix, clause_features)
+        assert scores.numel() == 5
+        assert not torch.isnan(scores).any()
 
     def test_multi_layer(self):
-        # GAT with num_layers > 1 (single layer has dimension issues)
-        model = ClauseGAT(node_feature_dim=13, hidden_dim=32, num_layers=2, num_heads=2)
-        node_features = torch.randn(8, 13)
-        adj = torch.eye(8)
+        model = ClauseGAT(hidden_dim=32, num_layers=2, num_heads=2)
+        node_features = make_node_features(8)
+        adj = make_adj(8)
         pool_matrix = torch.ones(2, 8) / 8
+        clause_features = make_clause_features(2)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.numel() == 2
+        assert not torch.isnan(scores).any()
 
     def test_gradient_flow(self):
-        model = ClauseGAT(node_feature_dim=13, hidden_dim=32, num_layers=2, num_heads=2)
-        node_features = torch.randn(10, 13, requires_grad=True)
-        adj = torch.eye(10)
+        model = ClauseGAT(hidden_dim=32, num_layers=2, num_heads=2)
+        node_features = make_node_features(10)
+        node_features.requires_grad_(True)
+        adj = make_adj(10)
         pool_matrix = torch.ones(2, 10) / 10
+        clause_features = make_clause_features(2)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         loss = scores.sum()
         loss.backward()
         assert node_features.grad is not None
@@ -246,33 +272,84 @@ class TestClauseGraphSAGE:
     """Tests for ClauseGraphSAGE model."""
 
     def test_forward_shape(self):
-        model = ClauseGraphSAGE(node_feature_dim=13, hidden_dim=64, num_layers=3)
-        node_features = torch.randn(20, 13)
-        adj = torch.eye(20)
+        model = ClauseGraphSAGE(hidden_dim=64, num_layers=3)
+        node_features = make_node_features(20)
+        adj = make_adj(20)
         pool_matrix = torch.zeros(5, 20)
         for i in range(5):
             pool_matrix[i, i*4:(i+1)*4] = 0.25
+        clause_features = make_clause_features(5)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (5,)
+        assert not torch.isnan(scores).any()
 
     def test_single_clause(self):
-        model = ClauseGraphSAGE(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(4, 13)
+        model = ClauseGraphSAGE(hidden_dim=32, num_layers=2)
+        node_features = make_node_features(4)
         adj = torch.zeros(4, 4)  # No neighbors for GraphSAGE
         pool_matrix = torch.ones(1, 4) / 4
+        clause_features = make_clause_features(1)
 
-        scores = model(node_features, adj, pool_matrix)
-        # Single clause may return scalar or (1,) depending on squeeze
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.numel() == 1
+        assert not torch.isnan(scores).any()
 
     def test_gradient_flow(self):
-        model = ClauseGraphSAGE(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(10, 13, requires_grad=True)
-        adj = torch.eye(10)
+        model = ClauseGraphSAGE(hidden_dim=32, num_layers=2)
+        node_features = make_node_features(10)
+        node_features.requires_grad_(True)
+        adj = make_adj(10)
         pool_matrix = torch.ones(2, 10) / 10
+        clause_features = make_clause_features(2)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         loss = scores.sum()
         loss.backward()
         assert node_features.grad is not None
+
+
+class TestTorchScriptExport:
+    """Tests for TorchScript export functionality."""
+
+    @pytest.fixture
+    def valid_inputs(self):
+        """Create valid inputs with correct value ranges."""
+        num_nodes, num_clauses = 20, 5
+        node_features = make_node_features(num_nodes)
+        adj = make_adj(num_nodes)
+        pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
+        clause_features = make_clause_features(num_clauses)
+        return node_features, adj, pool_matrix, clause_features
+
+    def test_gcn_export(self, valid_inputs, tmp_path):
+        """Test ClauseGCN TorchScript export."""
+        model = ClauseGCN(hidden_dim=64, num_layers=3)
+        path = tmp_path / "gcn.pt"
+        model.export_torchscript(str(path))
+
+        loaded = torch.jit.load(str(path))
+        node_features, adj, pool_matrix, clause_features = valid_inputs
+
+        with torch.no_grad():
+            original = model(node_features, adj, pool_matrix, clause_features)
+            exported = loaded(node_features, adj, pool_matrix, clause_features)
+
+        assert torch.allclose(original, exported)
+
+    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer", "cross_attention"])
+    def test_gcn_export_all_scorers(self, valid_inputs, tmp_path, scorer_type):
+        """Test TorchScript export with all scorer types."""
+        model = ClauseGCN(hidden_dim=64, num_layers=2, scorer_type=scorer_type)
+        path = tmp_path / f"gcn_{scorer_type}.pt"
+        model.export_torchscript(str(path))
+
+        loaded = torch.jit.load(str(path))
+        node_features, adj, pool_matrix, clause_features = valid_inputs
+
+        with torch.no_grad():
+            original = model(node_features, adj, pool_matrix, clause_features)
+            exported = loaded(node_features, adj, pool_matrix, clause_features)
+
+        assert not torch.isnan(original).any()
+        assert torch.allclose(original, exported)

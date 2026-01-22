@@ -3,19 +3,19 @@
 Train clause selection models.
 
 USAGE:
-    proofatlas-train --traces steps_sel22 --preset gcn_mlp   # Use preset from proofatlas.json
+    proofatlas-train --traces steps_sel22 --preset gcn_mlp            # Use preset from proofatlas.json
     proofatlas-train --traces steps_sel22 --embedding gcn --scorer mlp  # Specify directly
-    proofatlas-train --traces steps_sel22                    # Uses default preset
+    proofatlas-train --traces steps_sel22                             # Uses default preset
 
 CONFIG FILES:
     configs/proofatlas.json  - Presets with embedding/scorer combinations
-    configs/embeddings.json  - Embedding architecture configs (gcn, etc.)
+    configs/embeddings.json  - Embedding architecture configs (gcn, sentence, etc.)
     configs/scorers.json     - Scorer architecture configs (mlp, attention, etc.)
 
 OUTPUT:
-    .logs/<run_name>/              - Training logs and checkpoints
-    .logs/<run_name>/metrics.json  - Metrics for web visualization
-    .weights/<run_name>.safetensors - Exported model weights
+    .logs/<run_name>/                          - Training logs and checkpoints
+    .logs/<run_name>/metrics.json              - Metrics for web visualization
+    .weights/{embedding}_{scorer}.safetensors  - Exported model weights
 """
 
 import argparse
@@ -348,7 +348,7 @@ def main():
     parser.add_argument(
         "--embedding",
         type=str,
-        help="Embedding type from embeddings.json (e.g., gcn, none)",
+        help="Embedding type from embeddings.json (e.g., gcn, sentence)",
     )
     parser.add_argument(
         "--scorer",

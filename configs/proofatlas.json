@@ -68,20 +68,40 @@
       "age_weight_ratio": 0.167
     },
 
-    "gcn": {
-      "description": "128 iterations with GCN clause selector",
+    "gcn_mlp": {
+      "description": "GCN embedding with MLP scorer",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 22,
-      "selector": "gcn"
+      "embedding": "gcn",
+      "scorer": "mlp"
     },
 
-    "sentence": {
-      "description": "128 iterations with sentence transformer selector",
+    "gcn_attention": {
+      "description": "GCN embedding with attention scorer",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 22,
-      "selector": "sentence"
+      "embedding": "gcn",
+      "scorer": "attention"
+    },
+
+    "gcn_transformer": {
+      "description": "GCN embedding with transformer scorer",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 22,
+      "embedding": "gcn",
+      "scorer": "transformer"
+    },
+
+    "sentence_mlp": {
+      "description": "Sentence embedding with MLP scorer",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 22,
+      "embedding": "sentence",
+      "scorer": "mlp"
     }
   }
 }

@@ -400,10 +400,6 @@ class ClauseGCN(nn.Module):
         Returns:
             Scores [num_clauses]
         """
-        # Handle legacy 8-dim features
-        if node_features.size(-1) == 8:
-            node_features = node_features[:, :3]
-
         # Embed node features
         x = self.node_embedding(node_features)
 
@@ -433,6 +429,54 @@ class ClauseGCN(nn.Module):
             clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
         return self.scorer(clause_emb).squeeze(-1)
+
+    def export_torchscript(self, path: str):
+        """
+        Export model to TorchScript format for tch-rs inference.
+
+        Args:
+            path: Output path for TorchScript model (.pt)
+        """
+        self.eval()
+
+        # Create dummy inputs for tracing
+        # Use realistic feature values (not random, which can have invalid ranges)
+        num_nodes = 10
+        num_clauses = 3
+
+        # Node features: [type (0-5), arity (>=0), arg_pos (>=0)]
+        dummy_node_features = torch.zeros(num_nodes, 3)
+        dummy_node_features[:, 0] = torch.randint(0, 6, (num_nodes,)).float()  # node type
+        dummy_node_features[:, 1] = torch.randint(0, 5, (num_nodes,)).float()  # arity
+        dummy_node_features[:, 2] = torch.randint(0, 10, (num_nodes,)).float()  # arg_pos
+
+        # Adjacency with self-loops, row-normalized
+        dummy_adj = torch.eye(num_nodes) + 0.1 * torch.ones(num_nodes, num_nodes)
+        dummy_adj = dummy_adj / dummy_adj.sum(dim=1, keepdim=True)
+
+        dummy_pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
+
+        # Clause features: [age (0-1), role (0-4), size (>=1)]
+        dummy_clause_features = torch.zeros(num_clauses, 3)
+        dummy_clause_features[:, 0] = torch.rand(num_clauses)  # age
+        dummy_clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()  # role
+        dummy_clause_features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()  # size
+
+        with torch.no_grad():
+            traced = torch.jit.trace(
+                self,
+                (dummy_node_features, dummy_adj, dummy_pool_matrix, dummy_clause_features)
+            )
+
+        traced.save(path)
+        print(f"Exported TorchScript model to {path}")
+
+        # Verify
+        with torch.no_grad():
+            original_out = self(dummy_node_features, dummy_adj, dummy_pool_matrix, dummy_clause_features)
+            traced_out = traced(dummy_node_features, dummy_adj, dummy_pool_matrix, dummy_clause_features)
+            diff = (original_out - traced_out).abs().max().item()
+            print(f"Verification: max diff = {diff:.6e}")
 
 
 class ClauseGAT(nn.Module):
@@ -516,10 +560,6 @@ class ClauseGAT(nn.Module):
         Returns:
             Scores [num_clauses]
         """
-        # Handle legacy 8-dim features
-        if node_features.size(-1) == 8:
-            node_features = node_features[:, :3]
-
         x = self.node_embedding(node_features)
 
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
@@ -621,10 +661,6 @@ class ClauseGraphSAGE(nn.Module):
         Returns:
             Scores [num_clauses]
         """
-        # Handle legacy 8-dim features
-        if node_features.size(-1) == 8:
-            node_features = node_features[:, :3]
-
         x = self.node_embedding(node_features)
 
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):

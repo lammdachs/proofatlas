@@ -513,48 +513,54 @@ impl ProofState {
     ///     max_iterations: Maximum number of saturation steps
     ///     timeout_secs: Optional timeout in seconds
     ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
-    ///     selector: Clause selector type: "age_weight" (default), "gcn", or "sentence"
+    ///     embedding_type: Embedding type: None (default, uses age_weight), "graph", or "string"
     ///     weights_path: Path to model weights directory
+    ///     model_name: Name of the model file (without .pt extension).
+    ///                 Uses "{embedding}_{scorer}" format (e.g., "gcn_mlp", "sentence_attention").
     ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str) where status is one of:
     ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, max_clause_memory_mb)
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, selector=None, weights_path=None, max_clause_memory_mb=None))]
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
         timeout_secs: Option<f64>,
         age_weight_ratio: Option<f64>,
-        selector: Option<String>,
+        embedding_type: Option<String>,
         weights_path: Option<String>,
+        model_name: Option<String>,
         max_clause_memory_mb: Option<usize>,
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
 
-        // Create clause selector based on selector type
-        let selector_type = selector.as_deref().unwrap_or("age_weight");
-        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match selector_type {
-            "age_weight" => {
+        // Create clause selector based on embedding type
+        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match embedding_type.as_deref() {
+            None => {
+                // No embedding = heuristic selector
                 let ratio = age_weight_ratio.unwrap_or(0.5);
                 Box::new(AgeWeightSelector::new(ratio))
             }
             #[cfg(feature = "ml")]
-            "gcn" => {
-                // Find TorchScript GCN model
+            Some("graph") => {
+                // Graph embeddings (gcn, gat, graphsage)
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
 
-                let model_path = weights_dir.join("gcn_model.pt");
+                let name = model_name.as_deref().ok_or_else(|| {
+                    PyValueError::new_err("model_name required for graph embedding")
+                })?;
+                let model_path = weights_dir.join(format!("{}.pt", name));
 
                 if !model_path.exists() {
                     return Err(PyValueError::new_err(format!(
-                        "GCN model not found at {}. Export with scripts/export_gcn.py",
+                        "Model not found at {}. Export with model.export_torchscript(path)",
                         model_path.display()
                     )));
                 }
@@ -562,24 +568,27 @@ impl ProofState {
                 let selector = crate::selectors::load_gcn_selector(
                     &model_path,
                     true,   // use_cuda
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load GCN model: {}", e)))?;
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
                 Box::new(selector)
             }
             #[cfg(feature = "ml")]
-            "sentence" => {
-                // Find TorchScript model and tokenizer
+            Some("string") => {
+                // String embeddings (sentence transformers)
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
 
-                let model_path = weights_dir.join("sentence_encoder.pt");
-                let tokenizer_path = weights_dir.join("sentence_tokenizer/tokenizer.json");
+                let name = model_name.as_deref().ok_or_else(|| {
+                    PyValueError::new_err("model_name required for string embedding")
+                })?;
+                let model_path = weights_dir.join(format!("{}.pt", name));
+                let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", name));
 
                 if !model_path.exists() {
                     return Err(PyValueError::new_err(format!(
-                        "Sentence model not found at {}. Export with model.export_torchscript(path)",
+                        "Model not found at {}. Export with model.export_torchscript(path)",
                         model_path.display()
                     )));
                 }
@@ -588,19 +597,17 @@ impl ProofState {
                     &model_path,
                     &tokenizer_path,
                     true,   // use_cuda
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load sentence model: {}", e)))?;
+                ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
                 Box::new(selector)
             }
-            _ => {
+            Some(other) => {
                 #[cfg(feature = "ml")]
-                let available = "'age_weight', 'gcn', or 'sentence'";
-                #[cfg(all(feature = "torch", not(feature = "sentence")))]
-                let available = "'age_weight' or 'gcn'";
-                #[cfg(not(feature = "torch"))]
-                let available = "'age_weight'";
+                let available = "None, 'graph', or 'string'";
+                #[cfg(not(feature = "ml"))]
+                let available = "None (ML features not enabled)";
                 return Err(PyValueError::new_err(format!(
-                    "Unknown selector: {}. Use {}",
-                    selector_type, available
+                    "Unknown embedding_type: '{}'. Use {}",
+                    other, available
                 )));
             }
         };

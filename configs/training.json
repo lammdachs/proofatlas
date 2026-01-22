@@ -6,8 +6,8 @@
     "margin": 0.1,
 
     "optimizer": "adamw",
-    "learning_rate": 0.001,
-    "weight_decay": 1e-5,
+    "learning_rate": 0.0003,
+    "weight_decay": 1e-4,
     "betas": [0.9, 0.999],
     "gradient_clip": 1.0
   },
@@ -35,8 +35,7 @@
 
     "long": {
       "description": "Extended training for better convergence",
-      "max_epochs": 200,
-      "learning_rate": 0.0005
+      "max_epochs": 200
     },
 
     "sgd": {

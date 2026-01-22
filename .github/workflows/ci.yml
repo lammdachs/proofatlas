@@ -39,6 +39,7 @@ jobs:
               - 'web/**'
             python_ml:
               - 'python/proofatlas/ml/**'
+              - 'python/proofatlas/selectors/**'
               - 'python/tests/ml/**'
             docs_only:
               - '**/*.md'

@@ -160,6 +160,29 @@ class TestScorerTrainEval:
         assert torch.allclose(scores1, scores2)
 
 
+def _make_valid_inputs(num_nodes: int, num_clauses: int):
+    """Create valid test inputs with correct value ranges."""
+    # Node features: [type (0-5), arity (>=0), arg_pos (>=0)]
+    node_features = torch.zeros(num_nodes, 3)
+    node_features[:, 0] = torch.randint(0, 6, (num_nodes,)).float()
+    node_features[:, 1] = torch.randint(0, 5, (num_nodes,)).float()
+    node_features[:, 2] = torch.randint(0, 10, (num_nodes,)).float()
+
+    # Normalized adjacency with self-loops
+    adj = torch.eye(num_nodes) + 0.1 * torch.ones(num_nodes, num_nodes)
+    adj = adj / adj.sum(dim=1, keepdim=True)
+
+    pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
+
+    # Clause features: [age (0-1), role (0-4), size (>=1)]
+    clause_features = torch.zeros(num_clauses, 3)
+    clause_features[:, 0] = torch.rand(num_clauses)
+    clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
+    clause_features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+
+    return node_features, adj, pool_matrix, clause_features
+
+
 class TestScorerIntegration:
     """Integration tests with GNN models."""
 
@@ -167,35 +190,31 @@ class TestScorerIntegration:
         from proofatlas.selectors.gnn import ClauseGCN
 
         model = ClauseGCN(
-            node_feature_dim=13,
             hidden_dim=64,
             num_layers=2,
             scorer_type="attention",
             scorer_num_heads=4,
         )
-        node_features = torch.randn(50, 13)
-        adj = torch.randn(50, 50)
-        pool_matrix = torch.randn(10, 50)
+        node_features, adj, pool_matrix, clause_features = _make_valid_inputs(50, 10)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (10,)
+        assert not torch.isnan(scores).any()
 
     def test_gcn_with_transformer_scorer(self):
         from proofatlas.selectors.gnn import ClauseGCN
 
         model = ClauseGCN(
-            node_feature_dim=13,
             hidden_dim=64,
             num_layers=2,
             scorer_type="transformer",
             scorer_num_layers=2,
         )
-        node_features = torch.randn(50, 13)
-        adj = torch.randn(50, 50)
-        pool_matrix = torch.randn(10, 50)
+        node_features, adj, pool_matrix, clause_features = _make_valid_inputs(50, 10)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (10,)
+        assert not torch.isnan(scores).any()
 
     def test_factory_with_scorer(self):
         from proofatlas.selectors.factory import create_model
@@ -206,9 +225,8 @@ class TestScorerIntegration:
             num_layers=2,
             scorer_type="attention",
         )
-        node_features = torch.randn(50, 13)
-        adj = torch.randn(50, 50)
-        pool_matrix = torch.randn(10, 50)
+        node_features, adj, pool_matrix, clause_features = _make_valid_inputs(50, 10)
 
-        scores = model(node_features, adj, pool_matrix)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (10,)
+        assert not torch.isnan(scores).any()

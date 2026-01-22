@@ -5,24 +5,24 @@ Benchmark and train theorem provers.
 USAGE:
     proofatlas-bench                                  # Evaluate with default preset
     proofatlas-bench --preset time_sel0               # Use specific preset
-    proofatlas-bench --preset gcn --force-train       # Force retrain even if weights exist
+    proofatlas-bench --preset gcn_mlp --force-train   # Force retrain even if weights exist
 
     proofatlas-bench --track                          # Start and monitor progress
     proofatlas-bench --status                         # Check progress
     proofatlas-bench --kill                           # Stop job
 
-LEARNED SELECTORS:
-    When preset uses gcn/mlp/gat selector:
-    1. If weights exist in .weights/, uses them directly
+ML MODELS:
+    When preset has embedding+scorer fields (e.g., gcn_mlp):
+    1. If weights exist in .weights/{embedding}_{scorer}.pt, uses them
     2. If not, automatically:
-       - Collects traces with age_weight selector
+       - Collects traces with age_weight heuristic
        - Trains the model
-       - Saves weights to .weights/
+       - Exports to .weights/{embedding}_{scorer}.pt
 
 OUTPUT:
-    .weights/<selector>.safetensors  - Trained model weights
-    .data/traces/<preset>/           - Proof traces for training
-    .data/runs/<prover>/<preset>/    - Per-problem results (JSON)
+    .weights/{embedding}_{scorer}.pt  - TorchScript model for inference
+    .data/traces/<preset>/            - Proof traces for training
+    .data/runs/<prover>/<preset>/     - Per-problem results (JSON)
 """
 
 import argparse
@@ -438,35 +438,43 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
 
 # Weights management
 
-def find_weights(base_dir: Path, selector: str) -> Optional[Path]:
+def find_weights(base_dir: Path, preset: dict) -> Optional[Path]:
     """Find weights file/directory for a learned selector.
 
-    For tch-rs selectors (gcn, sentence), returns the .weights directory
+    For ML selectors (graph, string), returns the .weights directory
     if the required model files exist. For legacy selectors, looks for
     .safetensors files.
+
+    Args:
+        base_dir: Project root directory
+        preset: Preset config dict with embedding/scorer fields
     """
     weights_dir = base_dir / ".weights"
     if not weights_dir.exists():
         return None
 
-    # tch-rs selectors use TorchScript .pt files
-    if selector == "gcn":
-        model_path = weights_dir / "gcn_model.pt"
+    # Get model name from preset (modular: {embedding}_{scorer})
+    model_name = get_model_name(preset)
+    embedding_type = get_embedding_type(preset)
+
+    # ML models use TorchScript .pt files
+    if embedding_type == "graph":
+        model_path = weights_dir / f"{model_name}.pt"
         if model_path.exists():
             return weights_dir
-    elif selector == "sentence":
-        model_path = weights_dir / "sentence_encoder.pt"
-        tokenizer_path = weights_dir / "sentence_tokenizer" / "tokenizer.json"
+    elif embedding_type == "string":
+        model_path = weights_dir / f"{model_name}.pt"
+        tokenizer_path = weights_dir / f"{model_name}_tokenizer" / "tokenizer.json"
         if model_path.exists() and tokenizer_path.exists():
             return weights_dir
 
     # Legacy: check for .safetensors files
-    exact = weights_dir / f"{selector}.safetensors"
+    exact = weights_dir / f"{model_name}.safetensors"
     if exact.exists():
         return exact
 
-    # Check for iteration variants (e.g., gcn_iter_5.safetensors)
-    prefix = f"{selector}_iter_"
+    # Check for iteration variants (e.g., gcn_mlp_iter_5.safetensors)
+    prefix = f"{model_name}_iter_"
     latest_iter = None
     latest_path = None
 
@@ -482,14 +490,61 @@ def find_weights(base_dir: Path, selector: str) -> Optional[Path]:
     return latest_path
 
 
-def is_learned_selector(selector_config: dict) -> bool:
-    """Check if selector requires trained weights."""
-    # Check for explicit selector field with learned selector name
-    selector = selector_config.get("selector", "")
-    if selector in ("gcn", "sentence"):
+def is_learned_selector(preset: dict) -> bool:
+    """Check if preset requires trained weights."""
+    # Check for modular embedding+scorer design
+    if "embedding" in preset and "scorer" in preset:
         return True
-    # Legacy: check for embedding or model field
-    return "embedding" in selector_config or "model" in selector_config
+    # Legacy: check for model field
+    return "model" in preset
+
+
+def get_model_name(preset: dict) -> str:
+    """Get model file name from preset config.
+
+    Uses modular naming: {embedding}_{scorer}.pt
+    Falls back to legacy naming for backwards compatibility.
+    """
+    # Modular design: embedding + scorer
+    embedding = preset.get("embedding")
+    scorer = preset.get("scorer")
+    if embedding and scorer:
+        return f"{embedding}_{scorer}"
+
+    # Legacy: explicit model field
+    if "model" in preset:
+        return preset["model"]
+
+    # Legacy: embedding field only
+    if embedding:
+        return embedding
+
+    # Default
+    return "gcn"
+
+
+# Embeddings that use string input (clause text)
+STRING_EMBEDDINGS = {"sentence"}
+
+# Embeddings that use graph input (node features, adjacency, pooling)
+GRAPH_EMBEDDINGS = {"gcn", "gat", "graphsage"}
+
+
+def get_embedding_type(preset: dict) -> Optional[str]:
+    """Get embedding type category from preset config.
+
+    Returns "graph", "string", or None for non-ML presets.
+    """
+    embedding = preset.get("embedding")
+    if not embedding:
+        return None
+
+    if embedding in STRING_EMBEDDINGS:
+        return "string"
+    elif embedding in GRAPH_EMBEDDINGS:
+        return "graph"
+    else:
+        raise ValueError(f"Unknown embedding: {embedding}")
 
 
 # Trace collection and training
@@ -588,7 +643,7 @@ def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log
         training_config = json.load(f)
 
     # Get model and training config from preset
-    embedding_name = preset.get("embedding", preset.get("model"))  # fallback to "model" for compat
+    embedding_name = preset.get("embedding") or preset.get("model")
     scorer_name = preset.get("scorer", "mlp")
     training_name = preset.get("training", "standard")
 
@@ -769,11 +824,12 @@ def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log
         log_file.write(f"TRAIN:{epoch}:{max_epochs}:{train_loss:.6f}\n")
         log_file.flush()
 
-    # Save weights
+    # Save weights using modular naming: {embedding}_{scorer}
     from safetensors.torch import save_file
     weights_dir = base_dir / ".weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
-    weights_path = weights_dir / f"{preset_name}.safetensors"
+    model_name = get_model_name(preset)
+    weights_path = weights_dir / f"{model_name}.safetensors"
 
     metadata = {
         "model_type": model_type,
@@ -823,13 +879,15 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
-    is_learned = "embedding" in preset or "model" in preset or "selector" in preset
+    is_learned = is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
-    # Use selector key directly if present, otherwise use embedding/model for learned selectors
-    selector = preset.get("selector", preset.get("embedding", preset.get("model", "age_weight")) if is_learned else "age_weight")
+    # Derive embedding type from embedding field: "graph", "string", or None
+    embedding_type = get_embedding_type(preset) if is_learned else None
+    # Model name for .pt file: {embedding}_{scorer} for modular design
+    model_name = get_model_name(preset) if is_learned else None
 
-    # Initialize CUDA if using tch-rs torch selector (required for tch to detect CUDA)
-    if selector == "sentence_torch":
+    # Initialize CUDA if using string embedding (required for tch to detect CUDA)
+    if embedding_type == "string":
         try:
             import torch
             if torch.cuda.is_available():
@@ -847,8 +905,9 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             max_iterations,
             float(remaining_timeout),
             float(age_weight_ratio) if not is_learned else None,
-            selector,
+            embedding_type,  # "graph", "string", or None
             weights_path,
+            model_name,
             max_clause_memory_mb,
         )
     except Exception as e:
@@ -1238,8 +1297,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
-        selector_type = preset.get("selector", preset.get("embedding", preset.get("model", "age_weight")))
-        print(f"\nEvaluating {len(problems)} problems with {selector_type}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
+        model_label = get_model_name(preset) if is_learned_selector(preset) else "age_weight"
+        print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")
     else:
@@ -1612,7 +1671,7 @@ def main():
 
             # Training only supported for proofatlas
             if prover == "proofatlas" and is_learned_selector(preset):
-                existing_weights = find_weights(base_dir, preset_name)
+                existing_weights = find_weights(base_dir, preset)
 
                 if existing_weights and not args.force_train:
                     print(f"Using existing weights: {existing_weights}")
