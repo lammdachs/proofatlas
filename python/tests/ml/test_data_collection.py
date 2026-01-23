@@ -3,10 +3,13 @@
 import pytest
 import torch
 from proofatlas import ProofState
-from proofatlas.ml import (
-    run_saturation_loop,
-    to_torch_tensors,
-)
+from proofatlas.ml import to_torch_tensors
+
+
+def run_saturation(state: ProofState, max_iterations: int = 100) -> bool:
+    """Run saturation and return whether proof was found."""
+    proof_found, _ = state.run_saturation(max_iterations)
+    return proof_found
 
 
 class TestTrainingDataExtraction:
@@ -20,7 +23,7 @@ class TestTrainingDataExtraction:
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        proof_found = run_saturation_loop(state, max_iterations=100)
+        proof_found = run_saturation(state, max_iterations=100)
         assert proof_found
 
         examples = state.extract_training_examples()
@@ -40,7 +43,7 @@ class TestTrainingDataExtraction:
             cnf(r_c, axiom, r(c)).
         """)
 
-        proof_found = run_saturation_loop(state, max_iterations=100)
+        proof_found = run_saturation(state, max_iterations=100)
         assert proof_found
 
         examples = state.extract_training_examples()
@@ -63,7 +66,7 @@ class TestTrainingDataExtraction:
         """)
 
         # Limit iterations to prevent finding a proof
-        proof_found = run_saturation_loop(state, max_iterations=10)
+        proof_found = run_saturation(state, max_iterations=10)
         # This may or may not find proof depending on problem
 
         if not state.contains_empty_clause():
@@ -78,7 +81,7 @@ class TestTrainingDataExtraction:
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        proof_found = run_saturation_loop(state, max_iterations=100)
+        proof_found = run_saturation(state, max_iterations=100)
         assert proof_found
 
         examples = state.extract_training_examples()
@@ -104,7 +107,7 @@ class TestTrainingDataExtraction:
             cnf(q_b, axiom, q(b)).
         """)
 
-        proof_found = run_saturation_loop(state, max_iterations=100)
+        proof_found = run_saturation(state, max_iterations=100)
         assert proof_found
 
         stats = state.get_proof_statistics()
@@ -129,7 +132,7 @@ class TestSaturationLoop:
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        result = run_saturation_loop(state, max_iterations=100)
+        result = run_saturation(state, max_iterations=100)
         assert result is True
         assert state.contains_empty_clause()
 
@@ -141,7 +144,7 @@ class TestSaturationLoop:
             cnf(q_b, axiom, q(b)).
         """)
 
-        result = run_saturation_loop(state, max_iterations=100)
+        result = run_saturation(state, max_iterations=100)
         # May or may not saturate, but shouldn't find proof
         # The result depends on the problem
 
@@ -154,7 +157,7 @@ class TestSaturationLoop:
         """)
 
         # With only 1 iteration, shouldn't find proof
-        result = run_saturation_loop(state, max_iterations=1)
+        result = run_saturation(state, max_iterations=1)
         # Proof should not be found with only 1 iteration
         # (need at least 2: select p(a), then select ~p(a))
 
@@ -171,7 +174,7 @@ class TestProofClauseIds:
             cnf(q_b, axiom, q(b)).
         """)
 
-        run_saturation_loop(state, max_iterations=100)
+        run_saturation(state, max_iterations=100)
 
         proof_ids = state.proof_clause_ids()
         all_ids = state.all_clause_ids()
