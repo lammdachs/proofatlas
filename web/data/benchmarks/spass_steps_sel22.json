@@ -1,5 +1,5 @@
 {
-  "generated": "2026-01-17T02:43:04.654805",
+  "generated": "2026-01-22T23:12:10.343721",
   "prover": "spass",
   "preset": "steps_sel22",
   "completed": 8398,
@@ -8,8 +8,8 @@
   "stats": {
     "proof": 3218,
     "saturated": 0,
-    "timeout": 5157,
-    "error": 23
+    "timeout": 5156,
+    "error": 24
   },
   "proof_rate": 38.31864729697547
 }
