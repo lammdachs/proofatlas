@@ -1182,12 +1182,11 @@ def main():
             prover_info = available_provers[prover_name]
             presets = prover_info["config"].get("presets", {})
 
-            for prefix in ["steps", "time"]:
-                for sel in selections:
-                    # SPASS doesn't support sel0
-                    if prover_name == "spass" and sel == "sel0":
-                        continue
-                    preset_name = f"{prefix}_{sel}"
+            for sel in selections:
+                # SPASS doesn't support sel0
+                if prover_name == "spass" and sel == "sel0":
+                    continue
+                preset_name = f"age_weight_{sel}"
                     if preset_name in presets:
                         runs.append({
                             "prover": prover_name,

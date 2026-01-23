@@ -97,8 +97,8 @@ Configures the Vampire prover.
     "selection": 21,
     "avatar": "off"
   },
-  "steps_sel21": {
-    "description": "512 activations with selection 21",
+  "age_weight_sel21": {
+    "description": "Age-weight baseline (512 activations) with selection 21",
     "time_limit": 600,
     "activation_limit": 512,
     "selection": 21,

@@ -3,13 +3,13 @@
   "runs": [
     "proofatlas_gcn_mlp_sel0",
     "proofatlas_sentence",
-    "proofatlas_steps_sel0",
-    "proofatlas_steps_sel20",
-    "proofatlas_steps_sel21",
-    "spass_steps_sel20",
-    "spass_steps_sel21",
-    "vampire_steps_sel0",
-    "vampire_steps_sel20",
-    "vampire_steps_sel21"
+    "proofatlas_age_weight_sel0",
+    "proofatlas_age_weight_sel20",
+    "proofatlas_age_weight_sel21",
+    "spass_age_weight_sel20",
+    "spass_age_weight_sel21",
+    "vampire_age_weight_sel0",
+    "vampire_age_weight_sel20",
+    "vampire_age_weight_sel21"
   ]
 }

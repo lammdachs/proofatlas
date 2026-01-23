@@ -26,14 +26,14 @@
       "Select": 1
     },
 
-    "steps_sel20": {
+    "age_weight_sel20": {
       "description": "128 loops with Select=0 (all maximal)",
       "TimeLimit": 600,
       "Loops": 128,
       "Select": 0
     },
 
-    "steps_sel21": {
+    "age_weight_sel21": {
       "description": "128 loops with Select=1 (prefer negative)",
       "TimeLimit": 600,
       "Loops": 128,

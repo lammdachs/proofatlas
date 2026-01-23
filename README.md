@@ -92,11 +92,8 @@ python scripts/bench.py --prover proofatlas --preset quick
 ### Training ML Models
 
 ```bash
-# Collect traces
-python scripts/bench.py --prover proofatlas --trace
-
-# Train a GCN selector
-python scripts/train.py --traces steps_sel21 --model gcn
+# Train and run GCN selector (auto-collects traces if needed)
+proofatlas-bench --preset gcn_mlp_sel21
 ```
 
 ### Local Web Interface

@@ -40,7 +40,7 @@
       "saturation_algorithm": "otter"
     },
 
-    "steps_sel0": {
+    "age_weight_sel0": {
       "description": "128 activations with selection 0",
       "time_limit": 600,
       "activation_limit": 128,
@@ -49,7 +49,7 @@
       "saturation_algorithm": "otter"
     },
 
-    "steps_sel20": {
+    "age_weight_sel20": {
       "description": "128 activations with selection 20",
       "time_limit": 600,
       "activation_limit": 128,
@@ -58,7 +58,7 @@
       "saturation_algorithm": "otter"
     },
 
-    "steps_sel21": {
+    "age_weight_sel21": {
       "description": "128 activations with selection 21",
       "time_limit": 600,
       "activation_limit": 128,
