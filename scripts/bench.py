@@ -6,23 +6,30 @@ USAGE:
     proofatlas-bench                                  # Evaluate with default preset
     proofatlas-bench --preset time_sel0               # Use specific preset
     proofatlas-bench --preset gcn_mlp --retrain       # Retrain even if weights exist
+    proofatlas-bench --rerun                          # Re-evaluate even if cached
 
     proofatlas-bench --track                          # Start and monitor progress
     proofatlas-bench --status                         # Check progress
     proofatlas-bench --kill                           # Stop job
 
+CACHING:
+    Results are cached in .data/runs/<prover>/<preset>/<problem>.json.
+    Use --rerun to force re-evaluation of problems with cached results.
+    Use --retrain to force retraining of ML models with cached weights.
+
 ML MODELS:
     When preset has embedding+scorer fields (e.g., gcn_mlp):
-    1. If weights exist in .weights/{embedding}_{scorer}.pt, uses them
+    1. If weights exist in .weights/{embedding}_{scorer}.safetensors, uses them
     2. If not, automatically:
        - Collects traces with age_weight heuristic
        - Trains the model
-       - Exports to .weights/{embedding}_{scorer}.pt
+       - Saves to .weights/{embedding}_{scorer}.safetensors
 
 OUTPUT:
-    .weights/{embedding}_{scorer}.pt  - TorchScript model for inference
-    .data/traces/<preset>/            - Proof traces for training
-    .data/runs/<prover>/<preset>/     - Per-problem results (JSON)
+    .weights/{embedding}_{scorer}.safetensors  - Model weights
+    .data/traces/<preset>/                     - Proof traces for training
+    .data/runs/<prover>/<preset>/              - Per-problem results (JSON)
+    web/data/benchmarks/<prover>_<preset>.json - Aggregated results for web UI
 """
 
 import argparse
