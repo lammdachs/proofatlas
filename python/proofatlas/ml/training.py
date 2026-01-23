@@ -17,6 +17,23 @@ import torch.nn.functional as F
 from ..selectors import create_model, normalize_adjacency, edge_index_to_adjacency
 from .config import SelectorConfig
 
+# Use orjson for faster JSON loading if available
+try:
+    import orjson
+    _ORJSON_AVAILABLE = True
+except ImportError:
+    _ORJSON_AVAILABLE = False
+
+
+def _load_json(path: Path) -> dict:
+    """Load JSON file using orjson if available, else standard json."""
+    if _ORJSON_AVAILABLE:
+        with open(path, "rb") as f:
+            return orjson.loads(f.read())
+    else:
+        with open(path) as f:
+            return json.load(f)
+
 
 # =============================================================================
 # Contrastive Loss
@@ -224,11 +241,9 @@ class ProofDataset(torch.utils.data.Dataset):
         return len(self.trace_files)
 
     def __getitem__(self, idx):
-        import json
         import random
 
-        with open(self.trace_files[idx]) as f:
-            trace = json.load(f)
+        trace = _load_json(self.trace_files[idx])
 
         clauses = trace["clauses"]
         n_clauses = len(clauses)
