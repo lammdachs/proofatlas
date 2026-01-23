@@ -53,40 +53,116 @@
       "age_weight_ratio": 0.167
     },
 
-    "gcn_mlp": {
-      "description": "GCN embedding with MLP scorer",
+    "gcn_mlp_sel0": {
+      "description": "GCN + MLP with sel0",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 0,
+      "embedding": "gcn",
+      "scorer": "mlp",
+      "traces": "steps_sel0"
+    },
+    "gcn_mlp_sel20": {
+      "description": "GCN + MLP with sel20",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 20,
+      "embedding": "gcn",
+      "scorer": "mlp",
+      "traces": "steps_sel20"
+    },
+    "gcn_mlp_sel21": {
+      "description": "GCN + MLP with sel21",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
       "embedding": "gcn",
-      "scorer": "mlp"
+      "scorer": "mlp",
+      "traces": "steps_sel21"
     },
 
-    "gcn_attention": {
-      "description": "GCN embedding with attention scorer",
+    "gcn_attention_sel0": {
+      "description": "GCN + attention with sel0",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 0,
+      "embedding": "gcn",
+      "scorer": "attention",
+      "traces": "steps_sel0"
+    },
+    "gcn_attention_sel20": {
+      "description": "GCN + attention with sel20",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 20,
+      "embedding": "gcn",
+      "scorer": "attention",
+      "traces": "steps_sel20"
+    },
+    "gcn_attention_sel21": {
+      "description": "GCN + attention with sel21",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
       "embedding": "gcn",
-      "scorer": "attention"
+      "scorer": "attention",
+      "traces": "steps_sel21"
     },
 
-    "gcn_transformer": {
-      "description": "GCN embedding with transformer scorer",
+    "gcn_transformer_sel0": {
+      "description": "GCN + transformer with sel0",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 0,
+      "embedding": "gcn",
+      "scorer": "transformer",
+      "traces": "steps_sel0"
+    },
+    "gcn_transformer_sel20": {
+      "description": "GCN + transformer with sel20",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 20,
+      "embedding": "gcn",
+      "scorer": "transformer",
+      "traces": "steps_sel20"
+    },
+    "gcn_transformer_sel21": {
+      "description": "GCN + transformer with sel21",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
       "embedding": "gcn",
-      "scorer": "transformer"
+      "scorer": "transformer",
+      "traces": "steps_sel21"
     },
 
-    "sentence_mlp": {
-      "description": "Sentence embedding with MLP scorer",
+    "sentence_mlp_sel0": {
+      "description": "Sentence + MLP with sel0",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 0,
+      "embedding": "sentence",
+      "scorer": "mlp",
+      "traces": "steps_sel0"
+    },
+    "sentence_mlp_sel20": {
+      "description": "Sentence + MLP with sel20",
+      "timeout": 600,
+      "max_iterations": 128,
+      "literal_selection": 20,
+      "embedding": "sentence",
+      "scorer": "mlp",
+      "traces": "steps_sel20"
+    },
+    "sentence_mlp_sel21": {
+      "description": "Sentence + MLP with sel21",
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
       "embedding": "sentence",
-      "scorer": "mlp"
+      "scorer": "mlp",
+      "traces": "steps_sel21"
     }
   }
 }
