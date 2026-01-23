@@ -364,9 +364,9 @@ python scripts/export.py --benchmarks</pre>
                     return;
                 }
 
-                // Initialize preset filters with step-based presets only
+                // Initialize preset filters with all presets active
                 const presets = [...new Set(Object.values(allRuns).map(r => r.preset))];
-                presets.filter(p => p.includes('steps')).forEach(p => filters.presets.add(p));
+                presets.forEach(p => filters.presets.add(p));
 
                 setupFilters();
                 displayData();
