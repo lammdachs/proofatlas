@@ -80,6 +80,25 @@ Python environments.
 ./target/release/prove problem.p --timeout 60 --literal-selection 21
 ```
 
+## Web Interface
+
+The web interface runs the prover in the browser using WebAssembly:
+
+```bash
+# Install wasm-pack (if not installed)
+cargo install wasm-pack
+
+# Build the WASM package
+cd crates/proofatlas-wasm
+wasm-pack build --target web --out-dir ../../web/pkg
+
+# Serve the web directory
+cd ../../web
+python -m http.server 8000
+```
+
+Then open http://localhost:8000 in your browser.
+
 ## Benchmarking
 
 After installation, use the benchmark tool:
