@@ -26,7 +26,7 @@ ML MODELS:
        - Saves to .weights/{embedding}_{scorer}.safetensors
 
 OUTPUT:
-    .weights/{embedding}_{scorer}.safetensors  - Model weights
+    .weights/{embedding}_{scorer}.pt           - TorchScript model for inference
     .data/traces/<preset>/                     - Proof traces for training
     .data/runs/<prover>/<preset>/              - Per-problem results (JSON)
     web/data/benchmarks/<prover>_<preset>.json - Aggregated results for web UI

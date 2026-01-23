@@ -864,22 +864,27 @@ def run_training(
         if log_callback:
             log_callback(epoch, max_epochs, train_loss)
 
-    # Save weights using modular naming: {embedding}_{scorer}
-    from safetensors.torch import save_file
-
+    # Export to TorchScript for Rust inference
     weights_dir = Path(weights_dir)
     weights_dir.mkdir(parents=True, exist_ok=True)
-    weights_path = weights_dir / f"{model_name}.safetensors"
+    weights_path = weights_dir / f"{model_name}.pt"
 
-    metadata = {
-        "model_type": model_type,
-        "hidden_dim": str(config.get("hidden_dim", 64)),
-        "num_layers": str(config.get("num_layers", 3)),
-        "num_heads": str(config.get("num_heads", 4)),
-        "input_dim": str(config.get("input_dim", 13)),
-    }
-    save_file(model.state_dict(), weights_path, metadata=metadata)
-    print(f"Weights saved: {weights_path}")
+    model.eval()
+    model.cpu()
+
+    # Create example inputs for tracing
+    hidden_dim = config.get("hidden_dim", 64)
+    example_x = torch.randn(10, config.get("input_dim", 13))
+    example_adj = torch.eye(10)
+    example_pool = torch.ones(3, 10) / 10
+
+    if needs_adj:
+        traced = torch.jit.trace(model, (example_x, example_adj, example_pool))
+    else:
+        traced = torch.jit.trace(model, (example_x, example_pool))
+
+    traced.save(str(weights_path))
+    print(f"TorchScript model saved: {weights_path}")
 
     return weights_path
 

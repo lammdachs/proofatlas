@@ -65,27 +65,21 @@ def is_learned_selector(preset: dict) -> bool:
 
 
 def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
-    """Find weights file/directory for a learned selector.
-
-    For ML selectors (graph, string), returns the .weights directory
-    if the required model files exist. For legacy selectors, looks for
-    .safetensors files.
+    """Find TorchScript model for a learned selector.
 
     Args:
         weights_dir: Directory containing model weights (.weights/)
         preset: Preset config dict with embedding/scorer fields
 
     Returns:
-        Path to weights directory or file, or None if not found.
+        Path to weights directory if model exists, or None if not found.
     """
     if not weights_dir.exists():
         return None
 
-    # Get model name from preset (modular: {embedding}_{scorer})
     model_name = get_model_name(preset)
     embedding_type = get_embedding_type(preset)
 
-    # ML models use TorchScript .pt files
     if embedding_type == "graph":
         model_path = weights_dir / f"{model_name}.pt"
         if model_path.exists():
@@ -96,23 +90,4 @@ def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
         if model_path.exists() and tokenizer_path.exists():
             return weights_dir
 
-    # Legacy: check for .safetensors files
-    exact = weights_dir / f"{model_name}.safetensors"
-    if exact.exists():
-        return exact
-
-    # Check for iteration variants (e.g., gcn_mlp_iter_5.safetensors)
-    prefix = f"{model_name}_iter_"
-    latest_iter = None
-    latest_path = None
-
-    for f in weights_dir.glob(f"{prefix}*.safetensors"):
-        try:
-            iter_num = int(f.stem[len(prefix):])
-            if latest_iter is None or iter_num > latest_iter:
-                latest_iter = iter_num
-                latest_path = f
-        except ValueError:
-            continue
-
-    return latest_path
+    return None
