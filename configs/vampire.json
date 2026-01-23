@@ -40,14 +40,6 @@
       "saturation_algorithm": "otter"
     },
 
-    "time_sel22": {
-      "description": "10s with selection 22 (neg max-weight, else all maximal)",
-      "time_limit": 10,
-      "selection": 22,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
     "steps_sel0": {
       "description": "128 activations with selection 0",
       "time_limit": 600,
@@ -71,15 +63,6 @@
       "time_limit": 600,
       "activation_limit": 128,
       "selection": 21,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
-    "steps_sel22": {
-      "description": "128 activations with selection 22",
-      "time_limit": 600,
-      "activation_limit": 128,
-      "selection": 22,
       "avatar": "off",
       "saturation_algorithm": "otter"
     }

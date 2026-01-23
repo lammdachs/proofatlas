@@ -29,13 +29,6 @@
       "age_weight_ratio": 0.167
     },
 
-    "time_sel22": {
-      "description": "10s with sel22 (neg max-weight, else all maximal)",
-      "timeout": 10,
-      "literal_selection": 22,
-      "age_weight_ratio": 0.167
-    },
-
     "steps_sel0": {
       "description": "128 iterations with sel0",
       "timeout": 600,
@@ -60,19 +53,11 @@
       "age_weight_ratio": 0.167
     },
 
-    "steps_sel22": {
-      "description": "128 iterations with sel22",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 22,
-      "age_weight_ratio": 0.167
-    },
-
     "gcn_mlp": {
       "description": "GCN embedding with MLP scorer",
       "timeout": 600,
       "max_iterations": 128,
-      "literal_selection": 22,
+      "literal_selection": 21,
       "embedding": "gcn",
       "scorer": "mlp"
     },
@@ -81,7 +66,7 @@
       "description": "GCN embedding with attention scorer",
       "timeout": 600,
       "max_iterations": 128,
-      "literal_selection": 22,
+      "literal_selection": 21,
       "embedding": "gcn",
       "scorer": "attention"
     },
@@ -90,7 +75,7 @@
       "description": "GCN embedding with transformer scorer",
       "timeout": 600,
       "max_iterations": 128,
-      "literal_selection": 22,
+      "literal_selection": 21,
       "embedding": "gcn",
       "scorer": "transformer"
     },
@@ -99,7 +84,7 @@
       "description": "Sentence embedding with MLP scorer",
       "timeout": 600,
       "max_iterations": 128,
-      "literal_selection": 22,
+      "literal_selection": 21,
       "embedding": "sentence",
       "scorer": "mlp"
     }

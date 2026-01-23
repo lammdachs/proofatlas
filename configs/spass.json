@@ -7,7 +7,7 @@
   },
 
   "notes": {
-    "selection_mapping": "SPASS Select=0 ~ Vampire sel20, Select=1 ~ sel21, Select=2 ~ sel22",
+    "selection_mapping": "SPASS Select=0 ~ Vampire sel20, Select=1 ~ sel21",
     "no_sel0": "SPASS does not support selecting all literals (Vampire sel0)"
   },
 
@@ -26,12 +26,6 @@
       "Select": 1
     },
 
-    "time_sel22": {
-      "description": "10s with Select=2 (neg max-weight, like Vampire sel22)",
-      "TimeLimit": 10,
-      "Select": 2
-    },
-
     "steps_sel20": {
       "description": "128 loops with Select=0 (all maximal)",
       "TimeLimit": 600,
@@ -44,13 +38,6 @@
       "TimeLimit": 600,
       "Loops": 128,
       "Select": 1
-    },
-
-    "steps_sel22": {
-      "description": "128 loops with Select=2 (neg max-weight)",
-      "TimeLimit": 600,
-      "Loops": 128,
-      "Select": 2
     }
   }
 }
