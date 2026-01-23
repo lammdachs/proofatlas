@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..selectors import create_model, normalize_adjacency, edge_index_to_adjacency
+from ..selectors import create_model, normalize_adjacency, edge_index_to_sparse_adjacency
 from .config import SelectorConfig
 
 # Use orjson for faster JSON loading if available
@@ -343,21 +343,23 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     # Build batched graph tensors (optimized: pre-allocated numpy -> torch)
     batched = clauses_to_batch(all_clauses, labels=all_labels)
 
-    # Build adjacency matrix
+    # Build sparse adjacency matrix (O(edges) memory instead of O(nodes^2))
     edge_index = batched["edge_index"]
     num_nodes = batched["x"].size(0)
-    adj = edge_index_to_adjacency(edge_index, num_nodes, add_self_loops=True)
+    adj = edge_index_to_sparse_adjacency(edge_index, num_nodes, add_self_loops=True)
     adj_norm = normalize_adjacency(adj, add_self_loops=False)
 
-    # Build pool matrix (one row per clause, average pooling over clause nodes)
-    # Vectorized: O(num_nodes) instead of O(num_clauses * num_nodes)
+    # Build sparse pool matrix (one row per clause, average pooling over clause nodes)
     num_clauses = len(all_clauses)
     clause_batch = batched["batch"]
 
     counts = torch.bincount(clause_batch, minlength=num_clauses).float()
-    pool_matrix = torch.zeros(num_clauses, num_nodes)
     node_indices = torch.arange(num_nodes)
-    pool_matrix[clause_batch, node_indices] = 1.0 / counts[clause_batch]
+    pool_indices = torch.stack([clause_batch, node_indices])
+    pool_values = 1.0 / counts[clause_batch]
+    pool_matrix = torch.sparse_coo_tensor(
+        pool_indices, pool_values, (num_clauses, num_nodes)
+    ).coalesce()
 
     return {
         "node_features": batched["x"],

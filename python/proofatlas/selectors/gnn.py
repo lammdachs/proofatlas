@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .scorers import create_scorer, MLPScorer
+from .utils import sparse_mm
 
 
 class NodeFeatureEmbedding(nn.Module):
@@ -194,12 +195,12 @@ class GCNLayer(nn.Module):
         """
         Args:
             x: Node features [num_nodes, in_dim]
-            adj: Adjacency matrix [num_nodes, num_nodes] (with self-loops, normalized)
+            adj: Adjacency matrix [num_nodes, num_nodes] (sparse or dense, normalized)
 
         Returns:
             Updated features [num_nodes, out_dim]
         """
-        h = torch.mm(adj, x)
+        h = sparse_mm(adj, x)
         return self.linear(h)
 
 
@@ -308,12 +309,12 @@ class GraphSAGELayer(nn.Module):
         """
         Args:
             x: Node features [num_nodes, in_dim]
-            adj: Adjacency matrix [num_nodes, num_nodes] (normalized, without self-loops)
+            adj: Adjacency matrix [num_nodes, num_nodes] (sparse or dense, normalized)
 
         Returns:
             Updated features [num_nodes, out_dim]
         """
-        neighbor_agg = torch.mm(adj, x)
+        neighbor_agg = sparse_mm(adj, x)
         h = torch.cat([x, neighbor_agg], dim=-1)
         return self.linear(h)
 
@@ -411,8 +412,8 @@ class ClauseGCN(nn.Module):
             if i < self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
-        # Pool to clause level
-        clause_emb = torch.mm(pool_matrix, x)
+        # Pool to clause level (handles sparse or dense pool_matrix)
+        clause_emb = sparse_mm(pool_matrix, x)
 
         # Add clause features if available and model expects them
         if self.use_clause_features and self.clause_embedding is not None:
@@ -569,7 +570,7 @@ class ClauseGAT(nn.Module):
             if i < self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
-        clause_emb = torch.mm(pool_matrix, x)
+        clause_emb = sparse_mm(pool_matrix, x)
 
         # Add clause features if available and model expects them
         if self.use_clause_features and self.clause_embedding is not None:
@@ -670,7 +671,7 @@ class ClauseGraphSAGE(nn.Module):
             if i < self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
-        clause_emb = torch.mm(pool_matrix, x)
+        clause_emb = sparse_mm(pool_matrix, x)
 
         # Add clause features if available and model expects them
         if self.use_clause_features and self.clause_embedding is not None:

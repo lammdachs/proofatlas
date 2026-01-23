@@ -49,7 +49,7 @@ from .scorers import (
 )
 from .transformer import ClauseTransformer, ClauseGNNTransformer
 from .baseline import NodeMLP, AgeWeightHeuristic
-from .utils import normalize_adjacency, edge_index_to_adjacency
+from .utils import normalize_adjacency, edge_index_to_adjacency, edge_index_to_sparse_adjacency, sparse_mm
 from .factory import create_model
 
 __all__ = [
@@ -87,6 +87,8 @@ __all__ = [
     # Utilities
     "normalize_adjacency",
     "edge_index_to_adjacency",
+    "edge_index_to_sparse_adjacency",
+    "sparse_mm",
     # Factory
     "create_model",
 ]
