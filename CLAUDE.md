@@ -65,7 +65,7 @@ pip install -e ".[ml]"                   # With PyTorch for training
 # Options:
 #   --timeout <seconds>        Timeout (default: 300s)
 #   --max-clauses <n>          Clause limit (default: 10000)
-#   --literal-selection <n>    0=all, 20=maximal, 21=unique, 22=neg-max-weight
+#   --literal-selection <n>    0=all, 20=maximal, 21=unique
 ```
 
 ### Tests

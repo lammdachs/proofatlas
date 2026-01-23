@@ -96,7 +96,7 @@ python scripts/bench.py --prover proofatlas --preset quick
 python scripts/bench.py --prover proofatlas --trace
 
 # Train a GCN selector
-python scripts/train.py --traces steps_sel22 --model gcn
+python scripts/train.py --traces steps_sel21 --model gcn
 ```
 
 ### Local Web Interface

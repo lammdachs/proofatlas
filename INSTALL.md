@@ -105,7 +105,7 @@ proofatlas-export --benchmarks
 
 # Filter by prover and/or preset
 proofatlas-export --benchmarks --prover proofatlas
-proofatlas-export --benchmarks --prover vampire --preset time_sel22
+proofatlas-export --benchmarks --prover vampire --preset time_sel21
 
 # Filter by problem set (overrides default)
 proofatlas-export --benchmarks --problem-set krs

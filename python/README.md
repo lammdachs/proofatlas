@@ -159,7 +159,7 @@ The main class for managing proof search.
 - `get_proof_trace() -> List[ProofStep]` - Get proof derivation
 
 **Configuration:**
-- `set_literal_selection(strategy: str)` - Set literal selection ("0"=all, "20"=maximal, "21"=unique, "22"=neg_max_weight)
+- `set_literal_selection(strategy: str)` - Set literal selection ("0"=all, "20"=maximal, "21"=unique)
 
 #### ClauseInfo
 

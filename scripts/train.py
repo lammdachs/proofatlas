@@ -3,9 +3,9 @@
 Train clause selection models.
 
 USAGE:
-    proofatlas-train --traces steps_sel22 --preset gcn_mlp            # Use preset from proofatlas.json
-    proofatlas-train --traces steps_sel22 --embedding gcn --scorer mlp  # Specify directly
-    proofatlas-train --traces steps_sel22                             # Uses default preset
+    proofatlas-train --traces steps_sel21 --preset gcn_mlp            # Use preset from proofatlas.json
+    proofatlas-train --traces steps_sel21 --embedding gcn --scorer mlp  # Specify directly
+    proofatlas-train --traces steps_sel21                             # Uses default preset
 
 CONFIG FILES:
     configs/proofatlas.json  - Presets with embedding/scorer combinations
@@ -336,7 +336,7 @@ def main():
     parser.add_argument(
         "--traces",
         type=str,
-        help="Trace directory name (e.g., steps_sel22) or full path",
+        help="Trace directory name (e.g., steps_sel21) or full path",
     )
 
     # Model selection (from configs)

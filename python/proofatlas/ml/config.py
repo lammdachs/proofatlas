@@ -72,7 +72,7 @@ class SelectorSpec:
 @dataclass
 class SolverConfig:
     """Solver configuration for data collection."""
-    literal_selection: str = "0"  # 0=all, 20=maximal, 21=unique, 22=neg max-weight
+    literal_selection: str = "0"  # 0=all, 20=maximal, 21=unique
 
 
 @dataclass

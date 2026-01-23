@@ -4,7 +4,7 @@ Prove a single TPTP problem.
 
 USAGE:
     proofatlas-prove problem.p
-    proofatlas-prove problem.p --preset time_sel22
+    proofatlas-prove problem.p --preset time_sel21
     proofatlas-prove problem.p --preset time_sel21 --verbose
 """
 

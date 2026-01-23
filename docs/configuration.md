@@ -43,7 +43,7 @@ Configures the ProofAtlas prover and its presets.
 | `description` | string | - | Human-readable description |
 | `timeout` | int | 10 | Time limit in seconds |
 | `max_clauses` | int | 0 | Clause limit (0 = unlimited) |
-| `literal_selection` | int | 0 | Literal selection strategy (0, 20, 21, 22) |
+| `literal_selection` | int | 0 | Literal selection strategy (0, 20, 21) |
 | `age_weight_ratio` | float | 0.167 | Probability of selecting oldest clause |
 | `model` | string | - | ML model name (gcn, mlp, gat) |
 | `training` | string | - | Training config name |
@@ -82,7 +82,7 @@ Configures the Vampire prover.
 |--------|------|---------|-------------|
 | `description` | string | - | Human-readable description |
 | `time_limit` | int | 10 | Time limit in seconds |
-| `selection` | int | 21 | Literal selection (0-22) |
+| `selection` | int | 21 | Literal selection (0, 20, 21) |
 | `avatar` | string | "off" | AVATAR splitting ("on"/"off") |
 | `memory_limit` | int | - | Memory limit in MB |
 | `activation_limit` | int | - | Maximum clause activations |

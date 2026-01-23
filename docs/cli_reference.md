@@ -74,7 +74,7 @@ proofatlas-prove <problem> [options]
 proofatlas-prove .tptp/TPTP-v9.0.0/Problems/GRP/GRP001-1.p
 
 # Use specific preset
-proofatlas-prove problem.p --preset time_sel22 --verbose
+proofatlas-prove problem.p --preset time_sel21 --verbose
 ```
 
 ---
