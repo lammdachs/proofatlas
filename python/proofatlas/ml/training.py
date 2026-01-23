@@ -762,10 +762,12 @@ def run_training(
     start_time = time.time()
 
     def log_msg(msg: str):
-        """Log message to stdout and optionally to log_file."""
-        print(msg)
+        """Log message with timestamp to stdout and optionally to log_file."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {msg}"
+        print(line)
         if log_file:
-            log_file.write(msg + "\n")
+            log_file.write(line + "\n")
             log_file.flush()
 
     # Load configs
