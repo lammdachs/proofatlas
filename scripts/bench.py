@@ -57,7 +57,6 @@ from proofatlas.ml import (
     get_model_name,
     get_embedding_type,
     save_trace,
-    load_traces,
     run_training,
 )
 
@@ -1375,26 +1374,23 @@ def main():
                         print(f"[{preset_name}] Found {len(existing_traces)} existing traces in {trace_preset_dir}")
                     sys.stdout.flush()
 
-                    # Load traces and train (filtered by problem set)
-                    print(f"[{preset_name}] Loading traces for training...")
+                    # Train with lazy loading (traces loaded one at a time)
+                    print(f"[{preset_name}] Starting training (lazy loading)...")
                     sys.stdout.flush()
-                    data = load_traces(traces_dir, trace_preset, problem_names)
-                    if data["num_problems"] > 0:
-                        print(f"[{preset_name}] Loaded {data['num_problems']} problems for training")
-                        print(f"[{preset_name}] Starting training...")
-                        sys.stdout.flush()
+                    try:
                         weights_path = run_training(
                             preset=preset,
-                            data=data,
+                            trace_dir=trace_preset_dir,
                             weights_dir=weights_dir,
                             configs_dir=base_dir / "configs",
+                            problem_names=problem_names,
                             init_weights=existing_weights,
                             web_data_dir=base_dir / "web" / "data",
                             log_file=sys.stdout,
                         )
                         print(f"[{preset_name}] Training complete, weights saved to: {weights_path}")
-                    else:
-                        print(f"[{preset_name}] WARNING: No valid traces found, falling back to age_weight")
+                    except ValueError as e:
+                        print(f"[{preset_name}] WARNING: {e}, falling back to age_weight")
                         current_preset = proofatlas_presets.get(trace_preset, preset)
                         weights_path = None
                     sys.stdout.flush()
