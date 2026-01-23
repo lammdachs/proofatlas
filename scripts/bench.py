@@ -28,7 +28,6 @@ OUTPUT:
 import argparse
 import json
 import os
-import random
 import signal
 import sys
 import time
@@ -36,6 +35,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+# Add package to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
+
+from proofatlas.ml import (
+    find_weights,
+    is_learned_selector,
+    get_model_name,
+    get_embedding_type,
+    save_trace,
+    load_traces,
+    run_training,
+)
 
 
 
@@ -436,414 +448,6 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     return problems
 
 
-# Weights management
-
-def find_weights(base_dir: Path, preset: dict) -> Optional[Path]:
-    """Find weights file/directory for a learned selector.
-
-    For ML selectors (graph, string), returns the .weights directory
-    if the required model files exist. For legacy selectors, looks for
-    .safetensors files.
-
-    Args:
-        base_dir: Project root directory
-        preset: Preset config dict with embedding/scorer fields
-    """
-    weights_dir = base_dir / ".weights"
-    if not weights_dir.exists():
-        return None
-
-    # Get model name from preset (modular: {embedding}_{scorer})
-    model_name = get_model_name(preset)
-    embedding_type = get_embedding_type(preset)
-
-    # ML models use TorchScript .pt files
-    if embedding_type == "graph":
-        model_path = weights_dir / f"{model_name}.pt"
-        if model_path.exists():
-            return weights_dir
-    elif embedding_type == "string":
-        model_path = weights_dir / f"{model_name}.pt"
-        tokenizer_path = weights_dir / f"{model_name}_tokenizer" / "tokenizer.json"
-        if model_path.exists() and tokenizer_path.exists():
-            return weights_dir
-
-    # Legacy: check for .safetensors files
-    exact = weights_dir / f"{model_name}.safetensors"
-    if exact.exists():
-        return exact
-
-    # Check for iteration variants (e.g., gcn_mlp_iter_5.safetensors)
-    prefix = f"{model_name}_iter_"
-    latest_iter = None
-    latest_path = None
-
-    for f in weights_dir.glob(f"{prefix}*.safetensors"):
-        try:
-            iter_num = int(f.stem[len(prefix):])
-            if latest_iter is None or iter_num > latest_iter:
-                latest_iter = iter_num
-                latest_path = f
-        except ValueError:
-            continue
-
-    return latest_path
-
-
-def is_learned_selector(preset: dict) -> bool:
-    """Check if preset requires trained weights."""
-    # Check for modular embedding+scorer design
-    if "embedding" in preset and "scorer" in preset:
-        return True
-    # Legacy: check for model field
-    return "model" in preset
-
-
-def get_model_name(preset: dict) -> str:
-    """Get model file name from preset config.
-
-    Uses modular naming: {embedding}_{scorer}.pt
-    Falls back to legacy naming for backwards compatibility.
-    """
-    # Modular design: embedding + scorer
-    embedding = preset.get("embedding")
-    scorer = preset.get("scorer")
-    if embedding and scorer:
-        return f"{embedding}_{scorer}"
-
-    # Legacy: explicit model field
-    if "model" in preset:
-        return preset["model"]
-
-    # Legacy: embedding field only
-    if embedding:
-        return embedding
-
-    # Default
-    return "gcn"
-
-
-# Embeddings that use string input (clause text)
-STRING_EMBEDDINGS = {"sentence"}
-
-# Embeddings that use graph input (node features, adjacency, pooling)
-GRAPH_EMBEDDINGS = {"gcn", "gat", "graphsage"}
-
-
-def get_embedding_type(preset: dict) -> Optional[str]:
-    """Get embedding type category from preset config.
-
-    Returns "graph", "string", or None for non-ML presets.
-    """
-    embedding = preset.get("embedding")
-    if not embedding:
-        return None
-
-    if embedding in STRING_EMBEDDINGS:
-        return "string"
-    elif embedding in GRAPH_EMBEDDINGS:
-        return "graph"
-    else:
-        raise ValueError(f"Unknown embedding: {embedding}")
-
-
-# Trace collection and training
-
-def save_trace(base_dir: Path, preset: str, problem: str, trace_json: str):
-    """Save proof trace for training in structured JSON format.
-
-    Args:
-        base_dir: Project root directory
-        preset: Preset name for trace subdirectory
-        problem: Problem file name
-        trace_json: Structured JSON string from extract_structured_trace()
-    """
-    try:
-        traces_dir = base_dir / ".data" / "traces" / preset
-        traces_dir.mkdir(parents=True, exist_ok=True)
-        problem_name = Path(problem).stem
-        json_path = traces_dir / f"{problem_name}.json"
-        with open(json_path, "w") as f:
-            f.write(trace_json)
-    except Exception:
-        pass
-
-
-def load_traces(base_dir: Path, preset: str, problem_names: set[str] = None):
-    """Load traces for training, optionally filtered by problem names.
-
-    Args:
-        base_dir: Project root directory
-        preset: Trace preset name (subdirectory in .data/traces/)
-        problem_names: Optional set of problem names to include. If None, loads all.
-
-    Returns:
-        Dict with 'problems' list and 'num_problems' count.
-    """
-    sys.path.insert(0, str(base_dir / "python"))
-    from proofatlas.ml.structured import clause_to_graph
-
-    traces_dir = base_dir / ".data" / "traces" / preset
-    if not traces_dir.exists():
-        return {"problems": [], "num_problems": 0}
-
-    problems = []
-    for trace_file in sorted(traces_dir.glob("*.json")):
-        # Filter by problem set if specified
-        if problem_names is not None and trace_file.stem not in problem_names:
-            continue
-
-        try:
-            with open(trace_file) as f:
-                trace = json.load(f)
-        except Exception:
-            continue
-
-        if not trace.get("proof_found") or not trace.get("clauses"):
-            continue
-
-        # Convert structured clauses to graph tensors
-        clauses = trace["clauses"]
-        max_age = len(clauses)
-        graphs = [clause_to_graph(c, max_age) for c in clauses]
-        labels = [c.get("label", 0) for c in clauses]
-
-        problems.append({
-            "name": trace_file.stem,
-            "graphs": graphs,
-            "labels": labels,
-        })
-
-    return {"problems": problems, "num_problems": len(problems)}
-
-
-def run_training(base_dir: Path, preset_name: str, preset: dict, data: dict, log_file,
-                 init_weights: Path = None) -> Path:
-    """Train a model and return the weights path.
-
-    Args:
-        init_weights: Optional path to weights file to initialize from.
-                     If provided, continues training from these weights.
-    """
-    import torch
-    import torch.nn.functional as F
-    import torch.optim as optim
-    from torch.utils.data import DataLoader
-
-    sys.path.insert(0, str(base_dir / "python"))
-    from proofatlas.ml.training import ClauseDataset, collate_clause_batch
-    from proofatlas.selectors import create_model
-
-    # Load configs
-    with open(base_dir / "configs" / "embeddings.json") as f:
-        embeddings_config = json.load(f)
-    with open(base_dir / "configs" / "scorers.json") as f:
-        scorers_config = json.load(f)
-    with open(base_dir / "configs" / "training.json") as f:
-        training_config = json.load(f)
-
-    # Get model and training config from preset
-    embedding_name = preset.get("embedding") or preset.get("model")
-    scorer_name = preset.get("scorer", "mlp")
-    training_name = preset.get("training", "standard")
-
-    # Get embedding architecture
-    embedding_arch = embeddings_config["architectures"].get(embedding_name)
-    if not embedding_arch:
-        raise ValueError(f"Unknown embedding: {embedding_name}")
-
-    # Get scorer architecture
-    scorer_arch = scorers_config["architectures"].get(scorer_name)
-    if not scorer_arch:
-        raise ValueError(f"Unknown scorer: {scorer_name}")
-
-    # Get training config
-    training_defaults = training_config.get("defaults", {})
-    training_overrides = training_config.get("configs", {}).get(training_name, {})
-
-    # Merge configs
-    config = {**training_defaults, **training_overrides}
-    config["embedding"] = embedding_arch
-    config["scorer"] = scorer_arch
-    config["input_dim"] = embeddings_config.get("input_dim", 8)
-
-    problems = data["problems"]
-    if not problems:
-        raise ValueError("No training data")
-
-    # Problem-level split
-    val_ratio = config.get("val_ratio", 0.0)
-    random.seed(42)
-    problem_indices = list(range(len(problems)))
-    random.shuffle(problem_indices)
-
-    if val_ratio > 0:
-        val_count = max(1, int(len(problems) * val_ratio))
-        train_indices = problem_indices[val_count:]
-        val_indices = problem_indices[:val_count]
-    else:
-        train_indices = problem_indices
-        val_indices = []
-
-    def make_dataset(prob_indices):
-        all_graphs, all_labels = [], []
-        for idx in prob_indices:
-            p = problems[idx]
-            all_graphs.extend(p["graphs"])
-            all_labels.extend(p["labels"])
-        if not all_graphs:
-            return None
-        return ClauseDataset(
-            node_features=[g["x"] for g in all_graphs],
-            edge_indices=[g["edge_index"] for g in all_graphs],
-            labels=all_labels,
-        )
-
-    train_ds = make_dataset(train_indices)
-    val_ds = make_dataset(val_indices) if val_indices else None
-
-    if not train_ds:
-        raise ValueError("No training examples")
-
-    print(f"Training {preset_name}: {len(train_indices)} problems, {len(train_ds)} examples")
-
-    # Create model
-    model_type = config.get("type", "gcn")
-    model = create_model(
-        model_type=model_type,
-        node_feature_dim=config.get("input_dim", 13),
-        hidden_dim=config.get("hidden_dim", 64),
-        num_layers=config.get("num_layers", 3),
-        num_heads=config.get("num_heads", 4),
-        dropout=config.get("dropout", 0.1),
-    )
-
-    needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-
-    # Initialize from existing weights if provided
-    if init_weights and init_weights.exists():
-        print(f"Initializing from {init_weights}")
-        from safetensors.torch import load_file
-        state_dict = load_file(init_weights)
-        model.load_state_dict(state_dict)
-        model = model.to(device)
-
-    batch_size = config.get("batch_size", 32)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_clause_batch)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_clause_batch) if val_ds else None
-
-    # Optimizer
-    optimizer_type = config.get("optimizer", "adamw").lower()
-    lr = config.get("learning_rate", 0.001)
-    weight_decay = config.get("weight_decay", 1e-5)
-
-    if optimizer_type == "adamw":
-        betas = tuple(config.get("betas", [0.9, 0.999]))
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
-    elif optimizer_type == "adam":
-        betas = tuple(config.get("betas", [0.9, 0.999]))
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
-    elif optimizer_type == "sgd":
-        momentum = config.get("momentum", 0.9)
-        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
-    else:
-        raise ValueError(f"Unknown optimizer: {optimizer_type}")
-
-    max_epochs = config.get("max_epochs", 100)
-
-    # Margin ranking loss for pairwise learning
-    margin = config.get("margin", 0.1)
-    ranking_loss = torch.nn.MarginRankingLoss(margin=margin)
-
-    def compute_pairwise_loss(scores, labels):
-        """Compute pairwise margin ranking loss between positive and negative examples."""
-        pos_mask = labels == 1
-        neg_mask = labels == 0
-
-        if not pos_mask.any() or not neg_mask.any():
-            # Fallback to BCE if no pairs available
-            return F.binary_cross_entropy_with_logits(scores, labels.float())
-
-        pos_scores = scores[pos_mask]
-        neg_scores = scores[neg_mask]
-
-        # Sample pairs: for each positive, sample a random negative
-        n_pos = pos_scores.size(0)
-        n_neg = neg_scores.size(0)
-
-        # Random pairing: sample n_pos negatives (with replacement if needed)
-        neg_indices = torch.randint(0, n_neg, (n_pos,), device=scores.device)
-        neg_sampled = neg_scores[neg_indices]
-
-        # Target: +1 means first input should be ranked higher than second
-        target = torch.ones(n_pos, device=scores.device)
-        return ranking_loss(pos_scores, neg_sampled, target)
-
-    for epoch in range(1, max_epochs + 1):
-        model.train()
-        train_loss = 0
-        for batch in train_loader:
-            optimizer.zero_grad()
-            x = batch["node_features"].to(device)
-            adj = batch["adj"].to(device)
-            pool = batch["pool_matrix"].to(device)
-            labels = batch["labels"].to(device)
-
-            scores = model(x, adj, pool) if needs_adj else model(x, pool)
-            loss = compute_pairwise_loss(scores, labels)
-            loss.backward()
-
-            if config.get("gradient_clip"):
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
-
-            optimizer.step()
-            train_loss += loss.item()
-
-        train_loss /= len(train_loader)
-
-        val_loss = 0
-        if val_loader:
-            model.eval()
-            with torch.no_grad():
-                for batch in val_loader:
-                    x = batch["node_features"].to(device)
-                    adj = batch["adj"].to(device)
-                    pool = batch["pool_matrix"].to(device)
-                    labels = batch["labels"].to(device)
-                    scores = model(x, adj, pool) if needs_adj else model(x, pool)
-                    val_loss += compute_pairwise_loss(scores, labels).item()
-            val_loss /= len(val_loader)
-
-        if val_loader:
-            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
-        else:
-            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
-
-        log_file.write(f"TRAIN:{epoch}:{max_epochs}:{train_loss:.6f}\n")
-        log_file.flush()
-
-    # Save weights using modular naming: {embedding}_{scorer}
-    from safetensors.torch import save_file
-    weights_dir = base_dir / ".weights"
-    weights_dir.mkdir(parents=True, exist_ok=True)
-    model_name = get_model_name(preset)
-    weights_path = weights_dir / f"{model_name}.safetensors"
-
-    metadata = {
-        "model_type": model_type,
-        "hidden_dim": str(config.get("hidden_dim", 64)),
-        "num_layers": str(config.get("num_layers", 3)),
-        "num_heads": str(config.get("num_heads", 4)),
-        "input_dim": str(config.get("input_dim", 13)),
-    }
-    save_file(model.state_dict(), weights_path, metadata=metadata)
-    print(f"Weights saved: {weights_path}")
-
-    return weights_path
-
-
 # Prover execution
 
 def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
@@ -923,7 +527,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     if collect_trace and proof_found and trace_preset:
         try:
             trace_json = state.extract_structured_trace(elapsed)
-            save_trace(base_dir, trace_preset, problem.name, trace_json)
+            save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
         except Exception:
             pass
 
@@ -1724,7 +1328,8 @@ def main():
 
             # Training only supported for proofatlas
             if prover == "proofatlas" and is_learned_selector(preset):
-                existing_weights = find_weights(base_dir, preset)
+                weights_dir = base_dir / ".weights"
+                existing_weights = find_weights(weights_dir, preset)
 
                 if existing_weights and not args.retrain:
                     print(f"Using existing weights: {existing_weights}")
@@ -1733,9 +1338,10 @@ def main():
                     print(f"Training {preset_name}...")
 
                     # First collect traces with age_weight if none exist
-                    traces_dir = base_dir / ".data" / "traces" / trace_preset
+                    traces_dir = base_dir / ".data" / "traces"
+                    trace_preset_dir = traces_dir / trace_preset
                     proofatlas_presets = prover_config.get("presets", {})
-                    if not traces_dir.exists() or not list(traces_dir.glob("*.json")):
+                    if not trace_preset_dir.exists() or not list(trace_preset_dir.glob("*.json")):
                         print("Collecting traces with age_weight...")
                         trace_source_preset = proofatlas_presets.get(trace_preset, preset)
                         run_evaluation(
@@ -1747,10 +1353,13 @@ def main():
                         )
 
                     # Load traces and train (filtered by problem set)
-                    data = load_traces(base_dir, trace_preset, problem_names)
+                    data = load_traces(traces_dir, trace_preset, problem_names)
                     if data["num_problems"] > 0:
                         weights_path = run_training(
-                            base_dir, preset_name, preset, data, sys.stdout,
+                            preset=preset,
+                            data=data,
+                            weights_dir=weights_dir,
+                            configs_dir=base_dir / "configs",
                             init_weights=existing_weights,
                         )
                     else:

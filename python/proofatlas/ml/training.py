@@ -558,6 +558,333 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
 
 
 # =============================================================================
+# Trace Management
+# =============================================================================
+
+
+def save_trace(traces_dir: Path, preset: str, problem: str, trace_json: str):
+    """Save proof trace for training in structured JSON format.
+
+    Args:
+        traces_dir: Base directory for traces (e.g., .data/traces/)
+        preset: Preset name for trace subdirectory
+        problem: Problem file name
+        trace_json: Structured JSON string from extract_structured_trace()
+    """
+    try:
+        preset_dir = Path(traces_dir) / preset
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        problem_name = Path(problem).stem
+        json_path = preset_dir / f"{problem_name}.json"
+        with open(json_path, "w") as f:
+            f.write(trace_json)
+    except Exception:
+        pass
+
+
+def load_traces(
+    traces_dir: Path,
+    preset: str,
+    problem_names: Optional[set] = None,
+) -> Dict[str, Any]:
+    """Load traces for training, optionally filtered by problem names.
+
+    Args:
+        traces_dir: Base directory for traces (e.g., .data/traces/)
+        preset: Trace preset name (subdirectory in traces_dir)
+        problem_names: Optional set of problem names to include. If None, loads all.
+
+    Returns:
+        Dict with 'problems' list and 'num_problems' count.
+    """
+    from .structured import clause_to_graph
+
+    preset_dir = Path(traces_dir) / preset
+    if not preset_dir.exists():
+        return {"problems": [], "num_problems": 0}
+
+    problems = []
+    for trace_file in sorted(preset_dir.glob("*.json")):
+        # Filter by problem set if specified
+        if problem_names is not None and trace_file.stem not in problem_names:
+            continue
+
+        try:
+            with open(trace_file) as f:
+                trace = json.load(f)
+        except Exception:
+            continue
+
+        if not trace.get("proof_found") or not trace.get("clauses"):
+            continue
+
+        # Convert structured clauses to graph tensors
+        clauses = trace["clauses"]
+        max_age = len(clauses)
+        graphs = [clause_to_graph(c, max_age) for c in clauses]
+        labels = [c.get("label", 0) for c in clauses]
+
+        problems.append({
+            "name": trace_file.stem,
+            "graphs": graphs,
+            "labels": labels,
+        })
+
+    return {"problems": problems, "num_problems": len(problems)}
+
+
+# =============================================================================
+# Training Loop
+# =============================================================================
+
+
+def run_training(
+    preset: dict,
+    data: Dict[str, Any],
+    weights_dir: Path,
+    configs_dir: Path,
+    init_weights: Optional[Path] = None,
+    log_callback: Optional[callable] = None,
+) -> Path:
+    """Train a model and return the weights path.
+
+    Args:
+        preset: Preset config dict with embedding/scorer fields
+        data: Training data from load_traces()
+        weights_dir: Directory to save weights (.weights/)
+        configs_dir: Directory containing config files (embeddings.json, etc.)
+        init_weights: Optional path to weights file to initialize from
+        log_callback: Optional callback(epoch, max_epochs, train_loss) for logging
+
+    Returns:
+        Path to saved weights file.
+    """
+    import random
+
+    import torch.nn.functional as F
+    import torch.optim as optim
+    from torch.utils.data import DataLoader
+
+    from .weights import get_model_name
+
+    # Load configs
+    configs_dir = Path(configs_dir)
+    with open(configs_dir / "embeddings.json") as f:
+        embeddings_config = json.load(f)
+    with open(configs_dir / "scorers.json") as f:
+        scorers_config = json.load(f)
+    with open(configs_dir / "training.json") as f:
+        training_config = json.load(f)
+
+    # Get model and training config from preset
+    embedding_name = preset.get("embedding") or preset.get("model")
+    scorer_name = preset.get("scorer", "mlp")
+    training_name = preset.get("training", "standard")
+
+    # Get embedding architecture
+    embedding_arch = embeddings_config["architectures"].get(embedding_name)
+    if not embedding_arch:
+        raise ValueError(f"Unknown embedding: {embedding_name}")
+
+    # Get scorer architecture
+    scorer_arch = scorers_config["architectures"].get(scorer_name)
+    if not scorer_arch:
+        raise ValueError(f"Unknown scorer: {scorer_name}")
+
+    # Get training config
+    training_defaults = training_config.get("defaults", {})
+    training_overrides = training_config.get("configs", {}).get(training_name, {})
+
+    # Merge configs
+    config = {**training_defaults, **training_overrides}
+    config["embedding"] = embedding_arch
+    config["scorer"] = scorer_arch
+    config["input_dim"] = embeddings_config.get("input_dim", 8)
+
+    problems = data["problems"]
+    if not problems:
+        raise ValueError("No training data")
+
+    # Problem-level split
+    val_ratio = config.get("val_ratio", 0.0)
+    random.seed(42)
+    problem_indices = list(range(len(problems)))
+    random.shuffle(problem_indices)
+
+    if val_ratio > 0:
+        val_count = max(1, int(len(problems) * val_ratio))
+        train_indices = problem_indices[val_count:]
+        val_indices = problem_indices[:val_count]
+    else:
+        train_indices = problem_indices
+        val_indices = []
+
+    def make_dataset(prob_indices):
+        all_graphs, all_labels = [], []
+        for idx in prob_indices:
+            p = problems[idx]
+            all_graphs.extend(p["graphs"])
+            all_labels.extend(p["labels"])
+        if not all_graphs:
+            return None
+        return ClauseDataset(
+            node_features=[g["x"] for g in all_graphs],
+            edge_indices=[g["edge_index"] for g in all_graphs],
+            labels=all_labels,
+        )
+
+    train_ds = make_dataset(train_indices)
+    val_ds = make_dataset(val_indices) if val_indices else None
+
+    if not train_ds:
+        raise ValueError("No training examples")
+
+    model_name = get_model_name(preset)
+    print(f"Training {model_name}: {len(train_indices)} problems, {len(train_ds)} examples")
+
+    # Create model
+    model_type = config.get("type", "gcn")
+    model = create_model(
+        model_type=model_type,
+        node_feature_dim=config.get("input_dim", 13),
+        hidden_dim=config.get("hidden_dim", 64),
+        num_layers=config.get("num_layers", 3),
+        num_heads=config.get("num_heads", 4),
+        dropout=config.get("dropout", 0.1),
+    )
+
+    needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    # Initialize from existing weights if provided
+    if init_weights and Path(init_weights).exists():
+        print(f"Initializing from {init_weights}")
+        from safetensors.torch import load_file
+        state_dict = load_file(init_weights)
+        model.load_state_dict(state_dict)
+        model = model.to(device)
+
+    batch_size = config.get("batch_size", 32)
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_clause_batch
+    )
+    val_loader = (
+        DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_clause_batch)
+        if val_ds else None
+    )
+
+    # Optimizer
+    optimizer_type = config.get("optimizer", "adamw").lower()
+    lr = config.get("learning_rate", 0.001)
+    weight_decay = config.get("weight_decay", 1e-5)
+
+    if optimizer_type == "adamw":
+        betas = tuple(config.get("betas", [0.9, 0.999]))
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+    elif optimizer_type == "adam":
+        betas = tuple(config.get("betas", [0.9, 0.999]))
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+    elif optimizer_type == "sgd":
+        momentum = config.get("momentum", 0.9)
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
+    else:
+        raise ValueError(f"Unknown optimizer: {optimizer_type}")
+
+    max_epochs = config.get("max_epochs", 100)
+
+    # Margin ranking loss for pairwise learning
+    margin = config.get("margin", 0.1)
+    ranking_loss = nn.MarginRankingLoss(margin=margin)
+
+    def compute_pairwise_loss(scores, labels):
+        """Compute pairwise margin ranking loss between positive and negative examples."""
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+
+        if not pos_mask.any() or not neg_mask.any():
+            # Fallback to BCE if no pairs available
+            return F.binary_cross_entropy_with_logits(scores, labels.float())
+
+        pos_scores = scores[pos_mask]
+        neg_scores = scores[neg_mask]
+
+        # Sample pairs: for each positive, sample a random negative
+        n_pos = pos_scores.size(0)
+        n_neg = neg_scores.size(0)
+
+        # Random pairing: sample n_pos negatives (with replacement if needed)
+        neg_indices = torch.randint(0, n_neg, (n_pos,), device=scores.device)
+        neg_sampled = neg_scores[neg_indices]
+
+        # Target: +1 means first input should be ranked higher than second
+        target = torch.ones(n_pos, device=scores.device)
+        return ranking_loss(pos_scores, neg_sampled, target)
+
+    for epoch in range(1, max_epochs + 1):
+        model.train()
+        train_loss = 0
+        for batch in train_loader:
+            optimizer.zero_grad()
+            x = batch["node_features"].to(device)
+            adj = batch["adj"].to(device)
+            pool = batch["pool_matrix"].to(device)
+            labels = batch["labels"].to(device)
+
+            scores = model(x, adj, pool) if needs_adj else model(x, pool)
+            loss = compute_pairwise_loss(scores, labels)
+            loss.backward()
+
+            if config.get("gradient_clip"):
+                nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
+
+            optimizer.step()
+            train_loss += loss.item()
+
+        train_loss /= len(train_loader)
+
+        val_loss = 0
+        if val_loader:
+            model.eval()
+            with torch.no_grad():
+                for batch in val_loader:
+                    x = batch["node_features"].to(device)
+                    adj = batch["adj"].to(device)
+                    pool = batch["pool_matrix"].to(device)
+                    labels = batch["labels"].to(device)
+                    scores = model(x, adj, pool) if needs_adj else model(x, pool)
+                    val_loss += compute_pairwise_loss(scores, labels).item()
+            val_loss /= len(val_loader)
+
+        if val_loader:
+            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
+        else:
+            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
+
+        if log_callback:
+            log_callback(epoch, max_epochs, train_loss)
+
+    # Save weights using modular naming: {embedding}_{scorer}
+    from safetensors.torch import save_file
+
+    weights_dir = Path(weights_dir)
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = weights_dir / f"{model_name}.safetensors"
+
+    metadata = {
+        "model_type": model_type,
+        "hidden_dim": str(config.get("hidden_dim", 64)),
+        "num_layers": str(config.get("num_layers", 3)),
+        "num_heads": str(config.get("num_heads", 4)),
+        "input_dim": str(config.get("input_dim", 13)),
+    }
+    save_file(model.state_dict(), weights_path, metadata=metadata)
+    print(f"Weights saved: {weights_path}")
+
+    return weights_path
+
+
+# =============================================================================
 # Legacy compatibility
 # =============================================================================
 

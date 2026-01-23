@@ -30,11 +30,24 @@ from .training import (
     # Legacy per-clause datasets
     ClauseDataset,
     collate_clause_batch,
+    # Training
+    run_training,
+    load_traces,
+    save_trace,
     # Utilities
     JSONLogger,
     split_dataset,
     save_model,
     load_model,
+)
+
+from .weights import (
+    find_weights,
+    is_learned_selector,
+    get_model_name,
+    get_embedding_type,
+    STRING_EMBEDDINGS,
+    GRAPH_EMBEDDINGS,
 )
 
 from .config import (
@@ -85,11 +98,22 @@ __all__ = [
     # Datasets (legacy per-clause)
     "ClauseDataset",
     "collate_clause_batch",
+    # Training
+    "run_training",
+    "load_traces",
+    "save_trace",
     # Utilities
     "JSONLogger",
     "split_dataset",
     "save_model",
     "load_model",
+    # Weights
+    "find_weights",
+    "is_learned_selector",
+    "get_model_name",
+    "get_embedding_type",
+    "STRING_EMBEDDINGS",
+    "GRAPH_EMBEDDINGS",
     # Config - Data
     "DataConfig",
     "ProblemFilters",
