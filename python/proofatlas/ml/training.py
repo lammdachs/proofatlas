@@ -761,6 +761,13 @@ def run_training(
 
     start_time = time.time()
 
+    def log_msg(msg: str):
+        """Log message to stdout and optionally to log_file."""
+        print(msg)
+        if log_file:
+            log_file.write(msg + "\n")
+            log_file.flush()
+
     # Load configs
     configs_dir = Path(configs_dir)
     with open(configs_dir / "embeddings.json") as f:
@@ -851,15 +858,7 @@ def run_training(
     log_msg(f"Train: {len(train_files)} traces, Val: {len(val_files)} traces")
 
     model_name = get_model_name(preset)
-
-    def log_msg(msg: str):
-        """Log message to stdout and optionally to log_file."""
-        print(msg)
-        if log_file:
-            log_file.write(msg + "\n")
-            log_file.flush()
-
-    log_msg(f"Training {model_name}: {len(train_indices)} problems, {len(train_ds)} examples")
+    log_msg(f"Training {model_name}: {len(train_ds)} traces")
 
     # Create model
     model_type = config.get("type", "gcn")
