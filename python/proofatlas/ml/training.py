@@ -464,38 +464,65 @@ def collate_clause_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
 
 class JSONLogger:
-    """Logger that writes metrics to JSON for web visualization."""
+    """Logger that writes metrics to JSON for web visualization.
 
-    def __init__(self, log_dir: str, run_name: str):
-        self.log_dir = Path(log_dir)
+    Writes to web/data/training/{run_name}.json and updates index.json.
+    The web interface reads these files to display training progress.
+    """
+
+    def __init__(self, web_data_dir: Path, run_name: str):
+        """Initialize logger.
+
+        Args:
+            web_data_dir: Path to web/data directory
+            run_name: Name for this training run (used as filename)
+        """
+        self.web_data_dir = Path(web_data_dir)
+        self.training_dir = self.web_data_dir / "training"
+        self.training_dir.mkdir(parents=True, exist_ok=True)
+
         self.run_name = run_name
-        self.log_file = self.log_dir / run_name / "metrics.json"
-        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self.log_file = self.training_dir / f"{run_name}.json"
+        self.index_file = self.training_dir / "index.json"
 
         self.metrics = {
-            "run_name": run_name,
+            "generated": datetime.now().isoformat(),
+            "name": run_name,
             "start_time": datetime.now().isoformat(),
-            "config": {},
+            "end_time": None,
+            "total_time_seconds": None,
+            "termination_reason": None,
+            "best_epoch": None,
+            "best_val_loss": None,
+            "model": {},
+            "training": {},
             "epochs": [],
             "evaluations": [],
         }
+        self._save()
+        self._update_index()
 
-    def log_config(self, config: SelectorConfig):
-        self.metrics["config"] = config.to_dict()
+    def log_config(self, model_config: Dict[str, Any], training_config: Dict[str, Any]):
+        """Log model and training configuration."""
+        self.metrics["model"] = model_config
+        self.metrics["training"] = training_config
         self._save()
 
-    def log_epoch(self, epoch: int, train_loss: float, val_loss: float, val_acc: float, lr: float):
+    def log_epoch(self, epoch: int, train_loss: float, val_loss: Optional[float] = None,
+                  val_acc: Optional[float] = None, lr: Optional[float] = None):
+        """Log metrics for one epoch."""
         self.metrics["epochs"].append({
             "epoch": epoch,
-            "timestamp": datetime.now().isoformat(),
             "train_loss": train_loss,
             "val_loss": val_loss,
             "val_acc": val_acc,
+            "val_mrr": None,
             "learning_rate": lr,
         })
         self._save()
 
     def log_evaluation(self, epoch: int, results: Dict[str, Any]):
+        """Log evaluation results."""
         self.metrics["evaluations"].append({
             "epoch": epoch,
             "timestamp": datetime.now().isoformat(),
@@ -503,7 +530,9 @@ class JSONLogger:
         })
         self._save()
 
-    def log_final(self, best_epoch: int, best_val_loss: float, total_time: float, termination_reason: str = "unknown"):
+    def log_final(self, best_epoch: Optional[int], best_val_loss: Optional[float],
+                  total_time: float, termination_reason: str = "completed"):
+        """Log final training results."""
         self.metrics["end_time"] = datetime.now().isoformat()
         self.metrics["best_epoch"] = best_epoch
         self.metrics["best_val_loss"] = best_val_loss
@@ -512,8 +541,27 @@ class JSONLogger:
         self._save()
 
     def _save(self):
+        """Save metrics to JSON file."""
         with open(self.log_file, "w") as f:
             json.dump(self.metrics, f, indent=2)
+
+    def _update_index(self):
+        """Update index.json with this run."""
+        # Load existing index
+        if self.index_file.exists():
+            with open(self.index_file) as f:
+                index = json.load(f)
+        else:
+            index = {"runs": []}
+
+        # Add this run if not already present
+        if self.run_name not in index["runs"]:
+            index["runs"].append(self.run_name)
+            index["runs"].sort()
+
+        # Save index
+        with open(self.index_file, "w") as f:
+            json.dump(index, f, indent=2)
 
 
 # =============================================================================
@@ -645,6 +693,8 @@ def run_training(
     configs_dir: Path,
     init_weights: Optional[Path] = None,
     log_callback: Optional[callable] = None,
+    web_data_dir: Optional[Path] = None,
+    log_file: Optional[Any] = None,
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -655,17 +705,22 @@ def run_training(
         configs_dir: Directory containing config files (embeddings.json, etc.)
         init_weights: Optional path to weights file to initialize from
         log_callback: Optional callback(epoch, max_epochs, train_loss) for logging
+        web_data_dir: Directory for web data (web/data/) - enables live web updates
+        log_file: File object for logging (e.g., bench.log)
 
     Returns:
         Path to saved weights file.
     """
     import random
+    import time
 
     import torch.nn.functional as F
     import torch.optim as optim
     from torch.utils.data import DataLoader
 
     from .weights import get_model_name
+
+    start_time = time.time()
 
     # Load configs
     configs_dir = Path(configs_dir)
@@ -740,7 +795,15 @@ def run_training(
         raise ValueError("No training examples")
 
     model_name = get_model_name(preset)
-    print(f"Training {model_name}: {len(train_indices)} problems, {len(train_ds)} examples")
+
+    def log_msg(msg: str):
+        """Log message to stdout and optionally to log_file."""
+        print(msg)
+        if log_file:
+            log_file.write(msg + "\n")
+            log_file.flush()
+
+    log_msg(f"Training {model_name}: {len(train_indices)} problems, {len(train_ds)} examples")
 
     # Create model
     model_type = config.get("type", "gcn")
@@ -792,6 +855,32 @@ def run_training(
         raise ValueError(f"Unknown optimizer: {optimizer_type}")
 
     max_epochs = config.get("max_epochs", 100)
+
+    # Initialize web logger for live updates
+    web_logger = None
+    if web_data_dir:
+        web_logger = JSONLogger(web_data_dir, model_name)
+        web_logger.log_config(
+            model_config={
+                "type": model_type,
+                "hidden_dim": config.get("hidden_dim", 64),
+                "num_layers": config.get("num_layers", 3),
+                "input_dim": config.get("input_dim", 13),
+                "scorer_type": scorer_name,
+            },
+            training_config={
+                "batch_size": batch_size,
+                "learning_rate": lr,
+                "max_epochs": max_epochs,
+                "optimizer": optimizer_type,
+                "weight_decay": weight_decay,
+                "margin": config.get("margin", 0.1),
+            },
+        )
+
+    # Track best model
+    best_val_loss = float("inf")
+    best_epoch = None
 
     # Margin ranking loss for pairwise learning
     margin = config.get("margin", 0.1)
@@ -856,13 +945,40 @@ def run_training(
                     val_loss += compute_pairwise_loss(scores, labels).item()
             val_loss /= len(val_loader)
 
+        # Track best model
+        current_val = val_loss if val_loader else train_loss
+        if current_val < best_val_loss:
+            best_val_loss = current_val
+            best_epoch = epoch
+
+        # Log to console and file
         if val_loader:
-            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
+            log_msg(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
         else:
-            print(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
+            log_msg(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
+
+        # Log to web for live updates
+        if web_logger:
+            web_logger.log_epoch(
+                epoch=epoch,
+                train_loss=train_loss,
+                val_loss=val_loss if val_loader else None,
+                val_acc=None,
+                lr=lr,
+            )
 
         if log_callback:
             log_callback(epoch, max_epochs, train_loss)
+
+    # Log final results
+    total_time = time.time() - start_time
+    if web_logger:
+        web_logger.log_final(
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+            total_time=total_time,
+            termination_reason="completed",
+        )
 
     # Export to TorchScript for Rust inference
     weights_dir = Path(weights_dir)
@@ -884,7 +1000,8 @@ def run_training(
         traced = torch.jit.trace(model, (example_x, example_pool))
 
     traced.save(str(weights_path))
-    print(f"TorchScript model saved: {weights_path}")
+    log_msg(f"TorchScript model saved: {weights_path}")
+    log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")
 
     return weights_path
 

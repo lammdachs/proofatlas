@@ -1366,6 +1366,8 @@ def main():
                             weights_dir=weights_dir,
                             configs_dir=base_dir / "configs",
                             init_weights=existing_weights,
+                            web_data_dir=base_dir / "web" / "data",
+                            log_file=sys.stdout,
                         )
                     else:
                         print("No traces collected, using age_weight")
