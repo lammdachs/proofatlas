@@ -3,14 +3,19 @@
 Benchmark and train theorem provers.
 
 USAGE:
-    proofatlas-bench                                  # Evaluate with default preset
-    proofatlas-bench --preset time_sel0               # Use specific preset
+    proofatlas-bench                                  # Run all benchmarks (baselines + ML)
+    proofatlas-bench --preset time_sel0               # Run specific preset
+    proofatlas-bench --prover proofatlas              # Run all presets for one prover
     proofatlas-bench --preset gcn_mlp --retrain       # Retrain even if weights exist
     proofatlas-bench --rerun                          # Re-evaluate even if cached
 
     proofatlas-bench --track                          # Start and monitor progress
     proofatlas-bench --status                         # Check progress
     proofatlas-bench --kill                           # Stop job
+
+DEFAULT (no arguments):
+    Runs all benchmarks: baselines (proofatlas/vampire/spass with sel0/sel20/sel21)
+    plus ML selectors (gcn_mlp, gcn_attention, gcn_transformer, sentence_mlp).
 
 CACHING:
     Results are cached in .data/runs/<prover>/<preset>/<problem>.json.
@@ -19,11 +24,11 @@ CACHING:
 
 ML MODELS:
     When preset has embedding+scorer fields (e.g., gcn_mlp):
-    1. If weights exist in .weights/{embedding}_{scorer}.safetensors, uses them
+    1. If weights exist in .weights/{embedding}_{scorer}.pt, uses them
     2. If not, automatically:
        - Collects traces with age_weight heuristic
        - Trains the model
-       - Saves to .weights/{embedding}_{scorer}.safetensors
+       - Exports to .weights/{embedding}_{scorer}.pt
 
 OUTPUT:
     .weights/{embedding}_{scorer}.pt           - TorchScript model for inference
@@ -1081,10 +1086,6 @@ def main():
     parser.add_argument("--kill", action="store_true",
                        help="Stop running job")
 
-    # Paper benchmarks
-    parser.add_argument("--ijcar", action="store_true",
-                       help="Run all IJCAR paper benchmarks (baselines + ML selectors)")
-
     args = parser.parse_args()
     base_dir = find_project_root()
 
@@ -1131,19 +1132,46 @@ def main():
         print("Error: No provers available")
         sys.exit(1)
 
-    # Filter provers if specified
-    if args.prover and not args.ijcar:
-        if args.prover not in available_provers:
-            print(f"Error: Prover '{args.prover}' not available")
-            print(f"Available: {', '.join(available_provers.keys())}")
-            sys.exit(1)
-        available_provers = {args.prover: available_provers[args.prover]}
-
     # Build list of (prover, preset_name, preset, binary) combinations
     runs = []
 
-    if args.ijcar:
-        # IJCAR paper benchmarks: baselines + ML selectors for sel0, sel20, sel21
+    # If --prover or --preset specified, use filtered mode
+    if args.prover or args.preset:
+        # Filter provers if specified
+        if args.prover:
+            if args.prover not in available_provers:
+                print(f"Error: Prover '{args.prover}' not available")
+                print(f"Available: {', '.join(available_provers.keys())}")
+                sys.exit(1)
+            available_provers = {args.prover: available_provers[args.prover]}
+
+        for prover_name, prover_info in available_provers.items():
+            presets = prover_info["config"].get("presets", {})
+
+            if args.preset:
+                # Filter to only presets that exist for this prover
+                preset_names = [p for p in args.preset if p in presets]
+                if not preset_names:
+                    continue  # Skip this prover if no matching presets
+            else:
+                preset_names = list(presets.keys())
+
+            for preset_name in preset_names:
+                preset = presets[preset_name]
+
+                # Skip learned selectors if --base-only
+                if args.base_only and is_learned_selector(preset):
+                    continue
+
+                runs.append({
+                    "prover": prover_name,
+                    "preset_name": preset_name,
+                    "preset": preset,
+                    "binary": prover_info["binary"],
+                    "config": prover_info["config"],
+                })
+    else:
+        # Default: run all benchmarks (baselines + ML selectors for sel0, sel20, sel21)
         selections = ["sel0", "sel20", "sel21"]
 
         # Baseline benchmarks (time and step limited)
@@ -1179,42 +1207,13 @@ def main():
                 for sel in selections:
                     preset_name = f"{model}_{sel}"
                     if preset_name in presets:
-                        preset = presets[preset_name].copy()
-                        # Set trace_preset to use matching selection traces
-                        preset["traces"] = f"steps_{sel}"
                         runs.append({
                             "prover": "proofatlas",
                             "preset_name": preset_name,
-                            "preset": preset,
+                            "preset": presets[preset_name],
                             "binary": prover_info["binary"],
                             "config": prover_info["config"],
                         })
-    else:
-        for prover_name, prover_info in available_provers.items():
-            presets = prover_info["config"].get("presets", {})
-
-            if args.preset:
-                # Filter to only presets that exist for this prover
-                preset_names = [p for p in args.preset if p in presets]
-                if not preset_names:
-                    continue  # Skip this prover if no matching presets
-            else:
-                preset_names = list(presets.keys())
-
-            for preset_name in preset_names:
-                preset = presets[preset_name]
-
-                # Skip learned selectors if --base-only
-                if args.base_only and is_learned_selector(preset):
-                    continue
-
-                runs.append({
-                    "prover": prover_name,
-                    "preset_name": preset_name,
-                    "preset": preset,
-                    "binary": prover_info["binary"],
-                    "config": prover_info["config"],
-                })
 
     if not runs:
         print("Error: No matching prover/preset combinations")
