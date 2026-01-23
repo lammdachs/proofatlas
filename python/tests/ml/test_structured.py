@@ -298,14 +298,14 @@ class TestProofDataset:
         with open(tmp_path / "trace2.json", "w") as f:
             json.dump(trace2, f)
 
-        # Test graph output
+        # Test graph output (returns raw clauses for efficient batched conversion)
         dataset = ProofDataset(tmp_path, output_type="graph", sample_prefix=False)
         assert len(dataset) == 2
 
         item = dataset[0]
-        assert "graphs" in item
+        assert "clauses" in item
         assert "labels" in item
-        assert len(item["graphs"]) == 2
+        assert len(item["clauses"]) == 2
 
         # Test string output
         dataset_str = ProofDataset(tmp_path, output_type="string", sample_prefix=False)

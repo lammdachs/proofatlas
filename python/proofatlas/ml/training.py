@@ -233,8 +233,7 @@ class ProofDataset(torch.utils.data.Dataset):
         if not self.trace_files:
             raise ValueError(f"No JSON trace files found")
 
-        # Lazy-load converters
-        self._clause_to_graph = None
+        # Lazy-load converter for sentence output
         self._clause_to_string = None
 
     def __len__(self):
@@ -270,16 +269,9 @@ class ProofDataset(torch.utils.data.Dataset):
         labels = [c.get("label", 0) for c in clauses]
 
         if self.output_type == "graph":
-            # Convert to graph tensors
-            if self._clause_to_graph is None:
-                from .structured import clause_to_graph
-                self._clause_to_graph = clause_to_graph
-
-            max_age = len(clauses)
-            graphs = [self._clause_to_graph(c, max_age) for c in clauses]
-
+            # Return raw clauses - graph conversion done in collate for efficiency
             return {
-                "graphs": graphs,
+                "clauses": clauses,
                 "labels": labels,
                 "problem": self.trace_files[idx].stem,
             }
@@ -330,74 +322,51 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     Combines all clauses from all proofs into single tensors,
     with proof_ids to track which proof each clause belongs to.
 
-    New architecture (IJCAR26 plan):
-    - Node features (3d): type, arity, arg_pos (for GCN encoder)
-    - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
+    Uses clauses_to_batch for optimized graph construction with
+    pre-allocated arrays.
     """
-    all_node_features = []
-    all_edge_indices = []
-    all_clause_features = []
+    from .structured import clauses_to_batch
+
+    # Collect all clauses and labels, tracking proof membership
+    all_clauses = []
     all_labels = []
     all_proof_ids = []
 
-    node_offset = 0
-
     for proof_idx, item in enumerate(batch):
-        graphs = item["graphs"]
+        clauses = item["clauses"]
         labels = item["labels"]
 
-        for graph, label in zip(graphs, labels):
-            # Offset edge indices
-            edge_index = graph["edge_index"] + node_offset
-            all_edge_indices.append(edge_index)
+        all_clauses.extend(clauses)
+        all_labels.extend(labels)
+        all_proof_ids.extend([proof_idx] * len(clauses))
 
-            all_node_features.append(graph["x"])
-            all_labels.append(label)
-            all_proof_ids.append(proof_idx)
-
-            # Collect clause features if present
-            if "clause_features" in graph:
-                all_clause_features.append(graph["clause_features"])
-
-            node_offset += graph["num_nodes"]
-
-    # Concatenate all
-    node_features = torch.cat(all_node_features, dim=0)
-    edge_index = torch.cat(all_edge_indices, dim=1)
-    labels = torch.tensor(all_labels, dtype=torch.float32)
-    proof_ids = torch.tensor(all_proof_ids, dtype=torch.long)
+    # Build batched graph tensors (optimized: pre-allocated numpy -> torch)
+    batched = clauses_to_batch(all_clauses, labels=all_labels)
 
     # Build adjacency matrix
-    num_nodes = node_features.size(0)
+    edge_index = batched["edge_index"]
+    num_nodes = batched["x"].size(0)
     adj = edge_index_to_adjacency(edge_index, num_nodes, add_self_loops=True)
     adj_norm = normalize_adjacency(adj, add_self_loops=False)
 
-    # Build pool matrix (one row per clause)
-    num_clauses = len(all_labels)
+    # Build pool matrix (one row per clause, average pooling over clause nodes)
+    # Vectorized: O(num_nodes) instead of O(num_clauses * num_nodes)
+    num_clauses = len(all_clauses)
+    clause_batch = batched["batch"]
+
+    counts = torch.bincount(clause_batch, minlength=num_clauses).float()
     pool_matrix = torch.zeros(num_clauses, num_nodes)
+    node_indices = torch.arange(num_nodes)
+    pool_matrix[clause_batch, node_indices] = 1.0 / counts[clause_batch]
 
-    clause_idx = 0
-    node_offset = 0
-    for item in batch:
-        for graph in item["graphs"]:
-            n = graph["num_nodes"]
-            pool_matrix[clause_idx, node_offset:node_offset + n] = 1.0 / n
-            clause_idx += 1
-            node_offset += n
-
-    result = {
-        "node_features": node_features,
+    return {
+        "node_features": batched["x"],
         "adj": adj_norm,
         "pool_matrix": pool_matrix,
-        "labels": labels,
-        "proof_ids": proof_ids,
+        "labels": batched["y"],
+        "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
+        "clause_features": batched["clause_features"],
     }
-
-    # Stack clause features if present
-    if all_clause_features:
-        result["clause_features"] = torch.stack(all_clause_features, dim=0)
-
-    return result
 
 
 class ClauseDataset(torch.utils.data.Dataset):
