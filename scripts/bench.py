@@ -1333,21 +1333,34 @@ def main():
 
             # Training only supported for proofatlas
             if prover == "proofatlas" and is_learned_selector(preset):
+                model_name = get_model_name(preset)
+                embedding_type = get_embedding_type(preset)
+                print(f"[{preset_name}] Learned selector: {model_name} (embedding: {embedding_type})")
+                sys.stdout.flush()
+
                 weights_dir = base_dir / ".weights"
                 existing_weights = find_weights(weights_dir, preset)
 
                 if existing_weights and not args.retrain:
-                    print(f"Using existing weights: {existing_weights}")
+                    print(f"[{preset_name}] Found cached weights: {existing_weights}")
                     weights_path = existing_weights
                 else:
-                    print(f"Training {preset_name}...")
+                    if existing_weights:
+                        print(f"[{preset_name}] --retrain specified, will retrain (existing: {existing_weights})")
+                    else:
+                        print(f"[{preset_name}] No cached weights found in {weights_dir}")
+                    sys.stdout.flush()
 
                     # First collect traces with age_weight if none exist
                     traces_dir = base_dir / ".data" / "traces"
                     trace_preset_dir = traces_dir / trace_preset
                     proofatlas_presets = prover_config.get("presets", {})
-                    if not trace_preset_dir.exists() or not list(trace_preset_dir.glob("*.json")):
-                        print("Collecting traces with age_weight...")
+
+                    existing_traces = list(trace_preset_dir.glob("*.json")) if trace_preset_dir.exists() else []
+                    if not existing_traces:
+                        print(f"[{preset_name}] No traces found in {trace_preset_dir}")
+                        print(f"[{preset_name}] Collecting traces using age_weight baseline...")
+                        sys.stdout.flush()
                         trace_source_preset = proofatlas_presets.get(trace_preset, preset)
                         run_evaluation(
                             base_dir, problems, tptp_root,
@@ -1356,10 +1369,20 @@ def main():
                             preset_name=trace_preset, trace_preset=trace_preset,
                             rerun=True,  # Always run for trace collection
                         )
+                        existing_traces = list(trace_preset_dir.glob("*.json")) if trace_preset_dir.exists() else []
+                        print(f"[{preset_name}] Trace collection complete: {len(existing_traces)} traces")
+                    else:
+                        print(f"[{preset_name}] Found {len(existing_traces)} existing traces in {trace_preset_dir}")
+                    sys.stdout.flush()
 
                     # Load traces and train (filtered by problem set)
+                    print(f"[{preset_name}] Loading traces for training...")
+                    sys.stdout.flush()
                     data = load_traces(traces_dir, trace_preset, problem_names)
                     if data["num_problems"] > 0:
+                        print(f"[{preset_name}] Loaded {data['num_problems']} problems for training")
+                        print(f"[{preset_name}] Starting training...")
+                        sys.stdout.flush()
                         weights_path = run_training(
                             preset=preset,
                             data=data,
@@ -1369,12 +1392,22 @@ def main():
                             web_data_dir=base_dir / "web" / "data",
                             log_file=sys.stdout,
                         )
+                        print(f"[{preset_name}] Training complete, weights saved to: {weights_path}")
                     else:
-                        print("No traces collected, using age_weight")
+                        print(f"[{preset_name}] WARNING: No valid traces found, falling back to age_weight")
                         current_preset = proofatlas_presets.get(trace_preset, preset)
                         weights_path = None
+                    sys.stdout.flush()
+            elif prover == "proofatlas":
+                print(f"[{preset_name}] Heuristic selector (no training needed)")
+                sys.stdout.flush()
+            else:
+                print(f"[{preset_name}] External prover: {prover}")
+                sys.stdout.flush()
 
             # Run evaluation
+            print(f"[{preset_name}] Starting evaluation on {len(problems)} problems...")
+            sys.stdout.flush()
             run_evaluation(
                 base_dir, problems, tptp_root,
                 prover=prover, preset=current_preset,
@@ -1383,6 +1416,13 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.n_jobs,
             )
+            print(f"[{preset_name}] Evaluation complete")
+            sys.stdout.flush()
+
+        print(f"\n{'='*60}")
+        print("All benchmarks complete")
+        print(f"{'='*60}")
+        sys.stdout.flush()
 
     except Exception as e:
         print(f"ERROR: {e}")
