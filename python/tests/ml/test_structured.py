@@ -93,15 +93,15 @@ class TestClauseToGraph:
 
     def test_graph_structure(self, sample_clause):
         from proofatlas.ml.structured import clause_to_graph
-        import torch
+        import numpy as np
 
         result = clause_to_graph(sample_clause, max_age=100)
 
-        # Check tensor types
-        assert isinstance(result["edge_index"], torch.Tensor)
-        assert isinstance(result["x"], torch.Tensor)
-        assert isinstance(result["node_types"], torch.Tensor)
-        assert isinstance(result["clause_features"], torch.Tensor)
+        # Check numpy array types (torch tensors created during batching)
+        assert isinstance(result["edge_index"], np.ndarray)
+        assert isinstance(result["x"], np.ndarray)
+        assert isinstance(result["node_types"], np.ndarray)
+        assert isinstance(result["clause_features"], np.ndarray)
 
         # Check shapes
         assert result["edge_index"].shape[0] == 2

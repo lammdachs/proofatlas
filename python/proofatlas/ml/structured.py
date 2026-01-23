@@ -120,21 +120,22 @@ def _term_to_string(term: Dict[str, Any]) -> str:
 def clause_to_graph(
     clause: Dict[str, Any],
     max_age: int = 1000,
-    device: str = "cpu"
 ) -> Dict[str, Any]:
-    """Convert structured clause to graph tensors.
+    """Convert structured clause to graph (numpy arrays).
 
     The new architecture separates node-level and clause-level features:
     - Node features (3d): type, arity, arg_pos (for GCN encoder)
     - Clause features (3d): age, role, size (for scorer, sinusoidal encoded)
 
+    Returns numpy arrays for efficient batching. Converted to torch tensors
+    in batch_graphs().
+
     Args:
         clause: Structured clause dict
         max_age: Maximum age for normalization
-        device: PyTorch device
 
     Returns:
-        Dictionary with:
+        Dictionary with numpy arrays:
             edge_index: [2, num_edges] edge indices
             x: [num_nodes, 3] node features (type, arity, arg_pos)
             node_types: [num_nodes] node type indices
@@ -142,13 +143,10 @@ def clause_to_graph(
             num_edges: int
             clause_features: [3] raw clause features (age, role, size)
     """
-    if not TORCH_AVAILABLE:
-        raise ImportError("PyTorch required for graph conversion")
-
     builder = _GraphBuilder(max_age)
     builder.build_clause(clause)
 
-    return builder.to_tensors(clause, device)
+    return builder.to_numpy(clause)
 
 
 class _GraphBuilder:
@@ -167,58 +165,49 @@ class _GraphBuilder:
 
     def __init__(self, max_age: int = 1000):
         self.max_age = max_age
-        self.nodes: List[np.ndarray] = []  # Node features
+        # Store as flat lists for efficiency (avoid numpy array per node)
+        self.node_features: List[Tuple[float, float, float]] = []
         self.node_types: List[int] = []
-        self.edges: List[Tuple[int, int]] = []
-        self.node_names: List[str] = []
+        self.edge_src: List[int] = []
+        self.edge_dst: List[int] = []
 
     def build_clause(self, clause: Dict[str, Any]) -> int:
         """Build graph for clause, return root node index."""
         literals = clause.get("literals", [])
 
         # Create clause node
-        clause_idx = self._add_node(
-            node_type=TYPE_CLAUSE,
-            arity=len(literals),
-            arg_pos=0,
-            name="clause"
-        )
+        clause_idx = self._add_node(TYPE_CLAUSE, len(literals), 0)
 
         # Add literals
         for lit_pos, lit in enumerate(literals):
             lit_idx = self._build_literal(lit, arg_pos=lit_pos)
-            self.edges.append((clause_idx, lit_idx))
+            self.edge_src.append(clause_idx)
+            self.edge_dst.append(lit_idx)
 
         return clause_idx
 
     def _build_literal(self, lit: Dict[str, Any], arg_pos: int) -> int:
         """Build graph for literal."""
-        polarity = lit.get("polarity", True)
         atom = lit["atom"]
-        pred = atom["predicate"]
         args = atom.get("args", [])
 
-        # Create literal node
-        lit_idx = self._add_node(
-            node_type=TYPE_LITERAL,
-            arity=1,  # Literal has one child (predicate)
-            arg_pos=arg_pos,
-            name=f"{'~' if not polarity else ''}{pred}"
-        )
+        # Create literal node (arity=1: one child which is the predicate)
+        lit_idx = self._add_node(TYPE_LITERAL, 1, arg_pos)
 
         # Create predicate node
         pred_idx = self._add_node(
             node_type=TYPE_PREDICATE,
             arity=len(args),
             arg_pos=0,
-            name=pred
         )
-        self.edges.append((lit_idx, pred_idx))
+        self.edge_src.append(lit_idx)
+        self.edge_dst.append(pred_idx)
 
         # Add arguments
         for child_pos, arg in enumerate(args):
             arg_idx = self._build_term(arg, arg_pos=child_pos)
-            self.edges.append((pred_idx, arg_idx))
+            self.edge_src.append(pred_idx)
+            self.edge_dst.append(arg_idx)
 
         return lit_idx
 
@@ -227,106 +216,56 @@ class _GraphBuilder:
         term_type = term["type"]
 
         if term_type == "Variable":
-            return self._add_node(
-                node_type=TYPE_VARIABLE,
-                arity=0,
-                arg_pos=arg_pos,
-                name=term["name"]
-            )
+            return self._add_node(TYPE_VARIABLE, 0, arg_pos)
         elif term_type == "Constant":
-            return self._add_node(
-                node_type=TYPE_CONSTANT,
-                arity=0,
-                arg_pos=arg_pos,
-                name=term["name"]
-            )
+            return self._add_node(TYPE_CONSTANT, 0, arg_pos)
         elif term_type == "Function":
             args = term.get("args", [])
-            func_idx = self._add_node(
-                node_type=TYPE_FUNCTION,
-                arity=len(args),
-                arg_pos=arg_pos,
-                name=term["name"]
-            )
+            func_idx = self._add_node(TYPE_FUNCTION, len(args), arg_pos)
 
             for child_pos, child in enumerate(args):
                 child_idx = self._build_term(child, arg_pos=child_pos)
-                self.edges.append((func_idx, child_idx))
+                self.edge_src.append(func_idx)
+                self.edge_dst.append(child_idx)
 
             return func_idx
         else:
             # Unknown term type, treat as constant
-            return self._add_node(
-                node_type=TYPE_CONSTANT,
-                arity=0,
-                arg_pos=arg_pos,
-                name=f"?{term_type}"
-            )
+            return self._add_node(TYPE_CONSTANT, 0, arg_pos)
 
-    def _add_node(
-        self,
-        node_type: int,
-        arity: int = 0,
-        arg_pos: int = 0,
-        name: str = ""
-    ) -> int:
+    def _add_node(self, node_type: int, arity: int = 0, arg_pos: int = 0) -> int:
         """Add a node with 3-dim feature vector (type, arity, arg_pos)."""
-        features = np.zeros(self.NODE_FEATURE_DIM, dtype=np.float32)
-
-        # Feature 0: Node type (raw value)
-        features[FEAT_NODE_TYPE] = float(node_type)
-
-        # Feature 1: Arity
-        features[FEAT_ARITY] = float(arity)
-
-        # Feature 2: Argument position
-        features[FEAT_ARG_POSITION] = float(arg_pos)
-
-        idx = len(self.nodes)
-        self.nodes.append(features)
+        idx = len(self.node_features)
+        self.node_features.append((float(node_type), float(arity), float(arg_pos)))
         self.node_types.append(node_type)
-        self.node_names.append(name)
-
         return idx
 
-    def to_tensors(self, clause: Dict[str, Any], device: str = "cpu") -> Dict[str, Any]:
-        """Convert to PyTorch tensors.
+    def to_numpy(self, clause: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert to numpy arrays (for efficient batching later).
 
         Args:
             clause: Original clause dict (for extracting clause-level features)
-            device: PyTorch device
 
         Returns:
-            Dictionary with node features, edge index, and clause features
+            Dictionary with numpy arrays (converted to torch tensors during batching)
         """
-        import torch
+        num_nodes = len(self.node_features)
+        num_edges = len(self.edge_src)
 
-        num_nodes = len(self.nodes)
-        num_edges = len(self.edges)
-
-        # Node features (3-dim)
-        x = torch.tensor(
-            np.stack(self.nodes) if self.nodes else np.zeros((0, self.NODE_FEATURE_DIM)),
-            dtype=torch.float32,
-            device=device
-        )
+        # Node features
+        if self.node_features:
+            x = np.array(self.node_features, dtype=np.float32)
+        else:
+            x = np.zeros((0, self.NODE_FEATURE_DIM), dtype=np.float32)
 
         # Edge index
-        if self.edges:
-            edge_index = torch.tensor(
-                [[e[0] for e in self.edges], [e[1] for e in self.edges]],
-                dtype=torch.long,
-                device=device
-            )
+        if self.edge_src:
+            edge_index = np.array([self.edge_src, self.edge_dst], dtype=np.int64)
         else:
-            edge_index = torch.zeros((2, 0), dtype=torch.long, device=device)
+            edge_index = np.zeros((2, 0), dtype=np.int64)
 
         # Node types
-        node_types = torch.tensor(
-            self.node_types,
-            dtype=torch.uint8,
-            device=device
-        )
+        node_types = np.array(self.node_types, dtype=np.uint8)
 
         # Clause-level features (raw values, will be sinusoidal encoded by scorer)
         age = clause.get("age", 0)
@@ -337,10 +276,8 @@ class _GraphBuilder:
         normalized_age = float(age) / float(max(self.max_age, 1))
         role_idx = float(ROLE_MAP.get(role, 4))
 
-        clause_features = torch.tensor(
-            [normalized_age, role_idx, float(size)],
-            dtype=torch.float32,
-            device=device
+        clause_features = np.array(
+            [normalized_age, role_idx, float(size)], dtype=np.float32
         )
 
         return {
@@ -368,22 +305,20 @@ def clauses_to_strings(clauses: List[Dict[str, Any]]) -> List[str]:
 def clauses_to_graphs(
     clauses: List[Dict[str, Any]],
     max_age: Optional[int] = None,
-    device: str = "cpu"
 ) -> List[Dict[str, Any]]:
-    """Convert list of structured clauses to graph tensors.
+    """Convert list of structured clauses to graph numpy arrays.
 
     Args:
         clauses: List of structured clause dicts
         max_age: Maximum age for normalization (default: len(clauses))
-        device: PyTorch device
 
     Returns:
-        List of graph tensor dicts
+        List of graph dicts with numpy arrays
     """
     if max_age is None:
         max_age = len(clauses)
 
-    return [clause_to_graph(c, max_age, device) for c in clauses]
+    return [clause_to_graph(c, max_age) for c in clauses]
 
 
 def load_structured_trace(path: str) -> Dict[str, Any]:
@@ -408,12 +343,12 @@ def batch_graphs(
     """Batch multiple graphs into a single disconnected graph.
 
     Args:
-        graphs: List of graph dicts from clause_to_graph
+        graphs: List of graph dicts from clause_to_graph (numpy arrays)
         labels: Optional list of labels (one per graph)
         device: PyTorch device
 
     Returns:
-        Batched graph dict with batch indices and clause features
+        Batched graph dict with torch tensors and batch indices
     """
     if not TORCH_AVAILABLE:
         raise ImportError("PyTorch required for batching")
@@ -438,6 +373,7 @@ def batch_graphs(
         num_nodes = g['num_nodes']
 
         all_x.append(x)
+        # Offset edge indices (numpy addition)
         all_edges.append(edges + node_offset)
         all_types.append(types)
         batch_indices.extend([i] * num_nodes)
@@ -448,17 +384,18 @@ def batch_graphs(
 
         node_offset += num_nodes
 
+    # Convert numpy arrays to tensors in one shot (much faster than per-graph)
     result = {
-        'x': torch.cat(all_x, dim=0) if all_x else torch.zeros(0, _GraphBuilder.NODE_FEATURE_DIM),
-        'edge_index': torch.cat(all_edges, dim=1) if all_edges else torch.zeros(2, 0, dtype=torch.long),
-        'node_types': torch.cat(all_types, dim=0) if all_types else torch.zeros(0, dtype=torch.uint8),
+        'x': torch.from_numpy(np.concatenate(all_x, axis=0)).to(device) if all_x else torch.zeros(0, _GraphBuilder.NODE_FEATURE_DIM, device=device),
+        'edge_index': torch.from_numpy(np.concatenate(all_edges, axis=1)).to(device) if all_edges else torch.zeros(2, 0, dtype=torch.long, device=device),
+        'node_types': torch.from_numpy(np.concatenate(all_types, axis=0)).to(device) if all_types else torch.zeros(0, dtype=torch.uint8, device=device),
         'batch': torch.tensor(batch_indices, dtype=torch.long, device=device),
         'num_graphs': len(graphs),
     }
 
     # Stack clause features if present
     if all_clause_features:
-        result['clause_features'] = torch.stack(all_clause_features, dim=0)
+        result['clause_features'] = torch.from_numpy(np.stack(all_clause_features, axis=0)).to(device)
 
     if labels is not None:
         result['y'] = torch.tensor(labels, dtype=torch.float, device=device)
