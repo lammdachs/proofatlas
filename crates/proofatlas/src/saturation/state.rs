@@ -22,7 +22,7 @@
 //!      - **Forward Deletion**: Check if C is subsumed by any clause in A ∪ P
 //!      - If C survives:
 //!        - **Backward Deletion**: Remove clauses in A ∪ P that are subsumed by C
-//!        - **Backward Simplification**: If C is a unit equality, rewrite clauses in A ∪ P
+//!        - **Backward Simplification**: If C is a unit equality, rewrite clauses in A ∪ P; results go to N
 //!        - **Transfer**: Move C from N to P
 //!
 //! 2. **Select Given Clause**: Choose a clause G from P using the clause selector
