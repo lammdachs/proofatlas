@@ -1,7 +1,7 @@
 {
   "generated": "2026-01-22T22:36:12.897495",
   "prover": "spass",
-  "preset": "steps_sel21",
+  "preset": "age_weight_sel21",
   "completed": 8398,
   "total": 8398,
   "progress_pct": 100.0,

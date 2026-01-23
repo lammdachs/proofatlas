@@ -1187,7 +1187,7 @@ def main():
                 if prover_name == "spass" and sel == "sel0":
                     continue
                 preset_name = f"age_weight_{sel}"
-                    if preset_name in presets:
+                if preset_name in presets:
                         runs.append({
                             "prover": prover_name,
                             "preset_name": preset_name,

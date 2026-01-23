@@ -1,7 +1,7 @@
 {
   "generated": "2026-01-22T21:16:10.732851",
   "prover": "vampire",
-  "preset": "steps_sel20",
+  "preset": "age_weight_sel20",
   "completed": 8398,
   "total": 8398,
   "progress_pct": 100.0,
