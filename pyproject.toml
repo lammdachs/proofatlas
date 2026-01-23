@@ -47,7 +47,6 @@ Issues = "https://github.com/lexpk/proofatlas/issues"
 # torch pinned to 2.9.0 for tch-rs 0.22 compatibility
 ml = [
     "torch==2.9.0",
-    "lightning>=2.0.0",
     "safetensors",
 ]
 
@@ -59,10 +58,6 @@ dev = [
     "mypy",
     "types-setuptools",
     "ruff",
-]
-
-examples = [
-    "matplotlib>=3.0",
 ]
 
 [tool.setuptools]

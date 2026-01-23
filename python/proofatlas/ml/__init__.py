@@ -19,18 +19,20 @@ from .graph_utils import (
 )
 
 from .training import (
-    # Per-proof training (recommended)
+    # Loss functions
+    info_nce_loss,
+    info_nce_loss_per_proof,
+    margin_ranking_loss,
+    # Per-proof datasets (recommended)
     ProofDataset,
     collate_proof_batch,
     collate_sentence_batch,
-    train_from_traces,
-    info_nce_loss_per_proof,
-    # Legacy per-clause training
+    # Legacy per-clause datasets
     ClauseDataset,
     collate_clause_batch,
+    # Utilities
     JSONLogger,
     split_dataset,
-    train,
     save_model,
     load_model,
 )
@@ -72,18 +74,20 @@ __all__ = [
     "extract_graph_embeddings",
     "get_node_type_masks",
     "compute_graph_statistics",
-    # Training (per-proof, recommended)
+    # Loss functions
+    "info_nce_loss",
+    "info_nce_loss_per_proof",
+    "margin_ranking_loss",
+    # Datasets (per-proof, recommended)
     "ProofDataset",
     "collate_proof_batch",
     "collate_sentence_batch",
-    "train_from_traces",
-    "info_nce_loss_per_proof",
-    # Training (legacy per-clause)
+    # Datasets (legacy per-clause)
     "ClauseDataset",
     "collate_clause_batch",
+    # Utilities
     "JSONLogger",
     "split_dataset",
-    "train",
     "save_model",
     "load_model",
     # Config - Data
