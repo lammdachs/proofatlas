@@ -7,7 +7,7 @@
 git clone https://github.com/lexpk/proofatlas.git
 cd proofatlas
 
-# Install in development mode
+# Install (includes ML features)
 pip install -e .
 
 # Verify installation
@@ -19,13 +19,16 @@ proofatlas --list
 - Python 3.7 or later
 - Rust toolchain (install from https://rustup.rs/)
 
-## Installation Options
-
-### Basic Installation
+## Installation
 
 ```bash
 pip install -e .
 ```
+
+This automatically:
+- Installs PyTorch 2.9.0
+- Configures tch-rs linking (creates `.cargo/config.toml`)
+- Builds the Rust extension with ML features
 
 ### With Development Dependencies
 
@@ -33,30 +36,7 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-This includes pytest, black, ruff, mypy for development.
-
-### With ML Features (GCN/Sentence selectors)
-
-To use ML-based clause selection:
-
-```bash
-# Install PyTorch first
-pip install torch==2.9.0
-
-# Configure Cargo for tch-rs
-python scripts/setup_cargo.py
-
-# Build with ML features
-cargo build --release --features python,ml -p proofatlas
-
-# Copy the extension to the Python package
-cp target/release/libproofatlas.so python/proofatlas/proofatlas.cpython-312-x86_64-linux-gnu.so
-
-# Install Python dependencies
-pip install -e ".[ml]"
-```
-
-Re-run `setup_cargo.py` if you change Python environments.
+This adds pytest, black, ruff, mypy for development.
 
 ## Running the Prover
 
@@ -64,13 +44,13 @@ Re-run `setup_cargo.py` if you change Python environments.
 # Run on a TPTP problem
 proofatlas problem.p
 
-# With a preset
+# With a config
 proofatlas problem.p --config time_sel21
 
 # With options
 proofatlas problem.p --timeout 60 --literal-selection 21
 
-# List available presets
+# List available configs
 proofatlas --list
 
 # Export result to JSON
@@ -98,13 +78,11 @@ Then open http://localhost:8000 in your browser.
 
 ## Benchmarking
 
-After installation, use the benchmark tool:
-
 ```bash
-# Run all presets
+# Run all configs
 proofatlas-bench
 
-# Run specific preset
+# Run specific config
 proofatlas-bench --config gcn_mlp_sel21
 
 # Retrain ML models
@@ -116,7 +94,7 @@ proofatlas-bench --status
 # Stop running job
 proofatlas-bench --kill
 
-# List available presets
+# List available configs
 proofatlas-bench --list
 ```
 
@@ -125,16 +103,12 @@ proofatlas-bench --list
 1. **Rust not found**
    - Install Rust from https://rustup.rs/
 
-2. **setuptools-rust not found**
-   - Run: `pip install setuptools-rust`
+2. **Build fails with libtorch errors**
+   - Re-run `pip install -e .` to regenerate `.cargo/config.toml`
+   - Ensure PyTorch 2.9.0 is installed
 
-3. **Build fails on older Python**
-   - Ensure Python 3.7+ is installed
-
-4. **ML features not working**
-   - Ensure PyTorch is installed before building
-   - Run `python scripts/setup_cargo.py` to configure libtorch paths
-   - Rebuild with `cargo build --release --features python,ml -p proofatlas`
+3. **Changed Python environment**
+   - Re-run `pip install -e .` to update libtorch paths
 
 ## Project Structure
 
