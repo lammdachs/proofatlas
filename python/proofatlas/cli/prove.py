@@ -126,7 +126,7 @@ def main():
     preset = {}
     if args.config:
         if args.config not in presets:
-            print(f"Error: Unknown preset '{args.config}'", file=sys.stderr)
+            print(f"Error: Unknown config '{args.config}'", file=sys.stderr)
             print(f"Use --list to see available configs", file=sys.stderr)
             sys.exit(1)
         preset = presets[args.config]
@@ -156,7 +156,7 @@ def main():
 
             if not weights_path:
                 print(f"Error: Model weights not found for {model_name}", file=sys.stderr)
-                print(f"Train with: proofatlas-bench --preset {args.config} --retrain", file=sys.stderr)
+                print(f"Train with: proofatlas-bench --config {args.config} --retrain", file=sys.stderr)
                 sys.exit(1)
 
             if args.verbose:

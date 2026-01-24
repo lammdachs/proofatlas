@@ -180,17 +180,8 @@ weights_path = run_training(
 
 ## Weight Export
 
-Trained PyTorch models are exported to TorchScript for Rust inference:
-
-```python
-import torch
-
-# For GCN models, use the export script
-# python scripts/export_gcn.py
-
-# For sentence models, use the export method
-model.export_torchscript(".weights/sentence_encoder.pt")
-```
+Trained PyTorch models are automatically exported to TorchScript during training.
+The exported `.pt` files are saved to `.weights/` for Rust inference.
 
 The tch-rs selector loads TorchScript models:
 
@@ -234,7 +225,6 @@ let selector = load_gcn_selector(".weights/gcn_model.pt", true)?;
 | `crates/proofatlas/src/selectors/` | Rust/tch-rs selector implementations |
 | `python/proofatlas/ml/` | Training infrastructure |
 | `python/proofatlas/selectors/` | PyTorch model definitions |
-| `scripts/export_gcn.py` | GCN TorchScript export |
 | `configs/training.json` | Training hyperparameter presets |
 | `.weights/` | TorchScript models (.pt files) |
 | `.data/traces/` | Collected proof traces |

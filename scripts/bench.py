@@ -1120,7 +1120,7 @@ def main():
         # Run specified configs
         for preset_name in args.config:
             if preset_name not in presets:
-                print(f"Error: Unknown preset '{preset_name}'")
+                print(f"Error: Unknown config '{preset_name}'")
                 print(f"Use --list to see available configs")
                 sys.exit(1)
             runs.append({
