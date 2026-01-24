@@ -711,12 +711,14 @@ def run_training(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    batch_size = config.get("batch_size", 32)
+    # Use batch_size=1 to process one proof at a time (avoids OOM with large proofs)
+    # Gradient accumulation simulates larger batch sizes
+    accumulate_steps = config.get("batch_size", 32)
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_proof_batch, num_workers=0
+        train_ds, batch_size=1, shuffle=True, collate_fn=collate_proof_batch, num_workers=0
     )
     val_loader = (
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_proof_batch, num_workers=0)
+        DataLoader(val_ds, batch_size=1, shuffle=False, collate_fn=collate_proof_batch, num_workers=0)
         if val_ds else None
     )
 
@@ -799,22 +801,25 @@ def run_training(
     for epoch in range(1, max_epochs + 1):
         model.train()
         train_loss = 0
-        for batch in train_loader:
-            optimizer.zero_grad()
+        optimizer.zero_grad()
+
+        for step, batch in enumerate(train_loader):
             x = batch["node_features"].to(device)
             adj = batch["adj"].to(device)
             pool = batch["pool_matrix"].to(device)
             labels = batch["labels"].to(device)
 
             scores = model(x, adj, pool) if needs_adj else model(x, pool)
-            loss = compute_pairwise_loss(scores, labels)
+            loss = compute_pairwise_loss(scores, labels) / accumulate_steps
             loss.backward()
+            train_loss += loss.item() * accumulate_steps
 
-            if config.get("gradient_clip"):
-                nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
-
-            optimizer.step()
-            train_loss += loss.item()
+            # Step optimizer after accumulating gradients
+            if (step + 1) % accumulate_steps == 0 or (step + 1) == len(train_loader):
+                if config.get("gradient_clip"):
+                    nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
+                optimizer.step()
+                optimizer.zero_grad()
 
         train_loss /= len(train_loader)
 
