@@ -4,9 +4,16 @@ Setup script for proofatlas.
 
 This script configures tch-rs/libtorch linking before building the Rust extension.
 It automatically creates .cargo/config.toml with the correct PyTorch library paths.
+
+It also sets up:
+- TPTP problem library (all platforms)
+- Vampire theorem prover (Linux only)
+- SPASS theorem prover (Linux only)
 """
 import os
+import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +32,8 @@ Then restart your shell and try again.
 
 # Set environment variable for tch-rs to find PyTorch's libtorch
 os.environ.setdefault('LIBTORCH_USE_PYTORCH', '1')
+
+PROJECT_ROOT = Path(__file__).parent
 
 
 def setup_cargo_config():
@@ -73,11 +82,8 @@ rustflags = ["-C", "link-arg=-Wl,-rpath,{torch_lib}"]
 
 def build_wasm():
     """Build the WASM package for the web interface."""
-    import subprocess
-
-    project_root = Path(__file__).parent
-    wasm_crate = project_root / "crates" / "proofatlas-wasm"
-    web_pkg = project_root / "web" / "pkg"
+    wasm_crate = PROJECT_ROOT / "crates" / "proofatlas-wasm"
+    web_pkg = PROJECT_ROOT / "web" / "pkg"
 
     # Check if wasm-pack is installed
     if not shutil.which('wasm-pack'):
@@ -117,11 +123,82 @@ def build_wasm():
         print("Web interface will not be available.")
 
 
+def setup_tptp():
+    """Run scripts/setup_tptp.py to download TPTP and extract metadata."""
+    script = PROJECT_ROOT / "scripts" / "setup_tptp.py"
+    if not script.exists():
+        print("Warning: scripts/setup_tptp.py not found, skipping TPTP setup")
+        return
+
+    # Check if already installed
+    metadata_path = PROJECT_ROOT / ".data" / "problem_metadata.json"
+    if metadata_path.exists():
+        print("TPTP already installed")
+        return
+
+    try:
+        subprocess.run([sys.executable, str(script)], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: TPTP setup failed: {e}")
+        print("Run 'python scripts/setup_tptp.py' manually")
+
+
+def setup_vampire():
+    """Run scripts/setup_vampire.py to download Vampire (Linux only)."""
+    if platform.system().lower() != "linux":
+        return
+
+    script = PROJECT_ROOT / "scripts" / "setup_vampire.py"
+    if not script.exists():
+        print("Warning: scripts/setup_vampire.py not found, skipping Vampire setup")
+        return
+
+    # Check if already installed
+    binary_path = PROJECT_ROOT / ".vampire" / "vampire"
+    if binary_path.exists():
+        print("Vampire already installed")
+        return
+
+    try:
+        subprocess.run([sys.executable, str(script)], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Vampire setup failed: {e}")
+        print("Run 'python scripts/setup_vampire.py' manually")
+
+
+def setup_spass():
+    """Run scripts/setup_spass.py to build SPASS (Linux only)."""
+    if platform.system().lower() != "linux":
+        return
+
+    script = PROJECT_ROOT / "scripts" / "setup_spass.py"
+    if not script.exists():
+        print("Warning: scripts/setup_spass.py not found, skipping SPASS setup")
+        return
+
+    # Check if already installed
+    binary_path = PROJECT_ROOT / ".spass" / "SPASS"
+    if binary_path.exists():
+        print("SPASS already installed")
+        return
+
+    try:
+        subprocess.run([sys.executable, str(script)], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: SPASS setup failed: {e}")
+        print("Run 'python scripts/setup_spass.py' manually")
+
+
 # Configure cargo before build
 setup_cargo_config()
 
 # Build WASM package
 build_wasm()
+
+# Setup external dependencies
+setup_tptp()
+setup_vampire()
+setup_spass()
 
 # Import and run setuptools
 from setuptools import setup

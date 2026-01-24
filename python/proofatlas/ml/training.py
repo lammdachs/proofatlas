@@ -180,35 +180,87 @@ def info_nce_loss_per_proof(
 # =============================================================================
 
 
+def _pool_init():
+    """Initializer for pool workers - ignore SIGTERM so parent handles it."""
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
+    """Load trace file and convert to graphs. Module-level for multiprocessing."""
+    from .structured import clause_to_graph
+
+    try:
+        trace = _load_json(trace_file)
+    except Exception:
+        return None
+
+    if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+
+    clauses = trace["clauses"]
+    labels = [c.get("label", 0) for c in clauses]
+    max_age = len(clauses)
+    graphs = [clause_to_graph(c, max_age) for c in clauses]
+
+    return {
+        "graphs": graphs,
+        "labels": labels,
+        "problem": trace_file.stem,
+    }
+
+
+def _load_trace_string(trace_file: Path) -> Optional[Dict]:
+    """Load trace file and convert to strings. Module-level for multiprocessing."""
+    from .structured import clause_to_string
+
+    try:
+        trace = _load_json(trace_file)
+    except Exception:
+        return None
+
+    if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+
+    clauses = trace["clauses"]
+    labels = [c.get("label", 0) for c in clauses]
+    strings = [clause_to_string(c) for c in clauses]
+
+    return {
+        "strings": strings,
+        "labels": labels,
+        "problem": trace_file.stem,
+    }
+
+
 class ProofDataset(torch.utils.data.Dataset):
     """
     Dataset that loads structured JSON traces and converts to graphs/strings.
 
-    All data is loaded and converted upfront in __init__ for simplicity.
+    Data is loaded in parallel using multiprocessing for speed.
     """
 
     def __init__(
         self,
         trace_dir: Path,
         output_type: str = "graph",  # "graph" or "string"
-        max_clauses: Optional[int] = None,
         problem_names: Optional[set] = None,
         trace_files: Optional[List[Path]] = None,
+        n_workers: int = None,
     ):
         """
         Args:
             trace_dir: Directory containing .json trace files
             output_type: "graph" for GNN models, "string" for sentence models
-            max_clauses: Optional limit on clauses per proof (for memory)
             problem_names: Optional set of problem names to include
             trace_files: Optional explicit list of trace files (overrides trace_dir)
+            n_workers: Number of parallel workers (default: CPU count)
         """
         self.output_type = output_type
-        self.max_clauses = max_clauses
 
         # Get trace files
         if trace_files is not None:
-            files = trace_files
+            files = list(trace_files)
         elif trace_dir:
             trace_dir = Path(trace_dir)
             files = sorted(trace_dir.glob("*.json"))
@@ -220,66 +272,24 @@ class ProofDataset(torch.utils.data.Dataset):
         if not files:
             raise ValueError("No JSON trace files found")
 
-        # Load all data upfront
-        self.items = []
-        for trace_file in files:
-            item = self._load_trace(trace_file)
-            if item is not None:
-                self.items.append(item)
+        # Load data in parallel
+        load_fn = _load_trace_graph if output_type == "graph" else _load_trace_string
+
+        if n_workers is None:
+            import os
+            n_workers = os.cpu_count() or 4
+
+        if n_workers > 1 and len(files) > 10:
+            from multiprocessing import Pool
+            with Pool(n_workers, initializer=_pool_init) as pool:
+                results = pool.map(load_fn, files)
+        else:
+            results = [load_fn(f) for f in files]
+
+        self.items = [r for r in results if r is not None]
 
         if not self.items:
             raise ValueError("No valid traces found (all filtered or empty)")
-
-    def _load_trace(self, trace_file: Path) -> Optional[Dict]:
-        """Load and convert a single trace file."""
-        import random
-
-        try:
-            trace = _load_json(trace_file)
-        except Exception:
-            return None
-
-        if not trace.get("proof_found") or not trace.get("clauses"):
-            return None
-
-        clauses = trace["clauses"]
-
-        # Apply max_clauses limit if needed
-        if self.max_clauses and len(clauses) > self.max_clauses:
-            # Keep all positives, sample negatives
-            pos_indices = [i for i, c in enumerate(clauses) if c.get("label", 0) == 1]
-            neg_indices = [i for i, c in enumerate(clauses) if c.get("label", 0) == 0]
-
-            max_neg = self.max_clauses - len(pos_indices)
-            if max_neg > 0 and len(neg_indices) > max_neg:
-                neg_indices = random.sample(neg_indices, max_neg)
-
-            indices = sorted(pos_indices + neg_indices)
-            clauses = [clauses[i] for i in indices]
-
-        labels = [c.get("label", 0) for c in clauses]
-
-        if self.output_type == "graph":
-            from .structured import clause_to_graph
-
-            max_age = len(clauses)
-            graphs = [clause_to_graph(c, max_age) for c in clauses]
-
-            return {
-                "graphs": graphs,
-                "labels": labels,
-                "problem": trace_file.stem,
-            }
-        else:
-            from .structured import clause_to_string
-
-            strings = [clause_to_string(c) for c in clauses]
-
-            return {
-                "strings": strings,
-                "labels": labels,
-                "problem": trace_file.stem,
-            }
 
     def __len__(self):
         return len(self.items)
@@ -661,14 +671,12 @@ def run_training(
         train_files = trace_files
         val_files = []
 
-    # Create datasets (loads all data upfront)
-    max_clauses = config.get("max_clauses_per_proof", 512)
+    # Create datasets (loads all data in parallel)
     log_msg("Loading training data...")
     train_ds = ProofDataset(
         trace_dir=None,
         trace_files=train_files,
         output_type="graph",
-        max_clauses=max_clauses,
     )
     val_ds = None
     if val_files:
@@ -677,7 +685,6 @@ def run_training(
             trace_dir=None,
             trace_files=val_files,
             output_type="graph",
-            max_clauses=max_clauses,
         )
 
     log_msg(f"Train: {len(train_ds)} traces, Val: {len(val_ds) if val_ds else 0} traces")

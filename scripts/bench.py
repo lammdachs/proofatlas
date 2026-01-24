@@ -55,6 +55,11 @@ def _get_ml():
     return _ml_module
 
 
+def log(msg: str):
+    """Print a log message with timestamp."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {msg}")
+
 
 def find_project_root() -> Path:
     """Find the proofatlas project root."""
@@ -332,27 +337,87 @@ def load_config(config_path: Path) -> dict:
         return json.load(f)
 
 
+def get_all_prover_configs(base_dir: Path) -> dict:
+    """Get configs from all provers, with installation status.
+
+    Returns dict mapping prover name to:
+        - config: the loaded config dict
+        - installed: whether the prover binary exists
+        - binary: path to binary (or None for proofatlas)
+    """
+    provers = {}
+
+    # proofatlas (always available via Python bindings)
+    proofatlas_config_path = base_dir / "configs" / "proofatlas.json"
+    if proofatlas_config_path.exists():
+        provers["proofatlas"] = {
+            "config": load_config(proofatlas_config_path),
+            "installed": True,
+            "binary": None,
+        }
+
+    # vampire
+    vampire_config_path = base_dir / "configs" / "vampire.json"
+    if vampire_config_path.exists():
+        vampire_config = load_config(vampire_config_path)
+        vampire_binary = base_dir / vampire_config["paths"]["binary"]
+        provers["vampire"] = {
+            "config": vampire_config,
+            "installed": vampire_binary.exists(),
+            "binary": vampire_binary if vampire_binary.exists() else None,
+        }
+
+    # spass
+    spass_config_path = base_dir / "configs" / "spass.json"
+    if spass_config_path.exists():
+        spass_config = load_config(spass_config_path)
+        spass_binary = base_dir / spass_config["paths"]["binary"]
+        provers["spass"] = {
+            "config": spass_config,
+            "installed": spass_binary.exists(),
+            "binary": spass_binary if spass_binary.exists() else None,
+        }
+
+    return provers
+
+
+def find_config(config_name: str, all_provers: dict) -> tuple:
+    """Find which prover a config belongs to.
+
+    Returns (prover_name, preset_dict) or (None, None) if not found.
+    """
+    for prover_name, prover_info in all_provers.items():
+        presets = prover_info["config"].get("presets", {})
+        if config_name in presets:
+            return prover_name, presets[config_name]
+    return None, None
+
+
 def list_configs(base_dir: Path):
-    """List available configs."""
-    config_path = base_dir / "configs" / "proofatlas.json"
-    if not config_path.exists():
-        print("Error: configs/proofatlas.json not found")
+    """List available configs from all provers."""
+    all_provers = get_all_prover_configs(base_dir)
+
+    if not all_provers:
+        print("Error: No prover configs found")
         return
 
-    config = load_config(config_path)
-    presets = config.get("presets", {})
+    for prover_name, prover_info in all_provers.items():
+        presets = prover_info["config"].get("presets", {})
+        installed = prover_info["installed"]
 
-    print("Available configs:")
-    for name, preset in sorted(presets.items()):
-        desc = preset.get("description", "")
-        embedding = preset.get("embedding")
-        scorer = preset.get("scorer")
+        status = "" if installed else " (not installed)"
+        print(f"\n{prover_name}{status}:")
 
-        model_info = ""
-        if embedding and scorer:
-            model_info = f" [{embedding}+{scorer}]"
+        for name, preset in sorted(presets.items()):
+            desc = preset.get("description", "")
+            embedding = preset.get("embedding")
+            scorer = preset.get("scorer")
 
-        print(f"  {name:<25} {desc}{model_info}")
+            model_info = ""
+            if embedding and scorer:
+                model_info = f" [{embedding}+{scorer}]"
+
+            print(f"  {name:<25} {desc}{model_info}")
 
 
 def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> list[Path]:
@@ -1002,43 +1067,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     return stats
 
 
-def get_available_provers(base_dir: Path) -> dict:
-    """Get available provers and their configs."""
-    provers = {}
-
-    # proofatlas is always available (Python bindings)
-    proofatlas_config_path = base_dir / "configs" / "proofatlas.json"
-    if proofatlas_config_path.exists():
-        provers["proofatlas"] = {
-            "config": load_config(proofatlas_config_path),
-            "binary": None,  # Uses Python bindings
-        }
-
-    # Check for vampire
-    vampire_config_path = base_dir / "configs" / "vampire.json"
-    if vampire_config_path.exists():
-        vampire_config = load_config(vampire_config_path)
-        vampire_binary = base_dir / vampire_config["paths"]["binary"]
-        if vampire_binary.exists():
-            provers["vampire"] = {
-                "config": vampire_config,
-                "binary": vampire_binary,
-            }
-
-    # Check for spass
-    spass_config_path = base_dir / "configs" / "spass.json"
-    if spass_config_path.exists():
-        spass_config = load_config(spass_config_path)
-        spass_binary = base_dir / spass_config["paths"]["binary"]
-        if spass_binary.exists():
-            provers["spass"] = {
-                "config": spass_config,
-                "binary": spass_binary,
-            }
-
-    return provers
-
-
 def main():
     parser = argparse.ArgumentParser(description="Benchmark and train theorem provers")
     parser.add_argument("--config", nargs="*",
@@ -1099,39 +1127,46 @@ def main():
             print("Error: No --problem-set specified and no default in tptp.json")
             sys.exit(1)
 
-    # Get available provers
-    available_provers = get_available_provers(base_dir)
-    if not available_provers:
-        print("Error: No provers available")
+    # Get all prover configs (installed or not)
+    all_provers = get_all_prover_configs(base_dir)
+    if not all_provers:
+        print("Error: No prover configs found")
         sys.exit(1)
-
-    # Only run proofatlas
-    if "proofatlas" not in available_provers:
-        print("Error: proofatlas not available")
-        sys.exit(1)
-
-    prover_info = available_provers["proofatlas"]
-    presets = prover_info["config"].get("presets", {})
 
     # Build list of runs
     runs = []
 
     if args.config:
         # Run specified configs
-        for preset_name in args.config:
-            if preset_name not in presets:
-                print(f"Error: Unknown config '{preset_name}'")
+        for config_name in args.config:
+            prover_name, preset = find_config(config_name, all_provers)
+
+            if prover_name is None:
+                print(f"Error: Unknown config '{config_name}'")
                 print(f"Use --list to see available configs")
                 sys.exit(1)
+
+            prover_info = all_provers[prover_name]
+            if not prover_info["installed"]:
+                print(f"Error: Config '{config_name}' requires {prover_name}, which is not installed")
+                print(f"Run 'python scripts/setup_{prover_name}.py' to install it")
+                sys.exit(1)
+
             runs.append({
-                "prover": "proofatlas",
-                "preset_name": preset_name,
-                "preset": presets[preset_name],
+                "prover": prover_name,
+                "preset_name": config_name,
+                "preset": preset,
                 "binary": prover_info["binary"],
                 "config": prover_info["config"],
             })
     else:
-        # Default: run all presets
+        # Default: run all proofatlas presets
+        if "proofatlas" not in all_provers:
+            print("Error: proofatlas config not found")
+            sys.exit(1)
+
+        prover_info = all_provers["proofatlas"]
+        presets = prover_info["config"].get("presets", {})
         for preset_name, preset in presets.items():
             runs.append({
                 "prover": "proofatlas",
@@ -1259,20 +1294,20 @@ def main():
             if prover == "proofatlas" and ml.is_learned_selector(preset):
                 model_name = ml.get_model_name(preset)
                 embedding_type = ml.get_embedding_type(preset)
-                print(f"[{preset_name}] Learned selector: {model_name} (embedding: {embedding_type})")
+                log(f"[{preset_name}] Learned selector: {model_name} (embedding: {embedding_type})")
                 sys.stdout.flush()
 
                 weights_dir = base_dir / ".weights"
                 existing_weights = ml.find_weights(weights_dir, preset)
 
                 if existing_weights and not args.retrain:
-                    print(f"[{preset_name}] Found cached weights: {existing_weights}")
+                    log(f"[{preset_name}] Found cached weights: {existing_weights}")
                     weights_path = existing_weights
                 else:
                     if existing_weights:
-                        print(f"[{preset_name}] --retrain specified, will retrain (existing: {existing_weights})")
+                        log(f"[{preset_name}] --retrain specified, will retrain (existing: {existing_weights})")
                     else:
-                        print(f"[{preset_name}] No cached weights found in {weights_dir}")
+                        log(f"[{preset_name}] No cached weights found in {weights_dir}")
                     sys.stdout.flush()
 
                     # First collect traces with age_weight if none exist
@@ -1282,8 +1317,8 @@ def main():
 
                     existing_traces = list(trace_preset_dir.glob("*.json")) if trace_preset_dir.exists() else []
                     if not existing_traces:
-                        print(f"[{preset_name}] No traces found in {trace_preset_dir}")
-                        print(f"[{preset_name}] Collecting traces using age_weight baseline...")
+                        log(f"[{preset_name}] No traces found in {trace_preset_dir}")
+                        log(f"[{preset_name}] Collecting traces using age_weight baseline...")
                         sys.stdout.flush()
                         trace_source_preset = proofatlas_presets.get(trace_preset, preset)
                         run_evaluation(
@@ -1294,13 +1329,13 @@ def main():
                             rerun=True,  # Always run for trace collection
                         )
                         existing_traces = list(trace_preset_dir.glob("*.json")) if trace_preset_dir.exists() else []
-                        print(f"[{preset_name}] Trace collection complete: {len(existing_traces)} traces")
+                        log(f"[{preset_name}] Trace collection complete: {len(existing_traces)} traces")
                     else:
-                        print(f"[{preset_name}] Found {len(existing_traces)} existing traces in {trace_preset_dir}")
+                        log(f"[{preset_name}] Found {len(existing_traces)} existing traces in {trace_preset_dir}")
                     sys.stdout.flush()
 
-                    # Train with lazy loading (traces loaded one at a time)
-                    print(f"[{preset_name}] Starting training (lazy loading)...")
+                    # Train model
+                    log(f"[{preset_name}] Starting training...")
                     sys.stdout.flush()
                     try:
                         weights_path = ml.run_training(
@@ -1312,21 +1347,21 @@ def main():
                             web_data_dir=base_dir / "web" / "data",
                             log_file=sys.stdout,
                         )
-                        print(f"[{preset_name}] Training complete, weights saved to: {weights_path}")
+                        log(f"[{preset_name}] Training complete, weights saved to: {weights_path}")
                     except ValueError as e:
-                        print(f"[{preset_name}] WARNING: {e}, falling back to age_weight")
+                        log(f"[{preset_name}] WARNING: {e}, falling back to age_weight")
                         current_preset = proofatlas_presets.get(trace_preset, preset)
                         weights_path = None
                     sys.stdout.flush()
             elif prover == "proofatlas":
-                print(f"[{preset_name}] Heuristic selector (no training needed)")
+                log(f"[{preset_name}] Heuristic selector (no training needed)")
                 sys.stdout.flush()
             else:
-                print(f"[{preset_name}] External prover: {prover}")
+                log(f"[{preset_name}] External prover: {prover}")
                 sys.stdout.flush()
 
             # Run evaluation
-            print(f"[{preset_name}] Starting evaluation on {len(problems)} problems...")
+            log(f"[{preset_name}] Starting evaluation on {len(problems)} problems...")
             sys.stdout.flush()
             run_evaluation(
                 base_dir, problems, tptp_root,
@@ -1336,7 +1371,7 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.n_jobs,
             )
-            print(f"[{preset_name}] Evaluation complete")
+            log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()
 
         print(f"\n{'='*60}")

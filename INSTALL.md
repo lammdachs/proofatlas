@@ -40,6 +40,8 @@ This installs CPU-only PyTorch automatically.
 - Generates `.cargo/config.toml` with libtorch paths
 - Builds Rust extension with ML features
 - Builds WASM package for web interface
+- Downloads TPTP problem library (~500 MB)
+- On Linux: Downloads Vampire and builds SPASS
 
 ### With Development Dependencies
 
