@@ -560,15 +560,11 @@ def run_training(
     weights_dir: Path,
     configs_dir: Path,
     problem_names: Optional[set] = None,
-    init_weights: Optional[Path] = None,
     log_callback: Optional[callable] = None,
     web_data_dir: Optional[Path] = None,
     log_file: Optional[Any] = None,
 ) -> Path:
     """Train a model and return the weights path.
-
-    Uses lazy loading - traces are loaded one at a time during training,
-    avoiding the need to load all data into memory upfront.
 
     Args:
         preset: Preset config dict with embedding/scorer fields
@@ -576,7 +572,6 @@ def run_training(
         weights_dir: Directory to save weights (.weights/)
         configs_dir: Directory containing config files (embeddings.json, etc.)
         problem_names: Optional set of problem names to filter traces
-        init_weights: Optional path to weights file to initialize from
         log_callback: Optional callback(epoch, max_epochs, train_loss) for logging
         web_data_dir: Directory for web data (web/data/) - enables live web updates
         log_file: File object for logging (e.g., bench.log)
@@ -704,14 +699,6 @@ def run_training(
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-
-    # Initialize from existing weights if provided
-    if init_weights and Path(init_weights).exists():
-        print(f"Initializing from {init_weights}")
-        from safetensors.torch import load_file
-        state_dict = load_file(init_weights)
-        model.load_state_dict(state_dict)
-        model = model.to(device)
 
     batch_size = config.get("batch_size", 32)
     train_loader = DataLoader(
