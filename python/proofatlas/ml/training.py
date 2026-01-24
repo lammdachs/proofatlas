@@ -684,7 +684,7 @@ def run_training(
     )
     val_ds = None
     if val_files:
-        log_msg("Loading validation data...")
+        log_msg(f"Loading validation data ({output_type} format)...")
         val_ds = ProofDataset(
             trace_dir=None,
             trace_files=val_files,
