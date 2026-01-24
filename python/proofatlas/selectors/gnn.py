@@ -414,7 +414,7 @@ class ClauseGCN(nn.Module):
             # Concatenate and project back to hidden_dim
             clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
-        return self.scorer(clause_emb).squeeze(-1)
+        return self.scorer(clause_emb).view(-1)
 
     def export_torchscript(self, path: str):
         """
@@ -670,4 +670,4 @@ class ClauseGraphSAGE(nn.Module):
                 )
             clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
-        return self.scorer(clause_emb).squeeze(-1)
+        return self.scorer(clause_emb).view(-1)

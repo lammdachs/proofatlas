@@ -79,7 +79,7 @@ class ClauseTransformer(nn.Module):
             x = layer['norm2'](x + ff_out)
 
         x = x.squeeze(0)
-        return self.scorer(x).squeeze(-1)
+        return self.scorer(x).view(-1)
 
 
 class ClauseGNNTransformer(nn.Module):
@@ -165,4 +165,4 @@ class ClauseGNNTransformer(nn.Module):
             x = layer['norm2'](x + ff_out)
 
         x = x.squeeze(0)
-        return self.scorer(x).squeeze(-1)
+        return self.scorer(x).view(-1)

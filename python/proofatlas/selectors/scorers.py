@@ -38,7 +38,7 @@ class MLPScorer(nn.Module):
         """
         x = self.linear1(x)
         x = F.gelu(x)
-        return self.linear2(x).squeeze(-1)
+        return self.linear2(x).view(-1)
 
 
 class AttentionScorer(nn.Module):
@@ -112,7 +112,7 @@ class AttentionScorer(nn.Module):
         x = x + out
 
         # Score
-        return self.scorer(x).squeeze(-1)
+        return self.scorer(x).view(-1)
 
 
 class TransformerScorer(nn.Module):
@@ -178,7 +178,7 @@ class TransformerScorer(nn.Module):
 
         # Final norm and score
         x = self.final_norm(x)
-        return self.scorer(x).squeeze(-1)
+        return self.scorer(x).view(-1)
 
 
 class CrossAttentionScorer(nn.Module):
@@ -254,7 +254,7 @@ class CrossAttentionScorer(nn.Module):
         # Clause scores via dot product with context
         scores = torch.mm(x, context.t())  # [num_clauses, 1]
 
-        return scores.squeeze(-1)
+        return scores.view(-1)
 
 
 def create_scorer(

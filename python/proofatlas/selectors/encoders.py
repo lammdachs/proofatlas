@@ -358,7 +358,7 @@ class ClauseSelector(nn.Module):
         clause_emb = self.projection(clause_emb)
 
         # Score
-        return self.scorer(clause_emb).squeeze(-1)
+        return self.scorer(clause_emb).view(-1)
 
     def export_torchscript(self, path: str):
         """Export model to TorchScript format."""

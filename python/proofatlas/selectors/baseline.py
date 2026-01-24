@@ -50,7 +50,7 @@ class NodeMLP(nn.Module):
         """
         h = self.encoder(node_features)
         clause_emb = torch.mm(pool_matrix, h)
-        return self.scorer(clause_emb).squeeze(-1)
+        return self.scorer(clause_emb).view(-1)
 
 
 class AgeWeightHeuristic(nn.Module):

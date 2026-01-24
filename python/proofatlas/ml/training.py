@@ -186,6 +186,14 @@ def _pool_init():
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
+def _pool_init_tokenizer():
+    """Initializer for pool workers that preloads the tokenizer."""
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    # Preload tokenizer in each worker to avoid repeated loading
+    _get_tokenizer()
+
+
 def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
     """Load trace file and convert to graphs. Module-level for multiprocessing."""
     from .structured import clause_to_graph
@@ -233,6 +241,121 @@ def _load_trace_string(trace_file: Path) -> Optional[Dict]:
     }
 
 
+# Global tokenizer for pre-tokenization (loaded lazily)
+_tokenizer = None
+
+
+def _get_tokenizer():
+    """Get or load the tokenizer for pre-tokenization."""
+    global _tokenizer
+    if _tokenizer is None:
+        from transformers import AutoTokenizer
+        _tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+    return _tokenizer
+
+
+def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
+    """Load trace file and pre-tokenize strings. Module-level for multiprocessing."""
+    from .structured import clause_to_string
+
+    try:
+        trace = _load_json(trace_file)
+    except Exception:
+        return None
+
+    if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+
+    clauses = trace["clauses"]
+    labels = [c.get("label", 0) for c in clauses]
+    strings = [clause_to_string(c) for c in clauses]
+
+    # Pre-tokenize
+    tokenizer = _get_tokenizer()
+    encoded = tokenizer(
+        strings,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    return {
+        "input_ids": encoded["input_ids"],
+        "attention_mask": encoded["attention_mask"],
+        "labels": labels,
+        "problem": trace_file.stem,
+    }
+
+
+class DynamicBatchSampler(torch.utils.data.Sampler):
+    """
+    Sampler that creates batches with approximately equal total size.
+
+    Groups proofs together until max_clauses is reached, allowing efficient
+    GPU utilization while avoiding OOM on large proofs.
+    """
+
+    def __init__(self, dataset, max_clauses: int = 8192, shuffle: bool = True):
+        """
+        Args:
+            dataset: ProofDataset with items containing size info
+            max_clauses: Maximum total clauses per batch
+            shuffle: Whether to shuffle between epochs
+        """
+        self.dataset = dataset
+        self.max_clauses = max_clauses
+        self.shuffle = shuffle
+
+        # Get sizes for each item
+        self.sizes = []
+        for item in dataset.items:
+            if "graphs" in item:
+                self.sizes.append(len(item["graphs"]))
+            elif "labels" in item:
+                self.sizes.append(len(item["labels"]))
+            else:
+                self.sizes.append(1)
+
+    def __iter__(self):
+        indices = list(range(len(self.dataset)))
+        if self.shuffle:
+            import random
+            random.shuffle(indices)
+
+        batch = []
+        batch_size = 0
+
+        for idx in indices:
+            size = self.sizes[idx]
+
+            # If single item exceeds max, yield it alone
+            if size > self.max_clauses:
+                if batch:
+                    yield batch
+                    batch = []
+                    batch_size = 0
+                yield [idx]
+                continue
+
+            # If adding this item would exceed max, yield current batch
+            if batch_size + size > self.max_clauses and batch:
+                yield batch
+                batch = []
+                batch_size = 0
+
+            batch.append(idx)
+            batch_size += size
+
+        # Yield remaining batch
+        if batch:
+            yield batch
+
+    def __len__(self):
+        # Approximate number of batches
+        total = sum(self.sizes)
+        return max(1, total // self.max_clauses)
+
+
 class ProofDataset(torch.utils.data.Dataset):
     """
     Dataset that loads structured JSON traces and converts to graphs/strings.
@@ -273,7 +396,12 @@ class ProofDataset(torch.utils.data.Dataset):
             raise ValueError("No JSON trace files found")
 
         # Load data in parallel
-        load_fn = _load_trace_graph if output_type == "graph" else _load_trace_string
+        if output_type == "graph":
+            load_fn = _load_trace_graph
+        elif output_type == "tokenized":
+            load_fn = _load_trace_tokenized
+        else:
+            load_fn = _load_trace_string
 
         if n_workers is None:
             import os
@@ -281,9 +409,14 @@ class ProofDataset(torch.utils.data.Dataset):
 
         if n_workers > 1 and len(files) > 10:
             from multiprocessing import Pool
-            with Pool(n_workers, initializer=_pool_init) as pool:
+            # Use tokenizer-aware initializer for pre-tokenized data
+            init_fn = _pool_init_tokenizer if output_type == "tokenized" else _pool_init
+            with Pool(n_workers, initializer=init_fn) as pool:
                 results = pool.map(load_fn, files)
         else:
+            # For single-threaded loading, preload tokenizer if needed
+            if output_type == "tokenized":
+                _get_tokenizer()
             results = [load_fn(f) for f in files]
 
         self.items = [r for r in results if r is not None]
@@ -320,6 +453,42 @@ def collate_sentence_batch(batch: List[Dict]) -> Dict[str, Any]:
         "strings": all_strings,
         "labels": torch.tensor(all_labels, dtype=torch.float32),
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
+    }
+
+
+def collate_tokenized_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """
+    Collate function for pre-tokenized sentence batches.
+
+    Pads and combines pre-tokenized inputs from multiple proofs.
+    """
+    all_input_ids = []
+    all_attention_mask = []
+    all_labels = []
+
+    for item in batch:
+        all_input_ids.append(item["input_ids"])
+        all_attention_mask.append(item["attention_mask"])
+        all_labels.extend(item["labels"])
+
+    # Pad to max length across all proofs
+    max_len = max(ids.shape[1] for ids in all_input_ids)
+
+    padded_input_ids = []
+    padded_attention_mask = []
+
+    for input_ids, attention_mask in zip(all_input_ids, all_attention_mask):
+        pad_len = max_len - input_ids.shape[1]
+        if pad_len > 0:
+            input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=0)
+            attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=0)
+        padded_input_ids.append(input_ids)
+        padded_attention_mask.append(attention_mask)
+
+    return {
+        "input_ids": torch.cat(padded_input_ids, dim=0),
+        "attention_mask": torch.cat(padded_attention_mask, dim=0),
+        "labels": torch.tensor(all_labels, dtype=torch.float32),
     }
 
 
@@ -606,12 +775,12 @@ def run_training(
         line = f"[{timestamp}] {msg}"
         if log_file and log_file is not sys.stdout:
             # Write to both stdout and log file
-            print(line)
+            print(line, flush=True)
             log_file.write(line + "\n")
             log_file.flush()
         else:
             # Just print to stdout (log_file is None or is stdout)
-            print(line)
+            print(line, flush=True)
 
     # Load configs
     configs_dir = Path(configs_dir)
@@ -673,7 +842,7 @@ def run_training(
 
     # Determine output type based on embedding
     embedding_type = get_embedding_type(preset)
-    output_type = "string" if embedding_type == "string" else "graph"
+    output_type = "tokenized" if embedding_type == "string" else "graph"
 
     # Create datasets (loads all data in parallel)
     log_msg(f"Loading training data ({output_type} format)...")
@@ -708,19 +877,32 @@ def run_training(
     )
 
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+    is_sentence_model = model_type == "sentence"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    # Use batch_size=1 to process one proof at a time (avoids OOM with large proofs)
-    # Gradient accumulation simulates larger batch sizes
-    accumulate_steps = config.get("batch_size", 32)
+    # Dynamic batching: group proofs up to max_clauses per batch
+    max_clauses = config.get("max_clauses_per_batch", 8192)
+    accumulate_steps = config.get("accumulate_steps", 1)
+
+    # Choose collate function based on output type
+    if output_type == "tokenized":
+        collate_fn = collate_tokenized_batch
+    elif output_type == "string":
+        collate_fn = collate_sentence_batch
+    else:
+        collate_fn = collate_proof_batch
+
+    train_sampler = DynamicBatchSampler(train_ds, max_clauses=max_clauses, shuffle=True)
     train_loader = DataLoader(
-        train_ds, batch_size=1, shuffle=True, collate_fn=collate_proof_batch, num_workers=0
+        train_ds, batch_sampler=train_sampler, collate_fn=collate_fn, num_workers=0
     )
-    val_loader = (
-        DataLoader(val_ds, batch_size=1, shuffle=False, collate_fn=collate_proof_batch, num_workers=0)
-        if val_ds else None
-    )
+    val_loader = None
+    if val_ds:
+        val_sampler = DynamicBatchSampler(val_ds, max_clauses=max_clauses, shuffle=False)
+        val_loader = DataLoader(
+            val_ds, batch_sampler=val_sampler, collate_fn=collate_fn, num_workers=0
+        )
 
     # Optimizer
     optimizer_type = config.get("optimizer", "adamw").lower()
@@ -754,7 +936,7 @@ def run_training(
                 "scorer_type": scorer_name,
             },
             training_config={
-                "batch_size": batch_size,
+                "batch_size": accumulate_steps,
                 "learning_rate": lr,
                 "max_epochs": max_epochs,
                 "optimizer": optimizer_type,
@@ -801,42 +983,63 @@ def run_training(
     for epoch in range(1, max_epochs + 1):
         model.train()
         train_loss = 0
+        num_batches = 0
         optimizer.zero_grad()
 
         for step, batch in enumerate(train_loader):
-            x = batch["node_features"].to(device)
-            adj = batch["adj"].to(device)
-            pool = batch["pool_matrix"].to(device)
             labels = batch["labels"].to(device)
 
-            scores = model(x, adj, pool) if needs_adj else model(x, pool)
-            loss = compute_pairwise_loss(scores, labels) / accumulate_steps
+            if is_sentence_model:
+                # Sentence model with pre-tokenized inputs
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                scores = model.forward_tokens(input_ids, attention_mask)
+            else:
+                # GNN model with graph inputs
+                x = batch["node_features"].to(device)
+                adj = batch["adj"].to(device)
+                pool = batch["pool_matrix"].to(device)
+                scores = model(x, adj, pool) if needs_adj else model(x, pool)
+
+            loss = compute_pairwise_loss(scores, labels)
+            if accumulate_steps > 1:
+                loss = loss / accumulate_steps
             loss.backward()
-            train_loss += loss.item() * accumulate_steps
+            train_loss += loss.item() * (accumulate_steps if accumulate_steps > 1 else 1)
+            num_batches += 1
 
             # Step optimizer after accumulating gradients
-            if (step + 1) % accumulate_steps == 0 or (step + 1) == len(train_loader):
+            if accumulate_steps <= 1 or (step + 1) % accumulate_steps == 0 or (step + 1) == len(train_loader):
                 if config.get("gradient_clip"):
                     nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
                 optimizer.step()
                 optimizer.zero_grad()
 
-        train_loss /= len(train_loader)
+        train_loss /= num_batches if num_batches > 0 else 1
 
         val_loss = 0
         if val_loader:
             model.eval()
+            num_val_batches = 0
             with torch.no_grad():
                 for batch in val_loader:
-                    x = batch["node_features"].to(device)
-                    adj = batch["adj"].to(device)
-                    pool = batch["pool_matrix"].to(device)
                     labels = batch["labels"].to(device)
-                    scores = model(x, adj, pool) if needs_adj else model(x, pool)
-                    val_loss += compute_pairwise_loss(scores, labels).item()
-            val_loss /= len(val_loader)
 
-        # Track best model and early stopping
+                    if is_sentence_model:
+                        input_ids = batch["input_ids"].to(device)
+                        attention_mask = batch["attention_mask"].to(device)
+                        scores = model.forward_tokens(input_ids, attention_mask)
+                    else:
+                        x = batch["node_features"].to(device)
+                        adj = batch["adj"].to(device)
+                        pool = batch["pool_matrix"].to(device)
+                        scores = model(x, adj, pool) if needs_adj else model(x, pool)
+
+                    val_loss += compute_pairwise_loss(scores, labels).item()
+                    num_val_batches += 1
+            val_loss /= num_val_batches if num_val_batches > 0 else 1
+
+        # Track best model and early stopping (use model for state dict)
         current_val = val_loss if val_loader else train_loss
         if current_val < best_val_loss:
             best_val_loss = current_val
@@ -870,7 +1073,7 @@ def run_training(
             log_msg(f"Early stopping at epoch {epoch} (patience={patience})")
             break
 
-    # Restore best model
+    # Restore best model (use model to handle DataParallel)
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
         log_msg(f"Restored best model from epoch {best_epoch}")
@@ -886,7 +1089,7 @@ def run_training(
             termination_reason="early_stopped" if early_stopped else "completed",
         )
 
-    # Export to TorchScript for Rust inference
+    # Export to TorchScript for Rust inference (use model, not DataParallel wrapper)
     weights_dir = Path(weights_dir)
     weights_dir.mkdir(parents=True, exist_ok=True)
     weights_path = weights_dir / f"{model_name}.pt"
@@ -894,18 +1097,22 @@ def run_training(
     model.eval()
     model.cpu()
 
-    # Create example inputs for tracing
-    hidden_dim = config.get("hidden_dim", 64)
-    example_x = torch.randn(10, config.get("input_dim", 13))
-    example_adj = torch.eye(10)
-    example_pool = torch.ones(3, 10) / 10
-
-    if needs_adj:
-        traced = torch.jit.trace(model, (example_x, example_adj, example_pool))
+    if is_sentence_model:
+        # Sentence model has its own export method that handles tokenizer
+        model.export_torchscript(str(weights_path), save_tokenizer=True)
     else:
-        traced = torch.jit.trace(model, (example_x, example_pool))
+        # GNN models: trace with example inputs
+        example_x = torch.randn(10, config.get("input_dim", 13))
+        example_adj = torch.eye(10)
+        example_pool = torch.ones(3, 10) / 10
 
-    traced.save(str(weights_path))
+        if needs_adj:
+            traced = torch.jit.trace(model, (example_x, example_adj, example_pool))
+        else:
+            traced = torch.jit.trace(model, (example_x, example_pool))
+
+        traced.save(str(weights_path))
+
     log_msg(f"TorchScript model saved: {weights_path}")
     log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")
 
