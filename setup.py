@@ -6,8 +6,22 @@ This script configures tch-rs/libtorch linking before building the Rust extensio
 It automatically creates .cargo/config.toml with the correct PyTorch library paths.
 """
 import os
+import shutil
 import sys
 from pathlib import Path
+
+# Check for Rust toolchain
+if not shutil.which('cargo'):
+    print("""
+Error: Rust toolchain not found.
+
+Install Rust from https://rustup.rs/:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+Then restart your shell and try again.
+""", file=sys.stderr)
+    sys.exit(1)
 
 # Set environment variable for tch-rs to find PyTorch's libtorch
 os.environ.setdefault('LIBTORCH_USE_PYTORCH', '1')
