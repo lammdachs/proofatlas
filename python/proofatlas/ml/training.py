@@ -183,22 +183,13 @@ class ProofDataset(torch.utils.data.Dataset):
     """
     Dataset that loads structured JSON traces and converts to graphs/strings.
 
-    Each item is a random prefix of a proof search, simulating the
-    partial information available during actual inference. This ensures
-    the training distribution matches the inference distribution.
-
-    The structured format preserves all symbol names and clause structure,
-    enabling both graph-based and sentence-based training from the same data.
-
-    Traces are loaded lazily (one per __getitem__ call) for memory efficiency.
+    All data is loaded and converted upfront in __init__ for simplicity.
     """
 
     def __init__(
         self,
         trace_dir: Path,
         output_type: str = "graph",  # "graph" or "string"
-        min_prefix_clauses: int = 10,
-        sample_prefix: bool = True,
         max_clauses: Optional[int] = None,
         problem_names: Optional[set] = None,
         trace_files: Optional[List[Path]] = None,
@@ -207,50 +198,50 @@ class ProofDataset(torch.utils.data.Dataset):
         Args:
             trace_dir: Directory containing .json trace files
             output_type: "graph" for GNN models, "string" for sentence models
-            min_prefix_clauses: Minimum prefix length to sample
-            sample_prefix: If True, sample random prefix; if False, use full proof
             max_clauses: Optional limit on clauses per proof (for memory)
             problem_names: Optional set of problem names to include
             trace_files: Optional explicit list of trace files (overrides trace_dir)
         """
-        self.trace_dir = Path(trace_dir) if trace_dir else None
         self.output_type = output_type
-        self.min_prefix_clauses = min_prefix_clauses
-        self.sample_prefix = sample_prefix
         self.max_clauses = max_clauses
 
         # Get trace files
         if trace_files is not None:
-            self.trace_files = trace_files
-        elif self.trace_dir:
-            self.trace_files = sorted(self.trace_dir.glob("*.json"))
-            # Filter by problem names if specified
+            files = trace_files
+        elif trace_dir:
+            trace_dir = Path(trace_dir)
+            files = sorted(trace_dir.glob("*.json"))
             if problem_names is not None:
-                self.trace_files = [f for f in self.trace_files if f.stem in problem_names]
+                files = [f for f in files if f.stem in problem_names]
         else:
-            self.trace_files = []
+            files = []
 
-        if not self.trace_files:
-            raise ValueError(f"No JSON trace files found")
+        if not files:
+            raise ValueError("No JSON trace files found")
 
-        # Lazy-load converter for sentence output
-        self._clause_to_string = None
+        # Load all data upfront
+        self.items = []
+        for trace_file in files:
+            item = self._load_trace(trace_file)
+            if item is not None:
+                self.items.append(item)
 
-    def __len__(self):
-        return len(self.trace_files)
+        if not self.items:
+            raise ValueError("No valid traces found (all filtered or empty)")
 
-    def __getitem__(self, idx):
+    def _load_trace(self, trace_file: Path) -> Optional[Dict]:
+        """Load and convert a single trace file."""
         import random
 
-        trace = _load_json(self.trace_files[idx])
+        try:
+            trace = _load_json(trace_file)
+        except Exception:
+            return None
+
+        if not trace.get("proof_found") or not trace.get("clauses"):
+            return None
 
         clauses = trace["clauses"]
-        n_clauses = len(clauses)
-
-        # Sample a random prefix to simulate partial proof search
-        if self.sample_prefix and n_clauses > self.min_prefix_clauses:
-            prefix_len = random.randint(self.min_prefix_clauses, n_clauses)
-            clauses = clauses[:prefix_len]
 
         # Apply max_clauses limit if needed
         if self.max_clauses and len(clauses) > self.max_clauses:
@@ -265,7 +256,6 @@ class ProofDataset(torch.utils.data.Dataset):
             indices = sorted(pos_indices + neg_indices)
             clauses = [clauses[i] for i in indices]
 
-        # Extract labels
         labels = [c.get("label", 0) for c in clauses]
 
         if self.output_type == "graph":
@@ -277,21 +267,24 @@ class ProofDataset(torch.utils.data.Dataset):
             return {
                 "graphs": graphs,
                 "labels": labels,
-                "problem": self.trace_files[idx].stem,
+                "problem": trace_file.stem,
             }
         else:
-            # Convert to strings
-            if self._clause_to_string is None:
-                from .structured import clause_to_string
-                self._clause_to_string = clause_to_string
+            from .structured import clause_to_string
 
-            strings = [self._clause_to_string(c) for c in clauses]
+            strings = [clause_to_string(c) for c in clauses]
 
             return {
                 "strings": strings,
                 "labels": labels,
-                "problem": self.trace_files[idx].stem,
+                "problem": trace_file.stem,
             }
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        return self.items[idx]
 
 
 def collate_sentence_batch(batch: List[Dict]) -> Dict[str, Any]:
@@ -618,73 +611,30 @@ def save_trace(traces_dir: Path, preset: str, problem: str, trace_json: str):
         pass
 
 
-def load_traces(
+def load_trace_files(
     traces_dir: Path,
     preset: str,
     problem_names: Optional[set] = None,
-    log_file: Optional[Any] = None,
-) -> Dict[str, Any]:
-    """Load traces for training, optionally filtered by problem names.
-
-    This function loads trace JSON files but does NOT convert clauses to graphs.
-    Graph conversion is done lazily during training to avoid slow upfront processing.
+) -> List[Path]:
+    """Get list of trace files for a preset.
 
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
         preset: Trace preset name (subdirectory in traces_dir)
         problem_names: Optional set of problem names to include. If None, loads all.
-        log_file: Optional file object for progress logging.
 
     Returns:
-        Dict with 'problems' list (raw clause dicts) and 'num_problems' count.
+        List of trace file paths.
     """
     preset_dir = Path(traces_dir) / preset
     if not preset_dir.exists():
-        return {"problems": [], "num_problems": 0}
+        return []
 
-    # Get list of trace files to process
     trace_files = sorted(preset_dir.glob("*.json"))
     if problem_names is not None:
         trace_files = [f for f in trace_files if f.stem in problem_names]
 
-    total_files = len(trace_files)
-    if total_files == 0:
-        return {"problems": [], "num_problems": 0}
-
-    problems = []
-    total_clauses = 0
-
-    for i, trace_file in enumerate(trace_files):
-        # Progress logging every 500 files
-        if log_file and (i + 1) % 500 == 0:
-            log_file.write(f"  Loading traces: {i + 1}/{total_files} ({len(problems)} valid, {total_clauses} clauses)\n")
-            log_file.flush()
-
-        try:
-            with open(trace_file) as f:
-                trace = json.load(f)
-        except Exception:
-            continue
-
-        if not trace.get("proof_found") or not trace.get("clauses"):
-            continue
-
-        # Store raw clauses - graph conversion done lazily during training
-        clauses = trace["clauses"]
-        labels = [c.get("label", 0) for c in clauses]
-
-        problems.append({
-            "name": trace_file.stem,
-            "clauses": clauses,  # Raw clause dicts, not graphs
-            "labels": labels,
-        })
-        total_clauses += len(clauses)
-
-    if log_file:
-        log_file.write(f"  Loaded {len(problems)} traces ({total_clauses} clauses) from {total_files} files\n")
-        log_file.flush()
-
-    return {"problems": problems, "num_problems": len(problems)}
+    return trace_files
 
 
 # =============================================================================
@@ -776,60 +726,50 @@ def run_training(
     config["scorer"] = scorer_arch
     config["input_dim"] = embeddings_config.get("input_dim", 8)
 
-    # Get trace files (filtered by problem_names if specified)
+    # Get trace files
     trace_dir = Path(trace_dir)
     trace_files = sorted(trace_dir.glob("*.json"))
     if problem_names is not None:
         trace_files = [f for f in trace_files if f.stem in problem_names]
 
-    # Filter to only valid traces (proof_found=true)
-    valid_trace_files = []
-    for f in trace_files:
-        try:
-            with open(f) as fp:
-                # Quick check without loading full content
-                content = fp.read(200)  # Read first 200 bytes
-                if '"proof_found": true' in content or '"proof_found":true' in content:
-                    valid_trace_files.append(f)
-        except Exception:
-            pass
+    if not trace_files:
+        raise ValueError(f"No trace files found in {trace_dir}")
 
-    if not valid_trace_files:
-        raise ValueError(f"No valid traces found in {trace_dir}")
-
-    log_msg(f"Found {len(valid_trace_files)} valid traces")
+    log_msg(f"Found {len(trace_files)} trace files")
 
     # Problem-level split
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    random.shuffle(valid_trace_files)
+    random.shuffle(trace_files)
 
     if val_ratio > 0:
-        val_count = max(1, int(len(valid_trace_files) * val_ratio))
-        train_files = valid_trace_files[val_count:]
-        val_files = valid_trace_files[:val_count]
+        val_count = max(1, int(len(trace_files) * val_ratio))
+        train_files = trace_files[val_count:]
+        val_files = trace_files[:val_count]
     else:
-        train_files = valid_trace_files
+        train_files = trace_files
         val_files = []
 
-    # Create lazy-loading datasets
-    max_clauses = config.get("max_clauses_per_proof", 512)  # Limit for memory
+    # Create datasets (loads all data upfront)
+    max_clauses = config.get("max_clauses_per_proof", 512)
+    log_msg("Loading training data...")
     train_ds = ProofDataset(
         trace_dir=None,
         trace_files=train_files,
         output_type="graph",
-        sample_prefix=False,
         max_clauses=max_clauses,
     )
-    val_ds = ProofDataset(
-        trace_dir=None,
-        trace_files=val_files,
-        output_type="graph",
-        sample_prefix=False,
-        max_clauses=max_clauses,
-    ) if val_files else None
+    val_ds = None
+    if val_files:
+        log_msg("Loading validation data...")
+        val_ds = ProofDataset(
+            trace_dir=None,
+            trace_files=val_files,
+            output_type="graph",
+            max_clauses=max_clauses,
+        )
 
-    log_msg(f"Train: {len(train_files)} traces, Val: {len(val_files)} traces")
+    log_msg(f"Train: {len(train_ds)} traces, Val: {len(val_ds) if val_ds else 0} traces")
 
     model_name = get_model_name(preset)
     log_msg(f"Training {model_name}: {len(train_ds)} traces")

@@ -299,7 +299,7 @@ class TestProofDataset:
             json.dump(trace2, f)
 
         # Test graph output (returns pre-converted graphs)
-        dataset = ProofDataset(tmp_path, output_type="graph", sample_prefix=False)
+        dataset = ProofDataset(tmp_path, output_type="graph")
         assert len(dataset) == 2
 
         item = dataset[0]
@@ -308,7 +308,7 @@ class TestProofDataset:
         assert len(item["graphs"]) == 2
 
         # Test string output
-        dataset_str = ProofDataset(tmp_path, output_type="string", sample_prefix=False)
+        dataset_str = ProofDataset(tmp_path, output_type="string")
         item_str = dataset_str[0]
         assert "strings" in item_str
         assert len(item_str["strings"]) == 2

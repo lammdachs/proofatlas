@@ -32,7 +32,7 @@ from .training import (
     collate_clause_batch,
     # Training
     run_training,
-    load_traces,
+    load_trace_files,
     save_trace,
     # Utilities
     JSONLogger,
@@ -100,7 +100,7 @@ __all__ = [
     "collate_clause_batch",
     # Training
     "run_training",
-    "load_traces",
+    "load_trace_files",
     "save_trace",
     # Utilities
     "JSONLogger",
