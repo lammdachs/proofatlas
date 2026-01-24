@@ -71,8 +71,57 @@ rustflags = ["-C", "link-arg=-Wl,-rpath,{torch_lib}"]
     print(f"Created {config_path} with PyTorch lib: {torch_lib}")
 
 
+def build_wasm():
+    """Build the WASM package for the web interface."""
+    import subprocess
+
+    project_root = Path(__file__).parent
+    wasm_crate = project_root / "crates" / "proofatlas-wasm"
+    web_pkg = project_root / "web" / "pkg"
+
+    # Check if wasm-pack is installed
+    if not shutil.which('wasm-pack'):
+        print("Installing wasm-pack...")
+        try:
+            subprocess.run(
+                ["cargo", "install", "wasm-pack"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Warning: Failed to install wasm-pack: {e}")
+            print("Web interface will not be available.")
+            print("Install manually with: cargo install wasm-pack")
+            return
+
+    # Check if WASM crate exists
+    if not (wasm_crate / "Cargo.toml").exists():
+        print("Warning: proofatlas-wasm crate not found, skipping WASM build")
+        return
+
+    # Check if already built
+    if (web_pkg / "proofatlas_wasm.js").exists():
+        print("WASM package already built")
+        return
+
+    print("Building WASM package...")
+    try:
+        subprocess.run(
+            ["wasm-pack", "build", "--target", "web", "--out-dir", str(web_pkg)],
+            cwd=wasm_crate,
+            check=True,
+        )
+        print(f"WASM package built: {web_pkg}")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: WASM build failed: {e}")
+        print("Web interface will not be available.")
+
+
 # Configure cargo before build
 setup_cargo_config()
+
+# Build WASM package
+build_wasm()
 
 # Import and run setuptools
 from setuptools import setup

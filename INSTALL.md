@@ -39,6 +39,7 @@ This installs CPU-only PyTorch automatically.
 - Installs PyTorch 2.9.0 (if not already installed)
 - Generates `.cargo/config.toml` with libtorch paths
 - Builds Rust extension with ML features
+- Builds WASM package for web interface
 
 ### With Development Dependencies
 
@@ -69,19 +70,18 @@ proofatlas problem.p --json output.json
 
 ## Web Interface
 
-The web interface runs the prover in the browser using WebAssembly:
+The web interface runs the prover in the browser using WebAssembly.
+The WASM package is built automatically during installation.
 
 ```bash
-# Install wasm-pack (if not installed)
-cargo install wasm-pack
+# Start the web server
+proofatlas-web
 
-# Build the WASM package
-cd crates/proofatlas-wasm
-wasm-pack build --target web --out-dir ../../web/pkg
+# Or on a custom port
+proofatlas-web --port 3000
 
-# Serve the web directory
-cd ../../web
-python -m http.server 8000
+# Stop the server
+proofatlas-web --kill
 ```
 
 Then open http://localhost:8000 in your browser.
