@@ -82,17 +82,10 @@ python -m pytest python/tests/ -v        # Python tests
 ### Benchmarking
 
 ```bash
-proofatlas-bench --prover proofatlas --preset time_sel0
-proofatlas-bench --prover vampire --problem-set test
-proofatlas-bench --base-only                           # Skip learned selectors
-```
-
-### Exporting Results
-
-```bash
-proofatlas-export                      # Export benchmarks and training data
-proofatlas-export --benchmarks         # Benchmarks only
-proofatlas-export --commit             # Auto-commit to git
+proofatlas-bench                              # Run all presets
+proofatlas-bench --preset time_sel21          # Run specific preset
+proofatlas-bench --retrain                    # Retrain ML models
+proofatlas-bench --status                     # Check job status
 ```
 
 ## Problem Sets

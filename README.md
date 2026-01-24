@@ -103,9 +103,6 @@ proofatlas-bench --preset gcn_mlp_sel21 --retrain
 ### Local Web Interface
 
 ```bash
-# Export benchmark and training data to web/data/
-proofatlas-export
-
 # Serve locally (Python)
 python -m http.server 8000 --directory web
 

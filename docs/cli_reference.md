@@ -140,50 +140,6 @@ When using a preset with ML (e.g., `gcn_mlp_sel21`):
 
 ---
 
-## proofatlas-export
-
-Export benchmark and training results for web display.
-
-```bash
-proofatlas-export [options]
-```
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--benchmarks` | - | Export benchmarks only |
-| `--training` | - | Export training only |
-| `--problem-set <name>` | from config | Limit to problems in this set |
-| `--preset <name>` | all | Include only this preset |
-| `--output-dir <path>` | web/data/ | Output directory |
-| `--commit` | - | Commit exported files to git |
-
-### Examples
-
-```bash
-# Export everything (uses default problem set)
-proofatlas-export
-
-# Export benchmarks only
-proofatlas-export --benchmarks
-
-# Export for specific problem set
-proofatlas-export --problem-set test
-
-# Export and commit
-proofatlas-export --commit
-```
-
-### Output Files
-
-| Path | Description |
-|------|-------------|
-| `web/data/benchmarks.json` | Benchmark results per preset |
-| `web/data/training/` | Training runs and metrics |
-
----
-
 ## Setup Scripts
 
 ### setup_tptp.py
