@@ -6,6 +6,7 @@ clause selection models. The training loop is in bench.py (run_training).
 """
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -598,10 +599,14 @@ def run_training(
         """Log message with timestamp to stdout and optionally to log_file."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         line = f"[{timestamp}] {msg}"
-        print(line)
-        if log_file:
+        if log_file and log_file is not sys.stdout:
+            # Write to both stdout and log file
+            print(line)
             log_file.write(line + "\n")
             log_file.flush()
+        else:
+            # Just print to stdout (log_file is None or is stdout)
+            print(line)
 
     # Load configs
     configs_dir = Path(configs_dir)
