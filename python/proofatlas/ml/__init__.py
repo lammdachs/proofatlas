@@ -23,20 +23,16 @@ from .training import (
     info_nce_loss,
     info_nce_loss_per_proof,
     margin_ranking_loss,
-    # Per-proof datasets (recommended)
+    # Datasets
     ProofDataset,
     collate_proof_batch,
     collate_sentence_batch,
-    # Legacy per-clause datasets
-    ClauseDataset,
-    collate_clause_batch,
     # Training
     run_training,
     load_trace_files,
     save_trace,
     # Utilities
     JSONLogger,
-    split_dataset,
     save_model,
     load_model,
 )
@@ -91,20 +87,16 @@ __all__ = [
     "info_nce_loss",
     "info_nce_loss_per_proof",
     "margin_ranking_loss",
-    # Datasets (per-proof, recommended)
+    # Datasets
     "ProofDataset",
     "collate_proof_batch",
     "collate_sentence_batch",
-    # Datasets (legacy per-clause)
-    "ClauseDataset",
-    "collate_clause_batch",
     # Training
     "run_training",
     "load_trace_files",
     "save_trace",
     # Utilities
     "JSONLogger",
-    "split_dataset",
     "save_model",
     "load_model",
     # Weights

@@ -89,8 +89,8 @@ def main():
     parser.add_argument(
         "--literal-selection",
         type=int,
-        choices=[0, 20, 21],
-        help="Literal selection: 0=all, 20=maximal, 21=unique/neg/max",
+        choices=[0, 20, 21, 22],
+        help="Literal selection: 0=all, 20=maximal, 21=unique/neg/max, 22=neg/max",
     )
     parser.add_argument("--include", action="append", dest="include_dirs", help="Add include directory")
     parser.add_argument("--json", dest="json_output", help="Export proof attempt to JSON file")

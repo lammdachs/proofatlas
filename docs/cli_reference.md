@@ -31,6 +31,7 @@ proofatlas --list
 | 0 | SelectAll | Select all literals (no restriction) |
 | 20 | SelectMaximal | Select all maximal literals (using KBO) |
 | 21 | UniqueMaximal | Unique maximal if exists, else max-weight negative, else all maximal |
+| 22 | NegMaxWeight | Max-weight negative if exists, else all maximal |
 
 ### Examples
 

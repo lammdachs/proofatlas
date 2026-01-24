@@ -165,10 +165,11 @@ Variables from different clauses are renamed to avoid capture (e.g., X becomes X
 - Collects literals from correct parent clauses
 
 ### Literal Selection
-Three strategies (Hoder et al. "Selecting the selection" 2016):
+Four strategies (Hoder et al. "Selecting the selection" 2016):
 - **0**: Select all literals (default)
 - **20**: Select all maximal literals
 - **21**: Unique maximal, else neg max-weight, else all maximal
+- **22**: Neg max-weight, else all maximal
 
 ### Demodulation
 - Uses one-way matching (only rewrite rule variables can be substituted)

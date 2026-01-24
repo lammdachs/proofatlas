@@ -17,25 +17,13 @@ GRAPH_EMBEDDINGS = {"gcn", "gat", "graphsage"}
 def get_model_name(preset: dict) -> str:
     """Get model file name from preset config.
 
-    Uses modular naming: {embedding}_{scorer}.pt
-    Falls back to legacy naming for backwards compatibility.
+    Uses modular naming: {embedding}_{scorer}
     """
-    # Modular design: embedding + scorer
     embedding = preset.get("embedding")
     scorer = preset.get("scorer")
     if embedding and scorer:
         return f"{embedding}_{scorer}"
-
-    # Legacy: explicit model field
-    if "model" in preset:
-        return preset["model"]
-
-    # Legacy: embedding field only
-    if embedding:
-        return embedding
-
-    # Default
-    return "gcn"
+    raise ValueError("Preset must have 'embedding' and 'scorer' fields")
 
 
 def get_embedding_type(preset: dict) -> Optional[str]:
@@ -57,11 +45,7 @@ def get_embedding_type(preset: dict) -> Optional[str]:
 
 def is_learned_selector(preset: dict) -> bool:
     """Check if preset requires trained weights."""
-    # Check for modular embedding+scorer design
-    if "embedding" in preset and "scorer" in preset:
-        return True
-    # Legacy: check for model field
-    return "model" in preset
+    return "embedding" in preset and "scorer" in preset
 
 
 def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
