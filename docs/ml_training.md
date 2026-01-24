@@ -132,12 +132,12 @@ Labels are extracted from completed proofs:
 
 ### Configuration
 
-Training is configured via `TrainingConfig` (or `SelectorConfig`):
+Training is configured via `TrainingConfig`:
 
 ```python
-from proofatlas.ml.config import SelectorConfig, ModelConfig, TrainingParams
+from proofatlas.ml.config import TrainingConfig, ModelConfig, TrainingParams
 
-config = SelectorConfig(
+config = TrainingConfig(
     name="my_gcn",
     model=ModelConfig(
         type="gcn",

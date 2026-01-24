@@ -253,9 +253,3 @@ class SentenceEncoder(nn.Module):
 
         print(f"Encoder: {self.model_name}")
         print(f"Encoder dim: {self.encoder_dim}, Hidden dim: {self.hidden_dim}")
-
-
-# Backwards compatibility aliases
-PretrainedClauseEncoder = SentenceEncoder
-ClauseSentenceEncoder = SentenceEncoder
-HAS_SENTENCE_TRANSFORMERS = HAS_TRANSFORMERS

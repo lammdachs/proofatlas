@@ -295,8 +295,6 @@ class TrainingConfig:
         return None
 
 
-# Keep SelectorConfig as alias for backwards compatibility
-SelectorConfig = TrainingConfig
 
 
 # =============================================================================

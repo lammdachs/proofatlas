@@ -54,8 +54,8 @@ from .config import (
     SolverConfig,
     TraceCollectionConfig,
     OutputConfig,
-    # Selector config
-    SelectorConfig,
+    # Training config
+    TrainingConfig,
     ModelConfig,
     TrainingParams,
     OptimizerConfig,
@@ -113,8 +113,8 @@ __all__ = [
     "SolverConfig",
     "TraceCollectionConfig",
     "OutputConfig",
-    # Config - Selector
-    "SelectorConfig",
+    # Config - Training
+    "TrainingConfig",
     "ModelConfig",
     "TrainingParams",
     "OptimizerConfig",

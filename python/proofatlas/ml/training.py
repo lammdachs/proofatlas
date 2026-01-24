@@ -8,14 +8,14 @@ clause selection models. The training loop is in bench.py (run_training).
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from ..selectors import create_model
-from .config import SelectorConfig
+from .config import TrainingConfig
 
 # Use orjson for faster JSON loading if available
 try:
@@ -461,7 +461,7 @@ class JSONLogger:
 # =============================================================================
 
 
-def save_model(model: nn.Module, path: Path, config: Optional[SelectorConfig] = None):
+def save_model(model: nn.Module, path: Path, config: Optional[TrainingConfig] = None):
     """Save model checkpoint."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

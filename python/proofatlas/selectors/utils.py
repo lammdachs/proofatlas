@@ -67,60 +67,6 @@ def normalize_adjacency_sparse(adj: torch.Tensor, add_self_loops: bool = True) -
     return torch.sparse_coo_tensor(indices, norm_values, (num_nodes, num_nodes)).coalesce()
 
 
-def edge_index_to_adjacency(
-    edge_index: torch.Tensor,
-    num_nodes: int,
-    add_self_loops: bool = True,
-) -> torch.Tensor:
-    """
-    Convert edge_index [2, num_edges] to dense adjacency matrix.
-    For large graphs, use edge_index_to_sparse_adjacency instead.
-    """
-    adj = torch.zeros(num_nodes, num_nodes, device=edge_index.device)
-    adj[edge_index[0], edge_index[1]] = 1.0
-
-    if add_self_loops:
-        adj = adj + torch.eye(num_nodes, device=adj.device)
-
-    return adj
-
-
-def edge_index_to_sparse_adjacency(
-    edge_index: torch.Tensor,
-    num_nodes: int,
-    add_self_loops: bool = True,
-) -> torch.Tensor:
-    """
-    Convert edge_index [2, num_edges] to sparse COO adjacency matrix.
-
-    Much more memory efficient for large graphs:
-    - Dense: O(num_nodes^2) memory
-    - Sparse: O(num_edges) memory
-
-    Args:
-        edge_index: [2, num_edges] edge indices
-        num_nodes: Number of nodes
-        add_self_loops: Whether to add self-loops
-
-    Returns:
-        Sparse COO adjacency matrix [num_nodes, num_nodes]
-    """
-    num_edges = edge_index.size(1)
-    device = edge_index.device
-
-    if add_self_loops:
-        # Add self-loop indices
-        self_loop_idx = torch.arange(num_nodes, device=device)
-        self_loop_indices = torch.stack([self_loop_idx, self_loop_idx])
-        indices = torch.cat([edge_index, self_loop_indices], dim=1)
-        values = torch.ones(num_edges + num_nodes, device=device)
-    else:
-        indices = edge_index
-        values = torch.ones(num_edges, device=device)
-
-    return torch.sparse_coo_tensor(indices, values, (num_nodes, num_nodes)).coalesce()
-
-
 def sparse_mm(adj: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """
     Matrix multiply adjacency (sparse or dense) with node features.
