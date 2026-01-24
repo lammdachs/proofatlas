@@ -80,20 +80,24 @@ python scripts/setup_tptp.py
 ### Running the Prover
 
 ```bash
-./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p --timeout 30
+# Basic usage
+proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+
+# With preset and timeout
+proofatlas problem.p --preset time_sel21 --timeout 30
+
+# List available presets
+proofatlas --list
 ```
 
 ### Benchmarking
 
 ```bash
-python scripts/bench.py --prover proofatlas --preset quick
-```
+# Run benchmarks with a preset
+proofatlas-bench --preset time_sel21
 
-### Training ML Models
-
-```bash
-# Train and run GCN selector (auto-collects traces if needed)
-proofatlas-bench --preset gcn_mlp_sel21
+# Retrain ML model
+proofatlas-bench --preset gcn_mlp_sel21 --retrain
 ```
 
 ### Local Web Interface
@@ -134,18 +138,20 @@ ML selectors require the `torch` feature and use GPU-accelerated inference via t
 
 ## Node Features
 
-Each clause is converted to a graph with 13-dimensional node features:
+Each clause is converted to a graph with 8-dimensional raw node features:
 
 | Index | Feature | Description |
 |-------|---------|-------------|
-| 0-5 | Node type | One-hot: clause, literal, predicate, function, variable, constant |
-| 6 | Arity | Number of arguments |
-| 7 | Arg position | Position as argument to parent |
-| 8 | Depth | Distance from clause root |
-| 9 | Age | Clause age normalized to [0, 1] |
-| 10 | Role | axiom/hypothesis/negated_conjecture/derived |
-| 11 | Polarity | positive/negative |
-| 12 | Is equality | Whether predicate is equality |
+| 0 | Node type | 0-5: clause, literal, predicate, function, variable, constant |
+| 1 | Arity | Number of arguments |
+| 2 | Arg position | Position as argument to parent |
+| 3 | Depth | Distance from clause root |
+| 4 | Age | Clause age normalized to [0, 1] |
+| 5 | Role | 0-4: axiom, hypothesis, definition, negated_conjecture, derived |
+| 6 | Polarity | 1=positive literal, 0=negative |
+| 7 | Is equality | 1 if equality predicate, 0 otherwise |
+
+The model's feature embedding layer converts these to a richer representation using one-hot and sinusoidal encodings.
 
 ## Tests
 

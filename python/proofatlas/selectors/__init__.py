@@ -30,7 +30,6 @@ from .gnn import (
     GraphSAGELayer,
     NodeFeatureEmbedding,
     ClauseFeatureEmbedding,
-    FeatureEmbedding,  # Legacy alias
 )
 from .encoders import (
     ClauseEncoder,
@@ -77,7 +76,6 @@ __all__ = [
     # Feature embeddings
     "NodeFeatureEmbedding",
     "ClauseFeatureEmbedding",
-    "FeatureEmbedding",
     # Transformer models
     "ClauseTransformer",
     "ClauseGNNTransformer",

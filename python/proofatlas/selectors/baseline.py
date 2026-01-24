@@ -55,7 +55,7 @@ class NodeMLP(nn.Module):
 
 class AgeWeightHeuristic(nn.Module):
     """
-    Age-weight heuristic as a neural network (for ONNX export).
+    Age-weight heuristic as a neural network.
 
     With probability p: prefer oldest clause (highest age)
     With probability 1-p: prefer lightest clause (lowest depth)

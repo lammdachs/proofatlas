@@ -163,21 +163,6 @@ class ClauseFeatureEmbedding(nn.Module):
         return torch.cat([age_enc, role_onehot, size_enc], dim=-1)
 
 
-# Legacy alias for backwards compatibility
-class FeatureEmbedding(NodeFeatureEmbedding):
-    """Legacy alias for NodeFeatureEmbedding.
-
-    For backwards compatibility with 8-dim features, this class accepts
-    8-dim input but only uses the first 3 dimensions (type, arity, arg_pos).
-    """
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Handle both 3-dim (new) and 8-dim (legacy) input
-        if x.size(-1) == 8:
-            x = x[:, :3]  # Use only type, arity, arg_pos
-        return super().forward(x)
-
-
 class GCNLayer(nn.Module):
     """
     Graph Convolutional Network layer (Kipf & Welling, 2017).

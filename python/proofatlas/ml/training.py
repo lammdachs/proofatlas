@@ -993,18 +993,6 @@ def run_training(
     return weights_path
 
 
-# =============================================================================
-# Legacy compatibility
-# =============================================================================
-
-
-def create_pyg_dataset(dataset):
-    """Legacy function for PyG compatibility."""
-    raise NotImplementedError(
-        "create_pyg_dataset is deprecated. Use ClauseDataset directly."
-    )
-
-
 def split_dataset(
     node_features: List[torch.Tensor],
     edge_indices: List[torch.Tensor],

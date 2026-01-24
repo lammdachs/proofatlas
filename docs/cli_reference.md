@@ -1,25 +1,28 @@
 # CLI Reference
 
-ProofAtlas provides several command-line tools for theorem proving, benchmarking, and exporting results.
+ProofAtlas provides command-line tools for theorem proving, benchmarking, and exporting results.
 
-## prove (Rust Binary)
+## proofatlas
 
-The core theorem prover binary.
+The main theorem prover command. Uses Python wrapper with Rust core.
 
 ```bash
-./target/release/prove <tptp_file> [options]
+proofatlas <problem> [options]
+proofatlas --list
 ```
 
 ### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--preset <name>` | - | Solver preset from `configs/proofatlas.json` |
 | `--timeout <seconds>` | 60 | Time limit for proof search |
 | `--max-clauses <n>` | 10000 | Maximum number of clauses before stopping |
 | `--literal-selection <n>` | 0 | Literal selection strategy (see below) |
 | `--include <dir>` | - | Add TPTP include directory (can be repeated) |
-| `--age-weight <ratio>` | 0.167 | Age probability for clause selection |
-| `--verbose` | - | Show detailed progress and proof steps |
+| `--json <file>` | - | Export proof attempt to JSON file |
+| `--verbose` | - | Show detailed output |
+| `--list` | - | List available presets |
 
 ### Literal Selection Strategies
 
@@ -28,19 +31,24 @@ The core theorem prover binary.
 | 0 | SelectAll | Select all literals (no restriction) |
 | 20 | SelectMaximal | Select all maximal literals (using KBO) |
 | 21 | UniqueMaximal | Unique maximal if exists, else max-weight negative, else all maximal |
-| 22 | NegMaxWeight | Max-weight negative if exists, else all maximal |
 
 ### Examples
 
 ```bash
 # Basic usage
-./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+
+# With preset
+proofatlas problem.p --preset time_sel21
 
 # With timeout and literal selection
-./target/release/prove problem.p --timeout 30 --literal-selection 21
+proofatlas problem.p --timeout 30 --literal-selection 21
 
-# Verbose output with include directory
-./target/release/prove problem.p --include .tptp/TPTP-v9.0.0 --verbose
+# Export result to JSON
+proofatlas problem.p --json result.json
+
+# List available presets
+proofatlas --list
 ```
 
 ### Exit Codes
@@ -49,33 +57,6 @@ The core theorem prover binary.
 |------|---------|
 | 0 | Proof found (theorem proved) |
 | 1 | Error, saturated, timeout, or resource limit |
-
----
-
-## proofatlas-prove (Python)
-
-Python wrapper for theorem proving with preset support.
-
-```bash
-proofatlas-prove <problem> [options]
-```
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--preset <name>` | time_sel21 | Solver preset from `configs/proofatlas.json` |
-| `--verbose` | - | Show detailed output |
-
-### Examples
-
-```bash
-# Use default preset
-proofatlas-prove .tptp/TPTP-v9.0.0/Problems/GRP/GRP001-1.p
-
-# Use specific preset
-proofatlas-prove problem.p --preset time_sel21 --verbose
-```
 
 ---
 
@@ -91,10 +72,8 @@ proofatlas-bench [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--prover <name>` | all | Prover to run: `proofatlas`, `vampire`, `spass` |
 | `--preset <name>...` | all | Preset(s) to evaluate |
 | `--problem-set <name>` | from config | Problem set from `configs/tptp.json` |
-| `--base-only` | - | Skip learned selectors (ML models) |
 | `--rerun` | - | Re-evaluate cached results |
 | `--n-jobs <n>` | 1 | Parallel jobs |
 
@@ -102,46 +81,49 @@ proofatlas-bench [options]
 
 | Option | Description |
 |--------|-------------|
-| `--force-train` | Retrain even if weights exist |
+| `--retrain` | Retrain model even if weights exist |
 | `--trace-preset <name>` | Preset name for trace collection |
 
 ### Job Management
 
 | Option | Description |
 |--------|-------------|
-| `--track` | Monitor job progress (blocking) |
 | `--status` | Check job status |
 | `--kill` | Stop running job |
+| `--list` | List available presets |
 
 ### Examples
 
 ```bash
-# Evaluate all provers with all presets
+# Evaluate all presets
 proofatlas-bench
 
-# Evaluate specific prover and preset
-proofatlas-bench --prover proofatlas --preset time_sel21
+# Evaluate specific preset
+proofatlas-bench --preset time_sel21
 
-# Train a GCN model
-proofatlas-bench --prover proofatlas --preset gcn --force-train
+# Retrain a GCN model
+proofatlas-bench --preset gcn_mlp_sel21 --retrain
 
-# Run with parallel jobs and monitor
-proofatlas-bench --prover vampire --n-jobs 4 --track
+# Run with parallel jobs
+proofatlas-bench --n-jobs 4
 
 # Check status
 proofatlas-bench --status
 
 # Kill running job
 proofatlas-bench --kill
+
+# List presets
+proofatlas-bench --list
 ```
 
 ### Workflow for Learned Selectors
 
-When using a preset with ML (e.g., `gcn`, `sentence`):
+When using a preset with ML (e.g., `gcn_mlp_sel21`):
 
 1. If TorchScript models exist in `.weights/`, uses them directly
-2. Otherwise, you need to:
-   - Collect traces with age_weight selector
+2. Otherwise, use `--retrain` to:
+   - Collect traces with heuristic selector
    - Train the model in PyTorch
    - Export to TorchScript (`.pt` file)
 
@@ -149,10 +131,9 @@ When using a preset with ML (e.g., `gcn`, `sentence`):
 
 | Path | Description |
 |------|-------------|
-| `.weights/gcn_model.pt` | GCN TorchScript model |
-| `.weights/sentence_encoder.pt` | Sentence transformer model |
+| `.weights/<model>.pt` | TorchScript model (e.g., `gcn_mlp.pt`) |
 | `.data/traces/<preset>/` | Proof traces for training |
-| `.data/runs/<prover>/<preset>/` | Per-problem results (JSON) |
+| `.data/runs/<preset>/` | Per-problem results (JSON) |
 | `.data/bench.log` | Daemon log file |
 | `.data/bench_job.json` | Job status file |
 
@@ -173,9 +154,7 @@ proofatlas-export [options]
 | `--benchmarks` | - | Export benchmarks only |
 | `--training` | - | Export training only |
 | `--problem-set <name>` | from config | Limit to problems in this set |
-| `--prover <name>` | all | Include only this prover |
 | `--preset <name>` | all | Include only this preset |
-| `--base-only` | - | Skip learned selectors |
 | `--output-dir <path>` | web/data/ | Output directory |
 | `--commit` | - | Commit exported files to git |
 
@@ -199,8 +178,8 @@ proofatlas-export --commit
 
 | Path | Description |
 |------|-------------|
-| `web/data/benchmarks.json` | Benchmark results per prover/preset |
-| `web/data/training.json` | Training runs and available weights |
+| `web/data/benchmarks.json` | Benchmark results per preset |
+| `web/data/training/` | Training runs and metrics |
 
 ---
 
@@ -241,4 +220,4 @@ python scripts/setup_spass.py
 | Variable | Description |
 |----------|-------------|
 | `TPTP` | TPTP library root directory (used by SPASS) |
-| `CUDA_VISIBLE_DEVICES` | GPU device for ML training |
+| `CUDA_VISIBLE_DEVICES` | GPU device for ML training/inference |

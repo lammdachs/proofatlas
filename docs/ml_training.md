@@ -74,7 +74,7 @@ Edges are bidirectional (parent ↔ child).
 The primary model uses GCN layers for message passing:
 
 ```
-Input: node_features [N, 13]
+Input: node_features [N, 8]
        adj          [N, N]  (normalized adjacency)
        pool_matrix  [C, N]  (clause pooling)
 
@@ -157,17 +157,25 @@ config = SelectorConfig(
 
 ### Running Training
 
+Training is typically done via the CLI:
+
+```bash
+# Train a GCN model (collects traces if needed)
+proofatlas-bench --preset gcn_mlp_sel21 --retrain
+```
+
+Or programmatically:
+
 ```python
-from proofatlas.ml.training import train, ClauseDataset
+from proofatlas.ml.training import run_training
 
-# Create datasets with binary labels
-train_dataset = ClauseDataset(
-    node_features=[...],  # List of [num_nodes, 13] tensors
-    edge_indices=[...],   # List of [2, num_edges] tensors
-    labels=[...],         # List of 0/1 labels
+# Train from collected traces
+weights_path = run_training(
+    preset={"embedding": "gcn", "scorer": "mlp"},
+    trace_dir=".data/traces/time_sel21",
+    weights_dir=".weights",
+    configs_dir="configs",
 )
-
-model, metrics = train(train_dataset, val_dataset, config)
 ```
 
 ## Weight Export
