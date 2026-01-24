@@ -4,7 +4,7 @@ Prove a single TPTP problem.
 
 USAGE:
     proofatlas problem.p
-    proofatlas problem.p --preset gcn_mlp_sel21
+    proofatlas problem.p --config gcn_mlp_sel21
     proofatlas problem.p --timeout 30 --literal-selection 21
     proofatlas problem.p --json output.json
     proofatlas --list
@@ -53,8 +53,8 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def list_presets(base_dir: Path):
-    """List available presets."""
+def list_configs(base_dir: Path):
+    """List available configs."""
     config_path = base_dir / "configs" / "proofatlas.json"
     if not config_path.exists():
         print("Error: configs/proofatlas.json not found", file=sys.stderr)
@@ -63,7 +63,7 @@ def list_presets(base_dir: Path):
     config = load_config(config_path)
     presets = config.get("presets", {})
 
-    print("Available presets:")
+    print("Available configs:")
     for name, preset in sorted(presets.items()):
         desc = preset.get("description", "")
         embedding = preset.get("embedding")
@@ -82,8 +82,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("problem", type=Path, nargs="?", help="Path to TPTP problem file")
-    parser.add_argument("--preset", help="Use preset from configs/proofatlas.json")
-    parser.add_argument("--list", action="store_true", help="List available presets")
+    parser.add_argument("--config", help="Use config from configs/proofatlas.json")
+    parser.add_argument("--list", action="store_true", help="List available configs")
     parser.add_argument("--timeout", type=int, help="Set timeout in seconds (default: 60)")
     parser.add_argument("--max-clauses", type=int, help="Set max clauses (default: 10000)")
     parser.add_argument(
@@ -102,7 +102,7 @@ def main():
 
     # Handle --list
     if args.list:
-        list_presets(base_dir)
+        list_configs(base_dir)
         return
 
     # Require problem file if not --list
@@ -124,12 +124,12 @@ def main():
 
     # Load preset if specified
     preset = {}
-    if args.preset:
-        if args.preset not in presets:
-            print(f"Error: Unknown preset '{args.preset}'", file=sys.stderr)
-            print(f"Use --list to see available presets", file=sys.stderr)
+    if args.config:
+        if args.config not in presets:
+            print(f"Error: Unknown preset '{args.config}'", file=sys.stderr)
+            print(f"Use --list to see available configs", file=sys.stderr)
             sys.exit(1)
-        preset = presets[args.preset]
+        preset = presets[args.config]
 
     # Get values from preset, then override with command line args
     timeout = args.timeout if args.timeout is not None else preset.get("timeout", 60)
@@ -156,7 +156,7 @@ def main():
 
             if not weights_path:
                 print(f"Error: Model weights not found for {model_name}", file=sys.stderr)
-                print(f"Train with: proofatlas-bench --preset {args.preset} --retrain", file=sys.stderr)
+                print(f"Train with: proofatlas-bench --preset {args.config} --retrain", file=sys.stderr)
                 sys.exit(1)
 
             if args.verbose:
@@ -198,8 +198,8 @@ def main():
     print(f"Parsed {num_clauses} clauses from '{args.problem}'")
 
     if args.verbose:
-        if args.preset:
-            print(f"Preset: {args.preset}")
+        if args.config:
+            print(f"Preset: {args.config}")
         print(f"  timeout: {timeout}s")
         print(f"  literal_selection: {literal_selection}")
         print(f"  max_clauses: {max_clauses or 'unlimited'}")
@@ -253,7 +253,7 @@ def main():
                 "timeout": timeout,
                 "max_clauses": max_clauses,
                 "literal_selection": literal_selection,
-                "preset": args.preset,
+                "preset": args.config,
             },
             "result": {
                 "status": "proof" if proof_found else status,

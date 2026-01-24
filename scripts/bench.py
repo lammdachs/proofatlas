@@ -3,10 +3,10 @@
 Benchmark and train proofatlas theorem prover.
 
 USAGE:
-    proofatlas-bench                           # Run all presets
-    proofatlas-bench --preset gcn_mlp_sel21    # Run specific preset
-    proofatlas-bench --preset gcn_mlp_sel21 --retrain  # Retrain model
-    proofatlas-bench --list                    # List available presets
+    proofatlas-bench                           # Run all configs
+    proofatlas-bench --config gcn_mlp_sel21    # Run specific config
+    proofatlas-bench --config gcn_mlp_sel21 --retrain  # Retrain model
+    proofatlas-bench --list                    # List available configs
 
     proofatlas-bench --status                  # Check job status
     proofatlas-bench --kill                    # Stop running job
@@ -222,7 +222,7 @@ def kill_job(base_dir: Path) -> bool:
     # Step 3: Kill tracked PIDs and worker processes (Unix only)
     if sys.platform != "win32":
         # Kill any proofatlas-bench worker processes
-        subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--preset"], capture_output=True)
+        subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--config"], capture_output=True)
 
         # Kill tracked prover PIDs
         max_iterations = 10
@@ -332,8 +332,8 @@ def load_config(config_path: Path) -> dict:
         return json.load(f)
 
 
-def list_presets(base_dir: Path):
-    """List available presets."""
+def list_configs(base_dir: Path):
+    """List available configs."""
     config_path = base_dir / "configs" / "proofatlas.json"
     if not config_path.exists():
         print("Error: configs/proofatlas.json not found")
@@ -342,7 +342,7 @@ def list_presets(base_dir: Path):
     config = load_config(config_path)
     presets = config.get("presets", {})
 
-    print("Available presets:")
+    print("Available configs:")
     for name, preset in sorted(presets.items()):
         desc = preset.get("description", "")
         embedding = preset.get("embedding")
@@ -1041,8 +1041,8 @@ def get_available_provers(base_dir: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark and train theorem provers")
-    parser.add_argument("--preset", nargs="*",
-                       help="Preset(s) to run (default: all)")
+    parser.add_argument("--config", nargs="*",
+                       help="Config(s) to run (default: all)")
     parser.add_argument("--problem-set",
                        help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--retrain", action="store_true",
@@ -1058,14 +1058,14 @@ def main():
     parser.add_argument("--kill", action="store_true",
                        help="Stop running job")
     parser.add_argument("--list", action="store_true",
-                       help="List available presets and exit")
+                       help="List available configs and exit")
 
     args = parser.parse_args()
     base_dir = find_project_root()
 
-    # List presets
+    # List configs
     if args.list:
-        list_presets(base_dir)
+        list_configs(base_dir)
         return
 
     # Job management
@@ -1116,12 +1116,12 @@ def main():
     # Build list of runs
     runs = []
 
-    if args.preset:
-        # Run specified presets
-        for preset_name in args.preset:
+    if args.config:
+        # Run specified configs
+        for preset_name in args.config:
             if preset_name not in presets:
                 print(f"Error: Unknown preset '{preset_name}'")
-                print(f"Use --list to see available presets")
+                print(f"Use --list to see available configs")
                 sys.exit(1)
             runs.append({
                 "prover": "proofatlas",

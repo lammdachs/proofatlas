@@ -65,7 +65,7 @@ Re-run `setup_cargo.py` if you change Python environments.
 proofatlas problem.p
 
 # With a preset
-proofatlas problem.p --preset time_sel21
+proofatlas problem.p --config time_sel21
 
 # With options
 proofatlas problem.p --timeout 60 --literal-selection 21
@@ -105,10 +105,10 @@ After installation, use the benchmark tool:
 proofatlas-bench
 
 # Run specific preset
-proofatlas-bench --preset gcn_mlp_sel21
+proofatlas-bench --config gcn_mlp_sel21
 
 # Retrain ML models
-proofatlas-bench --preset gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp_sel21 --retrain
 
 # Check status of running job
 proofatlas-bench --status

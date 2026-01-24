@@ -15,14 +15,14 @@ proofatlas --list
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--preset <name>` | - | Solver preset from `configs/proofatlas.json` |
+| `--config <name>` | - | Solver config from `configs/proofatlas.json` |
 | `--timeout <seconds>` | 60 | Time limit for proof search |
 | `--max-clauses <n>` | 10000 | Maximum number of clauses before stopping |
 | `--literal-selection <n>` | 0 | Literal selection strategy (see below) |
 | `--include <dir>` | - | Add TPTP include directory (can be repeated) |
 | `--json <file>` | - | Export proof attempt to JSON file |
 | `--verbose` | - | Show detailed output |
-| `--list` | - | List available presets |
+| `--list` | - | List available configs |
 
 ### Literal Selection Strategies
 
@@ -39,8 +39,8 @@ proofatlas --list
 # Basic usage
 proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
 
-# With preset
-proofatlas problem.p --preset time_sel21
+# With config
+proofatlas problem.p --config time_sel21
 
 # With timeout and literal selection
 proofatlas problem.p --timeout 30 --literal-selection 21
@@ -48,7 +48,7 @@ proofatlas problem.p --timeout 30 --literal-selection 21
 # Export result to JSON
 proofatlas problem.p --json result.json
 
-# List available presets
+# List available configs
 proofatlas --list
 ```
 
@@ -73,7 +73,7 @@ proofatlas-bench [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--preset <name>...` | all | Preset(s) to evaluate |
+| `--config <name>...` | all | Config(s) to evaluate |
 | `--problem-set <name>` | from config | Problem set from `configs/tptp.json` |
 | `--rerun` | - | Re-evaluate cached results |
 | `--n-jobs <n>` | 1 | Parallel jobs |
@@ -83,7 +83,6 @@ proofatlas-bench [options]
 | Option | Description |
 |--------|-------------|
 | `--retrain` | Retrain model even if weights exist |
-| `--trace-preset <name>` | Preset name for trace collection |
 
 ### Job Management
 
@@ -91,19 +90,19 @@ proofatlas-bench [options]
 |--------|-------------|
 | `--status` | Check job status |
 | `--kill` | Stop running job |
-| `--list` | List available presets |
+| `--list` | List available configs |
 
 ### Examples
 
 ```bash
-# Evaluate all presets
+# Evaluate all configs
 proofatlas-bench
 
-# Evaluate specific preset
-proofatlas-bench --preset time_sel21
+# Evaluate specific config
+proofatlas-bench --config time_sel21
 
 # Retrain a GCN model
-proofatlas-bench --preset gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp_sel21 --retrain
 
 # Run with parallel jobs
 proofatlas-bench --n-jobs 4
@@ -114,13 +113,13 @@ proofatlas-bench --status
 # Kill running job
 proofatlas-bench --kill
 
-# List presets
+# List configs
 proofatlas-bench --list
 ```
 
 ### Workflow for Learned Selectors
 
-When using a preset with ML (e.g., `gcn_mlp_sel21`):
+When using a config with ML (e.g., `gcn_mlp_sel21`):
 
 1. If TorchScript models exist in `.weights/`, uses them directly
 2. Otherwise, use `--retrain` to:
@@ -133,8 +132,8 @@ When using a preset with ML (e.g., `gcn_mlp_sel21`):
 | Path | Description |
 |------|-------------|
 | `.weights/<model>.pt` | TorchScript model (e.g., `gcn_mlp.pt`) |
-| `.data/traces/<preset>/` | Proof traces for training |
-| `.data/runs/<preset>/` | Per-problem results (JSON) |
+| `.data/traces/<config>/` | Proof traces for training |
+| `.data/runs/<config>/` | Per-problem results (JSON) |
 | `.data/bench.log` | Daemon log file |
 | `.data/bench_job.json` | Job status file |
 

@@ -123,7 +123,7 @@ Add literal selection strategy 21
 ### Benchmark Configurations
 
 1. Add preset to `configs/proofatlas.json`
-2. Test with `proofatlas-bench --preset your_preset`
+2. Test with `proofatlas-bench --config your_preset`
 3. Document the configuration
 
 ## Benchmarking
@@ -131,17 +131,17 @@ Add literal selection strategy 21
 Use the benchmark tool to evaluate changes:
 
 ```bash
-# Run all provers with all presets
-proofatlas-bench --track
+# Run all configs
+proofatlas-bench
 
 # Run specific configuration
-proofatlas-bench --prover proofatlas --preset time_sel21 --track
+proofatlas-bench --config time_sel21
 
 # Check job status
 proofatlas-bench --status
 ```
 
-Results are saved to `.logs/eval_TIMESTAMP/`.
+Results are saved to `.data/runs/`.
 
 ## Code of Conduct
 

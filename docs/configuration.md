@@ -388,12 +388,12 @@ Here's how the configuration files work together:
 
 Running:
 ```bash
-proofatlas-bench --prover proofatlas --preset gcn --problem-set unit_equality
+proofatlas-bench --config gcn --problem-set unit_equality
 ```
 
 This will:
 1. Load problems matching `unit_equality` filters from `tptp.json`
-2. Use the `gcn` preset from `proofatlas.json`
+2. Use the `gcn` config from `proofatlas.json`
 3. Use embedding and scorer from `embeddings.json` / `scorers.json`
 4. Apply `standard` training config from `training.json`
 5. Evaluate the trained model on the problem set

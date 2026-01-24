@@ -83,7 +83,7 @@ python -m pytest python/tests/ -v        # Python tests
 
 ```bash
 proofatlas-bench                              # Run all presets
-proofatlas-bench --preset time_sel21          # Run specific preset
+proofatlas-bench --config time_sel21          # Run specific preset
 proofatlas-bench --retrain                    # Retrain ML models
 proofatlas-bench --status                     # Check job status
 ```

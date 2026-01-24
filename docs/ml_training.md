@@ -161,7 +161,7 @@ Training is typically done via the CLI:
 
 ```bash
 # Train a GCN model (collects traces if needed)
-proofatlas-bench --preset gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp_sel21 --retrain
 ```
 
 Or programmatically:
