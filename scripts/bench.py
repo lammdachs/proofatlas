@@ -1,40 +1,31 @@
 #!/usr/bin/env python3
 """
-Benchmark and train theorem provers.
+Benchmark and train proofatlas theorem prover.
 
 USAGE:
-    proofatlas-bench                                  # Run all benchmarks (baselines + ML)
-    proofatlas-bench --preset time_sel0               # Run specific preset
-    proofatlas-bench --prover proofatlas              # Run all presets for one prover
-    proofatlas-bench --preset gcn_mlp --retrain       # Retrain even if weights exist
-    proofatlas-bench --rerun                          # Re-evaluate even if cached
+    proofatlas-bench                           # Run all presets
+    proofatlas-bench --preset gcn_mlp_sel21    # Run specific preset
+    proofatlas-bench --preset gcn_mlp_sel21 --retrain  # Retrain model
+    proofatlas-bench --list                    # List available presets
 
-    proofatlas-bench --track                          # Start and monitor progress
-    proofatlas-bench --status                         # Check progress
-    proofatlas-bench --kill                           # Stop job
-
-DEFAULT (no arguments):
-    Runs all benchmarks: baselines (proofatlas/vampire/spass with sel0/sel20/sel21)
-    plus ML selectors (gcn_mlp, gcn_attention, gcn_transformer, sentence_mlp).
+    proofatlas-bench --status                  # Check job status
+    proofatlas-bench --kill                    # Stop running job
 
 CACHING:
-    Results are cached in .data/runs/<prover>/<preset>/<problem>.json.
-    Use --rerun to force re-evaluation of problems with cached results.
-    Use --retrain to force retraining of ML models with cached weights.
+    Results cached in .data/runs/proofatlas/<preset>/<problem>.json
+    Use --rerun to force re-evaluation of cached results.
+    Use --retrain to force retraining of ML models.
 
 ML MODELS:
-    When preset has embedding+scorer fields (e.g., gcn_mlp):
-    1. If weights exist in .weights/{embedding}_{scorer}.pt, uses them
-    2. If not, automatically:
-       - Collects traces with age_weight heuristic
-       - Trains the model
-       - Exports to .weights/{embedding}_{scorer}.pt
+    Presets with embedding+scorer (e.g., gcn_mlp_sel21) automatically:
+    1. Collect traces using age_weight baseline (if none exist)
+    2. Train the model
+    3. Export to .weights/{embedding}_{scorer}.pt
 
 OUTPUT:
-    .weights/{embedding}_{scorer}.pt           - TorchScript model for inference
-    .data/traces/<preset>/                     - Proof traces for training
-    .data/runs/<prover>/<preset>/              - Per-problem results (JSON)
-    web/data/benchmarks/<prover>_<preset>.json - Aggregated results for web UI
+    .weights/{embedding}_{scorer}.pt    - TorchScript model
+    .data/traces/<preset>/              - Training traces
+    .data/runs/proofatlas/<preset>/     - Per-problem results
 """
 
 import argparse
@@ -51,14 +42,17 @@ from typing import Optional
 # Add package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-from proofatlas.ml import (
-    find_weights,
-    is_learned_selector,
-    get_model_name,
-    get_embedding_type,
-    save_trace,
-    run_training,
-)
+# Lazy imports for ML functionality (avoid loading PyTorch for --list)
+_ml_module = None
+
+
+def _get_ml():
+    """Lazily import proofatlas.ml to avoid slow startup for simple commands."""
+    global _ml_module
+    if _ml_module is None:
+        from proofatlas import ml as _ml
+        _ml_module = _ml
+    return _ml_module
 
 
 
@@ -245,25 +239,6 @@ def kill_job(base_dir: Path) -> bool:
     return job is not None
 
 
-def format_job_status(job: dict) -> str:
-    if not job:
-        return "No job running"
-
-    start = datetime.fromisoformat(job["start_time"])
-    elapsed = datetime.now() - start
-    hours = elapsed.seconds // 3600
-    minutes = (elapsed.seconds % 3600) // 60
-
-    parts = [f"[{hours}h{minutes:02d}m]"]
-
-    if "train_epoch" in job:
-        parts.append(f"train {job['train_epoch']}/{job['train_total']} loss={job['train_loss']:.4f}")
-    elif "current" in job:
-        parts.append(f"eval {job['current']}/{job['total']} +{job['proofs']} T{job['timeout']}")
-
-    return " | ".join(parts)
-
-
 def print_job_status(base_dir: Path):
     job = get_job_status(base_dir)
     if not job:
@@ -345,25 +320,6 @@ def print_job_status(base_dir: Path):
     print(f"\nTo stop: proofatlas-bench --kill")
 
 
-def track_job(base_dir: Path, poll_interval: float = 1.0):
-    last_status = ""
-    while True:
-        job = get_job_status(base_dir)
-        if not job:
-            sys.stdout.write("\r" + " " * len(last_status) + "\r")
-            sys.stdout.flush()
-            print("Job completed.")
-            break
-
-        status = format_job_status(job)
-        sys.stdout.write("\r" + " " * len(last_status) + "\r")
-        sys.stdout.write(status)
-        sys.stdout.flush()
-        last_status = status
-
-        time.sleep(poll_interval)
-
-
 @dataclass
 class BenchResult:
     problem: str
@@ -374,6 +330,29 @@ class BenchResult:
 def load_config(config_path: Path) -> dict:
     with open(config_path) as f:
         return json.load(f)
+
+
+def list_presets(base_dir: Path):
+    """List available presets."""
+    config_path = base_dir / "configs" / "proofatlas.json"
+    if not config_path.exists():
+        print("Error: configs/proofatlas.json not found")
+        return
+
+    config = load_config(config_path)
+    presets = config.get("presets", {})
+
+    print("Available presets:")
+    for name, preset in sorted(presets.items()):
+        desc = preset.get("description", "")
+        embedding = preset.get("embedding")
+        scorer = preset.get("scorer")
+
+        model_info = ""
+        if embedding and scorer:
+            model_info = f" [{embedding}+{scorer}]"
+
+        print(f"  {name:<25} {desc}{model_info}")
 
 
 def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> list[Path]:
@@ -494,12 +473,13 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
-    is_learned = is_learned_selector(preset)
+    ml = _get_ml()
+    is_learned = ml.is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
     # Derive embedding type from embedding field: "graph", "string", or None
-    embedding_type = get_embedding_type(preset) if is_learned else None
+    embedding_type = ml.get_embedding_type(preset) if is_learned else None
     # Model name for .pt file: {embedding}_{scorer} for modular design
-    model_name = get_model_name(preset) if is_learned else None
+    model_name = ml.get_model_name(preset) if is_learned else None
 
     # Initialize CUDA if using string embedding (required for tch to detect CUDA)
     if embedding_type == "string":
@@ -538,7 +518,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     if collect_trace and proof_found and trace_preset:
         try:
             trace_json = state.extract_structured_trace(elapsed)
-            save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
+            _get_ml().save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
         except Exception:
             pass
 
@@ -912,7 +892,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
-        model_label = get_model_name(preset) if is_learned_selector(preset) else "age_weight"
+        ml = _get_ml()
+        model_label = ml.get_model_name(preset) if ml.is_learned_selector(preset) else "age_weight"
         print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")
@@ -1060,44 +1041,37 @@ def get_available_provers(base_dir: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark and train theorem provers")
-    parser.add_argument("--prover",
-                       help="Prover to run (default: all available)")
     parser.add_argument("--preset", nargs="*",
-                       help="Solver preset(s) (default: all)")
+                       help="Preset(s) to run (default: all)")
     parser.add_argument("--problem-set",
                        help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--retrain", action="store_true",
                        help="Retrain models even if cached weights exist")
-    parser.add_argument("--base-only", action="store_true",
-                       help="Only run base configs (skip learned selectors)")
     parser.add_argument("--rerun", action="store_true",
                        help="Re-evaluate problems even if cached results exist")
-    parser.add_argument("--trace-preset",
-                       help="Preset name for trace collection (default: solver preset)")
     parser.add_argument("--n-jobs", type=int, default=1,
                        help="Number of parallel jobs (default: 1)")
 
     # Job management
-    parser.add_argument("--track", action="store_true",
-                       help="Track progress")
     parser.add_argument("--status", action="store_true",
                        help="Check job status")
     parser.add_argument("--kill", action="store_true",
                        help="Stop running job")
+    parser.add_argument("--list", action="store_true",
+                       help="List available presets and exit")
 
     args = parser.parse_args()
     base_dir = find_project_root()
+
+    # List presets
+    if args.list:
+        list_presets(base_dir)
+        return
 
     # Job management
     if args.status:
         print_job_status(base_dir)
         return
-
-    if args.track:
-        job = get_job_status(base_dir)
-        if job:
-            track_job(base_dir)
-            return
 
     if args.kill:
         had_job = kill_job(base_dir)
@@ -1110,7 +1084,7 @@ def main():
     existing = get_job_status(base_dir)
     if existing:
         print(f"Error: Job already running (PID: {existing['pid']})")
-        print("Use --status, --track, or --kill")
+        print("Use --status or --kill")
         sys.exit(1)
 
     # Load configs
@@ -1131,87 +1105,41 @@ def main():
         print("Error: No provers available")
         sys.exit(1)
 
-    # Build list of (prover, preset_name, preset, binary) combinations
+    # Only run proofatlas
+    if "proofatlas" not in available_provers:
+        print("Error: proofatlas not available")
+        sys.exit(1)
+
+    prover_info = available_provers["proofatlas"]
+    presets = prover_info["config"].get("presets", {})
+
+    # Build list of runs
     runs = []
 
-    # If --prover or --preset specified, use filtered mode
-    if args.prover or args.preset:
-        # Filter provers if specified
-        if args.prover:
-            if args.prover not in available_provers:
-                print(f"Error: Prover '{args.prover}' not available")
-                print(f"Available: {', '.join(available_provers.keys())}")
+    if args.preset:
+        # Run specified presets
+        for preset_name in args.preset:
+            if preset_name not in presets:
+                print(f"Error: Unknown preset '{preset_name}'")
+                print(f"Use --list to see available presets")
                 sys.exit(1)
-            available_provers = {args.prover: available_provers[args.prover]}
-
-        for prover_name, prover_info in available_provers.items():
-            presets = prover_info["config"].get("presets", {})
-
-            if args.preset:
-                # Filter to only presets that exist for this prover
-                preset_names = [p for p in args.preset if p in presets]
-                if not preset_names:
-                    continue  # Skip this prover if no matching presets
-            else:
-                preset_names = list(presets.keys())
-
-            for preset_name in preset_names:
-                preset = presets[preset_name]
-
-                # Skip learned selectors if --base-only
-                if args.base_only and is_learned_selector(preset):
-                    continue
-
-                runs.append({
-                    "prover": prover_name,
-                    "preset_name": preset_name,
-                    "preset": preset,
-                    "binary": prover_info["binary"],
-                    "config": prover_info["config"],
-                })
+            runs.append({
+                "prover": "proofatlas",
+                "preset_name": preset_name,
+                "preset": presets[preset_name],
+                "binary": prover_info["binary"],
+                "config": prover_info["config"],
+            })
     else:
-        # Default: run all benchmarks (baselines + ML selectors for sel0, sel20, sel21)
-        selections = ["sel0", "sel20", "sel21"]
-
-        # Baseline benchmarks (time and step limited)
-        for prover_name in ["proofatlas", "vampire", "spass"]:
-            if prover_name not in available_provers:
-                print(f"Warning: {prover_name} not available, skipping")
-                continue
-            prover_info = available_provers[prover_name]
-            presets = prover_info["config"].get("presets", {})
-
-            for sel in selections:
-                # SPASS doesn't support sel0
-                if prover_name == "spass" and sel == "sel0":
-                    continue
-                preset_name = f"age_weight_{sel}"
-                if preset_name in presets:
-                        runs.append({
-                            "prover": prover_name,
-                            "preset_name": preset_name,
-                            "preset": presets[preset_name],
-                            "binary": prover_info["binary"],
-                            "config": prover_info["config"],
-                        })
-
-        # ML selectors (proofatlas only)
-        if "proofatlas" in available_provers:
-            prover_info = available_provers["proofatlas"]
-            presets = prover_info["config"].get("presets", {})
-            models = ["gcn_mlp", "gcn_attention", "gcn_transformer", "sentence_mlp"]
-
-            for model in models:
-                for sel in selections:
-                    preset_name = f"{model}_{sel}"
-                    if preset_name in presets:
-                        runs.append({
-                            "prover": "proofatlas",
-                            "preset_name": preset_name,
-                            "preset": presets[preset_name],
-                            "binary": prover_info["binary"],
-                            "config": prover_info["config"],
-                        })
+        # Default: run all presets
+        for preset_name, preset in presets.items():
+            runs.append({
+                "prover": "proofatlas",
+                "preset_name": preset_name,
+                "preset": preset,
+                "binary": prover_info["binary"],
+                "config": prover_info["config"],
+            })
 
     if not runs:
         print("Error: No matching prover/preset combinations")
@@ -1240,11 +1168,7 @@ def main():
         prover_names = sorted(set(r["prover"] for r in runs))
         print(f"Started job (PID: {grandchild_pid})")
         print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
-        print("Use --track to monitor, --status to check, --kill to stop")
-        if args.track:
-            time.sleep(0.5)
-            print()
-            track_job(base_dir)
+        print("Use --status to check, --kill to stop")
         return
 
     # First child: become session leader and fork again
@@ -1317,7 +1241,7 @@ def main():
             prover_config = run["config"]
 
             config_label = f"{prover}/{preset_name}"
-            trace_preset = args.trace_preset or preset.get("traces") or preset_name
+            trace_preset = preset.get("traces") or preset_name
 
             # Log config progress for --status parsing
             print(f"CONFIG:{config_label}:{run_idx}:{num_runs}")
@@ -1331,14 +1255,15 @@ def main():
             current_preset = preset
 
             # Training only supported for proofatlas
-            if prover == "proofatlas" and is_learned_selector(preset):
-                model_name = get_model_name(preset)
-                embedding_type = get_embedding_type(preset)
+            ml = _get_ml()
+            if prover == "proofatlas" and ml.is_learned_selector(preset):
+                model_name = ml.get_model_name(preset)
+                embedding_type = ml.get_embedding_type(preset)
                 print(f"[{preset_name}] Learned selector: {model_name} (embedding: {embedding_type})")
                 sys.stdout.flush()
 
                 weights_dir = base_dir / ".weights"
-                existing_weights = find_weights(weights_dir, preset)
+                existing_weights = ml.find_weights(weights_dir, preset)
 
                 if existing_weights and not args.retrain:
                     print(f"[{preset_name}] Found cached weights: {existing_weights}")
@@ -1378,7 +1303,7 @@ def main():
                     print(f"[{preset_name}] Starting training (lazy loading)...")
                     sys.stdout.flush()
                     try:
-                        weights_path = run_training(
+                        weights_path = ml.run_training(
                             preset=preset,
                             trace_dir=trace_preset_dir,
                             weights_dir=weights_dir,

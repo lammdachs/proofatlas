@@ -44,11 +44,3 @@ wasm = []
 
 [dev-dependencies]
 # criterion = "0.5"  # Commented out due to rustc version requirements
-
-[[bin]]
-name = "prove"
-path = "src/bin/prove.rs"
-
-[[bin]]
-name = "prove_json"
-path = "src/bin/prove_json.rs"

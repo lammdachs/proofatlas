@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.scripts]
-proofatlas-prove = "proofatlas.cli.prove:main"
+proofatlas = "proofatlas.cli.prove:main"
 proofatlas-bench = "proofatlas.cli.bench:main"
 
 [project.urls]

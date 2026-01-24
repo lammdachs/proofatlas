@@ -10,11 +10,8 @@ cd proofatlas
 # Install in development mode
 pip install -e .
 
-# Build the Rust prover
-cargo build --release
-
 # Verify installation
-./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+proofatlas --list
 ```
 
 ## Prerequisites
@@ -38,19 +35,9 @@ pip install -e ".[dev]"
 
 This includes pytest, black, ruff, mypy for development.
 
-## Building the Prover
-
-The core theorem prover is written in Rust:
-
-```bash
-cargo build --release
-```
-
-The binary will be at `target/release/prove`.
-
 ### With ML Features (GCN/Sentence selectors)
 
-To build with ML-based clause selection:
+To use ML-based clause selection:
 
 ```bash
 # Install PyTorch first
@@ -59,25 +46,35 @@ pip install torch==2.9.0
 # Configure Cargo for tch-rs
 python scripts/setup_cargo.py
 
-# Install with ML features (--no-build-isolation required)
-SETUPTOOLS_RUST_CARGO_FLAGS="--features ml" pip install --no-build-isolation -e ".[ml]"
+# Build with ML features
+cargo build --release --features python,ml -p proofatlas
 
-# Build Rust with ML features
-cargo build --release --features ml
+# Copy the extension to the Python package
+cp target/release/libproofatlas.so python/proofatlas/proofatlas.cpython-312-x86_64-linux-gnu.so
+
+# Install Python dependencies
+pip install -e ".[ml]"
 ```
 
-The `--no-build-isolation` flag is needed because the Rust build uses your
-installed PyTorch to find libtorch. Re-run `setup_cargo.py` if you change
-Python environments.
+Re-run `setup_cargo.py` if you change Python environments.
 
 ## Running the Prover
 
 ```bash
 # Run on a TPTP problem
-./target/release/prove .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+proofatlas problem.p
+
+# With a preset
+proofatlas problem.p --preset time_sel21
 
 # With options
-./target/release/prove problem.p --timeout 60 --literal-selection 21
+proofatlas problem.p --timeout 60 --literal-selection 21
+
+# List available presets
+proofatlas --list
+
+# Export result to JSON
+proofatlas problem.p --json output.json
 ```
 
 ## Web Interface
@@ -104,37 +101,24 @@ Then open http://localhost:8000 in your browser.
 After installation, use the benchmark tool:
 
 ```bash
-# Start benchmark job (runs in background)
-proofatlas-bench --prover proofatlas --problem-set test
+# Run all presets
+proofatlas-bench
 
-# Start with live tracking
-proofatlas-bench --track
+# Run specific preset
+proofatlas-bench --preset gcn_mlp_sel21
+
+# Retrain ML models
+proofatlas-bench --preset gcn_mlp_sel21 --retrain
 
 # Check status of running job
 proofatlas-bench --status
+
+# Stop running job
+proofatlas-bench --kill
+
+# List available presets
+proofatlas-bench --list
 ```
-
-## Exporting Results
-
-Export benchmark results for web display:
-
-```bash
-# Export all results (uses default problem set from tptp.json)
-proofatlas-export --benchmarks
-
-# Filter by prover and/or preset
-proofatlas-export --benchmarks --prover proofatlas
-proofatlas-export --benchmarks --prover vampire --preset time_sel21
-
-# Filter by problem set (overrides default)
-proofatlas-export --benchmarks --problem-set krs
-
-# Skip learned selectors (only base configs)
-proofatlas-export --benchmarks --base-only
-```
-
-The default problem set is configured in `configs/tptp.json` under `defaults.problem_set`.
-Results are written to `web/data/benchmarks.json`.
 
 ## Common Issues
 
@@ -146,6 +130,11 @@ Results are written to `web/data/benchmarks.json`.
 
 3. **Build fails on older Python**
    - Ensure Python 3.7+ is installed
+
+4. **ML features not working**
+   - Ensure PyTorch is installed before building
+   - Run `python scripts/setup_cargo.py` to configure libtorch paths
+   - Rebuild with `cargo build --release --features python,ml -p proofatlas`
 
 ## Project Structure
 

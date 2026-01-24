@@ -103,11 +103,56 @@ class TestSentenceEncoder:
 
         assert path.exists()
 
+        # Check tokenizer was saved
+        tokenizer_dir = tmp_path / "model_tokenizer"
+        assert tokenizer_dir.exists()
+        assert (tokenizer_dir / "tokenizer.json").exists()
+
         # Check we can load and run the model
         loaded = torch.jit.load(str(path))
         dummy_ids = torch.zeros((2, 16), dtype=torch.long)
         dummy_mask = torch.ones((2, 16), dtype=torch.long)
         scores = loaded(dummy_ids, dummy_mask)
+        assert scores.shape == (2,)
+
+    def test_export_tokenizer_rust_compatible(self, tmp_path):
+        """Test that exported tokenizer works with tokenizers library (same as Rust)."""
+        from tokenizers import Tokenizer
+        from proofatlas.selectors.sentence import SentenceEncoder
+
+        model = SentenceEncoder(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            hidden_dim=64,
+            freeze_encoder=True,
+        )
+
+        path = tmp_path / "model.pt"
+        model.export_torchscript(str(path))
+
+        # Load tokenizer using tokenizers library (same as Rust crate)
+        tokenizer_path = tmp_path / "model_tokenizer" / "tokenizer.json"
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+
+        # Test tokenization
+        clauses = ["p(X, Y) | ~q(Y)", "r(a, b)"]
+        encodings = tokenizer.encode_batch(clauses)
+
+        assert len(encodings) == 2
+        assert len(encodings[0].ids) > 0
+        assert len(encodings[0].attention_mask) > 0
+
+        # Verify we can run the model with tokenized inputs
+        loaded = torch.jit.load(str(path))
+
+        max_len = max(len(e.ids) for e in encodings)
+        input_ids = torch.zeros((2, max_len), dtype=torch.long)
+        attention_mask = torch.zeros((2, max_len), dtype=torch.long)
+
+        for i, enc in enumerate(encodings):
+            input_ids[i, :len(enc.ids)] = torch.tensor(enc.ids)
+            attention_mask[i, :len(enc.attention_mask)] = torch.tensor(enc.attention_mask)
+
+        scores = loaded(input_ids, attention_mask)
         assert scores.shape == (2,)
 
 
