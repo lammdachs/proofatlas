@@ -596,7 +596,7 @@ def run_training(
     import torch.optim as optim
     from torch.utils.data import DataLoader
 
-    from .weights import get_model_name
+    from .weights import get_model_name, get_embedding_type
 
     start_time = time.time()
 
@@ -671,12 +671,16 @@ def run_training(
         train_files = trace_files
         val_files = []
 
+    # Determine output type based on embedding
+    embedding_type = get_embedding_type(preset)
+    output_type = "string" if embedding_type == "string" else "graph"
+
     # Create datasets (loads all data in parallel)
-    log_msg("Loading training data...")
+    log_msg(f"Loading training data ({output_type} format)...")
     train_ds = ProofDataset(
         trace_dir=None,
         trace_files=train_files,
-        output_type="graph",
+        output_type=output_type,
     )
     val_ds = None
     if val_files:
@@ -684,7 +688,7 @@ def run_training(
         val_ds = ProofDataset(
             trace_dir=None,
             trace_files=val_files,
-            output_type="graph",
+            output_type=output_type,
         )
 
     log_msg(f"Train: {len(train_ds)} traces, Val: {len(val_ds) if val_ds else 0} traces")
