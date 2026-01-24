@@ -321,152 +321,6 @@ def clauses_to_graphs(
     return [clause_to_graph(c, max_age) for c in clauses]
 
 
-def clauses_to_batch(
-    clauses: List[Dict[str, Any]],
-    labels: Optional[List[int]] = None,
-    device: str = "cpu",
-) -> Dict[str, "torch.Tensor"]:
-    """Convert clauses directly to batched torch tensors (optimized path).
-
-    This function pre-allocates arrays and builds all graphs in a single pass,
-    avoiding intermediate per-clause allocations. ~25% faster than
-    clause_to_graph + batch_graphs.
-
-    Args:
-        clauses: List of structured clause dicts
-        labels: Optional list of labels (one per clause)
-        device: PyTorch device
-
-    Returns:
-        Batched graph dict with torch tensors
-    """
-    if not TORCH_AVAILABLE:
-        raise ImportError("PyTorch required")
-
-    import torch
-
-    if not clauses:
-        raise ValueError("Cannot batch empty list of clauses")
-
-    # Count total nodes and edges
-    total_nodes = 0
-    total_edges = 0
-    for c in clauses:
-        n, e = _count_clause(c)
-        total_nodes += n
-        total_edges += e
-
-    # Pre-allocate numpy arrays
-    x = np.zeros((total_nodes, 3), dtype=np.float32)
-    node_types = np.zeros(total_nodes, dtype=np.uint8)
-    edge_index = np.zeros((2, total_edges), dtype=np.int64)
-    batch = np.zeros(total_nodes, dtype=np.int64)
-    clause_features = np.zeros((len(clauses), 3), dtype=np.float32)
-
-    node_idx = 0
-    edge_idx = 0
-    max_age = len(clauses)
-
-    for clause_i, clause in enumerate(clauses):
-        # Clause-level features
-        age = clause.get("age", 0)
-        role = clause.get("role", "derived")
-        size = len(clause.get("literals", []))
-        clause_features[clause_i, 0] = float(age) / float(max(max_age, 1))
-        clause_features[clause_i, 1] = float(ROLE_MAP.get(role, 4))
-        clause_features[clause_i, 2] = float(size)
-
-        # Build graph nodes and edges
-        def add_node(t, arity, pos):
-            nonlocal node_idx
-            idx = node_idx
-            x[idx, 0] = t
-            x[idx, 1] = arity
-            x[idx, 2] = pos
-            node_types[idx] = t
-            batch[idx] = clause_i
-            node_idx += 1
-            return idx
-
-        def add_edge(src, dst):
-            nonlocal edge_idx
-            edge_index[0, edge_idx] = src
-            edge_index[1, edge_idx] = dst
-            edge_idx += 1
-
-        def build_term(term, pos):
-            tt = term["type"]
-            if tt == "Variable":
-                return add_node(TYPE_VARIABLE, 0, pos)
-            elif tt == "Constant":
-                return add_node(TYPE_CONSTANT, 0, pos)
-            else:  # Function
-                args = term.get("args", [])
-                idx = add_node(TYPE_FUNCTION, len(args), pos)
-                for i, a in enumerate(args):
-                    child = build_term(a, i)
-                    add_edge(idx, child)
-                return idx
-
-        literals = clause.get("literals", [])
-        clause_node = add_node(TYPE_CLAUSE, len(literals), 0)
-
-        for lit_pos, lit in enumerate(literals):
-            lit_node = add_node(TYPE_LITERAL, 1, lit_pos)
-            add_edge(clause_node, lit_node)
-
-            args = lit["atom"].get("args", [])
-            pred_node = add_node(TYPE_PREDICATE, len(args), 0)
-            add_edge(lit_node, pred_node)
-
-            for i, arg in enumerate(args):
-                child = build_term(arg, i)
-                add_edge(pred_node, child)
-
-    # Single conversion to torch (from_numpy shares memory, no copy)
-    result = {
-        "x": torch.from_numpy(x).to(device),
-        "edge_index": torch.from_numpy(edge_index).to(device),
-        "node_types": torch.from_numpy(node_types).to(device),
-        "batch": torch.from_numpy(batch).to(device),
-        "clause_features": torch.from_numpy(clause_features).to(device),
-        "num_graphs": len(clauses),
-    }
-
-    if labels is not None:
-        result["y"] = torch.tensor(labels, dtype=torch.float, device=device)
-
-    return result
-
-
-def _count_clause(clause: Dict[str, Any]) -> Tuple[int, int]:
-    """Count nodes and edges in a clause (for pre-allocation)."""
-    nodes = 1  # clause node
-    edges = 0
-    for lit in clause.get("literals", []):
-        nodes += 2  # literal + predicate
-        edges += 2  # clause->lit, lit->pred
-        args = lit["atom"].get("args", [])
-        n, e = _count_args(args)
-        nodes += n
-        edges += e + len(args)  # pred->args edges
-    return nodes, edges
-
-
-def _count_args(args: List[Dict[str, Any]]) -> Tuple[int, int]:
-    """Count nodes and edges in term arguments."""
-    nodes = 0
-    edges = 0
-    for arg in args:
-        nodes += 1
-        if arg["type"] == "Function":
-            child_args = arg.get("args", [])
-            n, e = _count_args(child_args)
-            nodes += n
-            edges += e + len(child_args)
-    return nodes, edges
-
-
 def load_structured_trace(path: str) -> Dict[str, Any]:
     """Load a structured trace from JSON file.
 
@@ -486,7 +340,7 @@ def batch_graphs(
     labels: Optional[List[int]] = None,
     device: str = "cpu"
 ) -> Dict[str, Any]:
-    """Batch multiple graphs into a single disconnected graph.
+    """Batch multiple clause graphs with sparse adjacency and pool matrices.
 
     Args:
         graphs: List of graph dicts from clause_to_graph (numpy arrays)
@@ -494,7 +348,13 @@ def batch_graphs(
         device: PyTorch device
 
     Returns:
-        Batched graph dict with torch tensors and batch indices
+        Dict with:
+            x: [num_nodes, 3] node features
+            adj: Sparse normalized adjacency matrix
+            pool_matrix: Sparse pooling matrix [num_clauses, num_nodes]
+            clause_features: [num_clauses, 3] clause features
+            labels: [num_clauses] if provided
+            batch: [num_nodes] clause index for each node
     """
     if not TORCH_AVAILABLE:
         raise ImportError("PyTorch required for batching")
@@ -506,40 +366,59 @@ def batch_graphs(
 
     all_x = []
     all_edges = []
-    all_types = []
     all_clause_features = []
     batch_indices = []
 
     node_offset = 0
 
     for i, g in enumerate(graphs):
-        x = g['x']
-        edges = g['edge_index']
-        types = g['node_types']
-        num_nodes = g['num_nodes']
+        all_x.append(g['x'])
+        all_edges.append(g['edge_index'] + node_offset)
+        batch_indices.extend([i] * g['num_nodes'])
 
-        all_x.append(x)
-        # Offset edge indices (numpy addition)
-        all_edges.append(edges + node_offset)
-        all_types.append(types)
-        batch_indices.extend([i] * num_nodes)
-
-        # Collect clause features if present
         if 'clause_features' in g:
             all_clause_features.append(g['clause_features'])
 
-        node_offset += num_nodes
+        node_offset += g['num_nodes']
 
-    # Convert numpy arrays to tensors in one shot (much faster than per-graph)
+    # Concatenate node features
+    x = torch.from_numpy(np.concatenate(all_x, axis=0)).to(device)
+    num_nodes = x.size(0)
+    num_clauses = len(graphs)
+
+    # Build sparse adjacency with self-loops
+    edge_index = torch.from_numpy(np.concatenate(all_edges, axis=1)).to(device)
+    self_loops = torch.arange(num_nodes, device=device)
+    all_indices = torch.cat([edge_index, torch.stack([self_loops, self_loops])], dim=1)
+    all_values = torch.ones(all_indices.size(1), device=device)
+    adj = torch.sparse_coo_tensor(all_indices, all_values, (num_nodes, num_nodes)).coalesce()
+
+    # Normalize adjacency: D^{-1/2} A D^{-1/2}
+    indices = adj.indices()
+    values = adj.values()
+    deg = torch.zeros(num_nodes, device=device)
+    deg.scatter_add_(0, indices[0], values)
+    deg_inv_sqrt = deg.pow(-0.5)
+    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+    norm_values = deg_inv_sqrt[indices[0]] * values * deg_inv_sqrt[indices[1]]
+    adj_norm = torch.sparse_coo_tensor(indices, norm_values, (num_nodes, num_nodes)).coalesce()
+
+    # Build sparse pool matrix
+    batch = torch.tensor(batch_indices, dtype=torch.long, device=device)
+    counts = torch.bincount(batch, minlength=num_clauses).float()
+    node_indices = torch.arange(num_nodes, device=device)
+    pool_indices = torch.stack([batch, node_indices])
+    pool_values = 1.0 / counts[batch]
+    pool_matrix = torch.sparse_coo_tensor(pool_indices, pool_values, (num_clauses, num_nodes)).coalesce()
+
     result = {
-        'x': torch.from_numpy(np.concatenate(all_x, axis=0)).to(device) if all_x else torch.zeros(0, _GraphBuilder.NODE_FEATURE_DIM, device=device),
-        'edge_index': torch.from_numpy(np.concatenate(all_edges, axis=1)).to(device) if all_edges else torch.zeros(2, 0, dtype=torch.long, device=device),
-        'node_types': torch.from_numpy(np.concatenate(all_types, axis=0)).to(device) if all_types else torch.zeros(0, dtype=torch.uint8, device=device),
-        'batch': torch.tensor(batch_indices, dtype=torch.long, device=device),
-        'num_graphs': len(graphs),
+        'x': x,
+        'adj': adj_norm,
+        'pool_matrix': pool_matrix,
+        'batch': batch,
+        'num_graphs': num_clauses,
     }
 
-    # Stack clause features if present
     if all_clause_features:
         result['clause_features'] = torch.from_numpy(np.stack(all_clause_features, axis=0)).to(device)
 

@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..selectors import create_model, normalize_adjacency, edge_index_to_sparse_adjacency
+from ..selectors import create_model
 from .config import SelectorConfig
 
 # Use orjson for faster JSON loading if available
@@ -269,9 +269,13 @@ class ProofDataset(torch.utils.data.Dataset):
         labels = [c.get("label", 0) for c in clauses]
 
         if self.output_type == "graph":
-            # Return raw clauses - graph conversion done in collate for efficiency
+            from .structured import clause_to_graph
+
+            max_age = len(clauses)
+            graphs = [clause_to_graph(c, max_age) for c in clauses]
+
             return {
-                "clauses": clauses,
+                "graphs": graphs,
                 "labels": labels,
                 "problem": self.trace_files[idx].stem,
             }
@@ -319,55 +323,37 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     """
     Collate function for proof batches.
 
-    Combines all clauses from all proofs into single tensors,
+    Combines all clause graphs from all proofs into batched tensors,
     with proof_ids to track which proof each clause belongs to.
 
-    Uses clauses_to_batch for optimized graph construction with
-    pre-allocated arrays.
+    Uses batch_graphs which outputs sparse adjacency and pool matrices
+    for memory-efficient processing of large batches.
     """
-    from .structured import clauses_to_batch
+    from .structured import batch_graphs
 
-    # Collect all clauses and labels, tracking proof membership
-    all_clauses = []
+    # Collect all graphs and labels, tracking proof membership
+    all_graphs = []
     all_labels = []
     all_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
-        clauses = item["clauses"]
+        graphs = item["graphs"]
         labels = item["labels"]
 
-        all_clauses.extend(clauses)
+        all_graphs.extend(graphs)
         all_labels.extend(labels)
-        all_proof_ids.extend([proof_idx] * len(clauses))
+        all_proof_ids.extend([proof_idx] * len(graphs))
 
-    # Build batched graph tensors (optimized: pre-allocated numpy -> torch)
-    batched = clauses_to_batch(all_clauses, labels=all_labels)
-
-    # Build sparse adjacency matrix (O(edges) memory instead of O(nodes^2))
-    edge_index = batched["edge_index"]
-    num_nodes = batched["x"].size(0)
-    adj = edge_index_to_sparse_adjacency(edge_index, num_nodes, add_self_loops=True)
-    adj_norm = normalize_adjacency(adj, add_self_loops=False)
-
-    # Build sparse pool matrix (one row per clause, average pooling over clause nodes)
-    num_clauses = len(all_clauses)
-    clause_batch = batched["batch"]
-
-    counts = torch.bincount(clause_batch, minlength=num_clauses).float()
-    node_indices = torch.arange(num_nodes)
-    pool_indices = torch.stack([clause_batch, node_indices])
-    pool_values = 1.0 / counts[clause_batch]
-    pool_matrix = torch.sparse_coo_tensor(
-        pool_indices, pool_values, (num_clauses, num_nodes)
-    ).coalesce()
+    # Build batched tensors with sparse adjacency and pool matrices
+    batched = batch_graphs(all_graphs, labels=all_labels)
 
     return {
         "node_features": batched["x"],
-        "adj": adj_norm,
-        "pool_matrix": pool_matrix,
+        "adj": batched["adj"],
+        "pool_matrix": batched["pool_matrix"],
         "labels": batched["y"],
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
-        "clause_features": batched["clause_features"],
+        "clause_features": batched.get("clause_features"),
     }
 
 
@@ -921,9 +907,12 @@ def run_training(
             },
         )
 
-    # Track best model
+    # Track best model and early stopping
     best_val_loss = float("inf")
     best_epoch = None
+    best_state_dict = None
+    patience = config.get("patience", 10)
+    patience_counter = 0
 
     # Margin ranking loss for pairwise learning
     margin = config.get("margin", 0.1)
@@ -988,11 +977,15 @@ def run_training(
                     val_loss += compute_pairwise_loss(scores, labels).item()
             val_loss /= len(val_loader)
 
-        # Track best model
+        # Track best model and early stopping
         current_val = val_loss if val_loader else train_loss
         if current_val < best_val_loss:
             best_val_loss = current_val
             best_epoch = epoch
+            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
 
         # Log to console and file
         if val_loader:
@@ -1013,14 +1006,25 @@ def run_training(
         if log_callback:
             log_callback(epoch, max_epochs, train_loss)
 
+        # Early stopping check
+        if patience_counter >= patience:
+            log_msg(f"Early stopping at epoch {epoch} (patience={patience})")
+            break
+
+    # Restore best model
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
+        log_msg(f"Restored best model from epoch {best_epoch}")
+
     # Log final results
     total_time = time.time() - start_time
+    early_stopped = patience_counter >= patience
     if web_logger:
         web_logger.log_final(
             best_epoch=best_epoch,
             best_val_loss=best_val_loss,
             total_time=total_time,
-            termination_reason="completed",
+            termination_reason="early_stopped" if early_stopped else "completed",
         )
 
     # Export to TorchScript for Rust inference
