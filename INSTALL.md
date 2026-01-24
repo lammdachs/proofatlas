@@ -1,34 +1,44 @@
 # ProofAtlas Installation Guide
 
-## Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/lexpk/proofatlas.git
-cd proofatlas
-
-# Install (includes ML features)
-pip install -e .
-
-# Verify installation
-proofatlas --list
-```
-
 ## Prerequisites
 
-- Python 3.7 or later
+- Python 3.8 or later
 - Rust toolchain (install from https://rustup.rs/)
 
 ## Installation
 
+### With GPU Support (Recommended)
+
+Install PyTorch with CUDA first, then install proofatlas:
+
 ```bash
+# Install PyTorch 2.9 with CUDA (adjust cuda version as needed)
+pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu124
+
+# Clone and install proofatlas
+git clone https://github.com/lexpk/proofatlas.git
+cd proofatlas
+pip install -e .
+
+# Verify
+proofatlas --list
+```
+
+### CPU Only
+
+```bash
+git clone https://github.com/lexpk/proofatlas.git
+cd proofatlas
 pip install -e .
 ```
 
-This automatically:
-- Installs PyTorch 2.9.0
-- Configures tch-rs linking (creates `.cargo/config.toml`)
-- Builds the Rust extension with ML features
+This installs CPU-only PyTorch automatically.
+
+### What happens during install
+
+- Installs PyTorch 2.9.0 (if not already installed)
+- Generates `.cargo/config.toml` with libtorch paths
+- Builds Rust extension with ML features
 
 ### With Development Dependencies
 

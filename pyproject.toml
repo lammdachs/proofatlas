@@ -7,7 +7,7 @@ name = "proofatlas"
 version = "0.2.0"
 description = "High-performance theorem prover for first-order logic"
 authors = [{name = "ProofAtlas Contributors"}]
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 readme = "README.md"
 license = "MIT"
 keywords = ["theorem-proving", "automated-reasoning", "logic", "first-order-logic", "ATP"]
@@ -16,7 +16,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
