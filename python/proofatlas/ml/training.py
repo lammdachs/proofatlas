@@ -999,7 +999,10 @@ def run_training(
                 x = batch["node_features"].to(device)
                 adj = batch["adj"].to(device)
                 pool = batch["pool_matrix"].to(device)
-                scores = model(x, adj, pool) if needs_adj else model(x, pool)
+                clause_features = batch.get("clause_features")
+                if clause_features is not None:
+                    clause_features = clause_features.to(device)
+                scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
             loss = compute_pairwise_loss(scores, labels)
             if accumulate_steps > 1:
@@ -1033,7 +1036,10 @@ def run_training(
                         x = batch["node_features"].to(device)
                         adj = batch["adj"].to(device)
                         pool = batch["pool_matrix"].to(device)
-                        scores = model(x, adj, pool) if needs_adj else model(x, pool)
+                        clause_features = batch.get("clause_features")
+                        if clause_features is not None:
+                            clause_features = clause_features.to(device)
+                        scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
                     val_loss += compute_pairwise_loss(scores, labels).item()
                     num_val_batches += 1
