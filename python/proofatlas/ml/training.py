@@ -1101,13 +1101,15 @@ def run_training(
         # Sentence model has its own export method that handles tokenizer
         model.export_torchscript(str(weights_path), save_tokenizer=True)
     else:
-        # GNN models: trace with example inputs
-        example_x = torch.randn(10, config.get("input_dim", 13))
-        example_adj = torch.eye(10)
-        example_pool = torch.ones(3, 10) / 10
+        # GNN models: trace with example inputs (must match Rust call signature)
+        num_nodes, num_clauses = 10, 3
+        example_x = torch.randn(num_nodes, config.get("input_dim", 13))
+        example_adj = torch.eye(num_nodes)
+        example_pool = torch.ones(num_clauses, num_nodes) / num_nodes
+        example_clause_features = torch.randn(num_clauses, 3)  # age, role, size
 
         if needs_adj:
-            traced = torch.jit.trace(model, (example_x, example_adj, example_pool))
+            traced = torch.jit.trace(model, (example_x, example_adj, example_pool, example_clause_features))
         else:
             traced = torch.jit.trace(model, (example_x, example_pool))
 
