@@ -91,11 +91,17 @@ pub struct TrainingClauseJson {
     pub age: usize,
     /// Role: "axiom", "hypothesis", "definition", "negated_conjecture", "derived"
     pub role: String,
+    /// Parent clause IDs (empty for input clauses)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parents: Vec<usize>,
+    /// Inference rule used to derive this clause (empty for input clauses)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rule: String,
 }
 
 impl TrainingClauseJson {
-    /// Create from a Clause with a label
-    pub fn from_clause(clause: &Clause, label: bool) -> Self {
+    /// Create from a Clause with a label and optional derivation info
+    pub fn from_clause(clause: &Clause, label: bool, parents: Vec<usize>, rule: String) -> Self {
         let role = match clause.role {
             super::ClauseRole::Axiom => "axiom",
             super::ClauseRole::Hypothesis => "hypothesis",
@@ -108,6 +114,8 @@ impl TrainingClauseJson {
             label: if label { 1 } else { 0 },
             age: clause.age,
             role: role.to_string(),
+            parents,
+            rule,
         }
     }
 }

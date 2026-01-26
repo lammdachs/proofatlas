@@ -1363,8 +1363,8 @@ def main():
             # Run evaluation
             log(f"[{preset_name}] Starting evaluation on {len(problems)} problems...")
             sys.stdout.flush()
-            # Rust expects weights directory, not full path
-            weights_dir_str = str(weights_path.parent) if weights_path else None
+            # Rust expects weights directory (find_weights already returns the directory)
+            weights_dir_str = str(weights_path) if weights_path else None
             run_evaluation(
                 base_dir, problems, tptp_root,
                 prover=prover, preset=current_preset,

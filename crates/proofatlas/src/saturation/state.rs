@@ -175,6 +175,8 @@ pub struct SaturationState {
     literal_selector: Box<dyn LiteralSelector>,
     /// Tracked clause memory usage in bytes
     clause_memory_bytes: usize,
+    /// Current iteration (used for clause age)
+    current_iteration: usize,
 }
 
 impl SaturationState {
@@ -256,6 +258,7 @@ impl SaturationState {
             clause_selector,
             literal_selector,
             clause_memory_bytes,
+            current_iteration: 0,
         }
     }
 
@@ -277,7 +280,6 @@ impl SaturationState {
 
     pub fn saturate(mut self) -> SaturationResult {
         let start_time = Instant::now();
-        let mut iterations = 0;
 
         loop {
             // Forward simplification: process new clauses until fixed point, move to unprocessed
@@ -308,7 +310,7 @@ impl SaturationState {
             }
 
             // Check other limits
-            if self.config.max_iterations > 0 && iterations >= self.config.max_iterations {
+            if self.config.max_iterations > 0 && self.current_iteration >= self.config.max_iterations {
                 return SaturationResult::ResourceLimit(
                     self.proof_steps.clone(),
                     self.clauses.clone(),
@@ -324,7 +326,7 @@ impl SaturationState {
                 return SaturationResult::Timeout(self.proof_steps.clone(), self.clauses.clone());
             }
 
-            iterations += 1;
+            self.current_iteration += 1;
 
             // Check if given clause is empty
             let given_clause = &self.clauses[given_idx];
@@ -592,6 +594,8 @@ impl SaturationState {
         let new_idx = self.clauses.len();
         let mut clause_with_id = current_clause.clone();
         clause_with_id.id = Some(new_idx);
+        clause_with_id.age = self.current_iteration;
+        clause_with_id.role = crate::core::ClauseRole::Derived;
 
         // Add to subsumption checker as pending
         let idx_from_subsumption = self

@@ -875,6 +875,8 @@ impl ProofState {
     /// ```
     pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
         use crate::core::json::{TraceJson, TrainingClauseJson};
+        use crate::inference::InferenceRule;
+        use std::collections::HashMap;
 
         let examples = self.extract_training_examples();
 
@@ -885,14 +887,27 @@ impl ProofState {
             .map(|e| e.clause_idx)
             .collect();
 
-        // Build structured clauses
+        // Build derivation info map from proof trace
+        let mut derivation_info: HashMap<usize, (Vec<usize>, String)> = HashMap::new();
+        for step in &self.proof_trace {
+            derivation_info.insert(
+                step.clause_id,
+                (step.parent_ids.clone(), step.rule_name.clone()),
+            );
+        }
+
+        // Build structured clauses with derivation info
         let clauses: Vec<TrainingClauseJson> = self
             .clauses
             .iter()
             .enumerate()
             .map(|(idx, clause)| {
                 let in_proof = proof_clauses.contains(&idx);
-                TrainingClauseJson::from_clause(clause, in_proof)
+                let (parents, rule) = derivation_info
+                    .get(&idx)
+                    .cloned()
+                    .unwrap_or_else(|| (vec![], String::new()));
+                TrainingClauseJson::from_clause(clause, in_proof, parents, rule)
             })
             .collect();
 
