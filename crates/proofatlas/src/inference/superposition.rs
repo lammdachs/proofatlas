@@ -90,7 +90,7 @@ pub fn superposition(
                                 }
 
                                 // Additional check for superposition into equalities
-                                // For s[l'] ⊕ t, we need s[l']σ ⪯̸ tσ
+                                // The side containing l' must not be smaller than the other side
                                 if into_lit.atom.is_equality() && !pos.path.is_empty() {
                                     let s = &into_lit.atom.args[0];
                                     let t = &into_lit.atom.args[1];
@@ -99,14 +99,14 @@ pub fn superposition(
                                     let t_sigma = t.apply_substitution(&mgu);
 
                                     if pos.path[0] == 0 {
-                                        // l' is in s (left side)
+                                        // l' is in s (left side): need sσ ⪯̸ tσ
                                         match kbo.compare(&s_sigma, &t_sigma) {
                                             Ordering::Less | Ordering::Equal => continue,
                                             Ordering::Greater | Ordering::Incomparable => {}
                                         }
                                     } else if pos.path[0] == 1 {
-                                        // l' is in t (right side)
-                                        match kbo.compare(&s_sigma, &t_sigma) {
+                                        // l' is in t (right side): need tσ ⪯̸ sσ
+                                        match kbo.compare(&t_sigma, &s_sigma) {
                                             Ordering::Less | Ordering::Equal => continue,
                                             Ordering::Greater | Ordering::Incomparable => {}
                                         }
@@ -266,19 +266,18 @@ mod tests {
     use crate::inference::SelectAll;
 
     /// Test superposition into the RIGHT side of an equality
-    /// This catches a bug where find_unifiable_positions only searched the left side
-    /// when left > right in KBO, missing valid superposition positions.
+    /// This verifies that we search both sides of equalities for superposition positions.
+    /// The ordering constraint s[l']σ ⪯̸ tσ must be satisfied (the side containing l'
+    /// must not be smaller than the other side).
     #[test]
     fn test_superposition_into_right_side_of_equality() {
-        // From: f(X) = X (f(X) > X in KBO, so left=f(X), right=X)
-        // Into: g(g(a)) = f(a) (g(g(a)) > f(a) in KBO, so left=g(g(a)), right=f(a))
+        // From: f(X) = X (f(X) > X in KBO)
+        // Into: a = f(b) (f(b) > a in KBO, so RIGHT side is larger)
         //
-        // The pattern f(X) should unify with f(a) in the RIGHT side of the into clause.
-        // After superposition: g(g(a)) = a
-        //
-        // Bug: The old code only searched the right side if left and right were
-        // incomparable. Since g(g(a)) > f(a), it never searched the right side
-        // and missed this valid inference.
+        // The pattern f(X) should unify with f(b) in the RIGHT side of the into clause.
+        // s[l'] = f(b), t = a
+        // Constraint: s[l']σ ⪯̸ tσ means f(b) ⪯̸ a, which is satisfied since f(b) > a
+        // After superposition: a = b
 
         let eq = PredicateSymbol {
             name: "=".to_string(),
@@ -288,21 +287,18 @@ mod tests {
             name: "f".to_string(),
             arity: 1,
         };
-        let g = FunctionSymbol {
-            name: "g".to_string(),
-            arity: 1,
-        };
 
         let a = Term::Constant(Constant {
             name: "a".to_string(),
+        });
+        let b = Term::Constant(Constant {
+            name: "b".to_string(),
         });
         let x = Term::Variable(Variable {
             name: "X".to_string(),
         });
         let f_x = Term::Function(f.clone(), vec![x.clone()]);
-        let f_a = Term::Function(f.clone(), vec![a.clone()]);
-        let g_a = Term::Function(g.clone(), vec![a.clone()]);
-        let g_g_a = Term::Function(g.clone(), vec![g_a.clone()]);
+        let f_b = Term::Function(f.clone(), vec![b.clone()]);
 
         // f(X) = X
         let clause1 = Clause::new(vec![Literal::positive(Atom {
@@ -310,22 +306,22 @@ mod tests {
             args: vec![f_x.clone(), x.clone()],
         })]);
 
-        // g(g(a)) = f(a)
+        // a = f(b) (note: right side f(b) is larger than left side a)
         let clause2 = Clause::new(vec![Literal::positive(Atom {
             predicate: eq.clone(),
-            args: vec![g_g_a.clone(), f_a.clone()],
+            args: vec![a.clone(), f_b.clone()],
         })]);
 
         let selector = SelectAll;
         let results = superposition(&clause1, &clause2, 0, 1, &selector);
 
-        // Should derive: g(g(a)) = a
+        // Should derive: a = b
         assert!(
             !results.is_empty(),
             "Superposition should find positions in the right side of equalities"
         );
 
-        // Find the expected result: g(g(a)) = a
+        // Find the expected result: a = b
         let found = results.iter().any(|r| {
             r.conclusion.literals.len() == 1
                 && r.conclusion.literals[0].polarity
@@ -335,7 +331,7 @@ mod tests {
 
         assert!(
             found,
-            "Expected to derive g(g(a)) = a, got: {:?}",
+            "Expected to derive a = b, got: {:?}",
             results.iter().map(|r| r.conclusion.to_string()).collect::<Vec<_>>()
         );
     }

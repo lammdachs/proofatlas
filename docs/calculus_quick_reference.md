@@ -19,16 +19,16 @@ l ≈ r   P[l'] ∨ C
 
 ### Resolution
 ```
-P(x) ∨ C₁    ¬P(t) ∨ C₂
-------------------------  where σ = mgu(x, t), P(x) and ¬P(t) selected.
-      (C₁ ∨ C₂)σ
+P ∨ C₁    ¬Q ∨ C₂
+-----------------  where σ = mgu(P, Q), P and ¬Q selected.
+    (C₁ ∨ C₂)σ
 ```
 
 ### Factoring
 ```
-P(s) ∨ P(t) ∨ C
-----------------  where σ = mgu(s, t), P(s) selected.
-   (P(s) ∨ C)σ
+P ∨ Q ∨ C
+-----------  where σ = mgu(P, Q), P selected.
+ (P ∨ C)σ
 ```
 
 ### Superposition 1
@@ -90,6 +90,23 @@ Based on Hoder et al. "Selecting the selection" (2016), matching Vampire's numbe
 ## Term Orderings
 
 ### Knuth-Bendix Ordering (KBO)
-- Weight-based ordering
-- Variable condition must hold
-- Total on ground terms
+
+Let `#(x, s)` be the number of occurrences of variable `x` in term `s`.
+
+**Definition:** `s > t` if:
+
+1. `#(x, s) ≥ #(x, t)` for all variables `x` **AND** `|s| > |t|`
+
+2. `#(x, s) ≥ #(x, t)` for all variables `x` **AND** `|s| = |t|` **AND** one of the following holds:
+   - **2.1** `s = g(...)`, `t = h(...)` and `g ≫ h` by precedence (alphabetic)
+   - **2.2** `s = g(s₁,...,sₘ)`, `t = g(t₁,...,tₘ)` and for some `1 ≤ i ≤ m`: `s₁ = t₁, ..., sᵢ₋₁ = tᵢ₋₁` and `sᵢ > tᵢ`
+
+**Properties:**
+- Total on ground terms (no variables)
+- Partial on non-ground terms (variable condition may fail)
+- Well-founded and stable under substitution
+
+**Extension to Atoms/Literals:**
+- Predicates are compared by alphabetic precedence (like function symbols)
+- Same predicate: lexicographic comparison of arguments
+- Variable condition applies to the entire atom

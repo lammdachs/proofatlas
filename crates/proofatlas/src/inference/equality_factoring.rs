@@ -8,8 +8,9 @@ use super::LiteralSelector;
 use crate::unification::unify;
 
 /// Apply equality factoring rule
-/// From s ≈ t ∨ s' ≈ t' ∨ C where σ = mgu(s, s'), s ≈ t is selected, sσ ⪯̸ tσ, s'σ ⪯̸ t'σ
-/// Derive (t ≉ t' ∨ s ≈ t ∨ C)σ
+/// From l ≈ r ∨ s ≈ t ∨ C where σ = mgu(l, s), l ≈ r is selected
+/// Constraints: lσ ⪯̸ rσ, lσ ⪯̸ tσ, rσ ⪯̸ tσ
+/// Derive (l ≈ r ∨ r ≉ t ∨ C)σ
 pub fn equality_factoring(
     clause: &Clause,
     idx: usize,
@@ -46,44 +47,49 @@ pub fn equality_factoring(
             let (idx2, lit2) = positive_eq_literals[j];
             let (s2, t2) = get_equality_terms(&lit2.atom).unwrap();
 
-            // Try to unify s1 with s2
+            // Try to unify l with s (s1 with s2)
             if let Ok(sigma) = unify(s1, s2) {
                 // Apply substitution
-                let s1_sigma = s1.apply_substitution(&sigma);
-                let t1_sigma = t1.apply_substitution(&sigma);
-                let s2_sigma = s2.apply_substitution(&sigma);
-                let t2_sigma = t2.apply_substitution(&sigma);
+                // Using naming from quick reference: l=s1, r=t1, s=s2, t=t2
+                let l_sigma = s1.apply_substitution(&sigma);
+                let r_sigma = t1.apply_substitution(&sigma);
+                let _s_sigma = s2.apply_substitution(&sigma);
+                let t_sigma = t2.apply_substitution(&sigma);
 
-                // Check ordering constraints: sσ ⪯̸ tσ, s'σ ⪯̸ t'σ
-                // This means sσ > tσ or sσ ‖ tσ (and same for s' and t')
-                let s1_not_smaller = matches!(
-                    kbo.compare(&s1_sigma, &t1_sigma),
+                // Check ordering constraints: lσ ⪯̸ rσ, lσ ⪯̸ tσ, rσ ⪯̸ tσ
+                // ⪯̸ means "not smaller", i.e., Greater or Incomparable
+                let l_not_smaller_r = matches!(
+                    kbo.compare(&l_sigma, &r_sigma),
                     Ordering::Greater | Ordering::Incomparable
                 );
-                let s2_not_smaller = matches!(
-                    kbo.compare(&s2_sigma, &t2_sigma),
+                let l_not_smaller_t = matches!(
+                    kbo.compare(&l_sigma, &t_sigma),
+                    Ordering::Greater | Ordering::Incomparable
+                );
+                let r_not_smaller_t = matches!(
+                    kbo.compare(&r_sigma, &t_sigma),
                     Ordering::Greater | Ordering::Incomparable
                 );
 
-                if s1_not_smaller && s2_not_smaller {
-                    // Build the conclusion: (t ≉ t' ∨ s ≈ t ∨ C)σ
+                if l_not_smaller_r && l_not_smaller_t && r_not_smaller_t {
+                    // Build the conclusion: (l ≈ r ∨ r ≉ t ∨ C)σ
                     let mut new_literals = Vec::new();
 
-                    // Add t ≉ t'
+                    // Add r ≉ t
                     let eq_symbol = PredicateSymbol {
                         name: "=".to_string(),
                         arity: 2,
                     };
                     let neq_literal = Literal::negative(Atom {
                         predicate: eq_symbol.clone(),
-                        args: vec![t1_sigma.clone(), t2_sigma.clone()],
+                        args: vec![r_sigma.clone(), t_sigma.clone()],
                     });
                     new_literals.push(neq_literal);
 
-                    // Add s ≈ t (the first equality literal)
+                    // Add l ≈ r (the first equality literal)
                     let eq_literal = Literal::positive(Atom {
                         predicate: eq_symbol,
-                        args: vec![s1_sigma, t1_sigma],
+                        args: vec![l_sigma, r_sigma],
                     });
                     new_literals.push(eq_literal);
 

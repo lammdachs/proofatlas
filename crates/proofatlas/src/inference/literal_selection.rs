@@ -41,40 +41,82 @@ fn term_symbol_count(term: &Term) -> usize {
     }
 }
 
-/// Compare two literals using KBO
+/// Compare two literals using KBO extension to atoms
 /// Returns true if lit1 > lit2 in the literal ordering
+///
+/// KBO for terms: s > t if
+/// 1. #(x,s) >= #(x,t) for all variables x AND |s| > |t|, OR
+/// 2. #(x,s) >= #(x,t) for all variables x AND |s| = |t| AND one of:
+///    2.1. s = g(...), t = h(...) and g >> h by precedence (alphabetic)
+///    2.2. s = g(s1,...,sm), t = g(t1,...,tm) and lexicographically s > t
+///
+/// For atoms, we extend this by treating predicates like function symbols.
 fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
-    // Compare atoms first using multiset extension of KBO
-    // For simplicity, we compare based on the maximum term in each atom
-    let max_term1 = lit1.atom.args.iter().max_by(|a, b| {
-        match kbo.compare(a, b) {
-            TermOrdering::Greater => std::cmp::Ordering::Greater,
-            TermOrdering::Less => std::cmp::Ordering::Less,
-            _ => std::cmp::Ordering::Equal,
-        }
-    });
-    let max_term2 = lit2.atom.args.iter().max_by(|a, b| {
-        match kbo.compare(a, b) {
-            TermOrdering::Greater => std::cmp::Ordering::Greater,
-            TermOrdering::Less => std::cmp::Ordering::Less,
-            _ => std::cmp::Ordering::Equal,
-        }
+    // First check variable condition: #(x, lit1) >= #(x, lit2) for all x
+    let vars1 = count_literal_variables(lit1);
+    let vars2 = count_literal_variables(lit2);
+
+    let var_cond_satisfied = vars2.iter().all(|(var, count2)| {
+        let count1 = vars1.get(var).copied().unwrap_or(0);
+        count1 >= *count2
     });
 
-    match (max_term1, max_term2) {
-        (Some(t1), Some(t2)) => {
-            match kbo.compare(t1, t2) {
-                TermOrdering::Greater => true,
-                TermOrdering::Less => false,
-                _ => {
-                    // If terms are equal/incomparable, use weight as tiebreaker
-                    literal_weight(lit1) > literal_weight(lit2)
-                }
+    if !var_cond_satisfied {
+        return false;
+    }
+
+    // Compare weights (sum of all symbol weights)
+    let weight1 = literal_weight(lit1);
+    let weight2 = literal_weight(lit2);
+
+    if weight1 > weight2 {
+        return true;  // Case 1: variable condition + greater weight
+    }
+
+    if weight1 < weight2 {
+        return false;
+    }
+
+    // Equal weight - use lexicographic comparison (cases 2.2 and 2.3)
+    // Compare predicates by name (alphabetic precedence) - case 2.2
+    if lit1.atom.predicate.name != lit2.atom.predicate.name {
+        return lit1.atom.predicate.name > lit2.atom.predicate.name;
+    }
+
+    // Same predicate - lexicographic comparison of arguments (case 2.3)
+    for (arg1, arg2) in lit1.atom.args.iter().zip(lit2.atom.args.iter()) {
+        match kbo.compare(arg1, arg2) {
+            TermOrdering::Greater => return true,
+            TermOrdering::Less => return false,
+            TermOrdering::Equal | TermOrdering::Incomparable => continue,
+        }
+    }
+
+    // All compared arguments are equal/incomparable
+    false
+}
+
+/// Count occurrences of each variable in a literal
+fn count_literal_variables(lit: &Literal) -> std::collections::HashMap<String, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for arg in &lit.atom.args {
+        count_term_variables(arg, &mut counts);
+    }
+    counts
+}
+
+/// Recursively count variables in a term
+fn count_term_variables(term: &Term, counts: &mut std::collections::HashMap<String, usize>) {
+    match term {
+        Term::Variable(v) => {
+            *counts.entry(v.name.clone()).or_insert(0) += 1;
+        }
+        Term::Constant(_) => {}
+        Term::Function(_, args) => {
+            for arg in args {
+                count_term_variables(arg, counts);
             }
         }
-        (Some(_), None) => true,
-        (None, Some(_)) => false,
-        (None, None) => literal_weight(lit1) > literal_weight(lit2),
     }
 }
 
@@ -112,7 +154,7 @@ fn has_unique_maximal(clause: &Clause, kbo: &KBO) -> Option<usize> {
     }
 }
 
-/// Find negative literal with maximum weight (if any)
+/// Find a negative literal with maximum weight (if any)
 fn find_max_weight_negative(clause: &Clause) -> Option<usize> {
     let negative_literals: Vec<(usize, usize)> = clause
         .literals
@@ -364,7 +406,23 @@ mod tests {
 
     #[test]
     fn test_select_maximal() {
-        // P(X) ∨ Q(f(g(a))) - Q should be maximal due to higher weight
+        // P(a) ∨ Q(f(g(a))) - both ground, Q has higher weight so Q > P
+        let clause = make_clause(vec![
+            make_literal("P", vec![const_("a")], true),
+            make_literal("Q", vec![func("f", vec![func("g", vec![const_("a")])])], true),
+        ]);
+
+        let selector = SelectMaximal::new();
+        let selected = selector.select(&clause);
+
+        // Q(f(g(a))) should be uniquely maximal (higher weight)
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&1));
+    }
+
+    #[test]
+    fn test_select_maximal_with_variables() {
+        // P(X) ∨ Q(f(g(a))) - incomparable due to variable condition, both maximal
         let clause = make_clause(vec![
             make_literal("P", vec![var("X")], true),
             make_literal("Q", vec![func("f", vec![func("g", vec![const_("a")])])], true),
@@ -373,7 +431,9 @@ mod tests {
         let selector = SelectMaximal::new();
         let selected = selector.select(&clause);
 
-        // Q(f(g(a))) should be selected as maximal
+        // Both are maximal: Q can't be > P (Q doesn't contain X), P can't be > Q (lower weight)
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&0));
         assert!(selected.contains(&1));
     }
 
@@ -396,24 +456,25 @@ mod tests {
 
     #[test]
     fn test_select_neg_max_weight_fallback() {
-        // P(X) ∨ Q(f(a)) - all positive, should fall back to maximal
+        // P(a) ∨ Q(f(a)) - all positive, should fall back to maximal
         let clause = make_clause(vec![
-            make_literal("P", vec![var("X")], true),
+            make_literal("P", vec![const_("a")], true),
             make_literal("Q", vec![func("f", vec![const_("a")])], true),
         ]);
 
         let selector = SelectNegMaxWeightOrMaximal::new();
         let selected = selector.select(&clause);
 
-        // Should select maximal (Q(f(a))) since no negatives
+        // Should select Q(f(a)) as uniquely maximal since no negatives
+        assert_eq!(selected.len(), 1);
         assert!(selected.contains(&1));
     }
 
     #[test]
     fn test_select_unique_maximal() {
-        // P(X) ∨ Q(f(g(h(a)))) - Q is uniquely maximal
+        // P(a) ∨ Q(f(g(h(a)))) - Q is uniquely maximal (ground terms, higher weight)
         let clause = make_clause(vec![
-            make_literal("P", vec![var("X")], true),
+            make_literal("P", vec![const_("a")], true),
             make_literal("Q", vec![func("f", vec![func("g", vec![func("h", vec![const_("a")])])])], true),
         ]);
 
@@ -442,5 +503,22 @@ mod tests {
         // so we fall back to selecting the negative literal ~R(c) at index 2
         assert_eq!(selected.len(), 1);
         assert!(selected.contains(&2));
+    }
+
+    #[test]
+    fn test_select_one_negative_when_equal_weight() {
+        // ~P(f(X)) ∨ ~Q(f(Y)) - two negatives with equal weight
+        // Only one should be selected (completeness requires selecting A negative, not all)
+        let clause = make_clause(vec![
+            make_literal("P", vec![func("f", vec![var("X")])], false),
+            make_literal("Q", vec![func("f", vec![var("Y")])], false),
+        ]);
+
+        let selector = SelectUniqueMaximalOrNegOrMaximal::new();
+        let selected = selector.select(&clause);
+
+        // One negative is selected (the first one with max weight)
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&0) || selected.contains(&1));
     }
 }
