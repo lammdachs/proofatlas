@@ -888,8 +888,12 @@ impl ProofState {
             .collect();
 
         // Build derivation info map from proof trace
+        // Skip GivenClauseSelection - it's not an inference rule
         let mut derivation_info: HashMap<usize, (Vec<usize>, String)> = HashMap::new();
         for step in &self.proof_trace {
+            if step.rule_name == "GivenClauseSelection" {
+                continue;
+            }
             derivation_info.insert(
                 step.clause_id,
                 (step.parent_ids.clone(), step.rule_name.clone()),
