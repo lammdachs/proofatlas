@@ -756,7 +756,7 @@ def run_training(
         log_file: File object for logging (e.g., bench.log)
 
     Returns:
-        Path to saved weights file.
+        Path to weights directory (not the file) to match find_weights().
     """
     import random
     import time
@@ -1124,5 +1124,7 @@ def run_training(
     log_msg(f"TorchScript model saved: {weights_path}")
     log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")
 
-    return weights_path
+    # Return the weights directory (not the file path) to match find_weights()
+    # Rust expects a directory and constructs the full path itself
+    return weights_dir
 
