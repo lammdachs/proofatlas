@@ -17,11 +17,9 @@ struct Position {
 
 /// Apply superposition rule using literal selection
 ///
-/// Implements both Superposition 1 (into predicate) and Superposition 2 (into equality):
-/// - Superposition 1: l ≈ r ∨ C₁    P[l'] ∨ C₂  =>  (P[r] ∨ C₁ ∨ C₂)σ
-///   where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable
-/// - Superposition 2: l ≈ r ∨ C₁    s[l'] ⊕ t ∨ C₂  =>  (s[r] ⊕ t ∨ C₁ ∨ C₂)σ
-///   where σ = mgu(l, l'), l ⪯̸ r, l' is not a variable, s[l'] ⪯̸ t
+/// Superposition: l ≈ r ∨ C₁    L[l'] ∨ C₂  =>  (L[r] ∨ C₁ ∨ C₂)σ
+///   where σ = mgu(l, l'), lσ ⪯̸ rσ, l' is not a variable.
+///   If L[l'] is an equality s[l'] ⊕ t, additionally s[l']σ ⪯̸ tσ.
 pub fn superposition(
     from_clause: &Clause,
     into_clause: &Clause,
