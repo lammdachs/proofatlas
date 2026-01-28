@@ -55,6 +55,84 @@ def _get_ml():
     return _ml_module
 
 
+def _run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem_names, web_data_dir, log_file):
+    """Run training in a subprocess to avoid CUDA context issues.
+
+    CUDA contexts don't survive fork. If we train in the main process, the forked
+    worker processes (used for parallel evaluation) will fail. Running training
+    in a subprocess keeps the main process CUDA-free.
+    """
+    import subprocess
+    import pickle
+    import tempfile
+
+    # Serialize arguments to a temp file (problem_names can be large)
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.pkl', delete=False) as f:
+        args_file = f.name
+        pickle.dump({
+            'preset': preset,
+            'trace_dir': str(trace_dir),
+            'weights_dir': str(weights_dir),
+            'configs_dir': str(configs_dir),
+            'problem_names': list(problem_names) if problem_names else None,
+            'web_data_dir': str(web_data_dir) if web_data_dir else None,
+        }, f)
+
+    # Run training script
+    script = f'''
+import pickle
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("{Path(__file__).parent.parent / "python"}").resolve()))
+
+with open("{args_file}", "rb") as f:
+    args = pickle.load(f)
+
+from proofatlas import ml
+result = ml.run_training(
+    preset=args["preset"],
+    trace_dir=Path(args["trace_dir"]),
+    weights_dir=Path(args["weights_dir"]),
+    configs_dir=Path(args["configs_dir"]),
+    problem_names=set(args["problem_names"]) if args["problem_names"] else None,
+    web_data_dir=Path(args["web_data_dir"]) if args["web_data_dir"] else None,
+    log_file=sys.stdout,
+)
+print("TRAINING_RESULT:" + str(result))
+'''
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-c', script],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        # Forward output to log file
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                if line.startswith("TRAINING_RESULT:"):
+                    result_path = Path(line.split(":", 1)[1])
+                    return result_path
+                else:
+                    print(line)
+                    if log_file and log_file is not sys.stdout:
+                        log_file.write(line + "\n")
+                        log_file.flush()
+
+        if proc.returncode != 0:
+            if proc.stderr:
+                for line in proc.stderr.splitlines():
+                    print(f"ERROR: {line}", file=sys.stderr)
+            raise ValueError(f"Training failed with exit code {proc.returncode}")
+
+        raise ValueError("Training completed but no result path found")
+    finally:
+        # Clean up temp file
+        Path(args_file).unlink(missing_ok=True)
+
+
 def log(msg: str):
     """Print a log message with timestamp."""
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1334,11 +1412,12 @@ def main():
                         log(f"[{preset_name}] Found {len(existing_traces)} existing traces in {trace_preset_dir}")
                     sys.stdout.flush()
 
-                    # Train model
+                    # Train model in subprocess to avoid CUDA context issues
+                    # (CUDA contexts don't survive fork, would break parallel evaluation)
                     log(f"[{preset_name}] Starting training...")
                     sys.stdout.flush()
                     try:
-                        weights_path = ml.run_training(
+                        weights_path = _run_training_subprocess(
                             preset=preset,
                             trace_dir=trace_preset_dir,
                             weights_dir=weights_dir,
