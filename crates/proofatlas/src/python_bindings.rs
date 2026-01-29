@@ -522,7 +522,7 @@ impl ProofState {
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str) where status is one of:
     ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, max_clause_memory_mb)
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None))]
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None, use_cuda=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
@@ -532,6 +532,7 @@ impl ProofState {
         weights_path: Option<String>,
         model_name: Option<String>,
         max_clause_memory_mb: Option<usize>,
+        use_cuda: Option<bool>,
     ) -> PyResult<(bool, String)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::AgeWeightSelector;
@@ -567,7 +568,7 @@ impl ProofState {
 
                 let selector = crate::selectors::load_gcn_selector(
                     &model_path,
-                    true,   // use_cuda
+                    use_cuda.unwrap_or(true),
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
                 Box::new(selector)
             }
@@ -596,7 +597,7 @@ impl ProofState {
                 let selector = crate::selectors::load_sentence_selector(
                     &model_path,
                     &tokenizer_path,
-                    true,   // use_cuda
+                    use_cuda.unwrap_or(true),
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
                 Box::new(selector)
             }

@@ -1,8 +1,4 @@
 {
-  "paths": {
-    "binary": "rust/target/release/prove"
-  },
-
   "defaults": {
     "preset": "time_sel21"
   },

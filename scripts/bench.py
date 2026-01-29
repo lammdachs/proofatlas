@@ -55,7 +55,7 @@ def _get_ml():
     return _ml_module
 
 
-def _run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem_names, web_data_dir, log_file):
+def _run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem_names, web_data_dir, log_file, use_cuda=False):
     """Run training in a subprocess to avoid CUDA context issues.
 
     CUDA contexts don't survive fork. If we train in the main process, the forked
@@ -102,11 +102,15 @@ print("TRAINING_RESULT:" + str(result))
 '''
 
     try:
+        env = None
+        if not use_cuda:
+            env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
         proc = subprocess.run(
             [sys.executable, '-c', script],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
+            env=env,
         )
 
         # Forward output to log file
@@ -585,7 +589,7 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
 
 def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                           weights_path: str = None, collect_trace: bool = False,
-                          trace_preset: str = None) -> BenchResult:
+                          trace_preset: str = None, use_cuda: bool = False) -> BenchResult:
     """Inner function that actually runs ProofAtlas (called in subprocess)."""
     from proofatlas import ProofState
 
@@ -624,8 +628,8 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Model name for .pt file: {embedding}_{scorer} for modular design
     model_name = ml.get_model_name(preset) if is_learned else None
 
-    # Initialize CUDA if using string embedding (required for tch to detect CUDA)
-    if embedding_type == "string":
+    # Initialize CUDA if using string embedding with CUDA backend (required for tch to detect CUDA)
+    if use_cuda and embedding_type == "string":
         try:
             import torch
             if torch.cuda.is_available():
@@ -647,6 +651,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             weights_path,
             model_name,
             max_clause_memory_mb,
+            use_cuda,
         )
     except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
@@ -689,7 +694,7 @@ def get_num_gpus() -> int:
 
 
 def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_path,
-                    collect_trace, trace_preset, result_queue, gpu_id=None):
+                    collect_trace, trace_preset, result_queue, gpu_id=None, use_cuda=False):
     """Worker function that runs in subprocess and sends result via queue."""
     # Reset signal handlers inherited from parent daemon process.
     # Without this, if the worker is killed (e.g., timeout), it would run
@@ -699,14 +704,14 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGQUIT, signal.SIG_DFL)
 
-    # Set CUDA device for this worker
-    if gpu_id is not None:
+    # Set CUDA device for this worker (only when using CUDA backend)
+    if use_cuda and gpu_id is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
     try:
         result = _run_proofatlas_inner(
             Path(problem_str), Path(base_dir_str), preset, Path(tptp_root_str),
-            weights_path, collect_trace, trace_preset
+            weights_path, collect_trace, trace_preset, use_cuda
         )
         result_queue.put((result.status, result.time_s))
     except Exception as e:
@@ -715,7 +720,8 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
 
 def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                    weights_path: str = None, collect_trace: bool = False,
-                   trace_preset: str = None, gpu_id: int = None) -> BenchResult:
+                   trace_preset: str = None, gpu_id: int = None,
+                   use_cuda: bool = False) -> BenchResult:
     """Run ProofAtlas on a problem in a subprocess.
 
     Uses multiprocessing to isolate crashes (e.g., stack overflow on deeply
@@ -730,7 +736,7 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     proc = multiprocessing.Process(
         target=_worker_process,
         args=(str(problem), str(base_dir), preset, str(tptp_root),
-              weights_path, collect_trace, trace_preset, result_queue, gpu_id)
+              weights_path, collect_trace, trace_preset, result_queue, gpu_id, use_cuda)
     )
 
     start = time.time()
@@ -998,7 +1004,7 @@ def _run_single_problem_with_worker_gpu(args):
 
 def _run_single_problem(args, gpu_id=None):
     """Worker function for execution."""
-    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun = args
+    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda = args
 
     try:
         # Check if already evaluated (skip unless --rerun)
@@ -1011,6 +1017,7 @@ def _run_single_problem(args, gpu_id=None):
                 problem, base_dir, preset, tptp_root,
                 weights_path=weights_path, collect_trace=collect_trace,
                 trace_preset=trace_preset, gpu_id=gpu_id,
+                use_cuda=use_cuda,
             )
         elif prover == "vampire":
             result = run_vampire(problem, base_dir, preset, binary, tptp_root)
@@ -1030,7 +1037,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    prover: str, preset: dict, log_file,
                    preset_name: str = None, weights_path: str = None,
                    binary: Path = None, trace_preset: str = None,
-                   rerun: bool = False, n_jobs: int = 1):
+                   rerun: bool = False, n_jobs: int = 1,
+                   use_cuda: bool = False):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
 
@@ -1046,14 +1054,14 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     # Always collect traces for proofatlas
     collect_trace = (prover == "proofatlas")
 
-    # Detect GPUs for worker distribution
-    num_gpus = get_num_gpus()
-    if num_gpus > 0 and prover == "proofatlas":
+    # Detect GPUs for worker distribution (only when using CUDA backend)
+    num_gpus = get_num_gpus() if use_cuda and prover == "proofatlas" else 0
+    if num_gpus > 0:
         print(f"Distributing workers across {num_gpus} GPU(s)")
 
     # Prepare work items (GPU assigned per-worker, not per-problem)
     work_items = [
-        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun)
+        (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
         for problem in problems
     ]
 
@@ -1157,6 +1165,10 @@ def main():
                        help="Re-evaluate problems even if cached results exist")
     parser.add_argument("--n-jobs", type=int, default=1,
                        help="Number of parallel jobs (default: 1)")
+    parser.add_argument("--backend-train", choices=["cpu", "cuda"], default="cpu",
+                       help="Backend for ML training (default: cpu)")
+    parser.add_argument("--backend-eval", choices=["cpu", "cuda"], default="cpu",
+                       help="Backend for ML inference during evaluation (default: cpu)")
 
     # Job management
     parser.add_argument("--status", action="store_true",
@@ -1261,6 +1273,10 @@ def main():
     # Get problems
     problems = get_problems(base_dir, tptp_config, problem_set)
 
+    # Parse backend options
+    use_cuda_train = (args.backend_train == "cuda")
+    use_cuda_eval = (args.backend_eval == "cuda")
+
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1311,6 +1327,7 @@ def main():
     print(f"Benchmark daemon started (PID: {os.getpid()})")
     print(f"Working directory: {base_dir}")
     print(f"Configs: {len(runs)}, Problems: {len(problems)}")
+    print(f"Backend: train={'cuda' if use_cuda_train else 'cpu'}, eval={'cuda' if use_cuda_eval else 'cpu'}")
     sys.stdout.flush()
 
     # Clear any stale PID tracking and save job status
@@ -1405,6 +1422,7 @@ def main():
                             log_file=sys.stdout,
                             preset_name=trace_preset, trace_preset=trace_preset,
                             rerun=True,  # Always run for trace collection
+                            use_cuda=use_cuda_eval,
                         )
                         existing_traces = list(trace_preset_dir.glob("*.json")) if trace_preset_dir.exists() else []
                         log(f"[{preset_name}] Trace collection complete: {len(existing_traces)} traces")
@@ -1425,6 +1443,7 @@ def main():
                             problem_names=problem_names,
                             web_data_dir=base_dir / "web" / "data",
                             log_file=sys.stdout,
+                            use_cuda=use_cuda_train,
                         )
                         log(f"[{preset_name}] Training complete, weights saved to: {weights_path}")
                     except ValueError as e:
@@ -1451,6 +1470,7 @@ def main():
                 preset_name=preset_name, weights_path=weights_dir_str,
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.n_jobs,
+                use_cuda=use_cuda_eval,
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()
