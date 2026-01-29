@@ -22,12 +22,10 @@ def _setup_torch_libs():
 
             # Preload libtorch to ensure it's available
             import ctypes
-            libtorch_cpu = os.path.join(torch_lib, 'libtorch_cpu.so')
-            if os.path.exists(libtorch_cpu):
-                ctypes.CDLL(libtorch_cpu, mode=ctypes.RTLD_GLOBAL)
-            libc10 = os.path.join(torch_lib, 'libc10.so')
-            if os.path.exists(libc10):
-                ctypes.CDLL(libc10, mode=ctypes.RTLD_GLOBAL)
+            for lib_name in ['libc10.so', 'libtorch_cpu.so', 'libtorch_cuda.so']:
+                lib_path = os.path.join(torch_lib, lib_name)
+                if os.path.exists(lib_path):
+                    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except ImportError:
         pass  # torch not installed, skip
 

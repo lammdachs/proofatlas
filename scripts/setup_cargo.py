@@ -56,7 +56,7 @@ rustflags = ["-C", "link-arg=-Wl,-rpath,{torch_lib}"]
     print(f"Created {config_path}")
     print(f"PyTorch lib: {torch_lib}")
     print()
-    print("You can now build with: cargo build --features torch")
+    print("You can now build with: cargo build")
 
 
 if __name__ == "__main__":

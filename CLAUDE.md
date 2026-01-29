@@ -52,10 +52,10 @@ proofatlas/
 ### Building
 
 ```bash
-cargo build --release                    # Build Rust prover
-pip install -e .                         # Install Python package
-pip install -e ".[ml]"                   # With PyTorch for training
+maturin develop                     # Build and install into Python environment
 ```
+
+**Note:** The `python` and `ml` Cargo features are enabled by default. The WASM crate opts out via `default-features = false`. After switching Python environments, re-run `python scripts/setup_cargo.py` to update libtorch paths in `.cargo/config.toml`.
 
 ### Running the Prover
 
@@ -188,7 +188,7 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 | gcn | ✓ | ✓ | Graph Convolutional Network |
 | sentence | ✓ | ✓ | Sentence transformer (MiniLM) |
 
-ML selectors require the `torch` feature and use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference. Models are exported as TorchScript (`.pt` files).
+ML selectors use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch (CPU and CUDA if available) is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
 
 ## Analysis Guidelines
 

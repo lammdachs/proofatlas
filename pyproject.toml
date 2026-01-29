@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools-rust>=1.0", "torch==2.9.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0", "torch==2.9.0"]
+build-backend = "maturin"
 
 [project]
 name = "proofatlas"
@@ -49,26 +49,13 @@ dev = [
     "pytest-benchmark",
     "black",
     "mypy",
-    "types-setuptools",
     "ruff",
 ]
 
-[tool.setuptools]
-zip-safe = false
-
-[tool.setuptools.packages.find]
-where = ["python"]
-include = ["proofatlas*"]
-namespaces = false
-
-[tool.setuptools.package-data]
-proofatlas = ["*.so", "*.pyd", "*.dylib"]
-
-[[tool.setuptools-rust.ext-modules]]
-target = "proofatlas.proofatlas"
-path = "crates/proofatlas/Cargo.toml"
-binding = "PyO3"
-features = ["python", "ml"]
+[tool.maturin]
+manifest-path = "crates/proofatlas/Cargo.toml"
+python-source = "python"
+module-name = "proofatlas.proofatlas"
 
 [tool.ruff]
 line-length = 100

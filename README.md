@@ -65,11 +65,8 @@ See [INSTALL.md](INSTALL.md) for detailed instructions.
 ### Quick Start
 
 ```bash
-# Build the Rust prover
-cargo build --release
-
-# Install Python package with ML dependencies
-pip install -e ".[ml]"
+# Build and install into Python environment
+maturin develop
 
 # Setup TPTP problem library
 python scripts/setup_tptp.py
@@ -131,7 +128,7 @@ let selector = load_gcn_selector(
 )?;
 ```
 
-ML selectors require the `torch` feature and use GPU-accelerated inference via tch-rs.
+ML selectors are enabled by default and use GPU-accelerated inference via tch-rs. CUDA is used automatically when available.
 
 ## Node Features
 
