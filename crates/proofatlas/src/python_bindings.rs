@@ -8,14 +8,14 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, ToPyArray};
 
-use crate::core::{CNFFormula, Clause, Term, Variable};
+use crate::core::Clause;
 use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     InferenceResult as RustInferenceResult, InferenceRule,
 };
 use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
-use crate::saturation::{LiteralSelectionStrategy, SaturationConfig};
+use crate::saturation::LiteralSelectionStrategy;
 use crate::inference::{LiteralSelector, SelectAll, SelectMaximal};
 
 /// Python-accessible proof state
@@ -101,7 +101,7 @@ pub struct ClauseGraphData {
 #[pymethods]
 impl ClauseGraphData {
     /// Get edge indices as numpy array (2, num_edges)
-    fn edge_indices<'py>(&self, py: Python<'py>) -> &'py PyArray2<i64> {
+    fn edge_indices<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<i64>> {
         let num_edges = self.graph.edge_indices.len();
 
         // Build separate source and target arrays
@@ -114,11 +114,11 @@ impl ClauseGraphData {
         }
 
         // Create 2D array with shape (2, num_edges)
-        PyArray2::from_vec2(py, &vec![sources, targets]).unwrap()
+        PyArray2::from_vec2(py, &[sources, targets]).unwrap()
     }
 
     /// Get node features as numpy array (num_nodes, feature_dim)
-    fn node_features<'py>(&self, py: Python<'py>) -> &'py PyArray2<f32> {
+    fn node_features<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f32>> {
         // Convert Vec<[f32; FEATURE_DIM]> to Vec<Vec<f32>>
         let features_vec: Vec<Vec<f32>> = self.graph.node_features
             .iter()
@@ -129,7 +129,7 @@ impl ClauseGraphData {
     }
 
     /// Get node types as numpy array (num_nodes,)
-    fn node_types<'py>(&self, py: Python<'py>) -> &'py PyArray1<u8> {
+    fn node_types<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<u8>> {
         self.graph.node_types.to_pyarray(py)
     }
 
@@ -318,9 +318,9 @@ impl ProofState {
     }
 
     /// Select next given clause
+    #[pyo3(signature = (strategy=None))]
     pub fn select_given_clause(
         &mut self,
-        _py: Python,
         strategy: Option<&str>,
     ) -> PyResult<Option<usize>> {
         let strategy = strategy.unwrap_or("age");
@@ -351,7 +351,7 @@ impl ProofState {
             }
             "size" => {
                 // Alias for "smallest"
-                self.select_given_clause(_py, Some("smallest"))
+                self.select_given_clause(Some("smallest"))
             }
             _ => Ok(self.unprocessed.pop_front()), // Default to age-based
         }
@@ -876,7 +876,6 @@ impl ProofState {
     /// ```
     pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
         use crate::core::json::{TraceJson, TrainingClauseJson};
-        use crate::inference::InferenceRule;
         use std::collections::HashMap;
 
         let examples = self.extract_training_examples();
@@ -964,7 +963,7 @@ pub struct TrainingExample {
 
 /// Python module definition
 #[pymodule]
-fn proofatlas(_py: Python, m: &PyModule) -> PyResult<()> {
+fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProofState>()?;
     m.add_class::<ClauseInfo>()?;
     m.add_class::<InferenceResult>()?;
