@@ -66,11 +66,17 @@ impl GcnEmbedder {
         let num_nodes = graph.num_nodes;
 
         if num_nodes == 0 {
-            // Empty graph - return zeros
+            // Empty graph - return minimal sparse tensors
             let node_features = tch::Tensor::zeros([1, 3], (tch::Kind::Float, self.device));
-            let adj = tch::Tensor::eye(1, (tch::Kind::Float, self.device));
-            let pool_matrix =
-                tch::Tensor::ones([num_clauses as i64, 1], (tch::Kind::Float, self.device));
+            let empty_idx = tch::Tensor::zeros([2, 0], (tch::Kind::Int64, self.device));
+            let empty_vals = tch::Tensor::zeros([0], (tch::Kind::Float, self.device));
+            let adj = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals, [1, 1], (tch::Kind::Float, self.device), true,
+            );
+            let pool_matrix = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals,
+                [num_clauses as i64, 1], (tch::Kind::Float, self.device), true,
+            );
             let clause_features =
                 tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
             return (node_features, adj, pool_matrix, clause_features);
@@ -104,52 +110,70 @@ impl GcnEmbedder {
         (node_features, adj, pool_matrix, clause_features)
     }
 
-    /// Build normalized adjacency matrix
+    /// Build normalized sparse adjacency matrix (COO format)
+    ///
+    /// Constructs D^(-1/2) A D^(-1/2) as a sparse COO tensor, where A includes
+    /// bidirectional edges and self-loops. Memory is O(edges + nodes) instead of
+    /// O(nodes²).
     fn build_adjacency(&self, edges: &[(usize, usize)], num_nodes: usize) -> tch::Tensor {
-        let mut adj_data = vec![0.0f32; num_nodes * num_nodes];
+        use std::collections::HashSet;
 
-        // Add edges (bidirectional)
+        // Collect unique edges (bidirectional + self-loops)
+        let mut edge_set = HashSet::new();
         for &(src, dst) in edges {
             if src < num_nodes && dst < num_nodes {
-                adj_data[src * num_nodes + dst] = 1.0;
-                adj_data[dst * num_nodes + src] = 1.0;
+                edge_set.insert((src, dst));
+                edge_set.insert((dst, src));
             }
         }
-
-        // Add self-loops
         for i in 0..num_nodes {
-            adj_data[i * num_nodes + i] = 1.0;
+            edge_set.insert((i, i));
         }
 
-        // Normalize: D^(-1/2) A D^(-1/2)
+        // Compute degrees from the edge set
         let mut degrees = vec![0.0f32; num_nodes];
-        for i in 0..num_nodes {
-            for j in 0..num_nodes {
-                degrees[i] += adj_data[i * num_nodes + j];
-            }
+        for &(src, _) in &edge_set {
+            degrees[src] += 1.0;
         }
 
-        for i in 0..num_nodes {
-            for j in 0..num_nodes {
-                if degrees[i] > 0.0 && degrees[j] > 0.0 {
-                    adj_data[i * num_nodes + j] /= (degrees[i] * degrees[j]).sqrt();
-                }
-            }
+        // Build COO indices and normalized values
+        let nnz = edge_set.len();
+        let mut rows = Vec::with_capacity(nnz);
+        let mut cols = Vec::with_capacity(nnz);
+        let mut values = Vec::with_capacity(nnz);
+
+        for &(src, dst) in &edge_set {
+            rows.push(src as i64);
+            cols.push(dst as i64);
+            values.push(1.0 / (degrees[src] * degrees[dst]).sqrt());
         }
 
-        tch::Tensor::from_slice(&adj_data)
-            .view([num_nodes as i64, num_nodes as i64])
-            .to_device(self.device)
+        let indices = tch::Tensor::from_slice2(&[&rows, &cols]).to_device(self.device);
+        let vals = tch::Tensor::from_slice(&values).to_device(self.device);
+        let n = num_nodes as i64;
+
+        tch::Tensor::sparse_coo_tensor_indices_size(
+            &indices,
+            &vals,
+            [n, n],
+            (tch::Kind::Float, self.device),
+            false,
+        ).coalesce()
     }
 
-    /// Build pool matrix from clause boundaries
+    /// Build sparse pool matrix from clause boundaries (COO format)
+    ///
+    /// Each clause maps to a mean-pool over its nodes. Memory is O(nodes)
+    /// instead of O(clauses × nodes).
     fn build_pool_matrix(
         &self,
         clause_boundaries: &[(usize, usize)],
         num_clauses: usize,
         num_nodes: usize,
     ) -> tch::Tensor {
-        let mut pool_data = vec![0.0f32; num_clauses * num_nodes];
+        let mut rows = Vec::with_capacity(num_nodes);
+        let mut cols = Vec::with_capacity(num_nodes);
+        let mut values = Vec::with_capacity(num_nodes);
 
         for (clause_idx, &(start, end)) in clause_boundaries.iter().enumerate() {
             let clause_size = end - start;
@@ -157,15 +181,24 @@ impl GcnEmbedder {
                 let weight = 1.0 / clause_size as f32;
                 for node_idx in start..end {
                     if node_idx < num_nodes {
-                        pool_data[clause_idx * num_nodes + node_idx] = weight;
+                        rows.push(clause_idx as i64);
+                        cols.push(node_idx as i64);
+                        values.push(weight);
                     }
                 }
             }
         }
 
-        tch::Tensor::from_slice(&pool_data)
-            .view([num_clauses as i64, num_nodes as i64])
-            .to_device(self.device)
+        let indices = tch::Tensor::from_slice2(&[&rows, &cols]).to_device(self.device);
+        let vals = tch::Tensor::from_slice(&values).to_device(self.device);
+
+        tch::Tensor::sparse_coo_tensor_indices_size(
+            &indices,
+            &vals,
+            [num_clauses as i64, num_nodes as i64],
+            (tch::Kind::Float, self.device),
+            false,
+        ).coalesce()
     }
 }
 
