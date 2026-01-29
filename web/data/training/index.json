@@ -1,6 +1,7 @@
 {
   "generated": "2026-01-19T03:59:02.510762",
   "runs": [
-    "gcn_mlp"
+    "gcn_mlp",
+    "sentence_mlp"
   ]
 }

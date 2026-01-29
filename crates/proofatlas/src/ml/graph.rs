@@ -286,40 +286,93 @@ pub struct BatchClauseGraph {
 impl GraphBuilder {
     /// Build a combined graph from multiple clauses for batch inference
     ///
-    /// Returns a BatchClauseGraph with node features limited to [type, arity, arg_pos]
-    /// since clause-level features (age, role, size) are provided separately.
+    /// This builds directly into batch arrays without intermediate ClauseGraph
+    /// objects. Only computes the 3 features needed for inference: [type, arity, arg_pos].
+    /// Skips node_names, node_types, node_depths, and features 3-7.
     pub fn build_from_clauses(clauses: &[&Clause]) -> BatchClauseGraph {
-        let mut all_features: Vec<[f32; 3]> = Vec::new();
-        let mut all_edges: Vec<(usize, usize)> = Vec::new();
+        let mut features: Vec<[f32; 3]> = Vec::new();
+        let mut edges: Vec<(usize, usize)> = Vec::new();
         let mut clause_boundaries: Vec<(usize, usize)> = Vec::new();
-
-        let mut node_offset = 0;
+        let mut next_id: usize = 0;
 
         for clause in clauses {
-            let graph = Self::build_from_clause(clause);
+            let start = next_id;
 
-            let start = node_offset;
-            let end = node_offset + graph.num_nodes;
-            clause_boundaries.push((start, end));
+            // Clause root node: [type=0, arity=0, arg_pos=0]
+            let clause_node = next_id;
+            features.push([NODE_TYPE_CLAUSE as f32, 0.0, 0.0]);
+            next_id += 1;
 
-            // Add node features (only first 3 dimensions: type, arity, arg_pos)
-            for f in &graph.node_features {
-                all_features.push([f[0], f[1], f[2]]);
+            for literal in &clause.literals {
+                // Literal node
+                let lit_node = next_id;
+                features.push([NODE_TYPE_LITERAL as f32, 0.0, 0.0]);
+                edges.push((clause_node, lit_node));
+                next_id += 1;
+
+                // Predicate node
+                let pred_node = next_id;
+                features.push([
+                    NODE_TYPE_PREDICATE as f32,
+                    literal.atom.args.len() as f32,
+                    0.0,
+                ]);
+                edges.push((lit_node, pred_node));
+                next_id += 1;
+
+                // Term nodes
+                for (pos, term) in literal.atom.args.iter().enumerate() {
+                    next_id = Self::add_term_batch(
+                        term, pred_node, pos, next_id, &mut features, &mut edges,
+                    );
+                }
             }
 
-            // Add edges with offset
-            for (src, dst) in &graph.edge_indices {
-                all_edges.push((src + node_offset, dst + node_offset));
-            }
-
-            node_offset = end;
+            clause_boundaries.push((start, next_id));
         }
 
         BatchClauseGraph {
-            num_nodes: node_offset,
-            edge_indices: all_edges,
-            node_features: all_features,
+            num_nodes: next_id,
+            edge_indices: edges,
+            node_features: features,
             clause_boundaries,
+        }
+    }
+
+    /// Add a term node directly to batch arrays (no intermediate objects)
+    fn add_term_batch(
+        term: &Term,
+        parent: usize,
+        arg_position: usize,
+        next_id: usize,
+        features: &mut Vec<[f32; 3]>,
+        edges: &mut Vec<(usize, usize)>,
+    ) -> usize {
+        match term {
+            Term::Variable(_) => {
+                features.push([NODE_TYPE_VARIABLE as f32, 0.0, arg_position as f32]);
+                edges.push((parent, next_id));
+                next_id + 1
+            }
+            Term::Constant(_) => {
+                features.push([NODE_TYPE_CONSTANT as f32, 0.0, arg_position as f32]);
+                edges.push((parent, next_id));
+                next_id + 1
+            }
+            Term::Function(_, args) => {
+                let func_node = next_id;
+                features.push([
+                    NODE_TYPE_FUNCTION as f32,
+                    args.len() as f32,
+                    arg_position as f32,
+                ]);
+                edges.push((parent, func_node));
+                let mut id = next_id + 1;
+                for (pos, arg) in args.iter().enumerate() {
+                    id = Self::add_term_batch(arg, func_node, pos, id, features, edges);
+                }
+                id
+            }
         }
     }
 }
@@ -565,5 +618,58 @@ mod tests {
 
         // Check role feature (Axiom = 0.0)
         assert_eq!(axiom_graph.node_features[0][FEAT_ROLE], 0.0);
+    }
+
+    #[test]
+    fn test_batch_direct_matches_individual() {
+        // Build two clauses: P(x) and Q(f(a, b))
+        let x = Term::Variable(Variable { name: "x".to_string() });
+        let a = Term::Constant(Constant { name: "a".to_string() });
+        let b = Term::Constant(Constant { name: "b".to_string() });
+        let f_ab = Term::Function(
+            FunctionSymbol { name: "f".to_string(), arity: 2 },
+            vec![a, b],
+        );
+
+        let clause1 = Clause::new(vec![Literal::positive(Atom {
+            predicate: PredicateSymbol { name: "P".to_string(), arity: 1 },
+            args: vec![x],
+        })]);
+        let clause2 = Clause::new(vec![Literal::positive(Atom {
+            predicate: PredicateSymbol { name: "Q".to_string(), arity: 1 },
+            args: vec![f_ab],
+        })]);
+
+        let clauses: Vec<&Clause> = vec![&clause1, &clause2];
+        let batch = GraphBuilder::build_from_clauses(&clauses);
+
+        // Verify against individual graphs
+        let g1 = GraphBuilder::build_from_clause(&clause1);
+        let g2 = GraphBuilder::build_from_clause(&clause2);
+
+        assert_eq!(batch.num_nodes, g1.num_nodes + g2.num_nodes);
+        assert_eq!(batch.edge_indices.len(), g1.edge_indices.len() + g2.edge_indices.len());
+        assert_eq!(batch.clause_boundaries.len(), 2);
+        assert_eq!(batch.clause_boundaries[0], (0, g1.num_nodes));
+        assert_eq!(batch.clause_boundaries[1], (g1.num_nodes, g1.num_nodes + g2.num_nodes));
+
+        // Check features match (first 3 dims only)
+        for i in 0..g1.num_nodes {
+            let expected = [g1.node_features[i][0], g1.node_features[i][1], g1.node_features[i][2]];
+            assert_eq!(batch.node_features[i], expected, "mismatch at node {i}");
+        }
+        for i in 0..g2.num_nodes {
+            let expected = [g2.node_features[i][0], g2.node_features[i][1], g2.node_features[i][2]];
+            assert_eq!(batch.node_features[g1.num_nodes + i], expected, "mismatch at node {}", g1.num_nodes + i);
+        }
+
+        // Check edges match with offset
+        for (j, &(src, dst)) in g1.edge_indices.iter().enumerate() {
+            assert_eq!(batch.edge_indices[j], (src, dst));
+        }
+        let offset = g1.edge_indices.len();
+        for (j, &(src, dst)) in g2.edge_indices.iter().enumerate() {
+            assert_eq!(batch.edge_indices[offset + j], (src + g1.num_nodes, dst + g1.num_nodes));
+        }
     }
 }

@@ -62,8 +62,8 @@ pub trait EmbeddingScorer: Send {
 pub struct CachingSelector<E: ClauseEmbedder, S: EmbeddingScorer> {
     embedder: E,
     scorer: S,
-    /// Cache: clause string -> embedding vector
-    cache: HashMap<String, Vec<f32>>,
+    /// Cache: clause index -> embedding vector
+    cache: HashMap<usize, Vec<f32>>,
     /// RNG state for sampling
     rng_state: u64,
 }
@@ -112,9 +112,6 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
         (self.rng_state >> 33) as f64 / (1u64 << 31) as f64
     }
 
-    fn clause_to_key(clause: &Clause) -> String {
-        clause.to_string()
-    }
 }
 
 impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E, S> {
@@ -127,37 +124,31 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
             return unprocessed.pop_front();
         }
 
-        // Get clause keys and find uncached clauses
-        let clause_keys: Vec<String> = unprocessed
+        // Find uncached clauses by index
+        let uncached_indices: Vec<usize> = unprocessed
             .iter()
-            .map(|&idx| Self::clause_to_key(&clauses[idx]))
-            .collect();
-
-        let uncached: Vec<(usize, &Clause)> = clause_keys
-            .iter()
-            .enumerate()
-            .filter(|(_, key)| !self.cache.contains_key(*key))
-            .map(|(i, _)| {
-                let clause_idx = unprocessed[i];
-                (i, &clauses[clause_idx])
-            })
+            .copied()
+            .filter(|idx| !self.cache.contains_key(idx))
             .collect();
 
         // Compute embeddings for uncached clauses
-        if !uncached.is_empty() {
-            let uncached_clauses: Vec<&Clause> = uncached.iter().map(|(_, c)| *c).collect();
+        if !uncached_indices.is_empty() {
+            let uncached_clauses: Vec<&Clause> = uncached_indices
+                .iter()
+                .map(|&idx| &clauses[idx])
+                .collect();
+
             let embeddings = self.embedder.embed_batch(&uncached_clauses);
 
-            // Store in cache
-            for ((i, _), embedding) in uncached.iter().zip(embeddings.into_iter()) {
-                self.cache.insert(clause_keys[*i].clone(), embedding);
+            for (idx, embedding) in uncached_indices.into_iter().zip(embeddings.into_iter()) {
+                self.cache.insert(idx, embedding);
             }
         }
 
         // Gather all embeddings from cache
-        let embeddings: Vec<&[f32]> = clause_keys
+        let embeddings: Vec<&[f32]> = unprocessed
             .iter()
-            .map(|key| self.cache.get(key).unwrap().as_slice())
+            .map(|idx| self.cache.get(idx).unwrap().as_slice())
             .collect();
 
         // Score all embeddings

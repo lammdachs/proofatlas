@@ -1,0 +1,15 @@
+{
+  "generated": "2026-01-27T00:37:41.183653",
+  "prover": "proofatlas",
+  "preset": "gcn_mlp_sel21",
+  "completed": 196,
+  "total": 8398,
+  "progress_pct": 2.3338890211955228,
+  "stats": {
+    "proof": 0,
+    "saturated": 0,
+    "timeout": 56,
+    "error": 140
+  },
+  "proof_rate": 0.0
+}

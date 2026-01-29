@@ -177,6 +177,8 @@ pub struct SaturationState {
     clause_memory_bytes: usize,
     /// Current iteration (used for clause age)
     current_iteration: usize,
+    /// Index of unit equality clause indices in A ∪ P (for fast forward demodulation)
+    unit_equalities: HashSet<usize>,
 }
 
 impl SaturationState {
@@ -259,7 +261,15 @@ impl SaturationState {
             literal_selector,
             clause_memory_bytes,
             current_iteration: 0,
+            unit_equalities: HashSet::new(),
         }
+    }
+
+    /// Check if a clause is a unit positive equality
+    fn is_unit_equality(clause: &Clause) -> bool {
+        clause.literals.len() == 1
+            && clause.literals[0].polarity
+            && clause.literals[0].atom.is_equality()
     }
 
     /// Set the literal selector
@@ -281,10 +291,10 @@ impl SaturationState {
     pub fn saturate(mut self) -> SaturationResult {
         let start_time = Instant::now();
 
-        loop {
+        let result = loop {
             // Forward simplification: process new clauses until fixed point, move to unprocessed
             if let Some(result) = self.forward_simplify_new() {
-                return result;
+                break result;
             }
 
             // Select given clause from unprocessed
@@ -292,7 +302,7 @@ impl SaturationState {
                 Some(idx) => idx,
                 None => {
                     // No more clauses to process
-                    return SaturationResult::Saturated(
+                    break SaturationResult::Saturated(
                         self.proof_steps.clone(),
                         self.clauses.clone(),
                     );
@@ -302,7 +312,7 @@ impl SaturationState {
             // Check clause memory limit (directly comparable across provers)
             if let Some(limit_mb) = self.config.max_clause_memory_mb {
                 if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
-                    return SaturationResult::ResourceLimit(
+                    break SaturationResult::ResourceLimit(
                         self.proof_steps.clone(),
                         self.clauses.clone(),
                     );
@@ -311,19 +321,19 @@ impl SaturationState {
 
             // Check other limits
             if self.config.max_iterations > 0 && self.current_iteration >= self.config.max_iterations {
-                return SaturationResult::ResourceLimit(
+                break SaturationResult::ResourceLimit(
                     self.proof_steps.clone(),
                     self.clauses.clone(),
                 );
             }
             if self.config.max_clauses > 0 && self.clauses.len() >= self.config.max_clauses {
-                return SaturationResult::ResourceLimit(
+                break SaturationResult::ResourceLimit(
                     self.proof_steps.clone(),
                     self.clauses.clone(),
                 );
             }
             if start_time.elapsed() > self.config.timeout {
-                return SaturationResult::Timeout(self.proof_steps.clone(), self.clauses.clone());
+                break SaturationResult::Timeout(self.proof_steps.clone(), self.clauses.clone());
             }
 
             self.current_iteration += 1;
@@ -331,7 +341,7 @@ impl SaturationState {
             // Check if given clause is empty
             let given_clause = &self.clauses[given_idx];
             if given_clause.is_empty() {
-                return SaturationResult::Proof(Proof {
+                break SaturationResult::Proof(Proof {
                     steps: self.proof_steps.clone(),
                     empty_clause_idx: given_idx,
                     all_clauses: self.clauses.clone(),
@@ -365,7 +375,9 @@ impl SaturationState {
                     self.add_clause_to_new(inference);
                 }
             }
-        }
+        };
+
+        result
     }
 
     /// Process new clauses: forward simplify by A ∪ P, then backward simplify A and P
@@ -374,36 +386,24 @@ impl SaturationState {
         while let Some(clause_idx) = self.new.pop_front() {
             let clause = &self.clauses[clause_idx];
 
-            // SimplifyFwd: try to simplify by A ∪ P (processed and unprocessed)
+            // SimplifyFwd: try to simplify using indexed unit equalities from A ∪ P
             let mut current_clause = clause.clone();
             let mut simplified = false;
             let mut demod_premise = None;
 
-            // Collect unit equalities from both processed and unprocessed
-            let all_clauses: Vec<usize> = self
-                .processed
-                .iter()
-                .copied()
-                .chain(self.unprocessed.iter().copied())
-                .collect();
+            // Iterate only over known unit equalities (not all clauses)
+            let unit_eq_indices: Vec<usize> = self.unit_equalities.iter().copied().collect();
 
-            for &unit_idx in &all_clauses {
+            for unit_idx in unit_eq_indices {
                 let unit_clause = &self.clauses[unit_idx];
-
-                // Check if it's a unit equality
-                if unit_clause.literals.len() == 1
-                    && unit_clause.literals[0].polarity
-                    && unit_clause.literals[0].atom.is_equality()
-                {
-                    let results =
-                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, clause_idx);
-                    if !results.is_empty() {
-                        current_clause = results[0].conclusion.clone();
-                        orient_clause_equalities(&mut current_clause);
-                        demod_premise = Some(unit_idx);
-                        simplified = true;
-                        break;
-                    }
+                let results =
+                    demodulation::demodulate(unit_clause, &current_clause, unit_idx, clause_idx);
+                if !results.is_empty() {
+                    current_clause = results[0].conclusion.clone();
+                    orient_clause_equalities(&mut current_clause);
+                    demod_premise = Some(unit_idx);
+                    simplified = true;
+                    break;
                 }
             }
 
@@ -459,6 +459,11 @@ impl SaturationState {
                 // Clause survives - activate it and do backward simplification before transfer to P
                 self.subsumption_checker.activate_clause(clause_idx);
 
+                // Track unit equalities for demodulation index
+                if Self::is_unit_equality(&self.clauses[clause_idx]) {
+                    self.unit_equalities.insert(clause_idx);
+                }
+
                 // DeleteBwd: remove clauses in P and A subsumed by this clause
                 let all_other: Vec<usize> = self
                     .processed
@@ -472,14 +477,11 @@ impl SaturationState {
                 for idx in subsumed {
                     self.processed.remove(&idx);
                     self.unprocessed.retain(|&x| x != idx);
+                    self.unit_equalities.remove(&idx);
                 }
 
                 // SimplifyBwd: if this clause is a unit equality, simplify P and A
-                let clause = &self.clauses[clause_idx];
-                if clause.literals.len() == 1
-                    && clause.literals[0].polarity
-                    && clause.literals[0].atom.is_equality()
-                {
+                if Self::is_unit_equality(&self.clauses[clause_idx]) {
                     self.backward_demodulate_with_unit(clause_idx);
                 }
 
@@ -668,6 +670,7 @@ impl SaturationState {
             // Mark old clause as inactive by removing from processed/unprocessed
             self.processed.remove(&old_idx);
             self.unprocessed.retain(|&idx| idx != old_idx);
+            self.unit_equalities.remove(&old_idx);
 
             // Add the simplified clause to the new set
             self.add_clause_to_new(inference_result);

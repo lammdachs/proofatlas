@@ -2,7 +2,9 @@
 members = ["crates/proofatlas", "crates/proofatlas-wasm"]
 resolver = "2"
 
-# Optimize WASM for small code size
 [profile.release]
+opt-level = 3
+
+# WASM crate: optimize for small code size
+[profile.release.package.proofatlas-wasm]
 opt-level = "z"
-lto = true

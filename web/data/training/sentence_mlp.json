@@ -1,0 +1,14 @@
+{
+  "generated": "2026-01-24T04:55:05.120291",
+  "name": "sentence_mlp",
+  "start_time": "2026-01-24T04:55:05.120309",
+  "end_time": null,
+  "total_time_seconds": null,
+  "termination_reason": null,
+  "best_epoch": null,
+  "best_val_loss": null,
+  "model": {},
+  "training": {},
+  "epochs": [],
+  "evaluations": []
+}
