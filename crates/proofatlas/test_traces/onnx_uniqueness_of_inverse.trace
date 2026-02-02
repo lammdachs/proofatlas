@@ -1,5 +1,0 @@
-=== uniqueness_of_inverse ===
-
-age_weight: "PROOF" in 0.145s, 64 clauses
-gcn: "PROOF" in 2.153s, 290 clauses
-mlp: "TIMEOUT" in 11.333s, 1099 clauses

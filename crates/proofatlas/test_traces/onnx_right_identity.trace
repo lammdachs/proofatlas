@@ -1,5 +1,0 @@
-=== right_identity ===
-
-age_weight: "PROOF" in 0.103s, 66 clauses
-gcn: "PROOF" in 0.179s, 122 clauses
-mlp: "TIMEOUT" in 11.118s, 969 clauses

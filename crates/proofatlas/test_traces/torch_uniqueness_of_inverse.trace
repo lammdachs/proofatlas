@@ -1,6 +1,0 @@
-=== uniqueness_of_inverse ===
-
-Default:     "PROOF" in 0.005s, 37 clauses
-Torch p=0.3: "PROOF" in 0.121s, 30 clauses
-Torch p=0.5: "PROOF" in 0.008s, 30 clauses
-Torch p=0.7: "PROOF" in 0.007s, 30 clauses
