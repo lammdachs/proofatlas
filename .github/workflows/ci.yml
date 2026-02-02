@@ -18,8 +18,8 @@ jobs:
       python_ml: ${{ steps.filter.outputs.python_ml }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
@@ -50,10 +50,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Cache Cargo
-        uses: actions/cache@v3
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install PyTorch (for libtorch)
+        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure libtorch
+        run: python scripts/setup_libtorch.py
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo
@@ -68,22 +75,9 @@ jobs:
       - name: End-to-end proof tests
         run: cargo test -p proofatlas --test basic_test
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
       - name: Basic Python import test
         run: |
-          pip install -e .
+          uv pip install --system -e .
           python -c "from proofatlas import ProofState; print('OK')"
 
   # Tier 2: Selective tests based on changes (always run on schedule)
@@ -93,10 +87,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Cache Cargo
-        uses: actions/cache@v3
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install PyTorch (for libtorch)
+        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure libtorch
+        run: python scripts/setup_libtorch.py
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo
@@ -116,10 +117,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Cache Cargo
-        uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo
@@ -128,15 +128,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-ml-
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
 
       - name: Install PyTorch (for tch-rs)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Configure Cargo for tch-rs
+      - name: Configure libtorch
         run: python scripts/setup_libtorch.py
 
       - name: Run ML tests
@@ -148,10 +145,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Cache Cargo
-        uses: actions/cache@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo
@@ -159,9 +159,6 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-wasm-
-
-      - name: Install wasm target
-        run: rustup target add wasm32-unknown-unknown
 
       - name: Check WASM build
         run: cargo check -p proofatlas-wasm --target wasm32-unknown-unknown
@@ -172,26 +169,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-ml-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-ml-
+      - uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: |
-          pip install -e .
-          pip install pytest numpy
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system -e .
+          uv pip install --system pytest numpy
+          uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run Python ML tests
         run: pytest python/tests/ml/ -v

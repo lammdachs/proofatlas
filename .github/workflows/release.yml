@@ -44,12 +44,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
 
       - name: Install build deps
-        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
+        run: uv pip install --system numpy torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure libtorch
         run: python scripts/setup_libtorch.py
