@@ -23,7 +23,7 @@ pub mod sentence;
 
 pub use age_weight::AgeWeightSelector;
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
-pub use clause::ClauseSelector;
+pub use clause::{ClauseSelector, SelectorStats};
 #[cfg(feature = "ml")]
 pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]

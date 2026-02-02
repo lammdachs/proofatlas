@@ -16,7 +16,7 @@ proofatlas/
 │   │   └── src/
 │   │       ├── core/           # Terms, literals, clauses, substitutions, KBO ordering
 │   │       ├── inference/      # Inference rules: resolution, superposition, demodulation
-│   │       ├── saturation/     # Saturation loop, forward/backward subsumption
+│   │       ├── saturation/     # Saturation loop, forward/backward subsumption, profiling
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── unification/    # Most General Unifier (MGU) computation
 │   │       ├── selectors/      # Clause/literal selection strategies (tch-rs ML)
@@ -178,6 +178,19 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 ### Subsumption
 Tiered approach: duplicates → variants → units → small clauses → greedy
 
+### Profiling
+`SaturationConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `saturate()` returns `(SaturationResult, Option<SaturationProfile>)` with timing and counting data for every phase:
+
+- **Phase timings**: forward simplification, clause selection, inference generation, inference addition
+- **Sub-phase timings**: forward/backward demodulation, forward/backward subsumption
+- **Per-rule counts and timings**: resolution, superposition, factoring, equality resolution, equality factoring, demodulation
+- **Aggregate counters**: iterations, clauses generated/added/subsumed/demodulated, tautologies deleted, max set sizes
+- **Selector stats**: name, cache hits/misses, embed/score time (populated from `ClauseSelector::stats()`)
+
+Zero overhead when disabled: all instrumentation is gated on `Option::None`, costing a single predicted-not-taken branch per instrumentation point.
+
+`SaturationProfile` implements `serde::Serialize` with `Duration` fields serialized as `f64` seconds. From Python, pass `enable_profiling=True` to `run_saturation()` to receive the profile as a JSON string in the third return element: `(proof_found, status, profile_json)`.
+
 ## ML Architecture
 
 **Workflow**: Train in PyTorch → Export to TorchScript → Load in Rust/tch-rs
@@ -187,6 +200,8 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 | age_weight | ✓ | - | Heuristic, no training |
 | gcn | ✓ | ✓ | Graph Convolutional Network |
 | sentence | ✓ | ✓ | Sentence transformer (MiniLM) |
+
+Selectors implement the `ClauseSelector` trait. The optional `stats()` method returns `SelectorStats` (cache hits/misses, embed/score time). `CachingSelector` tracks these automatically; `AgeWeightSelector` returns `None`.
 
 ML selectors use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch (CPU and CUDA if available) is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
 

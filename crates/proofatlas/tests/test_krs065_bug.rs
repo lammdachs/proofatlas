@@ -22,8 +22,8 @@ fn test_simple_resolution_proof() {
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
     
-    let result = saturate(formula, config, selector);
-    
+    let (result, _) = saturate(formula, config, selector);
+
     match &result {
         SaturationResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
@@ -41,7 +41,7 @@ fn test_simple_resolution_proof() {
             println!("TIMEOUT with {} clauses", clauses.len());
         }
     }
-    
+
     assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof!");
 }
 
@@ -53,18 +53,18 @@ fn test_with_duplicate_clause() {
         cnf(c5, axiom, cowlNothing(sk0)).
         cnf(c7, axiom, cowlNothing(sk0)).
     ";
-    
+
     let formula = parse_tptp(tptp, &[], None).expect("parse failed");
     println!("Parsed {} clauses", formula.clauses.len());
     for (i, c) in formula.clauses.iter().enumerate() {
         println!("  [{}] {}", i, c);
     }
-    
+
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
-    
-    let result = saturate(formula, config, selector);
-    
+
+    let (result, _) = saturate(formula, config, selector);
+
     match &result {
         SaturationResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
@@ -89,7 +89,7 @@ fn test_with_duplicate_clause() {
             println!("TIMEOUT with {} clauses", clauses.len());
         }
     }
-    
+
     assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof even with duplicate!");
 }
 
@@ -122,7 +122,7 @@ fn test_with_precloned_clauses() {
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
     
     let state = SaturationState::new(cloned_clauses, config, selector);
-    let result = state.saturate();
+    let (result, _) = state.saturate();
     
     match &result {
         SaturationResult::Proof(proof) => {

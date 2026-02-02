@@ -94,6 +94,7 @@ def main():
     )
     parser.add_argument("--include", action="append", dest="include_dirs", help="Add include directory")
     parser.add_argument("--json", dest="json_output", help="Export proof attempt to JSON file")
+    parser.add_argument("--profile", action="store_true", help="Enable profiling (included in --json output)")
     parser.add_argument("--verbose", action="store_true", help="Show detailed output")
 
     args = parser.parse_args()
@@ -216,7 +217,7 @@ def main():
     remaining_timeout = max(0.1, timeout - parse_time)
 
     try:
-        proof_found, status = state.run_saturation(
+        proof_found, status, profile_json = state.run_saturation(
             max_iterations if max_iterations > 0 else max_clauses,
             remaining_timeout,
             age_weight_ratio if not embedding_type else None,
@@ -224,6 +225,7 @@ def main():
             str(weights_path) if weights_path else None,
             model_name,
             None,  # max_clause_memory_mb
+            enable_profiling=args.profile,
         )
     except Exception as e:
         print(f"Error during saturation: {e}", file=sys.stderr)
@@ -261,6 +263,8 @@ def main():
                 "final_clauses": state.num_clauses(),
             },
         }
+        if profile_json is not None:
+            result_data["profile"] = json.loads(profile_json)
         try:
             with open(args.json_output, "w") as f:
                 json.dump(result_data, f, indent=2)

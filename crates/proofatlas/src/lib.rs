@@ -36,7 +36,8 @@ pub use selectors::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 pub use selectors::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
 
 pub use saturation::{
-    saturate, LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState,
+    saturate, LiteralSelectionStrategy, SaturationConfig, SaturationProfile, SaturationResult,
+    SaturationState,
 };
 
 pub use unification::{unify, UnificationError, UnificationResult};

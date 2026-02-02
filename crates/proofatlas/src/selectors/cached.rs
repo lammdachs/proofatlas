@@ -15,8 +15,10 @@
 //! - Clear separation between expensive embedding computation and cheap scoring
 
 use crate::core::Clause;
+use super::clause::SelectorStats;
 use super::ClauseSelector;
 use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 /// Trait for models that compute clause embeddings
 ///
@@ -66,6 +68,14 @@ pub struct CachingSelector<E: ClauseEmbedder, S: EmbeddingScorer> {
     cache: HashMap<usize, Vec<f32>>,
     /// RNG state for sampling
     rng_state: u64,
+    /// Accumulated cache hits
+    cache_hits: usize,
+    /// Accumulated cache misses
+    cache_misses: usize,
+    /// Accumulated embedding time
+    embed_time: Duration,
+    /// Accumulated scoring time
+    score_time: Duration,
 }
 
 impl<E: ClauseEmbedder, S: EmbeddingScorer> std::fmt::Debug for CachingSelector<E, S> {
@@ -86,6 +96,10 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
             scorer,
             cache: HashMap::new(),
             rng_state: 12345,
+            cache_hits: 0,
+            cache_misses: 0,
+            embed_time: Duration::ZERO,
+            score_time: Duration::ZERO,
         }
     }
 
@@ -131,6 +145,11 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
             .filter(|idx| !self.cache.contains_key(idx))
             .collect();
 
+        // Track cache hits/misses
+        let cached_count = unprocessed.len() - uncached_indices.len();
+        self.cache_hits += cached_count;
+        self.cache_misses += uncached_indices.len();
+
         // Compute embeddings for uncached clauses
         if !uncached_indices.is_empty() {
             let uncached_clauses: Vec<&Clause> = uncached_indices
@@ -138,7 +157,9 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
                 .map(|&idx| &clauses[idx])
                 .collect();
 
+            let t0 = Instant::now();
             let embeddings = self.embedder.embed_batch(&uncached_clauses);
+            self.embed_time += t0.elapsed();
 
             for (idx, embedding) in uncached_indices.into_iter().zip(embeddings.into_iter()) {
                 self.cache.insert(idx, embedding);
@@ -152,7 +173,9 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
             .collect();
 
         // Score all embeddings
+        let t0 = Instant::now();
         let scores = self.scorer.score_batch(&embeddings);
+        self.score_time += t0.elapsed();
 
         // Softmax sampling
         let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -183,6 +206,19 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
     fn reset(&mut self) {
         self.cache.clear();
         self.rng_state = 12345;
+        self.cache_hits = 0;
+        self.cache_misses = 0;
+        self.embed_time = Duration::ZERO;
+        self.score_time = Duration::ZERO;
+    }
+
+    fn stats(&self) -> Option<SelectorStats> {
+        Some(SelectorStats {
+            cache_hits: self.cache_hits,
+            cache_misses: self.cache_misses,
+            embed_time: self.embed_time,
+            score_time: self.score_time,
+        })
     }
 }
 

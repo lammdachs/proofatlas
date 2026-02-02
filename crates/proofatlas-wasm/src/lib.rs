@@ -114,6 +114,7 @@ impl ProofAtlasWasm {
             timeout: Duration::from_millis(options.timeout_ms as u64),
             literal_selection,
             max_clause_memory_mb: None,
+            enable_profiling: false,
         };
 
         web_sys::console::log_1(&"Config created, creating clause selector...".into());
@@ -134,7 +135,7 @@ impl ProofAtlasWasm {
 
         // Run saturation
         let state = SaturationState::new(cnf.clauses, config, clause_selector);
-        let result = state.saturate();
+        let (result, _profile) = state.saturate();
         
         web_sys::console::log_1(&"Saturation completed".into());
         

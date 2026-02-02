@@ -643,7 +643,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     remaining_timeout = max(0.1, timeout - elapsed_parsing)
 
     try:
-        proof_found, status = state.run_saturation(
+        proof_found, status, _ = state.run_saturation(
             max_iterations,
             float(remaining_timeout),
             float(age_weight_ratio) if not is_learned else None,

@@ -46,6 +46,7 @@
 //!   are "active" (in A ∪ P) vs "pending" (in N). Only active clauses participate
 //!   in subsumption checks, preventing self-subsumption of new clauses.
 
+use super::profile::SaturationProfile;
 use super::subsumption::SubsumptionChecker;
 use crate::core::{Clause, Proof, ProofStep};
 use crate::inference::{
@@ -72,6 +73,8 @@ pub struct SaturationConfig {
     pub literal_selection: LiteralSelectionStrategy,
     /// Memory limit for clause storage in MB (directly comparable across provers)
     pub max_clause_memory_mb: Option<usize>,
+    /// Enable structured profiling (zero overhead when false)
+    pub enable_profiling: bool,
 }
 
 /// Literal selection strategies (numbers match Vampire's --selection option)
@@ -102,6 +105,7 @@ impl Default for SaturationConfig {
             timeout: Duration::from_secs(60),
             literal_selection: LiteralSelectionStrategy::Sel0,
             max_clause_memory_mb: None,
+            enable_profiling: false,
         }
     }
 }
@@ -288,16 +292,28 @@ impl SaturationState {
         &self.clauses
     }
 
-    pub fn saturate(mut self) -> SaturationResult {
+    pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>) {
+        let mut profile = if self.config.enable_profiling {
+            Some(SaturationProfile::default())
+        } else {
+            None
+        };
+
         let start_time = Instant::now();
 
         let result = loop {
             // Forward simplification: process new clauses until fixed point, move to unprocessed
-            if let Some(result) = self.forward_simplify_new() {
+            let t0 = profile.as_ref().map(|_| Instant::now());
+            let fwd_result = self.forward_simplify_new(&mut profile);
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.forward_simplify_time += t.elapsed();
+            }
+            if let Some(result) = fwd_result {
                 break result;
             }
 
             // Select given clause from unprocessed
+            let t0 = profile.as_ref().map(|_| Instant::now());
             let given_idx = match self.select_given_clause() {
                 Some(idx) => idx,
                 None => {
@@ -308,6 +324,9 @@ impl SaturationState {
                     );
                 }
             };
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.select_given_time += t.elapsed();
+            }
 
             // Check clause memory limit (directly comparable across provers)
             if let Some(limit_mb) = self.config.max_clause_memory_mb {
@@ -338,6 +357,19 @@ impl SaturationState {
 
             self.current_iteration += 1;
 
+            // Track max sizes
+            if let Some(p) = profile.as_mut() {
+                p.iterations = self.current_iteration;
+                let up_size = self.unprocessed.len();
+                let pr_size = self.processed.len();
+                if up_size > p.max_unprocessed_size {
+                    p.max_unprocessed_size = up_size;
+                }
+                if pr_size > p.max_processed_size {
+                    p.max_processed_size = pr_size;
+                }
+            }
+
             // Check if given clause is empty
             let given_clause = &self.clauses[given_idx];
             if given_clause.is_empty() {
@@ -359,12 +391,18 @@ impl SaturationState {
             });
 
             // Generate new clauses by inference with processed clauses
-            let new_inferences = self.generate_inferences(given_idx);
+            let t0 = profile.as_ref().map(|_| Instant::now());
+            let new_inferences = self.generate_inferences(given_idx, &mut profile);
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.generate_inferences_time += t.elapsed();
+                p.clauses_generated += new_inferences.len();
+            }
 
             // Move given clause to processed
             self.processed.insert(given_idx);
 
             // Add new inferences to new set (deduplicate within the batch first)
+            let t0 = profile.as_ref().map(|_| Instant::now());
             let mut seen_in_batch = HashSet::new();
             for inference in new_inferences {
                 // Orient the clause first to get canonical form
@@ -372,17 +410,39 @@ impl SaturationState {
                 orient_clause_equalities(&mut oriented);
                 let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
-                    self.add_clause_to_new(inference);
+                    if self.add_clause_to_new(inference).is_some() {
+                        if let Some(p) = profile.as_mut() {
+                            p.clauses_added += 1;
+                        }
+                    }
                 }
+            }
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.add_inferences_time += t.elapsed();
             }
         };
 
-        result
+        // Finalize profile
+        if let Some(p) = profile.as_mut() {
+            p.total_time = start_time.elapsed();
+            p.selector_name = self.clause_selector.name().to_string();
+            if let Some(stats) = self.clause_selector.stats() {
+                p.selector_cache_hits = stats.cache_hits;
+                p.selector_cache_misses = stats.cache_misses;
+                p.selector_embed_time = stats.embed_time;
+                p.selector_score_time = stats.score_time;
+            }
+        }
+
+        (result, profile)
     }
 
     /// Process new clauses: forward simplify by A ∪ P, then backward simplify A and P
     /// Returns Some(result) if empty clause found
-    fn forward_simplify_new(&mut self) -> Option<SaturationResult> {
+    fn forward_simplify_new(
+        &mut self,
+        profile: &mut Option<SaturationProfile>,
+    ) -> Option<SaturationResult> {
         while let Some(clause_idx) = self.new.pop_front() {
             let clause = &self.clauses[clause_idx];
 
@@ -394,6 +454,7 @@ impl SaturationState {
             // Iterate only over known unit equalities (not all clauses)
             let unit_eq_indices: Vec<usize> = self.unit_equalities.iter().copied().collect();
 
+            let t0 = profile.as_ref().map(|_| Instant::now());
             for unit_idx in unit_eq_indices {
                 let unit_clause = &self.clauses[unit_idx];
                 let results =
@@ -403,18 +464,36 @@ impl SaturationState {
                     orient_clause_equalities(&mut current_clause);
                     demod_premise = Some(unit_idx);
                     simplified = true;
+                    if let Some(p) = profile.as_mut() {
+                        p.clauses_demodulated_forward += 1;
+                        p.demodulation_count += 1;
+                    }
                     break;
                 }
+            }
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.forward_demod_time += t.elapsed();
             }
 
             if simplified {
                 // Check if simplified to tautology
                 if current_clause.is_tautology() {
+                    if let Some(p) = profile.as_mut() {
+                        p.tautologies_deleted += 1;
+                    }
                     continue;
                 }
 
                 // Check if subsumed after simplification
-                if self.subsumption_checker.is_subsumed(&current_clause) {
+                let t0 = profile.as_ref().map(|_| Instant::now());
+                let subsumed = self.subsumption_checker.is_subsumed(&current_clause);
+                if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                    p.forward_subsumption_time += t.elapsed();
+                }
+                if subsumed {
+                    if let Some(p) = profile.as_mut() {
+                        p.clauses_subsumed_forward += 1;
+                    }
                     continue;
                 }
 
@@ -452,7 +531,15 @@ impl SaturationState {
                 }
             } else {
                 // DeleteFwd: check if subsumed by A ∪ P
-                if self.subsumption_checker.is_subsumed(&current_clause) {
+                let t0 = profile.as_ref().map(|_| Instant::now());
+                let subsumed = self.subsumption_checker.is_subsumed(&current_clause);
+                if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                    p.forward_subsumption_time += t.elapsed();
+                }
+                if subsumed {
+                    if let Some(p) = profile.as_mut() {
+                        p.clauses_subsumed_forward += 1;
+                    }
                     continue;
                 }
 
@@ -465,6 +552,7 @@ impl SaturationState {
                 }
 
                 // DeleteBwd: remove clauses in P and A subsumed by this clause
+                let t0 = profile.as_ref().map(|_| Instant::now());
                 let all_other: Vec<usize> = self
                     .processed
                     .iter()
@@ -474,15 +562,27 @@ impl SaturationState {
                 let subsumed = self
                     .subsumption_checker
                     .find_subsumed_by(clause_idx, &all_other);
+                if let Some(p) = profile.as_mut() {
+                    p.clauses_subsumed_backward += subsumed.len();
+                }
                 for idx in subsumed {
                     self.processed.remove(&idx);
                     self.unprocessed.retain(|&x| x != idx);
                     self.unit_equalities.remove(&idx);
                 }
+                if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                    p.backward_subsumption_time += t.elapsed();
+                }
 
                 // SimplifyBwd: if this clause is a unit equality, simplify P and A
                 if Self::is_unit_equality(&self.clauses[clause_idx]) {
+                    let t0 = profile.as_ref().map(|_| Instant::now());
+                    let new_before = self.new.len();
                     self.backward_demodulate_with_unit(clause_idx);
+                    if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                        p.backward_demod_time += t.elapsed();
+                        p.clauses_demodulated_backward += self.new.len().saturating_sub(new_before);
+                    }
                 }
 
                 // Transfer: move to unprocessed (P)
@@ -500,25 +600,49 @@ impl SaturationState {
     }
 
     /// Generate all inferences between given clause and processed clauses
-    fn generate_inferences(&self, given_idx: usize) -> Vec<InferenceResult> {
+    fn generate_inferences(
+        &self,
+        given_idx: usize,
+        profile: &mut Option<SaturationProfile>,
+    ) -> Vec<InferenceResult> {
         let mut results = Vec::new();
         let given_clause = &self.clauses[given_idx];
         let selector = self.literal_selector.as_ref();
 
         // Factoring on given clause
+        let t0 = profile.as_ref().map(|_| Instant::now());
+        let before = results.len();
         results.extend(factoring(given_clause, given_idx, selector));
+        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+            p.factoring_count += results.len() - before;
+            p.factoring_time += t.elapsed();
+        }
 
         // Equality resolution on given clause
+        let t0 = profile.as_ref().map(|_| Instant::now());
+        let before = results.len();
         results.extend(equality_resolution(given_clause, given_idx, selector));
+        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+            p.equality_resolution_count += results.len() - before;
+            p.equality_resolution_time += t.elapsed();
+        }
 
         // Equality factoring on given clause
+        let t0 = profile.as_ref().map(|_| Instant::now());
+        let before = results.len();
         results.extend(equality_factoring(given_clause, given_idx, selector));
+        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+            p.equality_factoring_count += results.len() - before;
+            p.equality_factoring_time += t.elapsed();
+        }
 
         // Inferences with each processed clause
         for &processed_idx in &self.processed {
             let processed_clause = &self.clauses[processed_idx];
 
             // Resolution
+            let t0 = profile.as_ref().map(|_| Instant::now());
+            let before = results.len();
             results.extend(resolution(
                 given_clause,
                 processed_clause,
@@ -533,8 +657,14 @@ impl SaturationState {
                 given_idx,
                 selector,
             ));
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.resolution_count += results.len() - before;
+                p.resolution_time += t.elapsed();
+            }
 
             // Superposition
+            let t0 = profile.as_ref().map(|_| Instant::now());
+            let before = results.len();
             results.extend(superposition(
                 given_clause,
                 processed_clause,
@@ -549,10 +679,16 @@ impl SaturationState {
                 given_idx,
                 selector,
             ));
+            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+                p.superposition_count += results.len() - before;
+                p.superposition_time += t.elapsed();
+            }
         }
 
         // IMPORTANT: Also do self-inferences (given clause with itself)
         // This is needed for cases like associativity self-superposition
+        let t0 = profile.as_ref().map(|_| Instant::now());
+        let before = results.len();
         results.extend(resolution(
             given_clause,
             given_clause,
@@ -560,6 +696,13 @@ impl SaturationState {
             given_idx,
             selector,
         ));
+        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+            p.resolution_count += results.len() - before;
+            p.resolution_time += t.elapsed();
+        }
+
+        let t0 = profile.as_ref().map(|_| Instant::now());
+        let before = results.len();
         results.extend(superposition(
             given_clause,
             given_clause,
@@ -567,6 +710,10 @@ impl SaturationState {
             given_idx,
             selector,
         ));
+        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
+            p.superposition_count += results.len() - before;
+            p.superposition_time += t.elapsed();
+        }
 
         results
     }
@@ -737,11 +884,74 @@ mod tests {
         ];
 
         let formula = CNFFormula { clauses };
-        let result = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
+        let (result, profile) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
 
         match result {
             SaturationResult::Proof(_) => {} // Expected
             _ => panic!("Expected to find proof"),
         }
+        assert!(profile.is_none(), "Profiling should be disabled by default");
+    }
+
+    #[test]
+    fn test_profiling_enabled() {
+        let p = PredicateSymbol {
+            name: "P".to_string(),
+            arity: 1,
+        };
+        let q = PredicateSymbol {
+            name: "Q".to_string(),
+            arity: 1,
+        };
+        let a = Term::Constant(Constant {
+            name: "a".to_string(),
+        });
+        let x = Term::Variable(Variable {
+            name: "X".to_string(),
+        });
+
+        let clauses = vec![
+            Clause::new(vec![Literal::positive(Atom {
+                predicate: p.clone(),
+                args: vec![a.clone()],
+            })]),
+            Clause::new(vec![
+                Literal::negative(Atom {
+                    predicate: p.clone(),
+                    args: vec![x.clone()],
+                }),
+                Literal::positive(Atom {
+                    predicate: q.clone(),
+                    args: vec![x.clone()],
+                }),
+            ]),
+            Clause::new(vec![Literal::negative(Atom {
+                predicate: q.clone(),
+                args: vec![a.clone()],
+            })]),
+        ];
+
+        let formula = CNFFormula { clauses };
+        let mut config = SaturationConfig::default();
+        config.enable_profiling = true;
+        let (result, profile) = crate::saturation::saturate(formula, config, create_selector());
+
+        match result {
+            SaturationResult::Proof(_) => {}
+            _ => panic!("Expected to find proof"),
+        }
+
+        let profile = profile.expect("Profile should be present when enabled");
+        assert!(profile.total_time.as_nanos() > 0, "total_time should be non-zero");
+        assert!(profile.iterations > 0, "iterations should be non-zero");
+        assert!(profile.resolution_count > 0, "should have resolution inferences");
+        assert_eq!(profile.selector_name, "AgeWeight");
+
+        // Verify JSON serialization works
+        let json = serde_json::to_string(&profile).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value["total_time"].as_f64().unwrap() > 0.0);
+        assert!(value["iterations"].as_u64().unwrap() > 0);
+        assert_eq!(value["selector_name"].as_str().unwrap(), "AgeWeight");
     }
 }

@@ -7,6 +7,16 @@
 
 use crate::core::Clause;
 use std::collections::VecDeque;
+use std::time::Duration;
+
+/// Accumulated statistics from a clause selector.
+#[derive(Debug, Clone, Default)]
+pub struct SelectorStats {
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub embed_time: Duration,
+    pub score_time: Duration,
+}
 
 /// Trait for clause selection strategies
 ///
@@ -22,4 +32,9 @@ pub trait ClauseSelector: Send {
 
     /// Reset any internal state (e.g., caches) when starting a new problem
     fn reset(&mut self) {}
+
+    /// Return accumulated selector statistics, if tracked.
+    fn stats(&self) -> Option<SelectorStats> {
+        None
+    }
 }

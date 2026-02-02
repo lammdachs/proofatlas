@@ -518,11 +518,12 @@ impl ProofState {
     ///     model_name: Name of the model file (without .pt extension).
     ///                 Uses "{embedding}_{scorer}" format (e.g., "gcn_mlp", "sentence_attention").
     ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
+    ///     enable_profiling: Enable structured profiling (default: false).
+    ///                       When enabled, the third element of the return tuple is a JSON string.
     ///
     /// Returns:
-    ///     Tuple of (proof_found: bool, status: str) where status is one of:
-    ///     "proof", "saturated", "resource_limit" (includes timeout, clause limit, iteration limit, max_clause_memory_mb)
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None, use_cuda=None))]
+    ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str])
+    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None, use_cuda=None, enable_profiling=None))]
     pub fn run_saturation(
         &mut self,
         max_iterations: usize,
@@ -533,7 +534,8 @@ impl ProofState {
         model_name: Option<String>,
         max_clause_memory_mb: Option<usize>,
         use_cuda: Option<bool>,
-    ) -> PyResult<(bool, String)> {
+        enable_profiling: Option<bool>,
+    ) -> PyResult<(bool, String, Option<String>)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
@@ -632,6 +634,7 @@ impl ProofState {
             timeout,
             literal_selection,
             max_clause_memory_mb,
+            enable_profiling: enable_profiling.unwrap_or(false),
         };
 
         // Create saturation state from current clauses
@@ -639,12 +642,18 @@ impl ProofState {
         let state = SaturationState::new(initial_clauses, config, clause_selector);
 
         // Run saturation in a thread with larger stack to handle deep recursion
-        let result = std::thread::Builder::new()
+        let (result, profile) = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || state.saturate())
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
             .join()
             .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
+
+        // Serialize profile to JSON if present
+        let profile_json = profile
+            .map(|p| serde_json::to_string(&p))
+            .transpose()
+            .map_err(|e| PyValueError::new_err(format!("Profile serialization failed: {}", e)))?;
 
         // Copy back the results
         let (proof_found, status, final_clauses, proof_steps) = match result {
@@ -677,7 +686,7 @@ impl ProofState {
             });
         }
 
-        Ok((proof_found, status.to_string()))
+        Ok((proof_found, status.to_string(), profile_json))
     }
 
     /// Get statistics

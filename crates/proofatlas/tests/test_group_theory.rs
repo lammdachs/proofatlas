@@ -41,7 +41,7 @@ fn run_group_problem(
     // Run saturation
     let state = SaturationState::new(formula.clauses, config, create_selector());
     let start_time = std::time::Instant::now();
-    let result = state.saturate();
+    let (result, _) = state.saturate();
     let elapsed = start_time.elapsed();
 
     // Add result to trace

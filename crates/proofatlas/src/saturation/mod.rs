@@ -1,8 +1,10 @@
 //! Saturation-based theorem proving using the given clause algorithm
 
+pub mod profile;
 mod state;
 pub mod subsumption;
 
+pub use profile::SaturationProfile;
 pub use state::{LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState};
 
 use crate::core::CNFFormula;
@@ -13,7 +15,7 @@ pub fn saturate(
     formula: CNFFormula,
     config: SaturationConfig,
     clause_selector: Box<dyn ClauseSelector>,
-) -> SaturationResult {
+) -> (SaturationResult, Option<SaturationProfile>) {
     let state = SaturationState::new(formula.clauses, config, clause_selector);
     state.saturate()
 }
