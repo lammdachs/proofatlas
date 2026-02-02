@@ -10,7 +10,7 @@ on:
 jobs:
   # Detect what changed
   detect-changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
       rust_ml: ${{ steps.filter.outputs.rust_ml }}
@@ -47,7 +47,7 @@ jobs:
 
   # Tier 1: Critical tests (always run)
   critical-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
   rust-core-tests:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.rust_core == 'true' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -114,7 +114,7 @@ jobs:
   rust-ml-tests:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.rust_ml == 'true' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +142,7 @@ jobs:
   rust-wasm-tests:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.rust_wasm == 'true' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -166,7 +166,7 @@ jobs:
   python-ml-tests:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.python_ml == 'true' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -191,7 +191,7 @@ jobs:
       needs.detect-changes.outputs.rust_ml == 'false' &&
       needs.detect-changes.outputs.rust_wasm == 'false' &&
       needs.detect-changes.outputs.python_ml == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Documentation-only changes
         run: echo "Only documentation changed, skipping component tests"
