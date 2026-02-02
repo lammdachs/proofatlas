@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "proofatlas"
-version = "0.2.0"
+version = "0.2.0a1"
 description = "High-performance theorem prover for first-order logic"
 authors = [{name = "ProofAtlas Contributors"}]
 requires-python = ">=3.10"
