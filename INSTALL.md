@@ -2,51 +2,52 @@
 
 ## Prerequisites
 
-- Python 3.8 or later
-- Rust toolchain (install from https://rustup.rs/)
+- Python 3.10 or later
 
-## Installation
+## Installation (pip)
 
-### With GPU Support (Recommended)
-
-Install PyTorch with CUDA first, then install proofatlas:
+Install PyTorch first (to choose your CUDA version), then install proofatlas:
 
 ```bash
-# Install PyTorch 2.9 with CUDA (adjust cuda version as needed)
-pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu124
+# GPU (adjust CUDA version as needed, see https://pytorch.org/)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install proofatlas
 
-# Clone and install proofatlas
+# CPU only
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install proofatlas
+```
+
+## Installation (from source)
+
+For development or if no pre-built wheel is available for your platform:
+
+```bash
+# Clone
 git clone https://github.com/lexpk/proofatlas.git
 cd proofatlas
-maturin develop
+
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Run setup (installs deps, auto-detects CUDA, builds extension)
+python scripts/setup.py
 
 # Verify
 proofatlas --list
 ```
 
-### CPU Only
+The setup script handles everything: installs Rust (if missing), Python dependencies, configures libtorch, and builds the extension.
+
+### Setup options
 
 ```bash
-git clone https://github.com/lexpk/proofatlas.git
-cd proofatlas
-maturin develop
+python scripts/setup.py                  # Full setup (auto-detects GPU)
+python scripts/setup.py --cpu            # Force CPU-only torch
+python scripts/setup.py --skip-external  # Skip TPTP/Vampire/SPASS downloads
+python scripts/setup.py --skip-wasm      # Skip WASM build
 ```
-
-This installs CPU-only PyTorch automatically.
-
-### What happens during install
-
-- Installs PyTorch 2.9.0 (if not already installed)
-- Builds Rust extension with Python bindings and ML features (both are default Cargo features)
-- At runtime, `proofatlas/__init__.py` preloads libtorch (CPU + CUDA if available) from your PyTorch installation
-
-### With Development Dependencies
-
-```bash
-pip install -e ".[dev]"
-```
-
-This adds pytest, black, ruff, mypy for development.
 
 ## Running the Prover
 
@@ -107,31 +108,23 @@ proofatlas-bench --kill
 proofatlas-bench --list
 ```
 
-## Developer Setup
-
-For development with `cargo test` and `cargo build`, you need `.cargo/config.toml` to point at your PyTorch installation so the linker can find libtorch at runtime:
-
-```bash
-python scripts/setup_cargo.py
-```
-
-Re-run this after switching Python environments. This is only needed for the `cargo` workflow; `pip install -e .` handles it automatically.
-
 ## Common Issues
 
-1. **Rust not found**
+1. **No virtual environment**
+   - The setup script requires an active venv. See instructions above.
+
+2. **Rust not found**
    - Install Rust from https://rustup.rs/
 
-2. **Build fails with libtorch errors**
-   - Ensure PyTorch 2.9.0 is installed
-   - Run `python scripts/setup_cargo.py` to regenerate `.cargo/config.toml`
+3. **Build fails with libtorch errors**
+   - Ensure PyTorch >=2.9 is installed
+   - Re-run `python scripts/setup.py` to regenerate `.cargo/config.toml`
 
-3. **`cargo test` fails with `libtorch_cpu.so: cannot open shared object file`**
-   - Run `python scripts/setup_cargo.py` to update the rpath in `.cargo/config.toml`
+4. **`cargo test` fails with `libtorch_cpu.so: cannot open shared object file`**
+   - Run `python scripts/setup_libtorch.py` to update the rpath in `.cargo/config.toml`
 
-4. **Changed Python environment**
-   - Run `python scripts/setup_cargo.py` to update libtorch paths
-   - Re-run `pip install -e .` if using the Python package
+5. **Changed Python environment**
+   - Run `python scripts/setup.py` in the new environment
 
 ## Project Structure
 

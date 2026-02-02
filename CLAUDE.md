@@ -34,9 +34,10 @@ proofatlas/
 ├── configs/                    # JSON configuration for provers, training, benchmarks
 │
 ├── scripts/                    # Utility scripts
+│   ├── setup.py                # One-command project setup
 │   ├── bench.py                # Multi-prover benchmarking with trace collection
 │   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
+│   └── setup_*.py              # Setup libtorch, TPTP, Vampire, SPASS
 │
 ├── .data/                      # Runtime data (gitignored)
 │   ├── traces/                 # Proof search traces
@@ -55,7 +56,7 @@ proofatlas/
 maturin develop                     # Build and install into Python environment
 ```
 
-**Note:** The `python` and `ml` Cargo features are enabled by default. The WASM crate opts out via `default-features = false`. After switching Python environments, re-run `python scripts/setup_cargo.py` to update libtorch paths in `.cargo/config.toml`.
+**Note:** The `python` and `ml` Cargo features are enabled by default. The WASM crate opts out via `default-features = false`. After switching Python environments, re-run `python scripts/setup_libtorch.py` to update libtorch paths in `.cargo/config.toml`.
 
 ### Running the Prover
 

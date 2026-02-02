@@ -137,7 +137,7 @@ jobs:
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure Cargo for tch-rs
-        run: python scripts/setup_cargo.py
+        run: python scripts/setup_libtorch.py
 
       - name: Run ML tests
         run: "cargo test -p proofatlas --features ml ml::"

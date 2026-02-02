@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0", "torch==2.9.0"]
+requires = ["maturin>=1.0,<2.0", "torch>=2.9"]
 build-backend = "maturin"
 
 [project]
@@ -7,7 +7,7 @@ name = "proofatlas"
 version = "0.2.0"
 description = "High-performance theorem prover for first-order logic"
 authors = [{name = "ProofAtlas Contributors"}]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 readme = "README.md"
 license = "MIT"
 keywords = ["theorem-proving", "automated-reasoning", "logic", "first-order-logic", "ATP"]
@@ -16,19 +16,19 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 # Core dependencies
 dependencies = [
+    "numpy",
     "tqdm",
-    "torch==2.9.0",
+    "torch>=2.9",
 ]
 
 [project.scripts]
@@ -59,16 +59,13 @@ module-name = "proofatlas.proofatlas"
 
 [tool.ruff]
 line-length = 100
-target-version = "py37"
 extend-exclude = ["crates/"]
 
 [tool.black]
 line-length = 100
-target-version = ['py37']
 extend-exclude = "crates/"
 
 [tool.mypy]
-python_version = "3.7"
 warn_return_any = true
 warn_unused_configs = true
 exclude = ["crates/", "build/", "dist/"]

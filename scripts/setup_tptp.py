@@ -10,7 +10,6 @@ Usage:
 """
 
 import json
-import subprocess
 import tarfile
 import time
 import urllib.request

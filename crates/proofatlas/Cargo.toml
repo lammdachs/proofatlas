@@ -25,8 +25,7 @@ pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 numpy = { version = "0.23", optional = true }
 
 # PyTorch bindings (for GPU inference via libtorch)
-# Using tch 0.22 which supports PyTorch 2.9
-tch = { version = "0.22", optional = true }
+tch = { version = ">=0.22", optional = true }
 
 # Tokenizers (for sentence encoder)
 tokenizers = { version = "0.20", optional = true }

@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-wheels:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          manylinux: auto
+          args: --release -o dist -i python${{ matrix.python }}
+          before-script-linux: |
+            pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
+            python scripts/setup_libtorch.py
+        env:
+          LIBTORCH_USE_PYTORCH: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.python }}
+          path: dist/
+
+  macos-wheels:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: macos-13
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build deps
+        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure libtorch
+        run: python scripts/setup_libtorch.py
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release -o dist
+        env:
+          LIBTORCH_USE_PYTORCH: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: -o dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+  publish:
+    needs: [linux-wheels, macos-wheels, sdist]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '{wheels-*,sdist}'
+          merge-multiple: true
+          path: dist/
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --non-interactive dist/*
