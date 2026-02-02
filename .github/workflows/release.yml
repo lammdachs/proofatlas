@@ -8,19 +8,19 @@ on:
 permissions:
   contents: read
 
+# TODO: Add macOS wheels (arm64 + x86_64) and Python 3.10/3.11/3.13 matrix
+# once bugs are resolved. See git history for full matrix config.
+
 jobs:
   linux-wheels:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - uses: PyO3/maturin-action@v1
         with:
           manylinux: auto
-          args: --release -o dist -i python${{ matrix.python }}
+          args: --release -o dist -i python3.12
           before-script-linux: |
             pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
             python scripts/setup_libtorch.py
@@ -29,56 +29,17 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.python }}
-          path: dist/
-
-  macos-wheels:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        python: ['3.10', '3.11', '3.12', '3.13']
-        os: [macos-14, macos-13]
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Install build deps
-        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure libtorch
-        run: python scripts/setup_libtorch.py
-
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release -o dist
-        env:
-          LIBTORCH_USE_PYTORCH: "1"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.target }}-${{ matrix.python }}
+          name: wheels-linux
           path: dist/
 
   windows-wheels:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
 
       - name: Install build deps
         run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
@@ -95,26 +56,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-windows-${{ matrix.python }}
-          path: dist/
-
-  sdist:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: -o dist
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
+          name: wheels-windows
           path: dist/
 
   publish:
-    needs: [linux-wheels, macos-wheels, windows-wheels, sdist]
+    needs: [linux-wheels, windows-wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi
@@ -123,7 +69,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '{wheels-*,sdist}'
+          pattern: 'wheels-*'
           merge-multiple: true
           path: dist/
 
