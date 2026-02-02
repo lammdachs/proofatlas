@@ -660,3 +660,132 @@ footer a:hover {
 .footer-links a:hover {
     text-decoration: underline;
 }
+
+/* Config preset row */
+.config-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+    width: 100%;
+    flex-wrap: wrap;
+}
+
+.config-row label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+}
+
+.config-row select {
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    min-width: 200px;
+}
+
+.server-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.server-status.connected {
+    background: #d4edda;
+    color: #155724;
+}
+
+.server-status.browser-only {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.config-json-details {
+    width: 100%;
+}
+
+.config-json-details summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: #6c757d;
+}
+
+.config-json-details summary:hover {
+    color: #495057;
+}
+
+.config-json {
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    resize: none;
+    tab-size: 2;
+    overflow: hidden;
+    field-sizing: content;
+}
+
+/* Profiling section */
+.profile-section {
+    margin-bottom: 20px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: #f8f9fa;
+}
+
+.profile-section summary {
+    padding: 10px 15px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    color: #495057;
+}
+
+.profile-section summary:hover {
+    background: #e9ecef;
+}
+
+#profile-content {
+    padding: 15px;
+}
+
+.profile-group {
+    margin-bottom: 15px;
+}
+
+.profile-group h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.profile-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.profile-table td {
+    padding: 3px 10px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.profile-table td:first-child {
+    color: #495057;
+    width: 60%;
+}
+
+.profile-table td:last-child {
+    font-family: 'Consolas', 'Monaco', monospace;
+    text-align: right;
+    color: #212529;
+}

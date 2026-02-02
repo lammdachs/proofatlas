@@ -202,7 +202,7 @@ class TestRustIntegration:
         """)
 
         # Run saturation to find proof
-        proof_found, status, _ = state.run_saturation(1000, 10.0)
+        proof_found, status, _ = state.run_saturation(timeout=10.0, max_iterations=1000)
 
         if proof_found:
             # Extract structured trace
@@ -233,7 +233,7 @@ class TestRustIntegration:
             cnf(identity, axiom, mult(X, e) = X).
         """)
 
-        proof_found, status, _ = state.run_saturation(1000, 10.0)
+        proof_found, status, _ = state.run_saturation(timeout=10.0, max_iterations=1000)
 
         if proof_found:
             trace_json = state.extract_structured_trace(1.0)

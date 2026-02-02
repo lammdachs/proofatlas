@@ -8,12 +8,12 @@ pub struct ProofAtlasWasm;
 
 #[derive(Serialize, Deserialize)]
 pub struct ProverOptions {
-    pub timeout_ms: u32,
-    pub max_clauses: usize,
+    pub timeout_ms: Option<u32>,
     pub literal_selection: Option<String>, // "0", "20", "21", or "22" (Vampire-compatible numbering)
     pub selector_type: Option<String>,     // "age_weight", "gcn", or "mlp" (default: "age_weight")
     pub selector_weights: Option<Vec<u8>>, // Safetensors weights for ML selectors (optional)
     pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.167)
+    pub max_iterations: Option<usize>,     // Max saturation iterations (default: 10000)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -33,6 +33,7 @@ pub struct ProverResult {
     pub all_clauses: Option<Vec<ProofStep>>, // All generated clauses
     pub statistics: ProverStatistics,
     pub trace: Option<ProofTrace>, // Detailed saturation trace
+    pub profile: Option<serde_json::Value>, // Profiling data
 }
 
 #[derive(Serialize, Deserialize)]
@@ -83,8 +84,8 @@ impl ProofAtlasWasm {
         let options: ProverOptions = serde_wasm_bindgen::from_value(options_js)
             .map_err(|e| JsError::new(&format!("Invalid options: {}", e)))?;
         
-        web_sys::console::log_1(&format!("Options parsed: timeout_ms={}, max_clauses={}",
-            options.timeout_ms, options.max_clauses).into());
+        web_sys::console::log_1(&format!("Options parsed: timeout_ms={:?}",
+            options.timeout_ms).into());
         
         // Parse TPTP input
         let cnf = parse_tptp(tptp_input, &[], None)
@@ -108,13 +109,13 @@ impl ProofAtlasWasm {
         };
 
         let config = SaturationConfig {
-            max_clauses: options.max_clauses,
-            max_iterations: 10000,
+            max_clauses: 0,
+            max_iterations: options.max_iterations.unwrap_or(0),
             max_clause_size: 100,
-            timeout: Duration::from_millis(options.timeout_ms as u64),
+            timeout: Duration::from_millis(options.timeout_ms.unwrap_or(60000) as u64),
             literal_selection,
             max_clause_memory_mb: None,
-            enable_profiling: false,
+            enable_profiling: true,
         };
 
         web_sys::console::log_1(&"Config created, creating clause selector...".into());
@@ -135,7 +136,7 @@ impl ProofAtlasWasm {
 
         // Run saturation
         let state = SaturationState::new(cnf.clauses, config, clause_selector);
-        let (result, _profile) = state.saturate();
+        let (result, profile) = state.saturate();
         
         web_sys::console::log_1(&"Saturation completed".into());
         
@@ -226,6 +227,7 @@ impl ProofAtlasWasm {
                     } else {
                         None
                     },
+                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
             SaturationResult::Saturated(steps, _) => {
@@ -253,6 +255,7 @@ impl ProofAtlasWasm {
                     } else {
                         None
                     },
+                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
             SaturationResult::Timeout(steps, _) => {
@@ -280,6 +283,7 @@ impl ProofAtlasWasm {
                     } else {
                         None
                     },
+                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
             SaturationResult::ResourceLimit(steps, _) => {
@@ -307,6 +311,7 @@ impl ProofAtlasWasm {
                     } else {
                         None
                     },
+                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
         };

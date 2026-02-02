@@ -40,23 +40,18 @@ fof(goal, conjecture, p => r).</textarea>
             </div>
 
             <div class="control-section">
-                <div class="options">
+                <div class="config-row" id="config-row">
                     <label>
-                        Timeout (ms):
-                        <input type="number" id="timeout" value="5000" min="100" max="60000">
-                    </label>
-                    <label>
-                        Max Clauses:
-                        <input type="number" id="max-clauses" value="10000" min="100" max="100000">
-                    </label>
-                    <label>
-                        Literal Selection:
-                        <select id="literal-selection">
-                            <option value="0">0: Select All</option>
-                            <option value="20">20: Select Maximal</option>
-                            <option value="21">21: Unique Maximal</option>
+                        Config Preset:
+                        <select id="config-preset">
+                            <option value="">Custom</option>
                         </select>
                     </label>
+                    <span id="server-status" class="server-status"></span>
+                    <details id="config-json-details" class="config-json-details">
+                        <summary>Config JSON</summary>
+                        <textarea id="config-json" class="config-json" spellcheck="false"></textarea>
+                    </details>
                 </div>
 
                 <button id="prove-btn" class="prove-button">Prove</button>
@@ -66,6 +61,10 @@ fof(goal, conjecture, p => r).</textarea>
                 <h2>Result</h2>
                 <div id="result-status"></div>
                 <div id="result-stats"></div>
+                <details id="profile-section" class="profile-section hidden">
+                    <summary>Profiling Details</summary>
+                    <div id="profile-content"></div>
+                </details>
                 <div id="clauses-container" class="proof-container hidden">
                     <div class="clause-selector">
                         <label>
@@ -111,7 +110,7 @@ fof(goal, conjecture, p => r).</textarea>
         </main>
 
         <footer>
-            <p>
+            <p id="footer-info">
                 ProofAtlas runs entirely in your browser. No data is sent to any server.
             </p>
             <p class="footer-links">

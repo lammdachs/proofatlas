@@ -510,28 +510,29 @@ impl ProofState {
     /// because it uses demodulation and other optimizations.
     ///
     /// Args:
-    ///     max_iterations: Maximum number of saturation steps
-    ///     timeout_secs: Optional timeout in seconds
+    ///     timeout: Optional timeout in seconds
+    ///     max_iterations: Maximum number of saturation steps (0 or None = no limit)
+    ///     literal_selection: Literal selection strategy: 0/20/21/22 (default: 0)
     ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
-    ///     embedding_type: Embedding type: None (default, uses age_weight), "graph", or "string"
+    ///     encoder: Encoder name: None (default, uses age_weight), "gcn", "gat", "graphsage", or "sentence"
+    ///     scorer: Name of the scorer. Model file is "{encoder}_{scorer}.pt" (e.g., "gcn_mlp").
     ///     weights_path: Path to model weights directory
-    ///     model_name: Name of the model file (without .pt extension).
-    ///                 Uses "{embedding}_{scorer}" format (e.g., "gcn_mlp", "sentence_attention").
     ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
     ///     enable_profiling: Enable structured profiling (default: false).
     ///                       When enabled, the third element of the return tuple is a JSON string.
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str])
-    #[pyo3(signature = (max_iterations, timeout_secs=None, age_weight_ratio=None, embedding_type=None, weights_path=None, model_name=None, max_clause_memory_mb=None, use_cuda=None, enable_profiling=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, max_clause_memory_mb=None, use_cuda=None, enable_profiling=None))]
     pub fn run_saturation(
         &mut self,
-        max_iterations: usize,
-        timeout_secs: Option<f64>,
+        timeout: Option<f64>,
+        max_iterations: Option<usize>,
+        literal_selection: Option<u32>,
         age_weight_ratio: Option<f64>,
-        embedding_type: Option<String>,
+        encoder: Option<String>,
+        scorer: Option<String>,
         weights_path: Option<String>,
-        model_name: Option<String>,
         max_clause_memory_mb: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
@@ -540,25 +541,29 @@ impl ProofState {
         use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
 
-        // Create clause selector based on embedding type
-        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match embedding_type.as_deref() {
+        // Create clause selector based on encoder type
+        let model_name = match (encoder.as_deref(), scorer.as_deref()) {
+            (Some(enc), Some(sc)) => Some(format!("{}_{}", enc, sc)),
+            (Some(_), None) => return Err(PyValueError::new_err("scorer required when encoder is set")),
+            _ => None,
+        };
+
+        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match encoder.as_deref() {
             None => {
-                // No embedding = heuristic selector
+                // No encoder = heuristic selector
                 let ratio = age_weight_ratio.unwrap_or(0.5);
                 Box::new(AgeWeightSelector::new(ratio))
             }
             #[cfg(feature = "ml")]
-            Some("graph") => {
-                // Graph embeddings (gcn, gat, graphsage)
+            Some("gcn") | Some("gat") | Some("graphsage") => {
+                // Graph encoders
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
 
-                let name = model_name.as_deref().ok_or_else(|| {
-                    PyValueError::new_err("model_name required for graph embedding")
-                })?;
+                let name = model_name.as_deref().unwrap();
                 let model_path = weights_dir.join(format!("{}.pt", name));
 
                 if !model_path.exists() {
@@ -575,17 +580,15 @@ impl ProofState {
                 Box::new(selector)
             }
             #[cfg(feature = "ml")]
-            Some("string") => {
-                // String embeddings (sentence transformers)
+            Some("sentence") => {
+                // String encoder (sentence transformer)
                 let weights_dir = if let Some(path) = weights_path.as_ref() {
                     std::path::PathBuf::from(path)
                 } else {
                     std::path::PathBuf::from(".weights")
                 };
 
-                let name = model_name.as_deref().ok_or_else(|| {
-                    PyValueError::new_err("model_name required for string embedding")
-                })?;
+                let name = model_name.as_deref().unwrap();
                 let model_path = weights_dir.join(format!("{}.pt", name));
                 let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", name));
 
@@ -605,34 +608,34 @@ impl ProofState {
             }
             Some(other) => {
                 #[cfg(feature = "ml")]
-                let available = "None, 'graph', or 'string'";
+                let available = "None, 'gcn', 'gat', 'graphsage', or 'sentence'";
                 #[cfg(not(feature = "ml"))]
                 let available = "None (ML features not enabled)";
                 return Err(PyValueError::new_err(format!(
-                    "Unknown embedding_type: '{}'. Use {}",
+                    "Unknown encoder: '{}'. Use {}",
                     other, available
                 )));
             }
         };
 
         // Build config
-        let timeout = timeout_secs
+        let timeout_dur = timeout
             .map(|s| Duration::from_secs_f64(s))
             .unwrap_or(Duration::from_secs(300));
 
-        let literal_selection = match self.literal_selector.as_ref().name() {
-            "sel20" => LiteralSelectionStrategy::Sel20,
-            "sel21" => LiteralSelectionStrategy::Sel21,  // unique maximal, else neg max-weight, else all maximal
-            "sel22" => LiteralSelectionStrategy::Sel22,  // max-weight negative, else all maximal
+        let lit_sel = match literal_selection {
+            Some(20) => LiteralSelectionStrategy::Sel20,
+            Some(21) => LiteralSelectionStrategy::Sel21,
+            Some(22) => LiteralSelectionStrategy::Sel22,
             _ => LiteralSelectionStrategy::Sel0,
         };
 
         let config = SaturationConfig {
-            max_clauses: 100000,
-            max_iterations,
+            max_clauses: 0,
+            max_iterations: max_iterations.unwrap_or(0),
             max_clause_size: 100,
-            timeout,
-            literal_selection,
+            timeout: timeout_dur,
+            literal_selection: lit_sel,
             max_clause_memory_mb,
             enable_profiling: enable_profiling.unwrap_or(false),
         };
@@ -709,6 +712,13 @@ impl ProofState {
         stats.insert("unit_clauses".to_string(), unit_count);
 
         stats
+    }
+
+    /// Get all proof steps from the last saturation run.
+    /// Unlike get_proof_trace() which returns only the minimal proof path,
+    /// this returns every step including GivenClauseSelection steps.
+    pub fn get_all_steps(&self) -> Vec<ProofStep> {
+        self.proof_trace.clone()
     }
 
     /// Get proof trace

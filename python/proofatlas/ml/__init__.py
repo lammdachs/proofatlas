@@ -41,7 +41,8 @@ from .weights import (
     find_weights,
     is_learned_selector,
     get_model_name,
-    get_embedding_type,
+    get_encoder_type,
+    get_embedding_type,  # alias for get_encoder_type
     STRING_EMBEDDINGS,
     GRAPH_EMBEDDINGS,
 )
@@ -103,6 +104,7 @@ __all__ = [
     "find_weights",
     "is_learned_selector",
     "get_model_name",
+    "get_encoder_type",
     "get_embedding_type",
     "STRING_EMBEDDINGS",
     "GRAPH_EMBEDDINGS",

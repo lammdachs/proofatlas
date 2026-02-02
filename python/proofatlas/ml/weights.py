@@ -7,45 +7,53 @@ from pathlib import Path
 from typing import Optional
 
 
-# Embeddings that use string input (clause text)
-STRING_EMBEDDINGS = {"sentence"}
+# Encoders that use string input (clause text)
+STRING_ENCODERS = {"sentence"}
 
-# Embeddings that use graph input (node features, adjacency, pooling)
-GRAPH_EMBEDDINGS = {"gcn", "gat", "graphsage"}
+# Encoders that use graph input (node features, adjacency, pooling)
+GRAPH_ENCODERS = {"gcn", "gat", "graphsage"}
+
+# Keep old names as aliases for backwards compatibility in training code
+STRING_EMBEDDINGS = STRING_ENCODERS
+GRAPH_EMBEDDINGS = GRAPH_ENCODERS
 
 
 def get_model_name(preset: dict) -> str:
     """Get model file name from preset config.
 
-    Uses modular naming: {embedding}_{scorer}
+    Uses modular naming: {encoder}_{scorer}
     """
-    embedding = preset.get("embedding")
+    encoder = preset.get("encoder")
     scorer = preset.get("scorer")
-    if embedding and scorer:
-        return f"{embedding}_{scorer}"
-    raise ValueError("Preset must have 'embedding' and 'scorer' fields")
+    if encoder and scorer:
+        return f"{encoder}_{scorer}"
+    raise ValueError("Preset must have 'encoder' and 'scorer' fields")
 
 
-def get_embedding_type(preset: dict) -> Optional[str]:
-    """Get embedding type category from preset config.
+def get_encoder_type(preset: dict) -> Optional[str]:
+    """Get encoder type category from preset config.
 
     Returns "graph", "string", or None for non-ML presets.
     """
-    embedding = preset.get("embedding")
-    if not embedding:
+    encoder = preset.get("encoder")
+    if not encoder:
         return None
 
-    if embedding in STRING_EMBEDDINGS:
+    if encoder in STRING_ENCODERS:
         return "string"
-    elif embedding in GRAPH_EMBEDDINGS:
+    elif encoder in GRAPH_ENCODERS:
         return "graph"
     else:
-        raise ValueError(f"Unknown embedding: {embedding}")
+        raise ValueError(f"Unknown encoder: {encoder}")
+
+
+# Keep old name as alias
+get_embedding_type = get_encoder_type
 
 
 def is_learned_selector(preset: dict) -> bool:
     """Check if preset requires trained weights."""
-    return "embedding" in preset and "scorer" in preset
+    return "encoder" in preset and "scorer" in preset
 
 
 def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
@@ -53,7 +61,7 @@ def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
 
     Args:
         weights_dir: Directory containing model weights (.weights/)
-        preset: Preset config dict with embedding/scorer fields
+        preset: Preset config dict with encoder/scorer fields
 
     Returns:
         Path to weights directory if model exists, or None if not found.
@@ -62,13 +70,13 @@ def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
         return None
 
     model_name = get_model_name(preset)
-    embedding_type = get_embedding_type(preset)
+    encoder_type = get_encoder_type(preset)
 
-    if embedding_type == "graph":
+    if encoder_type == "graph":
         model_path = weights_dir / f"{model_name}.pt"
         if model_path.exists():
             return weights_dir
-    elif embedding_type == "string":
+    elif encoder_type == "string":
         model_path = weights_dir / f"{model_name}.pt"
         tokenizer_path = weights_dir / f"{model_name}_tokenizer" / "tokenizer.json"
         if model_path.exists() and tokenizer_path.exists():

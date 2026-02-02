@@ -54,7 +54,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 0,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight_sel0"
     },
@@ -63,7 +63,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 20,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight_sel20"
     },
@@ -72,7 +72,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight_sel21"
     },
@@ -82,7 +82,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 0,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight_sel0"
     },
@@ -91,7 +91,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 20,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight_sel20"
     },
@@ -100,7 +100,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight_sel21"
     },
@@ -110,7 +110,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 0,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight_sel0"
     },
@@ -119,7 +119,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 20,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight_sel20"
     },
@@ -128,7 +128,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
-      "embedding": "gcn",
+      "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight_sel21"
     },
@@ -138,7 +138,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 0,
-      "embedding": "sentence",
+      "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight_sel0"
     },
@@ -147,7 +147,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 20,
-      "embedding": "sentence",
+      "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight_sel20"
     },
@@ -156,7 +156,7 @@
       "timeout": 600,
       "max_iterations": 128,
       "literal_selection": 21,
-      "embedding": "sentence",
+      "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight_sel21"
     }

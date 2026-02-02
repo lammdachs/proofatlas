@@ -66,12 +66,12 @@ def list_configs(base_dir: Path):
     print("Available configs:")
     for name, preset in sorted(presets.items()):
         desc = preset.get("description", "")
-        embedding = preset.get("embedding")
+        encoder = preset.get("encoder")
         scorer = preset.get("scorer")
 
         model_info = ""
-        if embedding and scorer:
-            model_info = f" [{embedding}+{scorer}]"
+        if encoder and scorer:
+            model_info = f" [{encoder}+{scorer}]"
 
         print(f"  {name:<25} {desc}{model_info}")
 
@@ -85,7 +85,6 @@ def main():
     parser.add_argument("--config", help="Use config from configs/proofatlas.json")
     parser.add_argument("--list", action="store_true", help="List available configs")
     parser.add_argument("--timeout", type=int, help="Set timeout in seconds (default: 60)")
-    parser.add_argument("--max-clauses", type=int, help="Set max clauses (default: 10000)")
     parser.add_argument(
         "--literal-selection",
         type=int,
@@ -134,7 +133,6 @@ def main():
 
     # Get values from preset, then override with command line args
     timeout = args.timeout if args.timeout is not None else preset.get("timeout", 60)
-    max_clauses = args.max_clauses if args.max_clauses is not None else preset.get("max_clauses", 0)
     literal_selection = (
         args.literal_selection if args.literal_selection is not None else preset.get("literal_selection", 0)
     )
@@ -142,27 +140,25 @@ def main():
     max_iterations = preset.get("max_iterations", 0)
 
     # Check for ML selector in preset
-    embedding_type = None
+    encoder = preset.get("encoder")
+    scorer = preset.get("scorer")
     weights_path = None
-    model_name = None
 
-    if preset:
-        from proofatlas.ml import is_learned_selector, get_embedding_type, get_model_name, find_weights
+    if encoder and scorer:
+        from proofatlas.ml import find_weights
 
-        if is_learned_selector(preset):
-            embedding_type = get_embedding_type(preset)
-            model_name = get_model_name(preset)
-            weights_dir = base_dir / ".weights"
-            weights_path = find_weights(weights_dir, preset)
+        model_name = f"{encoder}_{scorer}"
+        weights_dir = base_dir / ".weights"
+        weights_path = find_weights(weights_dir, preset)
 
-            if not weights_path:
-                print(f"Error: Model weights not found for {model_name}", file=sys.stderr)
-                print(f"Train with: proofatlas-bench --config {args.config} --retrain", file=sys.stderr)
-                sys.exit(1)
+        if not weights_path:
+            print(f"Error: Model weights not found for {model_name}", file=sys.stderr)
+            print(f"Train with: proofatlas-bench --config {args.config} --retrain", file=sys.stderr)
+            sys.exit(1)
 
-            if args.verbose:
-                print(f"Using ML selector: {model_name}")
-                print(f"  Weights: {weights_path}")
+        if args.verbose:
+            print(f"Using ML selector: {model_name}")
+            print(f"  Weights: {weights_path}")
 
     # Find TPTP root for includes
     tptp_root = find_tptp_root(base_dir)
@@ -203,28 +199,24 @@ def main():
             print(f"Preset: {args.config}")
         print(f"  timeout: {timeout}s")
         print(f"  literal_selection: {literal_selection}")
-        print(f"  max_clauses: {max_clauses or 'unlimited'}")
         print(f"  age_weight_ratio: {age_weight_ratio}")
         print()
 
     print("Running saturation with:")
-    print(f"  Max clauses: {max_clauses or 'unlimited'}")
     print(f"  Timeout: {timeout}s")
     print()
-
-    state.set_literal_selection(str(literal_selection))
 
     remaining_timeout = max(0.1, timeout - parse_time)
 
     try:
         proof_found, status, profile_json = state.run_saturation(
-            max_iterations if max_iterations > 0 else max_clauses,
-            remaining_timeout,
-            age_weight_ratio if not embedding_type else None,
-            embedding_type,
-            str(weights_path) if weights_path else None,
-            model_name,
-            None,  # max_clause_memory_mb
+            timeout=remaining_timeout,
+            max_iterations=max_iterations if max_iterations > 0 else None,
+            literal_selection=literal_selection,
+            age_weight_ratio=age_weight_ratio if not encoder else None,
+            encoder=encoder,
+            scorer=scorer,
+            weights_path=str(weights_path) if weights_path else None,
             enable_profiling=args.profile,
         )
     except Exception as e:
@@ -253,7 +245,6 @@ def main():
             "problem_file": str(args.problem),
             "config": {
                 "timeout": timeout,
-                "max_clauses": max_clauses,
                 "literal_selection": literal_selection,
                 "preset": args.config,
             },

@@ -492,12 +492,12 @@ def list_configs(base_dir: Path):
 
         for name, preset in sorted(presets.items()):
             desc = preset.get("description", "")
-            embedding = preset.get("embedding")
+            encoder = preset.get("encoder")
             scorer = preset.get("scorer")
 
             model_info = ""
-            if embedding and scorer:
-                model_info = f" [{embedding}+{scorer}]"
+            if encoder and scorer:
+                model_info = f" [{encoder}+{scorer}]"
 
             print(f"  {name:<25} {desc}{model_info}")
 
@@ -615,21 +615,18 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
         return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
-    literal_selection = str(preset.get("literal_selection", 21))
-    state.set_literal_selection(literal_selection)
+    literal_selection = preset.get("literal_selection", 21)
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
-    # Derive embedding type from embedding field: "graph", "string", or None
-    embedding_type = ml.get_embedding_type(preset) if is_learned else None
-    # Model name for .pt file: {embedding}_{scorer} for modular design
-    model_name = ml.get_model_name(preset) if is_learned else None
+    encoder = preset.get("encoder") if is_learned else None
+    scorer = preset.get("scorer") if is_learned else None
 
-    # Initialize CUDA if using string embedding with CUDA backend (required for tch to detect CUDA)
-    if use_cuda and embedding_type == "string":
+    # Initialize CUDA if using string encoder with CUDA backend (required for tch to detect CUDA)
+    if use_cuda and encoder == "sentence":
         try:
             import torch
             if torch.cuda.is_available():
@@ -644,14 +641,15 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     try:
         proof_found, status, _ = state.run_saturation(
-            max_iterations,
-            float(remaining_timeout),
-            float(age_weight_ratio) if not is_learned else None,
-            embedding_type,  # "graph", "string", or None
-            weights_path,
-            model_name,
-            max_clause_memory_mb,
-            use_cuda,
+            timeout=float(remaining_timeout),
+            max_iterations=max_iterations if max_iterations > 0 else None,
+            literal_selection=literal_selection,
+            age_weight_ratio=float(age_weight_ratio) if not is_learned else None,
+            encoder=encoder,
+            scorer=scorer,
+            weights_path=weights_path,
+            max_clause_memory_mb=max_clause_memory_mb,
+            use_cuda=use_cuda,
         )
     except Exception as e:
         return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
@@ -1044,7 +1042,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
     if prover == "proofatlas":
         ml = _get_ml()
-        model_label = ml.get_model_name(preset) if ml.is_learned_selector(preset) else "age_weight"
+        model_label = f"{preset['encoder']}_{preset['scorer']}" if ml.is_learned_selector(preset) else "age_weight"
         print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")
@@ -1387,9 +1385,9 @@ def main():
             # Training only supported for proofatlas
             ml = _get_ml()
             if prover == "proofatlas" and ml.is_learned_selector(preset):
-                model_name = ml.get_model_name(preset)
-                embedding_type = ml.get_embedding_type(preset)
-                log(f"[{preset_name}] Learned selector: {model_name} (embedding: {embedding_type})")
+                model_name = f"{preset['encoder']}_{preset['scorer']}"
+                encoder_type = ml.get_encoder_type(preset)
+                log(f"[{preset_name}] Learned selector: {model_name} (encoder: {encoder_type})")
                 sys.stdout.flush()
 
                 weights_dir = base_dir / ".weights"

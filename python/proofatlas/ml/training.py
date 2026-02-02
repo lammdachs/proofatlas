@@ -792,7 +792,7 @@ def run_training(
         training_config = json.load(f)
 
     # Get model and training config from preset
-    embedding_name = preset.get("embedding") or preset.get("model")
+    embedding_name = preset.get("encoder") or preset.get("embedding") or preset.get("model")
     scorer_name = preset.get("scorer", "mlp")
     training_name = preset.get("training", "standard")
 
