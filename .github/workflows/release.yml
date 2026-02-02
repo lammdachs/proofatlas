@@ -33,21 +33,25 @@ jobs:
           path: dist/
 
   macos-wheels:
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+        os: [macos-14, macos-13]
         include:
-          - runner: macos-14
+          - os: macos-14
             target: aarch64-apple-darwin
-          - runner: macos-13
+          - os: macos-13
             target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
 
       - name: Install build deps
-        run: uv pip install --system numpy torch --index-url https://download.pytorch.org/whl/cpu
+        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure libtorch
         run: python scripts/setup_libtorch.py
@@ -61,7 +65,37 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python }}
+          path: dist/
+
+  windows-wheels:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install build deps
+        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Configure libtorch
+        run: python scripts/setup_libtorch.py
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64-pc-windows-msvc
+          args: --release -o dist
+        env:
+          LIBTORCH_USE_PYTORCH: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-${{ matrix.python }}
           path: dist/
 
   sdist:
@@ -80,7 +114,7 @@ jobs:
           path: dist/
 
   publish:
-    needs: [linux-wheels, macos-wheels, sdist]
+    needs: [linux-wheels, macos-wheels, windows-wheels, sdist]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi
