@@ -45,9 +45,10 @@ proofatlas/
 ├── configs/                    # JSON configuration for provers, training, benchmarks
 │
 ├── scripts/                    # Utility scripts
+│   ├── setup.py                # One-command project setup
 │   ├── bench.py                # Multi-prover benchmarking with trace collection
 │   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
+│   └── setup_*.py              # Setup libtorch, TPTP, Vampire, SPASS
 │
 ├── .data/                      # Runtime data (gitignored)
 │   ├── traces/                 # Proof search traces for ML training
@@ -65,11 +66,17 @@ See [INSTALL.md](INSTALL.md) for detailed instructions.
 ### Quick Start
 
 ```bash
-# Build and install into Python environment
-maturin develop
+pip install torch  # or with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install proofatlas
+```
 
-# Setup TPTP problem library
-python scripts/setup_tptp.py
+### From Source
+
+```bash
+git clone https://github.com/lexpk/proofatlas.git
+cd proofatlas
+python -m venv .venv && source .venv/bin/activate
+python scripts/setup.py
 ```
 
 ## Usage
