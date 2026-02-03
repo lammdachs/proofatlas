@@ -99,6 +99,12 @@ header p {
     font-size: 14px;
 }
 
+#tptp-url:disabled {
+    background: #f8f9fa;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
 #load-url-btn {
     padding: 8px 16px;
     background: #27ae60;
@@ -109,8 +115,13 @@ header p {
     font-size: 14px;
 }
 
-#load-url-btn:hover {
+#load-url-btn:hover:not(:disabled) {
     background: #229954;
+}
+
+#load-url-btn:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
 }
 
 main {
@@ -764,6 +775,13 @@ footer a:hover {
 .server-status.browser-only {
     background: #e3f2fd;
     color: #1565c0;
+}
+
+.feature-hint {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+    margin-top: 4px;
 }
 
 .config-json-details {

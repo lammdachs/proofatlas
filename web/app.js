@@ -15,12 +15,15 @@ let configPresets = null; // Full config object from proofatlas.json
 let activePreset = null;  // Currently selected preset config (null = Custom)
 
 async function detectServer() {
+    let detected = false;
+
     try {
         const response = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
         if (response.ok) {
             const data = await response.json();
             serverAvailable = true;
             serverMlAvailable = data.ml_available || false;
+            detected = true;
             console.log('Server detected, ML available:', serverMlAvailable);
 
             // Update footer
@@ -36,8 +39,19 @@ async function detectServer() {
                 status.textContent = serverMlAvailable ? 'Server + ML' : 'Server (no ML)';
                 status.className = 'server-status connected';
             }
+
+            // Show ML hint if ML not available
+            if (!serverMlAvailable) {
+                const mlHint = document.getElementById('ml-hint');
+                if (mlHint) mlHint.classList.remove('hidden');
+            }
         }
     } catch {
+        // Network error or timeout - no server
+    }
+
+    // If server not detected (either 404 or network error), show browser-only UI
+    if (!detected) {
         serverAvailable = false;
         serverMlAvailable = false;
         console.log('No server detected, running in browser-only mode');
@@ -46,6 +60,21 @@ async function detectServer() {
         if (status) {
             status.textContent = 'Browser only';
             status.className = 'server-status browser-only';
+        }
+
+        // Show ML hint
+        const mlHint = document.getElementById('ml-hint');
+        if (mlHint) mlHint.classList.remove('hidden');
+
+        // Disable TPTP problem loading
+        const loadBtn = document.getElementById('load-url-btn');
+        const urlInput = document.getElementById('tptp-url');
+        if (loadBtn) {
+            loadBtn.disabled = true;
+        }
+        if (urlInput) {
+            urlInput.disabled = true;
+            urlInput.placeholder = 'Install locally for TPTP problem loading';
         }
     }
 }
@@ -929,107 +958,36 @@ document.addEventListener('DOMContentLoaded', () => {
         age_weight_ratio: 0.167,
     });
 
-    // Helper function to fetch TPTP content from URL
-    async function fetchTptpContent(url) {
-        const corsUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const response = await fetch(corsUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch: ${response.status}`);
-        }
-        const html = await response.text();
-
-        // Parse HTML to extract TPTP content from <pre> tag
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const preTag = doc.querySelector('pre');
-
-        if (!preTag) {
-            throw new Error('Could not find problem content in page');
-        }
-
-        return preTag.textContent;
-    }
-
-    // Helper function to resolve include directives
-    async function resolveIncludes(content) {
-        const includeRegex = /include\s*\(\s*'([^']+)'\s*\)/g;
-        const includes = [...content.matchAll(includeRegex)];
-
-        if (includes.length === 0) {
-            return content;
-        }
-
-        console.log(`Found ${includes.length} include directive(s), fetching axioms...`);
-
-        let resolvedContent = content;
-
-        for (const match of includes) {
-            const includePath = match[1];
-            const includeDirective = match[0];
-
-            try {
-                const parts = includePath.split('/');
-                const filename = parts[parts.length - 1];
-
-                const axiomUrl = `https://tptp.org/cgi-bin/SeeTPTP?Category=Axioms&File=${filename}`;
-                console.log(`Fetching axiom: ${includePath}`);
-
-                const axiomContent = await fetchTptpContent(axiomUrl);
-
-                const replacement = `% BEGIN include('${includePath}')\n${axiomContent}\n% END include('${includePath}')`;
-                resolvedContent = resolvedContent.replace(includeDirective, replacement);
-            } catch (error) {
-                console.warn(`Failed to load axiom ${includePath}:`, error);
-            }
-        }
-
-        return resolvedContent;
-    }
-
-    // Helper function to convert problem name to TPTP URL
-    function problemNameToUrl(input) {
-        if (input.startsWith('http://') || input.startsWith('https://')) {
-            return input;
-        }
-
-        let problemName = input.trim().toUpperCase();
-
-        if (problemName.endsWith('.P')) {
-            problemName = problemName.slice(0, -2);
-        }
-
-        const domainMatch = problemName.match(/^([A-Z]{3})/);
-        if (!domainMatch) {
-            throw new Error('Invalid problem name format. Expected format: ABC123-1 (e.g., GRP001-1)');
-        }
-
-        const domain = domainMatch[1];
-        const filename = `${problemName}.p`;
-
-        return `https://tptp.org/cgi-bin/SeeTPTP?Category=Problems&Domain=${domain}&File=${filename}`;
-    }
-
-    // Load from TPTP problem name or URL
+    // Load TPTP problem via server API
     document.getElementById('load-url-btn').addEventListener('click', async () => {
         const urlInput = document.getElementById('tptp-url');
         const input = urlInput.value.trim();
         if (!input) {
-            alert('Please enter a problem name (e.g., GRP001-1) or TPTP URL');
+            alert('Please enter a problem name (e.g., GRP001-1)');
             return;
         }
+
+        const loadBtn = document.getElementById('load-url-btn');
+        loadBtn.disabled = true;
+        loadBtn.textContent = 'Loading...';
+
         try {
-            const url = problemNameToUrl(input);
-            console.log('Loading problem from:', url);
+            const response = await fetch(`/api/tptp/${encodeURIComponent(input)}`);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Server error: ${response.status}`);
+            }
+            const data = await response.json();
 
-            const content = await fetchTptpContent(url);
-            const resolvedContent = await resolveIncludes(content);
-
-            document.getElementById('tptp-input').value = resolvedContent;
+            document.getElementById('tptp-input').value = data.content;
             document.getElementById('example-select').value = '';
             urlInput.value = '';
         } catch (error) {
             console.error('Error:', error);
             alert(`Error loading problem: ${error.message}`);
+        } finally {
+            loadBtn.disabled = false;
+            loadBtn.textContent = 'Load Problem';
         }
     });
 

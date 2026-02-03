@@ -259,8 +259,10 @@ impl ProofAtlasWasm {
             }
         };
 
-        // Convert to JS value
-        serde_wasm_bindgen::to_value(&prover_result)
+        // Convert to JS value (use json_compatible to serialize Maps as plain objects)
+        let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+        use serde::Serialize;
+        prover_result.serialize(&serializer)
             .map_err(|e| JsError::new(&format!("Serialization error: {}", e)))
     }
 
