@@ -640,7 +640,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     remaining_timeout = max(0.1, timeout - elapsed_parsing)
 
     try:
-        proof_found, status, _ = state.run_saturation(
+        proof_found, status, _, _ = state.run_saturation(
             timeout=float(remaining_timeout),
             max_iterations=max_iterations if max_iterations > 0 else None,
             literal_selection=literal_selection,

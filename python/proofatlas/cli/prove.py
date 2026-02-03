@@ -209,7 +209,7 @@ def main():
     remaining_timeout = max(0.1, timeout - parse_time)
 
     try:
-        proof_found, status, profile_json = state.run_saturation(
+        proof_found, status, profile_json, _ = state.run_saturation(
             timeout=remaining_timeout,
             max_iterations=max_iterations if max_iterations > 0 else None,
             literal_selection=literal_selection,
