@@ -1,6 +1,7 @@
 //! Common types and utilities for inference rules
 
-use crate::core::{Atom, Clause, Derivation, Literal, Substitution, Term, Variable};
+use crate::fol::{Atom, Clause, Literal, Substitution, Term, Variable};
+use super::derivation::Derivation;
 use crate::unification::unify;
 use std::collections::HashSet;
 

@@ -2,24 +2,19 @@
 
 pub mod common;
 pub mod demodulation;
+pub mod derivation;
 pub mod equality_factoring;
 pub mod equality_resolution;
 pub mod factoring;
-pub mod literal_selection;
+pub mod proof;
 pub mod resolution;
 pub mod superposition;
 
 // Re-export the main inference function and types
 pub use common::InferenceResult;
+pub use derivation::Derivation;
+pub use proof::{Proof, ProofStep};
 
-// Re-export literal selection strategies
-pub use literal_selection::{
-    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
-    SelectUniqueMaximalOrNegOrMaximal,
-};
-
-// Note: The inference rules now require a LiteralSelector parameter
-// Use them like: resolution(clause1, clause2, idx1, idx2, &selector)
 pub use demodulation::demodulate;
 pub use equality_factoring::equality_factoring;
 pub use equality_resolution::equality_resolution;

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, ToPyArray};
 
-use crate::core::Clause;
+use crate::fol::Clause;
 use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     InferenceResult as RustInferenceResult,
@@ -16,7 +16,7 @@ use crate::inference::{
 use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::saturation::LiteralSelectionStrategy;
-use crate::inference::{LiteralSelector, SelectAll, SelectMaximal};
+use crate::selection::{LiteralSelector, SelectAll, SelectMaximal};
 
 /// Python-accessible proof state
 #[pyclass]
@@ -270,11 +270,11 @@ impl ProofState {
 
         // Get role as string
         let role = match clause.role {
-            crate::core::ClauseRole::Axiom => "axiom",
-            crate::core::ClauseRole::Hypothesis => "hypothesis",
-            crate::core::ClauseRole::Definition => "definition",
-            crate::core::ClauseRole::NegatedConjecture => "negated_conjecture",
-            crate::core::ClauseRole::Derived => "derived",
+            crate::fol::ClauseRole::Axiom => "axiom",
+            crate::fol::ClauseRole::Hypothesis => "hypothesis",
+            crate::fol::ClauseRole::Definition => "definition",
+            crate::fol::ClauseRole::NegatedConjecture => "negated_conjecture",
+            crate::fol::ClauseRole::Derived => "derived",
         }
         .to_string();
 
@@ -489,12 +489,12 @@ impl ProofState {
             }
             "unique" | "21" => {
                 self.literal_selector =
-                    Box::new(crate::inference::SelectUniqueMaximalOrNegOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
+                    Box::new(crate::selection::SelectUniqueMaximalOrNegOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
                 Ok(())
             }
             "neg_max_weight" | "22" => {
                 self.literal_selector =
-                    Box::new(crate::inference::SelectNegMaxWeightOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
+                    Box::new(crate::selection::SelectNegMaxWeightOrMaximal::new()) as Box<dyn LiteralSelector + Send>;
                 Ok(())
             }
             _ => Err(PyValueError::new_err(format!(
@@ -538,7 +538,7 @@ impl ProofState {
         enable_profiling: Option<bool>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
-        use crate::selectors::AgeWeightSelector;
+        use crate::selection::AgeWeightSelector;
         use std::time::Duration;
 
         // Create clause selector based on encoder type
@@ -548,7 +548,7 @@ impl ProofState {
             _ => None,
         };
 
-        let clause_selector: Box<dyn crate::selectors::ClauseSelector> = match encoder.as_deref() {
+        let clause_selector: Box<dyn crate::selection::ClauseSelector> = match encoder.as_deref() {
             None => {
                 // No encoder = heuristic selector
                 let ratio = age_weight_ratio.unwrap_or(0.5);
@@ -573,7 +573,7 @@ impl ProofState {
                     )));
                 }
 
-                let selector = crate::selectors::load_gcn_selector(
+                let selector = crate::selection::load_gcn_selector(
                     &model_path,
                     use_cuda.unwrap_or(true),
                 ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
@@ -599,7 +599,7 @@ impl ProofState {
                     )));
                 }
 
-                let selector = crate::selectors::load_sentence_selector(
+                let selector = crate::selection::load_sentence_selector(
                     &model_path,
                     &tokenizer_path,
                     use_cuda.unwrap_or(true),
@@ -899,7 +899,7 @@ impl ProofState {
     /// }
     /// ```
     pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
-        use crate::core::json::{TraceJson, TrainingClauseJson};
+        use crate::json::{TraceJson, TrainingClauseJson};
         use std::collections::HashMap;
 
         let examples = self.extract_training_examples();

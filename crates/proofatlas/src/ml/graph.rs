@@ -19,7 +19,7 @@
 //! - Node type/role → one-hot or learned embeddings
 //! - Arity/position/depth/age → sinusoidal encoding
 
-use crate::core::{Clause, Literal, Term};
+use crate::fol::{Clause, Literal, Term};
 
 /// Node type constants
 pub const NODE_TYPE_CLAUSE: u8 = 0;
@@ -380,7 +380,7 @@ impl GraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
+    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
 
     #[test]
     fn test_simple_variable() {
@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_clause_age_and_role_features() {
-        use crate::core::ClauseRole;
+        use crate::fol::ClauseRole;
 
         // Create a simple clause P(x)
         let x = Term::Variable(Variable {

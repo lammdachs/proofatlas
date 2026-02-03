@@ -134,7 +134,7 @@ impl Clause {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Constant;
+    use crate::fol::Constant;
 
     #[test]
     fn test_term_substitution() {

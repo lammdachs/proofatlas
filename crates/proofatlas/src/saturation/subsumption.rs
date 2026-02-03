@@ -37,7 +37,7 @@
 //! - Full subsumption checking becomes expensive for larger clauses
 //! - A greedy heuristic catches many subsumptions with reasonable cost
 
-use crate::core::{Clause, Literal, Substitution, Term};
+use crate::fol::{Clause, Literal, Substitution, Term};
 use std::collections::{HashMap, HashSet};
 
 /// Subsumption checker implementing a balanced redundancy elimination strategy
@@ -322,8 +322,8 @@ fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
 
 /// Check if atoms match with a variable mapping
 fn atoms_match_with_mapping(
-    atom1: &crate::core::Atom,
-    atom2: &crate::core::Atom,
+    atom1: &crate::fol::Atom,
+    atom2: &crate::fol::Atom,
     var_map: &mut HashMap<String, String>,
 ) -> bool {
     if atom1.predicate != atom2.predicate {
@@ -504,8 +504,8 @@ fn match_literals(lit1: &Literal, lit2: &Literal, subst: &mut Substitution) -> b
 
 /// Try to match two atoms with a substitution
 fn match_atoms(
-    atom1: &crate::core::Atom,
-    atom2: &crate::core::Atom,
+    atom1: &crate::fol::Atom,
+    atom2: &crate::fol::Atom,
     subst: &mut Substitution,
 ) -> bool {
     if atom1.predicate != atom2.predicate {

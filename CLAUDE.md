@@ -14,13 +14,14 @@ proofatlas/
 ├── crates/
 │   ├── proofatlas/             # Core theorem prover (Rust)
 │   │   └── src/
-│   │       ├── core/           # Terms, literals, clauses, substitutions, KBO ordering
-│   │       ├── inference/      # Inference rules: resolution, superposition, demodulation
-│   │       ├── saturation/     # Saturation loop, forward/backward subsumption, profiling
+│   │       ├── fol/            # Pure FOL types: terms, literals, clauses, substitutions, KBO
+│   │       ├── inference/      # Inference rules, derivation tracking, proof types
+│   │       ├── selection/      # Literal + clause selection strategies (tch-rs ML)
+│   │       ├── saturation/     # Saturation loop, trace, forward/backward subsumption, profiling
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── selectors/      # Clause/literal selection strategies (tch-rs ML)
-│   │       └── ml/             # Graph building from clauses
+│   │       ├── ml/             # Graph building from clauses
+│   │       └── json.rs         # JSON serialization types
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
@@ -73,7 +74,7 @@ maturin develop                     # Build and install into Python environment
 
 ```bash
 cargo test                               # All Rust tests
-cargo test core                          # Specific module
+cargo test fol                           # Specific module
 cargo test --test '*'                    # Integration tests only
 cargo test -- --nocapture                # With output
 

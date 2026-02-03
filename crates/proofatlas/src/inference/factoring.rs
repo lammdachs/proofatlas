@@ -1,8 +1,9 @@
 //! Factoring inference rule
 
 use super::common::{remove_duplicate_literals, unify_atoms, InferenceResult};
-use crate::core::{Clause, Derivation};
-use super::LiteralSelector;
+use crate::fol::Clause;
+use super::derivation::Derivation;
+use crate::selection::LiteralSelector;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -66,8 +67,8 @@ pub fn factoring(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Literal, PredicateSymbol, Term, Variable};
-    use crate::inference::SelectAll;
+    use crate::fol::{Atom, Literal, PredicateSymbol, Term, Variable};
+    use crate::selection::SelectAll;
 
     #[test]
     fn test_factoring_with_select_all() {

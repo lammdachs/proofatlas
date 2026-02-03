@@ -11,7 +11,7 @@
 use std::path::Path;
 
 #[cfg(feature = "ml")]
-use crate::core::Clause;
+use crate::fol::Clause;
 #[cfg(feature = "ml")]
 use crate::ml::graph::GraphBuilder;
 
@@ -304,9 +304,9 @@ mod tests {
 
     #[test]
     fn test_gcn_selector_caching() {
-        use crate::core::{Atom, Literal, PredicateSymbol, Term, Constant};
+        use crate::fol::{Atom, Literal, PredicateSymbol, Term, Constant};
         use std::collections::VecDeque;
-        use super::super::ClauseSelector;
+        use super::ClauseSelector;
 
         // Skip if model doesn't exist
         let model_path = std::path::Path::new(".weights/gcn_model.pt");

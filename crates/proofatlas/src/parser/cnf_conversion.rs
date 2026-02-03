@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use super::fof::{FOFFormula, Quantifier};
-use crate::core::{
+use crate::fol::{
     Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, PredicateSymbol, Term,
     Variable,
 };
@@ -1014,7 +1014,7 @@ impl CNFConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::PredicateSymbol;
+    use crate::fol::PredicateSymbol;
 
     #[test]
     fn test_simple_cnf_conversion() {

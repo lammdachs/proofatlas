@@ -1,6 +1,7 @@
-//! JSON serialization for core data structures
+//! JSON serialization types for proof data
 
-use super::{Atom, Clause, Literal, Proof, ProofStep, Term};
+use crate::fol::{Atom, Clause, Literal, Term};
+use crate::inference::proof::{Proof, ProofStep};
 use serde::{Deserialize, Serialize};
 
 /// JSON representation of a term
@@ -102,11 +103,11 @@ impl TrainingClauseJson {
     /// Create from a Clause with a label and optional derivation info
     pub fn from_clause(clause: &Clause, label: bool, parents: Vec<usize>, rule: String) -> Self {
         let role = match clause.role {
-            super::ClauseRole::Axiom => "axiom",
-            super::ClauseRole::Hypothesis => "hypothesis",
-            super::ClauseRole::Definition => "definition",
-            super::ClauseRole::NegatedConjecture => "negated_conjecture",
-            super::ClauseRole::Derived => "derived",
+            crate::fol::ClauseRole::Axiom => "axiom",
+            crate::fol::ClauseRole::Hypothesis => "hypothesis",
+            crate::fol::ClauseRole::Definition => "definition",
+            crate::fol::ClauseRole::NegatedConjecture => "negated_conjecture",
+            crate::fol::ClauseRole::Derived => "derived",
         };
         TrainingClauseJson {
             literals: clause.literals.iter().map(|l| l.into()).collect(),

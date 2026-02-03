@@ -9,7 +9,7 @@
 //! - Selection 21: Select unique maximal, else negative with max weight, else all maximal
 //! - Selection 22: Select negative literal with max weight, else all maximal
 
-use crate::core::{Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
+use crate::fol::{Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
 use std::collections::HashSet;
 
 /// Trait for literal selection strategies
@@ -351,7 +351,7 @@ pub type SelectLargestNegative = SelectNegMaxWeightOrMaximal;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
 
     fn make_clause(literals: Vec<Literal>) -> Clause {
         Clause::new(literals)

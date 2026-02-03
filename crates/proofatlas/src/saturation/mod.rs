@@ -3,12 +3,17 @@
 pub mod profile;
 mod state;
 pub mod subsumption;
+pub mod trace;
 
 pub use profile::SaturationProfile;
 pub use state::{LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState};
+pub use trace::{
+    BackwardSimplification, ClauseSimplification, ForwardSimplification, GeneratingInference,
+    SaturationStep, SaturationTrace, SimplificationOutcome,
+};
 
-use crate::core::{CNFFormula, SaturationTrace};
-use crate::selectors::ClauseSelector;
+use crate::fol::CNFFormula;
+use crate::selection::ClauseSelector;
 
 /// Run saturation on a CNF formula
 pub fn saturate(

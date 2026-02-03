@@ -1,6 +1,6 @@
 //! Extract training data from completed proofs
 
-use crate::core::Proof;
+use crate::inference::Proof;
 use std::collections::HashSet;
 
 /// Training example: a clause with its label
@@ -82,7 +82,8 @@ pub fn compute_proof_statistics(proof: &Proof) -> ProofStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Clause, Derivation, ProofStep};
+    use crate::fol::Clause;
+    use crate::inference::{Derivation, ProofStep};
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
         let derivation = if premises.is_empty() {

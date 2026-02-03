@@ -1,7 +1,7 @@
 //! One-way matching for demodulation
 
 use super::UnificationError;
-use crate::core::{Substitution, Term};
+use crate::fol::{Substitution, Term};
 
 /// One-way match: Find a substitution σ such that pattern σ = term
 /// Only variables in the pattern can be substituted
@@ -76,7 +76,7 @@ fn match_with_subst(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, FunctionSymbol, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Variable};
 
     #[test]
     fn test_match_variable() {

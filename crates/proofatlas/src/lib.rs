@@ -3,42 +3,48 @@
 //! This library provides a complete implementation of a theorem prover
 //! using the superposition calculus with equality.
 
-pub mod core;
+pub mod fol;
 pub mod inference;
+pub mod json;
 pub mod ml;
 pub mod parser;
 pub mod saturation;
-pub mod selectors;
+pub mod selection;
 pub mod time_compat;
 pub mod unification;
 
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
-// Re-export commonly used types and functions
-pub use core::{
-    Atom, BackwardSimplification, CNFFormula, Clause, Constant, Derivation, ForwardSimplification,
-    FunctionSymbol, GeneratingInference, KBOConfig, Literal, PredicateSymbol, Proof, ProofStep,
-    SaturationTrace, SimplificationOutcome, Substitution, Term, TermOrdering, Variable, KBO,
+// Re-export commonly used types from fol
+pub use fol::{
+    Atom, CNFFormula, Clause, Constant, FunctionSymbol, KBOConfig, Literal, PredicateSymbol,
+    Substitution, Term, TermOrdering, Variable, KBO,
 };
 
+// Re-export inference types
 pub use inference::{
-    equality_factoring, equality_resolution, factoring, resolution, superposition, InferenceResult,
-    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
-    SelectUniqueMaximalOrNegOrMaximal,
+    equality_factoring, equality_resolution, factoring, resolution, superposition, Derivation,
+    InferenceResult, Proof, ProofStep,
 };
 
-pub use selectors::{AgeWeightSelector, ClauseSelector};
+// Re-export selection types
+pub use selection::{
+    AgeWeightSelector, ClauseSelector, LiteralSelector, SelectAll, SelectMaximal,
+    SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal,
+};
 
 #[cfg(feature = "ml")]
-pub use selectors::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
+pub use selection::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 
 #[cfg(feature = "ml")]
-pub use selectors::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
+pub use selection::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
 
+// Re-export saturation types
 pub use saturation::{
-    saturate, LiteralSelectionStrategy, SaturationConfig, SaturationProfile, SaturationResult,
-    SaturationState,
+    saturate, BackwardSimplification, ForwardSimplification, GeneratingInference,
+    LiteralSelectionStrategy, SaturationConfig, SaturationProfile, SaturationResult,
+    SaturationState, SaturationTrace, SimplificationOutcome,
 };
 
 pub use unification::{unify, UnificationError, UnificationResult};

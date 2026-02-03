@@ -48,20 +48,20 @@
 
 use super::profile::SaturationProfile;
 use super::subsumption::SubsumptionChecker;
-use crate::core::{
-    BackwardSimplification, Clause, ClauseSimplification, Derivation, ForwardSimplification,
-    GeneratingInference, Proof, ProofStep, SaturationStep, SaturationTrace, SimplificationOutcome,
+use super::trace::{
+    BackwardSimplification, ClauseSimplification, ForwardSimplification, GeneratingInference,
+    SaturationStep, SaturationTrace, SimplificationOutcome,
 };
+use crate::fol::Clause;
 use crate::inference::{
     demodulation, equality_factoring, equality_resolution, factoring, resolution, superposition,
-    InferenceResult,
+    Derivation, InferenceResult, Proof, ProofStep,
 };
 use crate::parser::orient_equalities::orient_clause_equalities;
-use crate::inference::{
-    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+use crate::selection::{
+    ClauseSelector, LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
     SelectUniqueMaximalOrNegOrMaximal,
 };
-use crate::selectors::ClauseSelector;
 use crate::time_compat::Instant;
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
@@ -128,8 +128,8 @@ pub enum SaturationResult {
 
 impl SaturationResult {
     /// Convert to JSON representation
-    pub fn to_json(&self, time_seconds: f64) -> crate::core::json::SaturationResultJson {
-        use crate::core::json::SaturationResultJson;
+    pub fn to_json(&self, time_seconds: f64) -> crate::json::SaturationResultJson {
+        use crate::json::SaturationResultJson;
 
         match self {
             SaturationResult::Proof(proof) => SaturationResultJson::Proof {
@@ -828,7 +828,7 @@ impl SaturationState {
         let mut clause_with_id = current_clause.clone();
         clause_with_id.id = Some(new_idx);
         clause_with_id.age = self.current_iteration;
-        clause_with_id.role = crate::core::ClauseRole::Derived;
+        clause_with_id.role = crate::fol::ClauseRole::Derived;
 
         // Add to subsumption checker as pending
         let idx_from_subsumption = self
@@ -915,8 +915,8 @@ impl SaturationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, CNFFormula, Constant, Literal, PredicateSymbol, Term, Variable};
-    use crate::selectors::AgeWeightSelector;
+    use crate::fol::{Atom, CNFFormula, Constant, Literal, PredicateSymbol, Term, Variable};
+    use crate::selection::AgeWeightSelector;
 
     fn create_selector() -> Box<dyn ClauseSelector> {
         Box::new(AgeWeightSelector::default())

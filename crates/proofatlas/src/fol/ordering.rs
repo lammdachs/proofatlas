@@ -227,7 +227,7 @@ impl KBO {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, FunctionSymbol};
+    use crate::fol::{Constant, FunctionSymbol};
 
     #[test]
     fn test_term_weight() {

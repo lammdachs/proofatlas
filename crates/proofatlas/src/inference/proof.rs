@@ -1,8 +1,8 @@
 //! Proof tracking structures
 
-use crate::core::Clause;
-use crate::core::Derivation;
-use crate::inference::InferenceResult;
+use crate::fol::Clause;
+use super::derivation::Derivation;
+use super::common::InferenceResult;
 
 /// A single step in a proof derivation. Every step produces a clause.
 #[derive(Debug, Clone)]

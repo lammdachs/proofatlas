@@ -3,7 +3,7 @@
 //! This module provides structures for representing full first-order logic
 //! formulas before conversion to CNF.
 
-use crate::core::{Atom, Term, Variable};
+use crate::fol::{Atom, Term, Variable};
 use std::collections::{HashMap, HashSet};
 
 /// Quantifier type
@@ -461,7 +461,7 @@ pub struct NamedFormula {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::PredicateSymbol;
+    use crate::fol::PredicateSymbol;
 
     #[test]
     fn test_nnf_conversion() {

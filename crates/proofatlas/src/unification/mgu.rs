@@ -1,6 +1,6 @@
 //! Most General Unifier (MGU) computation
 
-use crate::core::{Substitution, Term, Variable};
+use crate::fol::{Substitution, Term, Variable};
 use std::collections::HashSet;
 
 /// Result of a unification attempt
@@ -126,7 +126,7 @@ pub fn variables_in_term(term: &Term) -> HashSet<Variable> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, FunctionSymbol};
+    use crate::fol::{Constant, FunctionSymbol};
 
     #[test]
     fn test_unify_variables() {

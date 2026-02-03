@@ -1,10 +1,11 @@
 //! Equality factoring inference rule
 
 use super::common::InferenceResult;
-use crate::core::{
-    Atom, Clause, Derivation, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
+use crate::fol::{
+    Atom, Clause, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
 };
-use super::LiteralSelector;
+use super::derivation::Derivation;
+use crate::selection::LiteralSelector;
 use crate::unification::unify;
 
 /// Apply equality factoring rule
@@ -120,7 +121,7 @@ fn is_equality(atom: &Atom) -> bool {
 }
 
 /// Get the two terms from an equality atom
-fn get_equality_terms(atom: &Atom) -> Option<(&crate::core::Term, &crate::core::Term)> {
+fn get_equality_terms(atom: &Atom) -> Option<(&crate::fol::Term, &crate::fol::Term)> {
     if is_equality(atom) && atom.args.len() == 2 {
         Some((&atom.args[0], &atom.args[1]))
     } else {

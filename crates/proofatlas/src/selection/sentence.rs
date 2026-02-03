@@ -10,7 +10,7 @@
 use std::path::Path;
 
 #[cfg(feature = "ml")]
-use crate::core::Clause;
+use crate::fol::Clause;
 
 /// Sentence embedder using PyTorch for inference
 ///

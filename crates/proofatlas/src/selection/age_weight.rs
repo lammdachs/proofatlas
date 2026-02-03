@@ -4,7 +4,7 @@
 //! It alternates between selecting the oldest clause (FIFO) and the lightest clause
 //! (by symbol count) based on a configurable probability.
 
-use crate::core::Clause;
+use crate::fol::Clause;
 use std::collections::VecDeque;
 
 use super::ClauseSelector;
@@ -65,11 +65,11 @@ impl AgeWeightSelector {
     }
 
     /// Calculate the weight of a term recursively.
-    fn term_weight(term: &crate::core::Term) -> usize {
+    fn term_weight(term: &crate::fol::Term) -> usize {
         match term {
-            crate::core::Term::Variable(_) => 1,
-            crate::core::Term::Constant(_) => 1,
-            crate::core::Term::Function(_, args) => 1 + args.iter().map(Self::term_weight).sum::<usize>(),
+            crate::fol::Term::Variable(_) => 1,
+            crate::fol::Term::Constant(_) => 1,
+            crate::fol::Term::Function(_, args) => 1 + args.iter().map(Self::term_weight).sum::<usize>(),
         }
     }
 
@@ -116,7 +116,7 @@ impl Default for AgeWeightSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
 
     /// Create a clause with a predicate of given arity (number of variable arguments).
     fn make_clause(predicate_name: &str, num_args: usize) -> Clause {

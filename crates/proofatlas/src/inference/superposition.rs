@@ -3,10 +3,11 @@
 use super::common::{
     remove_duplicate_literals, rename_clause_variables, InferenceResult,
 };
-use crate::core::{
-    Atom, Clause, Derivation, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
+use crate::fol::{
+    Atom, Clause, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
 };
-use super::LiteralSelector;
+use super::derivation::Derivation;
+use crate::selection::LiteralSelector;
 use crate::unification::unify;
 
 /// Position in a term/atom where unification can occur
@@ -259,8 +260,8 @@ fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, FunctionSymbol, PredicateSymbol, Variable};
-    use crate::inference::SelectAll;
+    use crate::fol::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+    use crate::selection::SelectAll;
 
     /// Test superposition into the RIGHT side of an equality
     /// This verifies that we search both sides of equalities for superposition positions.

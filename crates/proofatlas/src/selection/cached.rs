@@ -14,7 +14,7 @@
 //! - Embeddings to be reused across multiple scoring calls
 //! - Clear separation between expensive embedding computation and cheap scoring
 
-use crate::core::Clause;
+use crate::fol::Clause;
 use super::clause::SelectorStats;
 use super::ClauseSelector;
 use std::collections::{HashMap, VecDeque};
@@ -225,7 +225,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Literal, PredicateSymbol, Term, Constant};
+    use crate::fol::{Atom, Literal, PredicateSymbol, Term, Constant};
 
     /// Simple test embedder that returns clause length as embedding
     struct TestEmbedder;

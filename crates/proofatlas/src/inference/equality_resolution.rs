@@ -1,8 +1,9 @@
 //! Equality resolution inference rule
 
 use super::common::InferenceResult;
-use crate::core::{Clause, Derivation};
-use super::LiteralSelector;
+use crate::fol::Clause;
+use super::derivation::Derivation;
+use crate::selection::LiteralSelector;
 use crate::unification::unify;
 
 /// Apply equality resolution rule using literal selection
@@ -57,8 +58,8 @@ pub fn equality_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Atom, Constant, Literal, PredicateSymbol, Term};
-    use crate::inference::SelectAll;
+    use crate::fol::{Atom, Constant, Literal, PredicateSymbol, Term};
+    use crate::selection::SelectAll;
 
     #[test]
     fn test_equality_resolution_with_select_all() {

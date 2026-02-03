@@ -1,7 +1,8 @@
 //! Demodulation - rewriting terms using unit equalities
 
 use super::common::InferenceResult;
-use crate::core::{Atom, Clause, Derivation, KBOConfig, Literal, Term, TermOrdering, KBO};
+use crate::fol::{Atom, Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
+use super::derivation::Derivation;
 use crate::unification::match_term;
 
 /// Apply demodulation using a unit equality to rewrite terms in another clause
@@ -142,7 +143,7 @@ fn rewrite_term(term: &Term, lhs: &Term, rhs: &Term, kbo: &KBO) -> Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Constant, FunctionSymbol, PredicateSymbol};
+    use crate::fol::{Constant, FunctionSymbol, PredicateSymbol};
 
     #[test]
     fn test_demodulation_basic() {
