@@ -22,7 +22,7 @@ fn test_simple_resolution_proof() {
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
     
-    let (result, _) = saturate(formula, config, selector);
+    let (result, _, _) = saturate(formula, config, selector);
 
     match &result {
         SaturationResult::Proof(proof) => {
@@ -34,11 +34,8 @@ fn test_simple_resolution_proof() {
                 println!("  [{}] {}", i, c);
             }
         }
-        SaturationResult::ResourceLimit(_, clauses) => {
-            println!("RESOURCE LIMIT with {} clauses", clauses.len());
-        }
-        SaturationResult::Timeout(_, clauses) => {
-            println!("TIMEOUT with {} clauses", clauses.len());
+        SaturationResult::ResourceLimit(_, clauses) | SaturationResult::Timeout(_, clauses) => {
+            println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
         }
     }
 
@@ -63,13 +60,13 @@ fn test_with_duplicate_clause() {
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
 
-    let (result, _) = saturate(formula, config, selector);
+    let (result, _, _) = saturate(formula, config, selector);
 
     match &result {
         SaturationResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
             for step in &proof.steps {
-                println!("  [{:?}] {} <- {:?}", step.inference.rule, step.inference.conclusion, step.inference.premises);
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises());
             }
         }
         SaturationResult::Saturated(steps, clauses) => {
@@ -79,14 +76,11 @@ fn test_with_duplicate_clause() {
             }
             println!("Steps:");
             for step in steps {
-                println!("  [{:?}] {} <- {:?}", step.inference.rule, step.inference.conclusion, step.inference.premises);
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises());
             }
         }
-        SaturationResult::ResourceLimit(_, clauses) => {
-            println!("RESOURCE LIMIT with {} clauses", clauses.len());
-        }
-        SaturationResult::Timeout(_, clauses) => {
-            println!("TIMEOUT with {} clauses", clauses.len());
+        SaturationResult::ResourceLimit(_, clauses) | SaturationResult::Timeout(_, clauses) => {
+            println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
         }
     }
 
@@ -122,7 +116,7 @@ fn test_with_precloned_clauses() {
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
     
     let state = SaturationState::new(cloned_clauses, config, selector);
-    let (result, _) = state.saturate();
+    let (result, _, _) = state.saturate();
     
     match &result {
         SaturationResult::Proof(proof) => {
@@ -131,11 +125,11 @@ fn test_with_precloned_clauses() {
         SaturationResult::Saturated(steps, clauses) => {
             println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
             for step in steps {
-                println!("  [{:?}] idx={}", step.inference.rule, step.clause_idx);
+                println!("  [{:?}] idx={}", step.derivation, step.clause_idx);
             }
         }
         _ => {}
     }
-    
+
     assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof with pre-assigned IDs!");
 }

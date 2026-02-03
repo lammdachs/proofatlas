@@ -1,7 +1,7 @@
 //! Equality resolution inference rule
 
-use super::common::{InferenceResult, InferenceRule};
-use crate::core::Clause;
+use super::common::InferenceResult;
+use crate::core::{Clause, Derivation};
 use super::LiteralSelector;
 use crate::unification::unify;
 
@@ -43,8 +43,7 @@ pub fn equality_resolution(
                     let new_clause = Clause::new(new_literals);
 
                     results.push(InferenceResult {
-                        rule: InferenceRule::EqualityResolution,
-                        premises: vec![idx],
+                        derivation: Derivation::EqualityResolution { parent: idx },
                         conclusion: new_clause,
                     });
                 }
@@ -81,6 +80,6 @@ mod tests {
         let results = equality_resolution(&clause, 0, &selector);
         assert_eq!(results.len(), 1);
         assert!(results[0].conclusion.is_empty());
-        assert_eq!(results[0].rule, InferenceRule::EqualityResolution);
+        assert_eq!(results[0].derivation, Derivation::EqualityResolution { parent: 0 });
     }
 }

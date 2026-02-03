@@ -1,7 +1,6 @@
 //! JSON serialization for core data structures
 
 use super::{Atom, Clause, Literal, Proof, ProofStep, Term};
-use crate::inference::{InferenceResult, InferenceRule};
 use serde::{Deserialize, Serialize};
 
 /// JSON representation of a term
@@ -139,27 +138,6 @@ pub struct InferenceJson {
     pub premises: Vec<usize>,
 }
 
-impl From<&InferenceResult> for InferenceJson {
-    fn from(inf: &InferenceResult) -> Self {
-        let rule_str = match inf.rule {
-            InferenceRule::Input => "Input",
-            InferenceRule::GivenClauseSelection => "GivenClauseSelection",
-            InferenceRule::Resolution => "Resolution",
-            InferenceRule::Factoring => "Factoring",
-            InferenceRule::Superposition => "Superposition",
-            InferenceRule::EqualityResolution => "EqualityResolution",
-            InferenceRule::EqualityFactoring => "EqualityFactoring",
-            InferenceRule::Demodulation => "Demodulation",
-        }
-        .to_string();
-
-        InferenceJson {
-            rule: rule_str,
-            premises: inf.premises.clone(),
-        }
-    }
-}
-
 /// JSON representation of a proof step
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofStepJson {
@@ -175,7 +153,10 @@ impl From<&ProofStep> for ProofStepJson {
     fn from(step: &ProofStep) -> Self {
         ProofStepJson {
             clause_idx: step.clause_idx,
-            inference: (&step.inference).into(),
+            inference: InferenceJson {
+                rule: step.derivation.rule_name().to_string(),
+                premises: step.derivation.premises(),
+            },
             processed_count: None,
             unprocessed_count: None,
         }

@@ -1,9 +1,9 @@
 //! Binary resolution inference rule
 
 use super::common::{
-    remove_duplicate_literals, rename_clause_variables, unify_atoms, InferenceResult, InferenceRule,
+    remove_duplicate_literals, rename_clause_variables, unify_atoms, InferenceResult,
 };
-use crate::core::Clause;
+use crate::core::{Clause, Derivation};
 use super::LiteralSelector;
 
 /// Apply binary resolution between two clauses using literal selection
@@ -64,8 +64,7 @@ pub fn resolution(
                     // Don't generate tautologies
                     if !new_clause.is_tautology() {
                         results.push(InferenceResult {
-                            rule: InferenceRule::Resolution,
-                            premises: vec![idx1, idx2],
+                            derivation: Derivation::Resolution { parent1: idx1, parent2: idx2 },
                             conclusion: new_clause,
                         });
                     }

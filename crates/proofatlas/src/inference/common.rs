@@ -1,28 +1,14 @@
 //! Common types and utilities for inference rules
 
-use crate::core::{Atom, Clause, Literal, Substitution, Term, Variable};
+use crate::core::{Atom, Clause, Derivation, Literal, Substitution, Term, Variable};
 use crate::unification::unify;
 use std::collections::HashSet;
 
 /// Result of an inference rule application
 #[derive(Debug, Clone)]
 pub struct InferenceResult {
-    pub rule: InferenceRule,
-    pub premises: Vec<usize>, // Indices of parent clauses
+    pub derivation: Derivation,
     pub conclusion: Clause,
-}
-
-/// Types of inference rules
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InferenceRule {
-    Input,                // Initial clause from input
-    GivenClauseSelection, // Clause selected as given
-    Resolution,
-    Factoring,
-    Superposition,
-    EqualityResolution,
-    EqualityFactoring,
-    Demodulation,
 }
 
 /// Rename all variables in a clause to avoid conflicts

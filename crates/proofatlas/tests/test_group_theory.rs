@@ -23,7 +23,7 @@ fn run_group_problem(problem_file: &str, timeout_secs: u64) -> SaturationResult 
     };
 
     let state = SaturationState::new(formula.clauses, config, create_selector());
-    let (result, _) = state.saturate();
+    let (result, _, _) = state.saturate();
     result
 }
 

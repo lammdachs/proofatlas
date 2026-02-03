@@ -1,6 +1,10 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
-use proofatlas::{parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy, Clause, Literal, AgeWeightSelector, ClauseSelector};
+use proofatlas::{
+    parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy,
+    Clause, Literal, AgeWeightSelector, ClauseSelector, SaturationTrace,
+    ForwardSimplification, BackwardSimplification, SimplificationOutcome, GeneratingInference,
+};
 use std::time::Duration;
 
 #[wasm_bindgen]
@@ -32,25 +36,8 @@ pub struct ProverResult {
     pub proof: Option<Vec<ProofStep>>,
     pub all_clauses: Option<Vec<ProofStep>>, // All generated clauses
     pub statistics: ProverStatistics,
-    pub trace: Option<ProofTrace>, // Detailed saturation trace
+    pub trace: Option<serde_json::Value>, // Structured SaturationTrace as JSON
     pub profile: Option<serde_json::Value>, // Profiling data
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ProofTrace {
-    pub initial_clauses: Vec<ProofStep>,
-    pub saturation_steps: Vec<SaturationStep>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SaturationStep {
-    pub step_type: String, // "given_selection" or "inference"
-    pub clause_idx: usize,
-    pub clause: String,
-    pub rule: String,
-    pub premises: Vec<usize>,
-    pub processed_count: usize,
-    pub unprocessed_count: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,33 +60,33 @@ impl ProofAtlasWasm {
         // This method will return detailed proof trace with saturation steps
         self.prove_internal(tptp_input, options_js, true)
     }
-    
+
     #[wasm_bindgen]
     pub fn prove(&self, tptp_input: &str, options_js: JsValue) -> Result<JsValue, JsError> {
         self.prove_internal(tptp_input, options_js, false)
     }
-    
+
     fn prove_internal(&self, tptp_input: &str, options_js: JsValue, include_trace: bool) -> Result<JsValue, JsError> {
         // Parse options
         let options: ProverOptions = serde_wasm_bindgen::from_value(options_js)
             .map_err(|e| JsError::new(&format!("Invalid options: {}", e)))?;
-        
+
         web_sys::console::log_1(&format!("Options parsed: timeout_ms={:?}",
             options.timeout_ms).into());
-        
+
         // Parse TPTP input
         let cnf = parse_tptp(tptp_input, &[], None)
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
-        
+
         web_sys::console::log_1(&format!("Parsed {} clauses", cnf.clauses.len()).into());
-        
+
         let initial_clauses = cnf.clauses.len();
         let start_time = web_sys::window()
             .unwrap()
             .performance()
             .unwrap()
             .now();
-        
+
         // Create saturation config with configurable literal selection
         let literal_selection = match options.literal_selection.as_deref() {
             Some("20") => LiteralSelectionStrategy::Sel20,
@@ -136,60 +123,50 @@ impl ProofAtlasWasm {
 
         // Run saturation
         let state = SaturationState::new(cnf.clauses, config, clause_selector);
-        let (result, profile) = state.saturate();
-        
+        let (result, profile, sat_trace) = state.saturate();
+
         web_sys::console::log_1(&"Saturation completed".into());
-        
+
         let end_time = web_sys::window()
             .unwrap()
             .performance()
             .unwrap()
             .now();
-        
+
         let time_ms = (end_time - start_time) as u32;
-        
-        // Helper to convert proof steps
+
+        // Helper to convert proof steps to WASM ProofStep
         let convert_steps = |steps: &[proofatlas::ProofStep]| -> Vec<ProofStep> {
-            steps.iter().map(|step| ProofStep {
-                id: step.clause_idx,
-                clause: format_clause(&step.inference.conclusion),
-                rule: format!("{:?}", step.inference.rule),
-                parents: step.inference.premises.clone(),
+            steps.iter().map(|step| {
+                ProofStep {
+                    id: step.clause_idx,
+                    clause: format_clause(&step.conclusion),
+                    rule: step.derivation.rule_name().to_string(),
+                    parents: step.derivation.premises(),
+                }
             }).collect()
         };
-        
+
         // Build result
         let prover_result = match result {
             SaturationResult::Proof(proof) => {
                 // Proof found
                 let all_steps = convert_steps(&proof.steps);
-                
-                // For "All Clauses" view: filter out GivenClauseSelection (keep Input and inference clauses)
-                let all_clauses: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| step.rule != "GivenClauseSelection")
-                    .cloned()
-                    .collect();
-                
-                // Build index mapping: step.id -> position in all_steps
-                // Only include non-GivenClauseSelection steps to avoid duplicates
-                let mut id_to_pos: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-                for (pos, step) in all_steps.iter().enumerate() {
-                    if step.rule != "GivenClauseSelection" {
-                        id_to_pos.insert(step.id, pos);
-                    }
-                }
-                
+
+                // All clauses: all proof steps (all are real derivations now)
+                let all_clauses = all_steps.clone();
+
                 // Extract the proof path - trace back from empty clause
                 let mut proof_indices = std::collections::HashSet::new();
                 let mut to_visit = vec![proof.empty_clause_idx];
-                
-                // Collect all clause IDs that contribute to the proof
+
+                // Build index mapping: step.id -> step
+                let id_to_step: std::collections::HashMap<usize, &ProofStep> =
+                    all_steps.iter().map(|s| (s.id, s)).collect();
+
                 while let Some(current_id) = to_visit.pop() {
                     if proof_indices.insert(current_id) {
-                        // Find this clause in all_steps by ID
-                        if let Some(&pos) = id_to_pos.get(&current_id) {
-                            let step = &all_steps[pos];
-                            // Add parents to visit (parents are clause IDs, not positions)
+                        if let Some(step) = id_to_step.get(&current_id) {
                             for &parent_id in &step.parents {
                                 if !proof_indices.contains(&parent_id) {
                                     to_visit.push(parent_id);
@@ -198,18 +175,14 @@ impl ProofAtlasWasm {
                         }
                     }
                 }
-                
-                // Build proof path: include all steps that contribute to the proof
-                // but filter out GivenClauseSelection (which is just bookkeeping)
+
+                // Build proof path
                 let mut proof_path: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| {
-                        proof_indices.contains(&step.id) && 
-                        step.rule != "GivenClauseSelection"
-                    })
+                    .filter(|step| proof_indices.contains(&step.id))
                     .cloned()
                     .collect();
                 proof_path.sort_by_key(|step| step.id);
-                
+
                 ProverResult {
                     success: true,
                     status: "proof_found".to_string(),
@@ -223,104 +196,74 @@ impl ProofAtlasWasm {
                         time_ms,
                     },
                     trace: if include_trace {
-                        Some(build_trace(&proof.steps, initial_clauses))
+                        Some(trace_to_js_value(&sat_trace))
                     } else {
                         None
                     },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            SaturationResult::Saturated(steps, _) => {
-                // Saturated without proof
+            SaturationResult::Saturated(steps, clauses) => {
                 let all_steps = convert_steps(&steps);
-                // Filter out GivenClauseSelection for all_clauses view
-                let all_clauses: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| step.rule != "GivenClauseSelection")
-                    .cloned()
-                    .collect();
                 ProverResult {
                     success: false,
                     status: "saturated".to_string(),
                     message: "Saturated without finding a proof - the formula may be satisfiable".to_string(),
                     proof: None,
-                    all_clauses: Some(all_clauses),
+                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
-                        final_clauses: steps.len(),
+                        final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace {
-                        Some(build_trace(&steps, initial_clauses))
-                    } else {
-                        None
-                    },
+                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            SaturationResult::Timeout(steps, _) => {
-                // Timeout
+            SaturationResult::Timeout(steps, clauses) => {
                 let all_steps = convert_steps(&steps);
-                // Filter out GivenClauseSelection for all_clauses view
-                let all_clauses: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| step.rule != "GivenClauseSelection")
-                    .cloned()
-                    .collect();
                 ProverResult {
                     success: false,
                     status: "timeout".to_string(),
                     message: "Timeout reached before finding a proof".to_string(),
                     proof: None,
-                    all_clauses: Some(all_clauses),
+                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
-                        final_clauses: steps.len(),
+                        final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace {
-                        Some(build_trace(&steps, initial_clauses))
-                    } else {
-                        None
-                    },
+                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            SaturationResult::ResourceLimit(steps, _) => {
-                // Resource limit
+            SaturationResult::ResourceLimit(steps, clauses) => {
                 let all_steps = convert_steps(&steps);
-                // Filter out GivenClauseSelection for all_clauses view
-                let all_clauses: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| step.rule != "GivenClauseSelection")
-                    .cloned()
-                    .collect();
                 ProverResult {
                     success: false,
                     status: "resource_limit".to_string(),
                     message: "Resource limit reached".to_string(),
                     proof: None,
-                    all_clauses: Some(all_clauses),
+                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: steps.len(),
-                        final_clauses: steps.len(),
+                        final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace {
-                        Some(build_trace(&steps, initial_clauses))
-                    } else {
-                        None
-                    },
+                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
         };
-        
+
         // Convert to JS value
         serde_wasm_bindgen::to_value(&prover_result)
             .map_err(|e| JsError::new(&format!("Serialization error: {}", e)))
     }
-    
+
     #[wasm_bindgen]
     pub fn validate_tptp(&self, input: &str) -> Result<String, JsError> {
         // Just parse and return success/error for validation
@@ -331,53 +274,161 @@ impl ProofAtlasWasm {
     }
 }
 
-fn build_trace(steps: &[proofatlas::ProofStep], initial_count: usize) -> ProofTrace {
-    let mut trace = ProofTrace {
-        initial_clauses: Vec::new(),
-        saturation_steps: Vec::new(),
-    };
-    
-    let mut processed_count = 0;
-    let mut unprocessed_count = initial_count;
-    
-    for step in steps.iter() {
-        if step.inference.rule == proofatlas::InferenceRule::Input {
-            // Initial clause
-            trace.initial_clauses.push(ProofStep {
-                id: step.clause_idx,
-                clause: format_clause(&step.inference.conclusion),
-                rule: "Input".to_string(),
-                parents: vec![],
-            });
-        } else {
-            // Saturation step
-            let step_type = if step.inference.rule == proofatlas::InferenceRule::GivenClauseSelection {
-                "given_selection"
-            } else {
-                "inference"
-            };
-            
-            // Update counts based on step type
-            if step.inference.rule == proofatlas::InferenceRule::GivenClauseSelection {
-                processed_count += 1;
-                unprocessed_count = unprocessed_count.saturating_sub(1);
-            } else if step.inference.rule != proofatlas::InferenceRule::Input {
-                unprocessed_count += 1;
+/// Convert a SaturationTrace into the flat event format expected by the JS ProofInspector.
+///
+/// Output format:
+/// ```json
+/// {
+///   "initial_clauses": [{"id": 0, "clause": "..."}, ...],
+///   "iterations": [{
+///     "simplification": [{"clause_idx": 0, "clause": "...", "rule": "Transfer", "premises": []}],
+///     "selection": {"clause_idx": 0, "clause": "...", "rule": "GivenClauseSelection"} | null,
+///     "generation": [{"clause_idx": 6, "clause": "...", "rule": "Resolution", "premises": [0, 1]}]
+///   }]
+/// }
+/// ```
+fn trace_to_js_value(trace: &SaturationTrace) -> serde_json::Value {
+    use serde_json::json;
+
+    // Build initial_clauses array
+    let initial_clauses: Vec<serde_json::Value> = (0..trace.initial_clause_count)
+        .map(|i| json!({
+            "id": i,
+            "clause": trace.clauses.get(i).cloned().unwrap_or_default(),
+        }))
+        .collect();
+
+    // Build iterations
+    let iterations: Vec<serde_json::Value> = trace.iterations.iter().map(|step| {
+        let mut simplification_events = Vec::new();
+
+        for cs in &step.simplifications {
+            let clause_str = trace.clauses.get(cs.clause_idx).cloned().unwrap_or_default();
+
+            match &cs.outcome {
+                None => {
+                    // Empty clause found — record as special event
+                    simplification_events.push(json!({
+                        "clause_idx": cs.clause_idx,
+                        "clause": clause_str,
+                        "rule": "EmptyClause",
+                        "premises": [],
+                    }));
+                }
+                Some(SimplificationOutcome::Forward(fwd)) => {
+                    match fwd {
+                        ForwardSimplification::Tautology => {
+                            simplification_events.push(json!({
+                                "clause_idx": cs.clause_idx,
+                                "clause": clause_str,
+                                "rule": "TautologyDeletion",
+                                "premises": [],
+                            }));
+                        }
+                        ForwardSimplification::Subsumption { subsumer } => {
+                            simplification_events.push(json!({
+                                "clause_idx": cs.clause_idx,
+                                "clause": clause_str,
+                                "rule": "ForwardSubsumptionDeletion",
+                                "premises": [subsumer],
+                            }));
+                        }
+                        ForwardSimplification::Demodulation { demodulator, result } => {
+                            // The original clause is deleted; the result is a new clause in N
+                            let result_str = trace.clauses.get(*result).cloned().unwrap_or_default();
+                            simplification_events.push(json!({
+                                "clause_idx": *result,
+                                "clause": result_str,
+                                "rule": "Demodulation",
+                                "premises": [demodulator, cs.clause_idx],
+                            }));
+                        }
+                    }
+                }
+                Some(SimplificationOutcome::Backward { effects }) => {
+                    // Clause survived — emit backward effects first, then Transfer
+                    for effect in effects {
+                        match effect {
+                            BackwardSimplification::Subsumption { deleted_clause } => {
+                                let del_str = trace.clauses.get(*deleted_clause).cloned().unwrap_or_default();
+                                simplification_events.push(json!({
+                                    "clause_idx": *deleted_clause,
+                                    "clause": del_str,
+                                    "rule": "BackwardSubsumptionDeletion",
+                                    "premises": [cs.clause_idx],
+                                }));
+                            }
+                            BackwardSimplification::Demodulation { old_clause, result } => {
+                                let result_str = trace.clauses.get(*result).cloned().unwrap_or_default();
+                                simplification_events.push(json!({
+                                    "clause_idx": *result,
+                                    "clause": result_str,
+                                    "rule": "Demodulation",
+                                    "premises": [cs.clause_idx, old_clause],
+                                }));
+                            }
+                        }
+                    }
+                    // Transfer event
+                    simplification_events.push(json!({
+                        "clause_idx": cs.clause_idx,
+                        "clause": clause_str,
+                        "rule": "Transfer",
+                        "premises": [],
+                    }));
+                }
             }
-            
-            trace.saturation_steps.push(SaturationStep {
-                step_type: step_type.to_string(),
-                clause_idx: step.clause_idx,
-                clause: format_clause(&step.inference.conclusion),
-                rule: format!("{:?}", step.inference.rule),
-                premises: step.inference.premises.clone(),
-                processed_count,
-                unprocessed_count,
-            });
         }
-    }
-    
-    trace
+
+        // Selection
+        let selection = step.given_clause.map(|idx| {
+            let clause_str = trace.clauses.get(idx).cloned().unwrap_or_default();
+            json!({
+                "clause_idx": idx,
+                "clause": clause_str,
+                "rule": "GivenClauseSelection",
+            })
+        });
+
+        // Generation
+        let generation_events: Vec<serde_json::Value> = step.generating_inferences.iter().map(|gi| {
+            let (clause_idx, rule, premises) = match gi {
+                GeneratingInference::Resolution { clause_idx, parents } => {
+                    (*clause_idx, "Resolution", vec![parents.0, parents.1])
+                }
+                GeneratingInference::Factoring { clause_idx, parent } => {
+                    (*clause_idx, "Factoring", vec![*parent])
+                }
+                GeneratingInference::Superposition { clause_idx, parents } => {
+                    (*clause_idx, "Superposition", vec![parents.0, parents.1])
+                }
+                GeneratingInference::EqualityResolution { clause_idx, parent } => {
+                    (*clause_idx, "EqualityResolution", vec![*parent])
+                }
+                GeneratingInference::EqualityFactoring { clause_idx, parent } => {
+                    (*clause_idx, "EqualityFactoring", vec![*parent])
+                }
+            };
+            let clause_str = trace.clauses.get(clause_idx).cloned().unwrap_or_default();
+            json!({
+                "clause_idx": clause_idx,
+                "clause": clause_str,
+                "rule": rule,
+                "premises": premises,
+            })
+        }).collect();
+
+        json!({
+            "simplification": simplification_events,
+            "selection": selection,
+            "generation": generation_events,
+        })
+    }).collect();
+
+    json!({
+        "initial_clauses": initial_clauses,
+        "iterations": iterations,
+    })
 }
 
 fn format_clause(clause: &Clause) -> String {
@@ -404,7 +455,7 @@ fn format_literal(lit: &Literal) -> String {
 pub fn main() {
     // Set panic hook for better error messages
     console_error_panic_hook::set_once();
-    
+
     // Also set up better panic handling
     std::panic::set_hook(Box::new(|info| {
         console_error_panic_hook::hook(info);

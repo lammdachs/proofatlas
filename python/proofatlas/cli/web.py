@@ -65,6 +65,121 @@ def check_ml_available() -> bool:
         return False
 
 
+def _convert_trace(trace_json: str) -> dict:
+    """Convert the Rust SaturationTrace JSON into the flat event format for ProofInspector.
+
+    The Rust format uses structured enums (SimplificationOutcome, ForwardSimplification, etc.).
+    The JS inspector expects flat events with {clause_idx, clause, rule, premises}.
+    """
+    raw = json.loads(trace_json)
+    clauses = raw["clauses"]
+    initial_count = raw["initial_clause_count"]
+
+    initial_clauses = [
+        {"id": i, "clause": clauses[i] if i < len(clauses) else ""}
+        for i in range(initial_count)
+    ]
+
+    iterations = []
+    for step in raw["iterations"]:
+        simplification_events = []
+
+        for cs in step["simplifications"]:
+            idx = cs["clause_idx"]
+            clause_str = clauses[idx] if idx < len(clauses) else ""
+            outcome = cs["outcome"]
+
+            if outcome is None:
+                # Empty clause found
+                simplification_events.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "EmptyClause", "premises": [],
+                })
+            elif outcome["type"] == "Forward":
+                # Adjacent-tagged: {"type": "Forward", "data": {"type": "Tautology", ...}}
+                fwd = outcome["data"]
+                fwd_type = fwd["type"]
+                if fwd_type == "Tautology":
+                    simplification_events.append({
+                        "clause_idx": idx, "clause": clause_str,
+                        "rule": "TautologyDeletion", "premises": [],
+                    })
+                elif fwd_type == "Subsumption":
+                    simplification_events.append({
+                        "clause_idx": idx, "clause": clause_str,
+                        "rule": "ForwardSubsumptionDeletion",
+                        "premises": [fwd["subsumer"]],
+                    })
+                elif fwd_type == "Demodulation":
+                    result_idx = fwd["result"]
+                    result_str = clauses[result_idx] if result_idx < len(clauses) else ""
+                    simplification_events.append({
+                        "clause_idx": result_idx, "clause": result_str,
+                        "rule": "Demodulation",
+                        "premises": [fwd["demodulator"], idx],
+                    })
+
+            elif outcome["type"] == "Backward":
+                # Adjacent-tagged: {"type": "Backward", "data": {"effects": [...]}}
+                effects = outcome["data"]["effects"]
+                for effect in effects:
+                    if effect["type"] == "Subsumption":
+                        del_idx = effect["deleted_clause"]
+                        del_str = clauses[del_idx] if del_idx < len(clauses) else ""
+                        simplification_events.append({
+                            "clause_idx": del_idx, "clause": del_str,
+                            "rule": "BackwardSubsumptionDeletion", "premises": [idx],
+                        })
+                    elif effect["type"] == "Demodulation":
+                        result_idx = effect["result"]
+                        result_str = clauses[result_idx] if result_idx < len(clauses) else ""
+                        simplification_events.append({
+                            "clause_idx": result_idx, "clause": result_str,
+                            "rule": "Demodulation",
+                            "premises": [idx, effect["old_clause"]],
+                        })
+                # Transfer event
+                simplification_events.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "Transfer", "premises": [],
+                })
+
+        # Selection
+        given = step.get("given_clause")
+        selection = None
+        if given is not None:
+            sel_str = clauses[given] if given < len(clauses) else ""
+            selection = {
+                "clause_idx": given, "clause": sel_str,
+                "rule": "GivenClauseSelection",
+            }
+
+        # Generation
+        generation_events = []
+        for gi in step["generating_inferences"]:
+            gi_type = gi["type"]
+            gi_idx = gi["clause_idx"]
+            gi_str = clauses[gi_idx] if gi_idx < len(clauses) else ""
+            if gi_type in ("Resolution", "Superposition"):
+                parents = gi["parents"]
+            elif gi_type in ("Factoring", "EqualityResolution", "EqualityFactoring"):
+                parents = [gi["parent"]]
+            else:
+                parents = []
+            generation_events.append({
+                "clause_idx": gi_idx, "clause": gi_str,
+                "rule": gi_type, "premises": parents,
+            })
+
+        iterations.append({
+            "simplification": simplification_events,
+            "selection": selection,
+            "generation": generation_events,
+        })
+
+    return {"initial_clauses": initial_clauses, "iterations": iterations}
+
+
 # Status messages for non-proof results
 STATUS_MESSAGES = {
     "saturated": "Saturated without finding a proof - the formula may be satisfiable",
@@ -91,7 +206,7 @@ def run_prove(tptp_input: str, options: dict) -> dict:
         if key in options:
             kwargs[key] = options[key]
 
-    proof_found, status, profile_json = state.run_saturation(**kwargs)
+    proof_found, status, profile_json, trace_json = state.run_saturation(**kwargs)
     elapsed_ms = int((time.time() - start) * 1000)
 
     # Get all steps and proof trace
@@ -100,6 +215,7 @@ def run_prove(tptp_input: str, options: dict) -> dict:
     stats = state.get_statistics()
 
     # Convert ProofStep objects to dicts matching WASM format
+    # All steps are now real derivations (no trace-only events to filter)
     def step_to_dict(s):
         return {
             "id": s.clause_id,
@@ -108,17 +224,17 @@ def run_prove(tptp_input: str, options: dict) -> dict:
             "parents": list(s.parent_ids),
         }
 
-    # Build all_clauses (exclude GivenClauseSelection)
-    all_clauses = [step_to_dict(s) for s in all_steps if s.rule_name != "GivenClauseSelection"]
-
-    # Build trace for inspector
-    trace = build_trace(all_steps, initial_count)
+    all_clauses = [step_to_dict(s) for s in all_steps]
 
     # Determine message
     if proof_found:
         message = f"Proof found with {len(proof_steps)} steps"
     else:
         message = STATUS_MESSAGES.get(status, status)
+
+    # Parse the structured saturation trace from Rust and convert to
+    # the flat event format expected by the JS ProofInspector.
+    trace = _convert_trace(trace_json) if trace_json else None
 
     return {
         "success": proof_found,
@@ -134,46 +250,6 @@ def run_prove(tptp_input: str, options: dict) -> dict:
         },
         "trace": trace,
         "profile": json.loads(profile_json) if profile_json else None,
-    }
-
-
-def build_trace(all_steps, initial_count: int) -> dict:
-    """Build a trace dict matching the WASM ProofTrace format."""
-    initial_clauses = []
-    saturation_steps = []
-    processed_count = 0
-    unprocessed_count = initial_count
-
-    for s in all_steps:
-        if s.rule_name == "Input" or s.rule_name == "input":
-            initial_clauses.append({
-                "id": s.clause_id,
-                "clause": s.clause_string,
-                "rule": "Input",
-                "parents": [],
-            })
-        else:
-            step_type = "given_selection" if s.rule_name == "GivenClauseSelection" else "inference"
-
-            if s.rule_name == "GivenClauseSelection":
-                processed_count += 1
-                unprocessed_count = max(0, unprocessed_count - 1)
-            else:
-                unprocessed_count += 1
-
-            saturation_steps.append({
-                "step_type": step_type,
-                "clause_idx": s.clause_id,
-                "clause": s.clause_string,
-                "rule": s.rule_name,
-                "premises": list(s.parent_ids),
-                "processed_count": processed_count,
-                "unprocessed_count": unprocessed_count,
-            })
-
-    return {
-        "initial_clauses": initial_clauses,
-        "saturation_steps": saturation_steps,
     }
 
 

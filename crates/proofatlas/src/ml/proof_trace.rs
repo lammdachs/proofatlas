@@ -17,11 +17,8 @@ pub fn extract_training_data(proof: &Proof) -> Vec<TrainingExample> {
     // Find all clauses that are part of the proof derivation
     let proof_clauses = extract_proof_dag(proof);
 
-    // Get all clauses from proof steps
-    let mut all_clauses = HashSet::new();
-    for step in &proof.steps {
-        all_clauses.insert(step.clause_idx);
-    }
+    // All proof steps are real derivations (no trace-only events to filter)
+    let all_clauses: HashSet<usize> = proof.steps.iter().map(|s| s.clause_idx).collect();
 
     // Create training examples
     let mut examples = Vec::new();
@@ -51,7 +48,7 @@ fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
         // Find the step that derived this clause
         if let Some(step) = proof.steps.iter().find(|s| s.clause_idx == clause_idx) {
             // Add premises (parent clauses) to the search
-            to_visit.extend(step.inference.premises.iter().copied());
+            to_visit.extend(step.derivation.premises());
         }
     }
 
@@ -85,21 +82,20 @@ pub fn compute_proof_statistics(proof: &Proof) -> ProofStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Clause, ProofStep};
-    use crate::inference::{InferenceResult, InferenceRule};
+    use crate::core::{Clause, Derivation, ProofStep};
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
+        let derivation = if premises.is_empty() {
+            Derivation::Input
+        } else if premises.len() == 1 {
+            Derivation::Factoring { parent: premises[0] }
+        } else {
+            Derivation::Resolution { parent1: premises[0], parent2: premises[1] }
+        };
         ProofStep {
             clause_idx,
-            inference: InferenceResult {
-                rule: if premises.is_empty() {
-                    InferenceRule::Input
-                } else {
-                    InferenceRule::Resolution
-                },
-                premises,
-                conclusion: Clause::new(vec![]), // Empty for simplicity
-            },
+            derivation,
+            conclusion: Clause::new(vec![]), // Empty for simplicity
         }
     }
 

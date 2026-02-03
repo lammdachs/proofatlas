@@ -1,10 +1,10 @@
 //! Superposition inference rule for equality reasoning
 
 use super::common::{
-    remove_duplicate_literals, rename_clause_variables, InferenceResult, InferenceRule,
+    remove_duplicate_literals, rename_clause_variables, InferenceResult,
 };
 use crate::core::{
-    Atom, Clause, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
+    Atom, Clause, Derivation, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
 };
 use super::LiteralSelector;
 use crate::unification::unify;
@@ -147,8 +147,7 @@ pub fn superposition(
 
                                 if !new_clause.is_tautology() {
                                     results.push(InferenceResult {
-                                        rule: InferenceRule::Superposition,
-                                        premises: vec![idx1, idx2],
+                                        derivation: Derivation::Superposition { parent1: idx1, parent2: idx2 },
                                         conclusion: new_clause,
                                     });
                                 }

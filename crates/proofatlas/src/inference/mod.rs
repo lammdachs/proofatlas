@@ -10,7 +10,7 @@ pub mod resolution;
 pub mod superposition;
 
 // Re-export the main inference function and types
-pub use common::{InferenceResult, InferenceRule};
+pub use common::InferenceResult;
 
 // Re-export literal selection strategies
 pub use literal_selection::{

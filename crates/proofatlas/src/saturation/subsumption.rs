@@ -45,6 +45,9 @@ pub struct SubsumptionChecker {
     /// All clauses indexed by their string representation for duplicate detection
     clause_strings: HashSet<String>,
 
+    /// Map from clause string to clause index (for active clauses, used by find_subsumer)
+    clause_string_to_idx: HashMap<String, usize>,
+
     /// Unit clauses for unit subsumption
     units: Vec<(Clause, usize)>,
 
@@ -59,6 +62,7 @@ impl SubsumptionChecker {
     pub fn new() -> Self {
         SubsumptionChecker {
             clause_strings: HashSet::new(),
+            clause_string_to_idx: HashMap::new(),
             units: Vec::new(),
             clauses: Vec::new(),
             active: HashSet::new(),
@@ -83,7 +87,8 @@ impl SubsumptionChecker {
 
         // Add to string index
         let clause_str = format!("{}", clause);
-        self.clause_strings.insert(clause_str);
+        self.clause_strings.insert(clause_str.clone());
+        self.clause_string_to_idx.insert(clause_str, idx);
 
         // Add to unit index if applicable
         if clause.literals.len() == 1 {
@@ -97,7 +102,8 @@ impl SubsumptionChecker {
 
         // Add to string index
         let clause_str = format!("{}", clause);
-        self.clause_strings.insert(clause_str);
+        self.clause_strings.insert(clause_str.clone());
+        self.clause_string_to_idx.insert(clause_str, idx);
 
         // Add to unit index if applicable
         if clause.literals.len() == 1 {
@@ -109,25 +115,26 @@ impl SubsumptionChecker {
         idx
     }
 
-    /// Check if a clause is subsumed by active clauses (those in P ∪ A)
-    pub fn is_subsumed(&self, clause: &Clause) -> bool {
+    /// Find the active clause that subsumes the given clause, returning its index.
+    /// Returns None if no active clause subsumes it.
+    pub fn find_subsumer(&self, clause: &Clause) -> Option<usize> {
         // 1. Check for exact duplicates (very fast)
-        // Note: clause_strings only contains active clauses
+        // Note: clause_strings maps to clause indices for active clauses
         let clause_str = format!("{}", clause);
-        if self.clause_strings.contains(&clause_str) {
-            return true;
+        if let Some(&idx) = self.clause_string_to_idx.get(&clause_str) {
+            return Some(idx);
         }
 
         // 2. Check for variants (duplicates up to variable renaming)
-        if self.has_variant(clause) {
-            return true;
+        if let Some(idx) = self.find_variant(clause) {
+            return Some(idx);
         }
 
         // 3. Unit subsumption (fast and complete)
         // Note: units only contains active unit clauses
-        for (unit, _) in &self.units {
+        for (unit, idx) in &self.units {
             if subsumes_unit(unit, clause) {
-                return true;
+                return Some(*idx);
             }
         }
 
@@ -138,7 +145,7 @@ impl SubsumptionChecker {
                     continue;
                 }
                 if existing.literals.len() < clause.literals.len() && subsumes(existing, clause) {
-                    return true;
+                    return Some(idx);
                 }
             }
         }
@@ -161,12 +168,17 @@ impl SubsumptionChecker {
 
                 // Try greedy subsumption
                 if subsumes_greedy(existing, clause) {
-                    return true;
+                    return Some(idx);
                 }
             }
         }
 
-        false
+        None
+    }
+
+    /// Check if a clause is subsumed by active clauses (those in P ∪ A)
+    pub fn is_subsumed(&self, clause: &Clause) -> bool {
+        self.find_subsumer(clause).is_some()
     }
 
     /// Check if a clause is subsumed by any processed clause (excluding itself)
@@ -247,8 +259,8 @@ impl SubsumptionChecker {
         subsumed
     }
 
-    /// Check if we have a variant of this clause among active clauses
-    fn has_variant(&self, clause: &Clause) -> bool {
+    /// Find a variant of this clause among active clauses, returning its index
+    fn find_variant(&self, clause: &Clause) -> Option<usize> {
         // Get the clause's "shape" (predicate symbols and polarities)
         let shape = get_clause_shape(clause);
 
@@ -267,11 +279,11 @@ impl SubsumptionChecker {
 
             // Check if they're variants
             if are_variants(existing, clause) {
-                return true;
+                return Some(idx);
             }
         }
 
-        false
+        None
     }
 }
 

@@ -616,7 +616,7 @@ footer a:hover {
 
 .clause-sets {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 20px;
 }
 
@@ -645,6 +645,69 @@ footer a:hover {
     margin-bottom: 5px;
     background: #f8f9fa;
     border-radius: 3px;
+}
+
+/* Phase events area */
+.phase-events {
+    margin-bottom: 15px;
+}
+
+.phase-group {
+    margin-bottom: 12px;
+}
+
+.phase-group h5 {
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+}
+
+.phase-event {
+    padding: 4px 8px;
+    margin-bottom: 3px;
+    font-family: monospace;
+    font-size: 13px;
+    border-radius: 3px;
+    border-left: 3px solid #dee2e6;
+}
+
+.phase-event.deletion {
+    background: #fff5f5;
+    border-left-color: #e74c3c;
+    color: #721c24;
+}
+
+.phase-event.transfer {
+    background: #f0fff4;
+    border-left-color: #27ae60;
+    color: #155724;
+}
+
+.phase-event.simplification {
+    background: #fff8e1;
+    border-left-color: #f39c12;
+    color: #856404;
+}
+
+.phase-event.generation {
+    background: #e8f4fd;
+    border-left-color: #3498db;
+    color: #1565c0;
+}
+
+/* Clause set color hints */
+.clause-set-new h4 {
+    border-bottom-color: #f39c12;
+}
+
+.clause-set-unprocessed h4 {
+    border-bottom-color: #3498db;
+}
+
+.clause-set-processed h4 {
+    border-bottom-color: #27ae60;
 }
 
 .footer-links {

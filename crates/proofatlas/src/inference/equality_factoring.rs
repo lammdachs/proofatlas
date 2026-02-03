@@ -1,8 +1,8 @@
 //! Equality factoring inference rule
 
-use super::common::{InferenceResult, InferenceRule};
+use super::common::InferenceResult;
 use crate::core::{
-    Atom, Clause, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
+    Atom, Clause, Derivation, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
 };
 use super::LiteralSelector;
 use crate::unification::unify;
@@ -103,8 +103,7 @@ pub fn equality_factoring(
                     let conclusion = Clause::new(new_literals);
 
                     results.push(InferenceResult {
-                        rule: InferenceRule::EqualityFactoring,
-                        premises: vec![idx],
+                        derivation: Derivation::EqualityFactoring { parent: idx },
                         conclusion,
                     });
                 }

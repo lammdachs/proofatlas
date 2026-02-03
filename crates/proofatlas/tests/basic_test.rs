@@ -16,7 +16,7 @@ fn test_simple_resolution() {
 
     let formula = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
-    let (result, _) = saturate(formula, config, create_selector());
+    let (result, _, _) = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Proof(_) => {
@@ -34,7 +34,7 @@ fn test_equality_reflexivity() {
 
     let formula = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
-    let (result, _) = saturate(formula, config, create_selector());
+    let (result, _, _) = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Proof(_) => {
@@ -54,7 +54,7 @@ fn test_satisfiable_formula() {
     let formula = parse_tptp(tptp, &[], None).unwrap();
     let mut config = SaturationConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
-    let (result, _) = saturate(formula, config, create_selector());
+    let (result, _, _) = saturate(formula, config, create_selector());
 
     match result {
         SaturationResult::Saturated(_, _) => {

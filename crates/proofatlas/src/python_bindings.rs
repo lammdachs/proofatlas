@@ -11,7 +11,7 @@ use numpy::{PyArray1, PyArray2, ToPyArray};
 use crate::core::Clause;
 use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
-    InferenceResult as RustInferenceResult, InferenceRule,
+    InferenceResult as RustInferenceResult,
 };
 use crate::ml::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
@@ -522,7 +522,7 @@ impl ProofState {
     ///                       When enabled, the third element of the return tuple is a JSON string.
     ///
     /// Returns:
-    ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str])
+    ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str], trace_json: Optional[str])
     #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, max_clause_memory_mb=None, use_cuda=None, enable_profiling=None))]
     pub fn run_saturation(
         &mut self,
@@ -536,7 +536,7 @@ impl ProofState {
         max_clause_memory_mb: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
-    ) -> PyResult<(bool, String, Option<String>)> {
+    ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
         use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
         use crate::selectors::AgeWeightSelector;
         use std::time::Duration;
@@ -645,7 +645,7 @@ impl ProofState {
         let state = SaturationState::new(initial_clauses, config, clause_selector);
 
         // Run saturation in a thread with larger stack to handle deep recursion
-        let (result, profile) = std::thread::Builder::new()
+        let (result, profile, sat_trace) = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || state.saturate())
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
@@ -681,15 +681,20 @@ impl ProofState {
         // Rebuild proof trace
         self.proof_trace.clear();
         for step in proof_steps {
+            let clause_string = step.conclusion.to_string();
             self.proof_trace.push(ProofStep {
                 clause_id: step.clause_idx,
-                parent_ids: step.inference.premises.clone(),
-                rule_name: format!("{:?}", step.inference.rule),
-                clause_string: step.inference.conclusion.to_string(),
+                parent_ids: step.derivation.premises(),
+                rule_name: step.derivation.rule_name().to_string(),
+                clause_string,
             });
         }
 
-        Ok((proof_found, status.to_string(), profile_json))
+        // Serialize trace to JSON
+        let trace_json = serde_json::to_string(&sat_trace)
+            .map_err(|e| PyValueError::new_err(format!("Trace serialization failed: {}", e)))?;
+
+        Ok((proof_found, status.to_string(), profile_json, Some(trace_json)))
     }
 
     /// Get statistics
@@ -907,12 +912,9 @@ impl ProofState {
             .collect();
 
         // Build derivation info map from proof trace
-        // Skip GivenClauseSelection - it's not an inference rule
+        // All proof trace entries are real derivations (no trace-only events to filter)
         let mut derivation_info: HashMap<usize, (Vec<usize>, String)> = HashMap::new();
         for step in &self.proof_trace {
-            if step.rule_name == "GivenClauseSelection" {
-                continue;
-            }
             derivation_info.insert(
                 step.clause_id,
                 (step.parent_ids.clone(), step.rule_name.clone()),
@@ -949,21 +951,12 @@ impl ProofState {
     /// Convert Rust inference result to Python inference result
     fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
         let clause_string = rust_result.conclusion.to_string();
-        let rule_name = match rust_result.rule {
-            InferenceRule::Input => "input",
-            InferenceRule::GivenClauseSelection => "given_clause_selection",
-            InferenceRule::Resolution => "resolution",
-            InferenceRule::Factoring => "factoring",
-            InferenceRule::Superposition => "superposition",
-            InferenceRule::EqualityResolution => "equality_resolution",
-            InferenceRule::EqualityFactoring => "equality_factoring",
-            InferenceRule::Demodulation => "demodulation",
-        }
-        .to_string();
+        let rule_name = rust_result.derivation.rule_name().to_lowercase();
+        let parent_ids = rust_result.derivation.premises();
 
         InferenceResult {
             clause_string,
-            parent_ids: rust_result.premises,
+            parent_ids,
             rule_name,
             clause: rust_result.conclusion,
         }

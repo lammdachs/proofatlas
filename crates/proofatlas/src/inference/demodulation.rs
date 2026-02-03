@@ -1,7 +1,7 @@
 //! Demodulation - rewriting terms using unit equalities
 
-use super::common::{InferenceResult, InferenceRule};
-use crate::core::{Atom, Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
+use super::common::InferenceResult;
+use crate::core::{Atom, Clause, Derivation, KBOConfig, Literal, Term, TermOrdering, KBO};
 use crate::unification::match_term;
 
 /// Apply demodulation using a unit equality to rewrite terms in another clause
@@ -40,8 +40,7 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    rule: InferenceRule::Demodulation,
-                    premises: vec![unit_idx, target_idx],
+                    derivation: Derivation::Demodulation { demodulator: unit_idx, target: target_idx },
                     conclusion: new_clause,
                 });
             }
@@ -52,8 +51,7 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    rule: InferenceRule::Demodulation,
-                    premises: vec![unit_idx, target_idx],
+                    derivation: Derivation::Demodulation { demodulator: unit_idx, target: target_idx },
                     conclusion: new_clause,
                 });
             }

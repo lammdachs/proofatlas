@@ -17,13 +17,14 @@ pub mod python_bindings;
 
 // Re-export commonly used types and functions
 pub use core::{
-    Atom, CNFFormula, Clause, Constant, FunctionSymbol, KBOConfig, Literal, PredicateSymbol, Proof,
-    ProofStep, Substitution, Term, TermOrdering, Variable, KBO,
+    Atom, BackwardSimplification, CNFFormula, Clause, Constant, Derivation, ForwardSimplification,
+    FunctionSymbol, GeneratingInference, KBOConfig, Literal, PredicateSymbol, Proof, ProofStep,
+    SaturationTrace, SimplificationOutcome, Substitution, Term, TermOrdering, Variable, KBO,
 };
 
 pub use inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition, InferenceResult,
-    InferenceRule, LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
     SelectUniqueMaximalOrNegOrMaximal,
 };
 

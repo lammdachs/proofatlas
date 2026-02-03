@@ -83,24 +83,28 @@ fof(goal, conjecture, p => r).</textarea>
                         <div class="stepper-controls">
                             <button id="step-first">First</button>
                             <button id="step-prev">Previous</button>
-                            <span id="step-counter">Step 0 / 0</span>
+                            <span id="step-counter">Iteration 0 / 0</span>
                             <button id="step-next">Next</button>
                             <button id="step-last">Last</button>
                         </div>
                         <div class="stepper-content">
                             <div class="given-clause-section">
-                                <h4>Current Given Clause</h4>
+                                <h4>Selected Given Clause</h4>
                                 <div id="given-clause" class="given-clause"></div>
                             </div>
-                            <div id="step-info" class="step-info"></div>
+                            <div id="phase-events" class="phase-events"></div>
                             <div class="clause-sets">
-                                <div class="clause-set">
-                                    <h4>Processed (<span id="processed-count">0</span>)</h4>
-                                    <div id="processed-clauses" class="clause-list"></div>
+                                <div class="clause-set clause-set-new">
+                                    <h4>New / N (<span id="new-count">0</span>)</h4>
+                                    <div id="new-clauses" class="clause-list"></div>
                                 </div>
-                                <div class="clause-set">
-                                    <h4>Unprocessed (<span id="unprocessed-count">0</span>)</h4>
+                                <div class="clause-set clause-set-unprocessed">
+                                    <h4>Unprocessed / P (<span id="unprocessed-count">0</span>)</h4>
                                     <div id="unprocessed-clauses" class="clause-list"></div>
+                                </div>
+                                <div class="clause-set clause-set-processed">
+                                    <h4>Processed / A (<span id="processed-count">0</span>)</h4>
+                                    <div id="processed-clauses" class="clause-list"></div>
                                 </div>
                             </div>
                         </div>

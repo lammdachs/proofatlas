@@ -1,7 +1,7 @@
 //! Factoring inference rule
 
-use super::common::{remove_duplicate_literals, unify_atoms, InferenceResult, InferenceRule};
-use crate::core::Clause;
+use super::common::{remove_duplicate_literals, unify_atoms, InferenceResult};
+use crate::core::{Clause, Derivation};
 use super::LiteralSelector;
 
 /// Apply factoring to a clause using literal selection
@@ -50,8 +50,7 @@ pub fn factoring(
 
                         if !new_clause.is_tautology() {
                             results.push(InferenceResult {
-                                rule: InferenceRule::Factoring,
-                                premises: vec![idx],
+                                derivation: Derivation::Factoring { parent: idx },
                                 conclusion: new_clause,
                             });
                         }

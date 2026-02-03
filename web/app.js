@@ -317,50 +317,52 @@ async function initializeWasm() {
     }
 }
 
-// Proof Inspector class
+// Proof Inspector class — iteration-based, matching the paper's given-clause algorithm
 class ProofInspector {
     constructor(trace, allClauses) {
         this.trace = trace;
         this.allClauses = allClauses;
         this.currentStep = 0;
-        this.processedClauses = new Set();
+
+        // Three clause sets matching the paper
+        this.newClauses = new Set();
         this.unprocessedClauses = new Set();
-        this.currentGiven = null;
+        this.processedClauses = new Set();
 
-        // Group steps by given clause
-        this.givenClauseGroups = [];
-        this.buildGivenClauseGroups();
-
-        // Initialize with initial clauses
-        if (trace && trace.initial_clauses) {
-            trace.initial_clauses.forEach(clause => {
-                this.unprocessedClauses.add(clause.id);
-            });
+        // Build clause lookup from all_clauses and trace events
+        this.clauseMap = new Map();
+        if (allClauses) {
+            allClauses.forEach(c => this.clauseMap.set(c.id, c));
         }
-
-        this.setupEventHandlers();
-        this.render();
-    }
-
-    buildGivenClauseGroups() {
-        if (!this.trace || !this.trace.saturation_steps) return;
-
-        let currentGroup = null;
-
-        for (const step of this.trace.saturation_steps) {
-            if (step.step_type === 'given_selection') {
-                currentGroup = {
-                    givenClauseId: step.clause_idx,
-                    givenClause: step.clause,
-                    inferences: []
-                };
-                this.givenClauseGroups.push(currentGroup);
-            } else if (step.step_type === 'inference' && currentGroup) {
-                currentGroup.inferences.push(step);
+        if (trace && trace.initial_clauses) {
+            trace.initial_clauses.forEach(c => this.clauseMap.set(c.id, c));
+        }
+        if (trace && trace.iterations) {
+            for (const iter of trace.iterations) {
+                for (const ev of iter.simplification) {
+                    if (!this.clauseMap.has(ev.clause_idx)) {
+                        this.clauseMap.set(ev.clause_idx, { id: ev.clause_idx, clause: ev.clause, rule: ev.rule, parents: ev.premises });
+                    }
+                }
+                if (iter.selection && !this.clauseMap.has(iter.selection.clause_idx)) {
+                    this.clauseMap.set(iter.selection.clause_idx, { id: iter.selection.clause_idx, clause: iter.selection.clause, rule: iter.selection.rule, parents: [] });
+                }
+                for (const ev of iter.generation) {
+                    if (!this.clauseMap.has(ev.clause_idx)) {
+                        this.clauseMap.set(ev.clause_idx, { id: ev.clause_idx, clause: ev.clause, rule: ev.rule, parents: ev.premises });
+                    }
+                }
             }
         }
 
-        console.log(`Total given clause groups: ${this.givenClauseGroups.length}`);
+        this.setupEventHandlers();
+
+        // Start at first iteration
+        if (trace && trace.iterations && trace.iterations.length > 0) {
+            this.goToStep(0);
+        } else {
+            this.render();
+        }
     }
 
     setupEventHandlers() {
@@ -368,69 +370,82 @@ class ProofInspector {
         document.getElementById('step-prev').addEventListener('click', () => this.goToStep(this.currentStep - 1));
         document.getElementById('step-next').addEventListener('click', () => this.goToStep(this.currentStep + 1));
         document.getElementById('step-last').addEventListener('click', () => {
-            const maxStep = this.givenClauseGroups ? this.givenClauseGroups.length - 1 : 0;
+            const maxStep = this.trace && this.trace.iterations ? this.trace.iterations.length - 1 : 0;
             this.goToStep(maxStep);
         });
     }
 
-    goToStep(groupNum) {
-        if (!this.givenClauseGroups) return;
+    goToStep(iterNum) {
+        if (!this.trace || !this.trace.iterations) return;
 
-        const maxStep = this.givenClauseGroups.length - 1;
-        if (groupNum < 0 || groupNum > maxStep) return;
+        const maxStep = this.trace.iterations.length - 1;
+        if (iterNum < 0 || iterNum > maxStep) return;
 
-        // Reset state and replay up to the target group
-        this.processedClauses.clear();
+        // Reset and replay from scratch
+        this.newClauses.clear();
         this.unprocessedClauses.clear();
-        this.currentGiven = null;
+        this.processedClauses.clear();
 
-        // Add initial clauses to unprocessed
-        if (this.trace && this.trace.initial_clauses) {
-            this.trace.initial_clauses.forEach(clause => {
-                this.unprocessedClauses.add(clause.id);
-            });
+        // Initial clauses start in N
+        if (this.trace.initial_clauses) {
+            this.trace.initial_clauses.forEach(c => this.newClauses.add(c.id));
         }
 
-        // Process all groups up to and including the current one
-        for (let i = 0; i <= groupNum; i++) {
-            const group = this.givenClauseGroups[i];
-
-            // Move previous given to processed
-            if (this.currentGiven !== null) {
-                this.processedClauses.add(this.currentGiven);
-            }
-
-            // Set current given clause
-            this.unprocessedClauses.delete(group.givenClauseId);
-            this.currentGiven = group.givenClauseId;
-
-            // If this is the current group, add all its inferences to unprocessed
-            if (i === groupNum) {
-                group.inferences.forEach(inf => {
-                    this.unprocessedClauses.add(inf.clause_idx);
-                });
-            } else {
-                // For previous groups, add all inferences to unprocessed then move given to processed
-                group.inferences.forEach(inf => {
-                    this.unprocessedClauses.add(inf.clause_idx);
-                });
-                this.processedClauses.add(this.currentGiven);
-                this.currentGiven = null;
-            }
+        // Replay all iterations up to and including the target
+        for (let i = 0; i <= iterNum; i++) {
+            const iter = this.trace.iterations[i];
+            this.replayIteration(iter);
         }
 
-        this.currentStep = groupNum;
+        this.currentStep = iterNum;
         this.render();
     }
 
-    render() {
-        if (!this.givenClauseGroups || this.givenClauseGroups.length === 0) return;
+    replayIteration(iter) {
+        // Step 1: Simplification
+        for (const ev of iter.simplification) {
+            switch (ev.rule) {
+                case 'TautologyDeletion':
+                case 'ForwardSubsumptionDeletion':
+                    this.newClauses.delete(ev.clause_idx);
+                    break;
+                case 'BackwardSubsumptionDeletion':
+                    this.unprocessedClauses.delete(ev.clause_idx);
+                    this.processedClauses.delete(ev.clause_idx);
+                    break;
+                case 'Transfer':
+                    this.newClauses.delete(ev.clause_idx);
+                    this.unprocessedClauses.add(ev.clause_idx);
+                    break;
+                case 'Demodulation':
+                    // Demodulation creates a new clause in N
+                    this.newClauses.add(ev.clause_idx);
+                    break;
+            }
+        }
 
-        const maxStep = this.givenClauseGroups.length - 1;
-        const currentGroup = this.currentStep >= 0 ? this.givenClauseGroups[this.currentStep] : null;
+        // Step 3: Selection
+        if (iter.selection) {
+            const givenId = iter.selection.clause_idx;
+            this.unprocessedClauses.delete(givenId);
+            this.processedClauses.add(givenId);
+        }
+
+        // Step 4: Generation
+        for (const ev of iter.generation) {
+            this.newClauses.add(ev.clause_idx);
+        }
+    }
+
+    render() {
+        const iterations = this.trace && this.trace.iterations ? this.trace.iterations : [];
+        if (iterations.length === 0) return;
+
+        const maxStep = iterations.length - 1;
+        const currentIter = iterations[this.currentStep];
 
         // Update counter
-        document.getElementById('step-counter').textContent = `Given Clause ${this.currentStep + 1} / ${maxStep + 1}`;
+        document.getElementById('step-counter').textContent = `Iteration ${this.currentStep + 1} / ${maxStep + 1}`;
 
         // Update buttons
         document.getElementById('step-first').disabled = this.currentStep <= 0;
@@ -438,45 +453,84 @@ class ProofInspector {
         document.getElementById('step-next').disabled = this.currentStep >= maxStep;
         document.getElementById('step-last').disabled = this.currentStep >= maxStep;
 
-        // Update step info with all inferences for this given clause
-        const stepInfo = document.getElementById('step-info');
-        if (currentGroup) {
-            let infoHtml = '';
-
-            if (currentGroup.inferences.length === 0) {
-                infoHtml = '<em>No inferences generated from this clause</em>';
-            } else {
-                infoHtml = `<strong>${currentGroup.inferences.length} inference(s) generated:</strong><div class="inference-list">`;
-                currentGroup.inferences.forEach(inf => {
-                    const parents = inf.premises && inf.premises.length > 0 ? inf.premises.join(', ') : '';
-                    if (parents) {
-                        infoHtml += `<div class="inference-item">${inf.rule} with [${parents}] → Clause ${inf.clause_idx}</div>`;
-                    } else {
-                        infoHtml += `<div class="inference-item">${inf.rule} → Clause ${inf.clause_idx}</div>`;
-                    }
-                });
-                infoHtml += '</div>';
-            }
-            stepInfo.innerHTML = infoHtml;
-        }
-
-        // Update clause lists
-        this.renderClauseList('processed-clauses', 'processed-count', this.processedClauses);
-        this.renderClauseList('unprocessed-clauses', 'unprocessed-count', this.unprocessedClauses);
-
         // Update given clause
         const givenDiv = document.getElementById('given-clause');
-        if (currentGroup) {
-            const clause = this.getClauseById(currentGroup.givenClauseId);
-            if (clause) {
-                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> ${escapeHtml(clause.clause)}`;
-            } else if (currentGroup.givenClause) {
-                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> ${escapeHtml(currentGroup.givenClause)}`;
-            } else {
-                givenDiv.innerHTML = `<strong>[${currentGroup.givenClauseId}]</strong> (clause details not available)`;
-            }
+        if (currentIter.selection) {
+            const sel = currentIter.selection;
+            givenDiv.innerHTML = `<strong>[${sel.clause_idx}]</strong> ${escapeHtml(sel.clause)}`;
         } else {
-            givenDiv.textContent = '(none selected)';
+            givenDiv.textContent = '(no selection — saturated)';
+        }
+
+        // Update phase events
+        this.renderPhaseEvents(currentIter);
+
+        // Update clause set displays
+        this.renderClauseList('new-clauses', 'new-count', this.newClauses);
+        this.renderClauseList('unprocessed-clauses', 'unprocessed-count', this.unprocessedClauses);
+        this.renderClauseList('processed-clauses', 'processed-count', this.processedClauses);
+    }
+
+    renderPhaseEvents(iter) {
+        const container = document.getElementById('phase-events');
+        let html = '';
+
+        // Simplification phase
+        if (iter.simplification.length > 0) {
+            html += '<div class="phase-group"><h5>Step 1 — Simplification</h5>';
+            for (const ev of iter.simplification) {
+                const cssClass = this.getEventCssClass(ev.rule);
+                html += `<div class="phase-event ${cssClass}">${this.describeEvent(ev)}</div>`;
+            }
+            html += '</div>';
+        }
+
+        // Generation phase
+        if (iter.generation.length > 0) {
+            html += '<div class="phase-group"><h5>Step 4 — Generation</h5>';
+            for (const ev of iter.generation) {
+                const parents = ev.premises.length > 0 ? ` from [${ev.premises.join(', ')}]` : '';
+                html += `<div class="phase-event generation">${ev.rule}${parents} → [${ev.clause_idx}] ${escapeHtml(ev.clause)}</div>`;
+            }
+            html += '</div>';
+        }
+
+        if (!html) {
+            html = '<em>No events in this iteration</em>';
+        }
+
+        container.innerHTML = html;
+    }
+
+    describeEvent(ev) {
+        switch (ev.rule) {
+            case 'TautologyDeletion':
+                return `Clause [${ev.clause_idx}] deleted (tautology)`;
+            case 'ForwardSubsumptionDeletion':
+                return `Clause [${ev.clause_idx}] deleted (subsumed by [${ev.premises.join(', ')}])`;
+            case 'BackwardSubsumptionDeletion':
+                return `Clause [${ev.clause_idx}] deleted (backward subsumed by [${ev.premises.join(', ')}])`;
+            case 'Transfer':
+                return `Clause [${ev.clause_idx}] transferred to P`;
+            case 'Demodulation':
+                return `Clause [${ev.premises[1] || '?'}] simplified by [${ev.premises[0] || '?'}] → [${ev.clause_idx}] ${escapeHtml(ev.clause)}`;
+            default:
+                return `${ev.rule} → [${ev.clause_idx}]`;
+        }
+    }
+
+    getEventCssClass(rule) {
+        switch (rule) {
+            case 'TautologyDeletion':
+            case 'ForwardSubsumptionDeletion':
+            case 'BackwardSubsumptionDeletion':
+                return 'deletion';
+            case 'Transfer':
+                return 'transfer';
+            case 'Demodulation':
+                return 'simplification';
+            default:
+                return '';
         }
     }
 
@@ -493,36 +547,13 @@ class ProofInspector {
 
         const clauseArray = Array.from(clauseIds).sort((a, b) => a - b);
         div.innerHTML = clauseArray.map(id => {
-            const clause = this.getClauseById(id);
+            const clause = this.clauseMap.get(id);
             if (clause) {
                 return `<div class="clause-item">[${id}] ${escapeHtml(clause.clause)}</div>`;
             } else {
                 return `<div class="clause-item">[${id}] (not available)</div>`;
             }
         }).join('');
-    }
-
-    getClauseById(id) {
-        if (this.allClauses) {
-            return this.allClauses.find(c => c.id === id);
-        }
-
-        if (this.trace) {
-            const initial = this.trace.initial_clauses?.find(c => c.id === id);
-            if (initial) return initial;
-
-            const step = this.trace.saturation_steps?.find(s => s.clause_idx === id);
-            if (step) {
-                return {
-                    id: step.clause_idx,
-                    clause: step.clause,
-                    rule: step.rule,
-                    parents: step.premises || []
-                };
-            }
-        }
-
-        return null;
     }
 }
 
