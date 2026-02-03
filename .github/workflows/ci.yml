@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Weekly full test (Sunday 00:00 UTC)
 
+env:
+  LIBTORCH_USE_PYTORCH: "1"
+
 jobs:
   # Detect what changed
   detect-changes:
@@ -24,12 +27,13 @@ jobs:
         with:
           filters: |
             rust_core:
-              - 'crates/proofatlas/src/core/**'
+              - 'crates/proofatlas/src/fol/**'
               - 'crates/proofatlas/src/inference/**'
               - 'crates/proofatlas/src/saturation/**'
               - 'crates/proofatlas/src/parser/**'
               - 'crates/proofatlas/src/unification/**'
-              - 'crates/proofatlas/src/selectors/**'
+              - 'crates/proofatlas/src/selection/**'
+              - 'crates/proofatlas/src/json.rs'
               - 'crates/proofatlas/Cargo.toml'
               - 'Cargo.toml'
             rust_ml:
@@ -51,14 +55,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v4
-
-      - name: Install PyTorch (for libtorch)
-        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure libtorch
-        run: python scripts/setup_libtorch.py
 
       - uses: actions/cache@v4
         with:
@@ -69,15 +66,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Install torch
+        run: |
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
       - name: Rust compile check
-        run: cargo check -p proofatlas
+        run: |
+          source .venv/bin/activate
+          cargo check -p proofatlas
 
       - name: End-to-end proof tests
-        run: cargo test -p proofatlas --test basic_test
+        run: |
+          source .venv/bin/activate
+          export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
+          cargo test -p proofatlas --test basic_test
 
       - name: Basic Python import test
         run: |
-          uv pip install --system -e .
+          source .venv/bin/activate
+          uv pip install maturin
+          maturin develop
           python -c "from proofatlas import ProofState; print('OK')"
 
   # Tier 2: Selective tests based on changes (always run on schedule)
@@ -88,14 +97,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v4
-
-      - name: Install PyTorch (for libtorch)
-        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure libtorch
-        run: python scripts/setup_libtorch.py
 
       - uses: actions/cache@v4
         with:
@@ -106,8 +108,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Install torch
+        run: |
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
       - name: Run all Rust tests
         run: |
+          source .venv/bin/activate
+          export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
           cargo test -p proofatlas --lib
           cargo test -p proofatlas --test '*'
 
@@ -118,6 +127,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
 
       - uses: actions/cache@v4
         with:
@@ -128,16 +138,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-ml-
 
-      - uses: astral-sh/setup-uv@v4
-
-      - name: Install PyTorch (for tch-rs)
-        run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure libtorch
-        run: python scripts/setup_libtorch.py
+      - name: Install torch
+        run: |
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run ML tests
-        run: "cargo test -p proofatlas --features ml ml::"
+        run: |
+          source .venv/bin/activate
+          export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
+          cargo test -p proofatlas --features ml "ml::"
 
   rust-wasm-tests:
     needs: [detect-changes, critical-tests]
@@ -170,17 +180,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v4
 
-      - name: Install dependencies
+      - name: Install and test
         run: |
-          uv pip install --system -e .
-          uv pip install --system pytest numpy
-          uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Run Python ML tests
-        run: pytest python/tests/ml/ -v
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install maturin pytest
+          source .venv/bin/activate
+          maturin develop
+          pytest python/tests/ml/ -v
 
   # Skip tests for docs-only changes
   docs-only:

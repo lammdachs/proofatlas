@@ -38,7 +38,7 @@ proofatlas/
 │   ├── setup.py                # One-command project setup
 │   ├── bench.py                # Multi-prover benchmarking with trace collection
 │   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup libtorch, TPTP, Vampire, SPASS
+│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
 │
 ├── .data/                      # Runtime data (gitignored)
 │   ├── traces/                 # Proof search traces
@@ -54,31 +54,34 @@ proofatlas/
 ### Building
 
 ```bash
-maturin develop                     # Build and install into Python environment
+LIBTORCH_USE_PYTORCH=1 maturin develop    # Build and install into Python environment
+LIBTORCH_USE_PYTORCH=1 cargo test         # Run Rust tests
 ```
 
-**Note:** The `python` and `ml` Cargo features are enabled by default. The WASM crate opts out via `default-features = false`. After switching Python environments, re-run `python scripts/setup_libtorch.py` to update libtorch paths in `.cargo/config.toml`.
+**Note:** The `python` and `ml` Cargo features are enabled by default. The WASM crate opts out via `default-features = false`. Set `LIBTORCH_USE_PYTORCH=1` to let torch-sys find libtorch from your PyTorch installation.
 
 ### Running the Prover
 
 ```bash
-./target/release/prove <tptp_file> [options]
-
-# Options:
-#   --timeout <seconds>        Timeout (default: 300s)
-#   --max-clauses <n>          Clause limit (default: 10000)
-#   --literal-selection <n>    0=all, 20=maximal, 21=unique
+proofatlas problem.p                          # Basic usage
+proofatlas problem.p --config time_sel21      # With preset
+proofatlas problem.p --timeout 30             # With timeout
+proofatlas --list                             # List available presets
 ```
 
 ### Tests
 
 ```bash
+# Set up environment for cargo tests
+export LIBTORCH_USE_PYTORCH=1
+export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
+
 cargo test                               # All Rust tests
 cargo test fol                           # Specific module
 cargo test --test '*'                    # Integration tests only
 cargo test -- --nocapture                # With output
 
-python -m pytest python/tests/ -v        # Python tests
+pytest python/tests/ -v                  # Python tests (no env vars needed)
 ```
 
 ### Benchmarking

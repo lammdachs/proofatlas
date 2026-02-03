@@ -305,8 +305,8 @@ mod tests {
     #[test]
     fn test_gcn_selector_caching() {
         use crate::fol::{Atom, Literal, PredicateSymbol, Term, Constant};
+        use crate::selection::ClauseSelector;
         use std::collections::VecDeque;
-        use super::ClauseSelector;
 
         // Skip if model doesn't exist
         let model_path = std::path::Path::new(".weights/gcn_model.pt");
