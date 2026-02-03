@@ -4,7 +4,7 @@ ProofAtlas is a research framework for experimenting with neural guidance in aut
 
 ## Live Demo
 
-Try ProofAtlas in your browser: **[lammdachs.github.io/proofatlas](https://lexpk.github.io/proofatlas)**
+Try ProofAtlas in your browser: **[lammdachs.github.io/proofatlas](https://lammdachs.github.io/proofatlas)**
 
 ## Research Focus
 
