@@ -183,6 +183,25 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 ### Subsumption
 Tiered approach: duplicates → variants → units → small clauses → greedy
 
+### Polymorphic Rule Architecture
+The saturation loop uses a modular, polymorphic architecture where rules are registered and applied generically:
+
+**SimplificationRule trait** (`saturation/rule.rs`):
+- `simplify_forward()`: Simplify/delete clause in N using U∪P
+- `simplify_backward()`: Simplify clauses in U∪P using new clause
+- Implementations: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
+
+**GeneratingInferenceRule trait** (`saturation/rule.rs`):
+- `generate()`: Generate inferences with given clause and clauses in P
+- Implementations: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
+
+All rules return `Vec<ProofStateChange>` for atomic state modifications:
+- `AddN { clause, derivation }`: Add new clause to N
+- `RemoveN/U/P { clause_idx }`: Remove from respective set
+- `AddU/P { clause_idx }`: Transfer between sets
+
+This architecture enables adding new rules without modifying the main loop.
+
 ### Profiling
 `SaturationConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `saturate()` returns `(SaturationResult, Option<SaturationProfile>)` with timing and counting data for every phase:
 

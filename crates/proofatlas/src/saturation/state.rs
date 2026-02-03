@@ -9,54 +9,46 @@
 //! The prover maintains three clause sets:
 //!
 //! - **New (N)**: Freshly derived clauses awaiting forward simplification
-//! - **Unprocessed (P)**: Clauses that have survived simplification, awaiting selection
-//! - **Processed (A)**: Clauses that have been selected and used for generating inferences
+//! - **Unprocessed (U)**: Clauses that have survived simplification, awaiting selection
+//! - **Processed (P)**: Clauses that have been selected and used for generating inferences
 //!
 //! ## Algorithm
 //!
 //! Each iteration of the main loop:
 //!
-//! 1. **Process New Clauses** (`forward_simplify_new`):
+//! 1. **Process New Clauses**:
 //!    - For each clause C in N:
-//!      - **Forward Simplification**: Simplify C using unit equalities from A ∪ P
-//!      - **Forward Deletion**: Check if C is subsumed by any clause in A ∪ P
+//!      - **Forward Simplification**: Apply simplification rules (tautology, demodulation, subsumption)
 //!      - If C survives:
-//!        - **Backward Deletion**: Remove clauses in A ∪ P that are subsumed by C
-//!        - **Backward Simplification**: If C is a unit equality, rewrite clauses in A ∪ P; results go to N
-//!        - **Transfer**: Move C from N to P
+//!        - **Backward Simplification**: Apply backward simplification rules
+//!        - **Transfer**: Move C from N to U
 //!
-//! 2. **Select Given Clause**: Choose a clause G from P using the clause selector
+//! 2. **Select Given Clause**: Choose a clause G from U using the clause selector
 //!
-//! 3. **Generate Inferences**: Apply inference rules between G and clauses in A;
-//!    results go to N
+//! 3. **Generate Inferences**: Apply generating inference rules between G and clauses in P
 //!
-//! 4. **Activate**: Move G from P to A
+//! 4. **Activate**: Move G from U to P
 //!
-//! ## Key Design Decisions
+//! ## Polymorphic Rule Architecture
 //!
-//! - **Forward simplification uses A ∪ P**: Unlike simpler loops that only simplify
-//!   by processed clauses, we also use unprocessed clauses. This catches more
-//!   redundancies earlier.
+//! The saturation loop uses registered rules implementing two traits:
+//! - **SimplificationRule**: Tautology deletion, subsumption, demodulation
+//! - **GeneratingInferenceRule**: Resolution, superposition, factoring, etc.
 //!
-//! - **Backward simplification on transfer**: When a clause moves from N to P,
-//!   we immediately use it to simplify existing clauses. This is more aggressive
-//!   than waiting until the clause is selected.
-//!
-//! - **Pending vs Active clauses**: The subsumption checker tracks which clauses
-//!   are "active" (in A ∪ P) vs "pending" (in N). Only active clauses participate
-//!   in subsumption checks, preventing self-subsumption of new clauses.
+//! All rules return `Vec<ProofStateChange>` for atomic state modifications.
 
 use super::profile::SaturationProfile;
-use super::subsumption::SubsumptionChecker;
+use super::rule::{
+    ClauseNotification, ClauseView, DemodulationRule, EqualityFactoringRule, EqualityResolutionRule,
+    FactoringRule, GeneratingInferenceRule, ProofStateChange, ResolutionRule, SimplificationRule,
+    SubsumptionRule, SuperpositionRule, TautologyRule,
+};
 use super::trace::{
     BackwardSimplification, ClauseSimplification, ForwardSimplification, GeneratingInference,
     SaturationStep, SaturationTrace, SimplificationOutcome,
 };
 use crate::fol::Clause;
-use crate::inference::{
-    demodulation, equality_factoring, equality_resolution, factoring, resolution, superposition,
-    Derivation, InferenceResult, Proof, ProofStep,
-};
+use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
 use crate::parser::orient_equalities::orient_clause_equalities;
 use crate::selection::{
     ClauseSelector, LiteralSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
@@ -166,16 +158,14 @@ pub struct SaturationState {
     clauses: Vec<Clause>,
     /// Derivations parallel to clauses (how each clause was derived)
     derivations: Vec<Option<Derivation>>,
-    /// Set A: Processed/active clauses (used for generating inferences)
+    /// Set P: Processed/active clauses (used for generating inferences)
     processed: HashSet<usize>,
-    /// Set P: Unprocessed/passive clauses (awaiting selection)
+    /// Set U: Unprocessed/passive clauses (awaiting selection)
     unprocessed: VecDeque<usize>,
     /// Set N: New clauses (awaiting forward simplification)
     new: VecDeque<usize>,
     /// Configuration
     config: SaturationConfig,
-    /// Subsumption checker for redundancy elimination
-    subsumption_checker: SubsumptionChecker,
     /// Clause selector
     clause_selector: Box<dyn ClauseSelector>,
     /// Literal selector
@@ -184,8 +174,6 @@ pub struct SaturationState {
     clause_memory_bytes: usize,
     /// Current iteration (used for clause age)
     current_iteration: usize,
-    /// Index of unit equality clause indices in A ∪ P (for fast forward demodulation)
-    unit_equalities: HashSet<usize>,
     /// Number of initial input clauses
     initial_clause_count: usize,
     /// Completed saturation iterations (for trace)
@@ -193,6 +181,12 @@ pub struct SaturationState {
     /// Per-iteration accumulators (reset each iteration)
     current_simplifications: Vec<ClauseSimplification>,
     current_generation: Vec<GeneratingInference>,
+
+    // === Polymorphic Rules ===
+    /// Simplification rules (tautology, demodulation, subsumption)
+    simplification_rules: Vec<Box<dyn SimplificationRule>>,
+    /// Generating inference rules (resolution, superposition, factoring, etc.)
+    generating_rules: Vec<Box<dyn GeneratingInferenceRule>>,
 }
 
 impl SaturationState {
@@ -208,14 +202,25 @@ impl SaturationState {
         clause_selector: Box<dyn ClauseSelector>,
     ) -> Self {
         let initial_clause_count = initial_clauses.len();
+
+        // Initialize simplification rules
+        let mut simplification_rules: Vec<Box<dyn SimplificationRule>> = vec![
+            Box::new(TautologyRule::new()),
+            Box::new(DemodulationRule::new()),
+            Box::new(SubsumptionRule::new()),
+        ];
+
+        // Initialize all simplification rules with input clauses
+        for rule in &mut simplification_rules {
+            rule.initialize(&initial_clauses);
+        }
+
         let mut clauses = Vec::new();
         let mut derivations = Vec::new();
         let mut new = VecDeque::new();
-        let mut subsumption_checker = SubsumptionChecker::new();
         let mut clause_memory_bytes = 0usize;
 
-        // Add initial clauses with IDs (tautologies enter N and are caught in step 1a)
-        // Note: clauses in N are added as pending (not active for subsumption)
+        // Add initial clauses with IDs
         let mut clause_idx = 0;
         for mut clause in initial_clauses.into_iter() {
             // Orient equalities before adding
@@ -227,9 +232,10 @@ impl SaturationState {
             // Track clause memory
             clause_memory_bytes += clause.memory_bytes();
 
-            // Add to subsumption checker as pending (not active yet)
-            let idx = subsumption_checker.add_clause_pending(oriented.clone());
-            assert_eq!(idx, clause_idx);
+            // Notify rules about pending clause
+            for rule in &mut simplification_rules {
+                rule.on_clause_pending(clause_idx, &oriented);
+            }
 
             // Record derivation for input clause
             derivations.push(Some(Derivation::Input));
@@ -251,31 +257,33 @@ impl SaturationState {
         let mut clause_selector = clause_selector;
         clause_selector.reset();
 
+        // Initialize generating rules
+        let generating_rules: Vec<Box<dyn GeneratingInferenceRule>> = vec![
+            Box::new(FactoringRule::new()),
+            Box::new(EqualityResolutionRule::new()),
+            Box::new(EqualityFactoringRule::new()),
+            Box::new(ResolutionRule::new()),
+            Box::new(SuperpositionRule::new()),
+        ];
+
         SaturationState {
             clauses,
             derivations,
             processed: HashSet::new(),
             unprocessed: VecDeque::new(),
             new,
-            subsumption_checker,
             config,
             clause_selector,
             literal_selector,
             clause_memory_bytes,
             current_iteration: 0,
-            unit_equalities: HashSet::new(),
             initial_clause_count,
             iterations: Vec::new(),
             current_simplifications: Vec::new(),
             current_generation: Vec::new(),
+            simplification_rules,
+            generating_rules,
         }
-    }
-
-    /// Check if a clause is a unit positive equality
-    fn is_unit_equality(clause: &Clause) -> bool {
-        clause.literals.len() == 1
-            && clause.literals[0].polarity
-            && clause.literals[0].atom.is_equality()
     }
 
     /// Set the literal selector
@@ -288,7 +296,6 @@ impl SaturationState {
         self.clause_selector = selector;
     }
 
-    /// Run the saturation algorithm
     /// Get all clauses (for JSON export)
     pub fn get_clauses(&self) -> &[Clause] {
         &self.clauses
@@ -372,6 +379,111 @@ impl SaturationState {
             .collect()
     }
 
+    /// Build clause views for U and P
+    fn build_views(&self) -> (Vec<usize>, Vec<usize>) {
+        let u_indices: Vec<usize> = self.unprocessed.iter().copied().collect();
+        let p_indices: Vec<usize> = self.processed.iter().copied().collect();
+        (u_indices, p_indices)
+    }
+
+    /// Notify all rules about a clause being added to U
+    fn notify_add_unprocessed(&mut self, clause_idx: usize) {
+        let clause = &self.clauses[clause_idx];
+        let notif = ClauseNotification::Added { clause_idx, clause };
+        for rule in &mut self.simplification_rules {
+            rule.notify_unprocessed(notif.clone());
+        }
+    }
+
+    /// Notify all rules about a clause being removed from U
+    fn notify_remove_unprocessed(&mut self, clause_idx: usize) {
+        let clause = &self.clauses[clause_idx];
+        let notif = ClauseNotification::Removed { clause_idx, clause };
+        for rule in &mut self.simplification_rules {
+            rule.notify_unprocessed(notif.clone());
+        }
+    }
+
+    /// Notify all rules about a clause being added to P
+    fn notify_add_processed(&mut self, clause_idx: usize) {
+        let clause = &self.clauses[clause_idx];
+        let notif = ClauseNotification::Added { clause_idx, clause };
+        for rule in &mut self.simplification_rules {
+            rule.notify_processed(notif.clone());
+        }
+        for rule in &mut self.generating_rules {
+            rule.notify(notif.clone());
+        }
+    }
+
+    /// Notify all rules about a clause being removed from P
+    fn notify_remove_processed(&mut self, clause_idx: usize) {
+        let clause = &self.clauses[clause_idx];
+        let notif = ClauseNotification::Removed { clause_idx, clause };
+        for rule in &mut self.simplification_rules {
+            rule.notify_processed(notif.clone());
+        }
+        for rule in &mut self.generating_rules {
+            rule.notify(notif.clone());
+        }
+    }
+
+    /// Apply a single ProofStateChange and return any follow-up actions needed
+    fn apply_change(&mut self, change: ProofStateChange, profile: &mut Option<SaturationProfile>) {
+        match change {
+            ProofStateChange::AddN { clause, derivation } => {
+                // Check clause size limit
+                if clause.literals.len() > self.config.max_clause_size {
+                    return;
+                }
+
+                let new_idx = self.clauses.len();
+                let mut clause_with_id = clause.clone();
+                clause_with_id.id = Some(new_idx);
+                clause_with_id.age = self.current_iteration;
+                clause_with_id.role = crate::fol::ClauseRole::Derived;
+
+                // Notify rules about pending clause
+                let mut oriented = clause.clone();
+                orient_clause_equalities(&mut oriented);
+                for rule in &mut self.simplification_rules {
+                    rule.on_clause_pending(new_idx, &oriented);
+                }
+
+                self.clause_memory_bytes += clause_with_id.memory_bytes();
+                self.clauses.push(clause_with_id);
+                self.derivations.push(Some(derivation));
+                self.new.push_back(new_idx);
+
+                if let Some(p) = profile.as_mut() {
+                    p.clauses_added += 1;
+                }
+            }
+            ProofStateChange::RemoveN { clause_idx: _ } => {
+                // Clause is just not transferred - no action needed
+            }
+            ProofStateChange::AddU { clause_idx } => {
+                self.unprocessed.push_back(clause_idx);
+                self.notify_add_unprocessed(clause_idx);
+            }
+            ProofStateChange::RemoveU { clause_idx } => {
+                if self.unprocessed.iter().any(|&x| x == clause_idx) {
+                    self.unprocessed.retain(|&x| x != clause_idx);
+                    self.notify_remove_unprocessed(clause_idx);
+                }
+            }
+            ProofStateChange::AddP { clause_idx } => {
+                self.processed.insert(clause_idx);
+                self.notify_add_processed(clause_idx);
+            }
+            ProofStateChange::RemoveP { clause_idx } => {
+                if self.processed.remove(&clause_idx) {
+                    self.notify_remove_processed(clause_idx);
+                }
+            }
+        }
+    }
+
     pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>, SaturationTrace) {
         let mut profile = if self.config.enable_profiling {
             Some(SaturationProfile::default())
@@ -384,8 +496,8 @@ impl SaturationState {
         let result = 'outer: loop {
             // === Step 1: Process new clauses ===
             let t0 = profile.as_ref().map(|_| Instant::now());
-            while let Some(clause_idx) = self.new.pop_front() {
-                // 1a: Check empty clause and tautology immediately
+            'process_n: while let Some(clause_idx) = self.new.pop_front() {
+                // 1a: Check empty clause immediately
                 if self.clauses[clause_idx].is_empty() {
                     if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                         p.forward_simplify_time += t.elapsed();
@@ -400,158 +512,178 @@ impl SaturationState {
                     let proof = self.extract_proof(clause_idx);
                     break 'outer SaturationResult::Proof(proof);
                 }
-                if self.clauses[clause_idx].is_tautology() {
-                    self.current_simplifications.push(ClauseSimplification {
-                        clause_idx,
-                        outcome: Some(SimplificationOutcome::Forward(ForwardSimplification::Tautology)),
-                    });
-                    if let Some(p) = profile.as_mut() {
-                        p.tautologies_deleted += 1;
-                    }
-                    continue;
-                }
 
+                // Build views for simplification rules
+                let (u_indices, p_indices) = self.build_views();
+                let u_view = ClauseView::new(&u_indices, &self.clauses);
+                let p_view = ClauseView::new(&p_indices, &self.clauses);
+
+                // 1b: Apply forward simplification rules
+                // Collect changes first to avoid borrow conflict, then apply after loop
                 let clause = &self.clauses[clause_idx];
+                let mut forward_deleted = false;
+                let mut forward_outcome = None;
+                let mut collected_changes: Vec<ProofStateChange> = Vec::new();
+                let mut is_demodulation_rule = false;
 
-                // 1b: Forward simplification (demod + subsumption)
-                // SimplifyFwd: try to simplify using indexed unit equalities from A ∪ P
-                let mut current_clause = clause.clone();
-                let mut simplified = false;
-                let mut demod_premise = None;
+                for rule in self.simplification_rules.iter() {
+                    let rule_name = rule.name();
+                    let t_rule = profile.as_ref().map(|_| Instant::now());
 
-                let unit_eq_indices: Vec<usize> = self.unit_equalities.iter().copied().collect();
+                    let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses);
 
-                let t_demod = profile.as_ref().map(|_| Instant::now());
-                for unit_idx in unit_eq_indices {
-                    let unit_clause = &self.clauses[unit_idx];
-                    let results =
-                        demodulation::demodulate(unit_clause, &current_clause, unit_idx, clause_idx);
-                    if !results.is_empty() {
-                        current_clause = results[0].conclusion.clone();
-                        orient_clause_equalities(&mut current_clause);
-                        demod_premise = Some(unit_idx);
-                        simplified = true;
-                        if let Some(p) = profile.as_mut() {
-                            p.clauses_demodulated_forward += 1;
-                            p.demodulation_count += 1;
+                    if !changes.is_empty() {
+                        // Update profiling stats based on rule
+                        if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
+                            match rule_name {
+                                "Tautology" => {
+                                    p.tautologies_deleted += 1;
+                                }
+                                "Demodulation" => {
+                                    p.clauses_demodulated_forward += 1;
+                                    p.demodulation_count += 1;
+                                    p.forward_demod_time += t.elapsed();
+                                }
+                                "Subsumption" => {
+                                    p.clauses_subsumed_forward += 1;
+                                    p.forward_subsumption_time += t.elapsed();
+                                }
+                                _ => {}
+                            }
                         }
+
+                        // Determine the outcome for tracing
+                        forward_outcome = Some(match rule_name {
+                            "Tautology" => SimplificationOutcome::Forward(ForwardSimplification::Tautology),
+                            "Demodulation" => {
+                                SimplificationOutcome::Forward(ForwardSimplification::Demodulation {
+                                    demodulator: 0, // Will be set properly below
+                                    result: 0,      // Will be set properly below
+                                })
+                            }
+                            "Subsumption" => SimplificationOutcome::Forward(ForwardSimplification::Subsumption {
+                                subsumer: 0, // Could track this if needed
+                            }),
+                            _ => SimplificationOutcome::Forward(ForwardSimplification::Tautology),
+                        });
+
+                        collected_changes = changes;
+                        is_demodulation_rule = rule_name == "Demodulation";
+                        forward_deleted = true;
                         break;
                     }
                 }
-                if let (Some(p), Some(t)) = (profile.as_mut(), t_demod) {
-                    p.forward_demod_time += t.elapsed();
+
+                // Apply collected changes after the borrow ends
+                for change in collected_changes {
+                    if let ProofStateChange::AddN { clause, derivation } = change {
+                        // For demodulation, update the outcome with correct indices
+                        if is_demodulation_rule {
+                            if let Derivation::Demodulation { demodulator, target: _ } = &derivation {
+                                let new_idx = self.clauses.len();
+                                forward_outcome = Some(SimplificationOutcome::Forward(
+                                    ForwardSimplification::Demodulation {
+                                        demodulator: *demodulator,
+                                        result: new_idx,
+                                    },
+                                ));
+                            }
+                        }
+                        self.apply_change(ProofStateChange::AddN { clause, derivation }, &mut profile);
+                    }
                 }
 
-                if simplified {
-                    // Forward demodulation: the original clause is deleted,
-                    // the result re-enters N and gets its own simplification pass.
-                    let new_idx = self.clauses.len();
-                    let mut clause_with_id = current_clause.clone();
-                    clause_with_id.id = Some(new_idx);
-
-                    let idx_from_subsumption = self
-                        .subsumption_checker
-                        .add_clause_pending(current_clause.clone());
-                    assert_eq!(idx_from_subsumption, new_idx);
-
-                    self.clause_memory_bytes += clause_with_id.memory_bytes();
-                    self.clauses.push(clause_with_id);
-                    self.derivations.push(Some(Derivation::Demodulation {
-                        demodulator: demod_premise.unwrap(),
-                        target: clause_idx,
-                    }));
-                    self.new.push_back(new_idx);
-
-                    // Record: original clause was forward-demodulated (deleted)
+                if forward_deleted {
                     self.current_simplifications.push(ClauseSimplification {
                         clause_idx,
-                        outcome: Some(SimplificationOutcome::Forward(
-                            ForwardSimplification::Demodulation {
-                                demodulator: demod_premise.unwrap(),
-                                result: new_idx,
-                            },
-                        )),
+                        outcome: forward_outcome,
                     });
-                } else {
-                    // No demodulation — check forward subsumption
-                    let t_sub = profile.as_ref().map(|_| Instant::now());
-                    let subsumer = self.subsumption_checker.find_subsumer(&current_clause);
-                    if let (Some(p), Some(t)) = (profile.as_mut(), t_sub) {
-                        p.forward_subsumption_time += t.elapsed();
-                    }
-                    if let Some(subsumer_idx) = subsumer {
-                        self.current_simplifications.push(ClauseSimplification {
-                            clause_idx,
-                            outcome: Some(SimplificationOutcome::Forward(
-                                ForwardSimplification::Subsumption { subsumer: subsumer_idx },
-                            )),
-                        });
-                        if let Some(p) = profile.as_mut() {
-                            p.clauses_subsumed_forward += 1;
-                        }
-                        continue;
-                    }
-
-                    // 1c: Backward simplification + transfer to P
-                    // Clause survives - activate it
-                    self.subsumption_checker.activate_clause(clause_idx);
-
-                    // Track unit equalities for demodulation index
-                    if Self::is_unit_equality(&self.clauses[clause_idx]) {
-                        self.unit_equalities.insert(clause_idx);
-                    }
-
-                    // DeleteBwd: remove clauses in P and A subsumed by this clause
-                    let t_bwd = profile.as_ref().map(|_| Instant::now());
-                    let all_other: Vec<usize> = self
-                        .processed
-                        .iter()
-                        .copied()
-                        .chain(self.unprocessed.iter().copied())
-                        .collect();
-                    let subsumed = self
-                        .subsumption_checker
-                        .find_subsumed_by(clause_idx, &all_other);
-                    if let Some(p) = profile.as_mut() {
-                        p.clauses_subsumed_backward += subsumed.len();
-                    }
-
-                    let mut backward_effects = Vec::new();
-                    for &idx in &subsumed {
-                        backward_effects.push(BackwardSimplification::Subsumption {
-                            deleted_clause: idx,
-                        });
-                        self.processed.remove(&idx);
-                        self.unprocessed.retain(|&x| x != idx);
-                        self.unit_equalities.remove(&idx);
-                    }
-                    if let (Some(p), Some(t)) = (profile.as_mut(), t_bwd) {
-                        p.backward_subsumption_time += t.elapsed();
-                    }
-
-                    // SimplifyBwd: if this clause is a unit equality, simplify P and A
-                    if Self::is_unit_equality(&self.clauses[clause_idx]) {
-                        let t_bdemod = profile.as_ref().map(|_| Instant::now());
-                        let new_before = self.new.len();
-                        let bwd_demod_effects = self.backward_demodulate_with_unit(clause_idx);
-                        backward_effects.extend(bwd_demod_effects);
-                        if let (Some(p), Some(t)) = (profile.as_mut(), t_bdemod) {
-                            p.backward_demod_time += t.elapsed();
-                            p.clauses_demodulated_backward += self.new.len().saturating_sub(new_before);
-                        }
-                    }
-
-                    // Transfer: move to unprocessed (P)
-                    self.unprocessed.push_back(clause_idx);
-
-                    // Record: clause survived and was transferred
-                    self.current_simplifications.push(ClauseSimplification {
-                        clause_idx,
-                        outcome: Some(SimplificationOutcome::Backward {
-                            effects: backward_effects,
-                        }),
-                    });
+                    continue 'process_n;
                 }
+
+                // 1c: Clause survives - activate it
+                for rule in &mut self.simplification_rules {
+                    rule.on_clause_activated(clause_idx, &self.clauses[clause_idx]);
+                }
+
+                // 1d: Apply backward simplification rules
+                // Collect all changes first to avoid borrow conflict, then apply after
+                let mut all_backward_changes: Vec<ProofStateChange> = Vec::new();
+                let mut backward_effects = Vec::new();
+
+                {
+                    let (u_indices, p_indices) = self.build_views();
+                    let u_view = ClauseView::new(&u_indices, &self.clauses);
+                    let p_view = ClauseView::new(&p_indices, &self.clauses);
+                    let clause = &self.clauses[clause_idx];
+
+                    for rule in self.simplification_rules.iter() {
+                        let rule_name = rule.name();
+                        let t_rule = profile.as_ref().map(|_| Instant::now());
+
+                        let changes = rule.simplify_backward(clause_idx, clause, &u_view, &p_view);
+
+                        if !changes.is_empty() {
+                            // Update profiling stats
+                            if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
+                                match rule_name {
+                                    "Subsumption" => {
+                                        let count = changes.iter().filter(|c| matches!(c, ProofStateChange::RemoveU { .. } | ProofStateChange::RemoveP { .. })).count();
+                                        p.clauses_subsumed_backward += count;
+                                        p.backward_subsumption_time += t.elapsed();
+                                    }
+                                    "Demodulation" => {
+                                        let count = changes.iter().filter(|c| matches!(c, ProofStateChange::AddN { .. })).count();
+                                        p.clauses_demodulated_backward += count;
+                                        p.backward_demod_time += t.elapsed();
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // Track effects for trace (compute new_idx before collecting)
+                            let mut current_new_idx = self.clauses.len();
+                            for change in &changes {
+                                match change {
+                                    ProofStateChange::RemoveU { clause_idx: idx } | ProofStateChange::RemoveP { clause_idx: idx } => {
+                                        backward_effects.push(BackwardSimplification::Subsumption {
+                                            deleted_clause: *idx,
+                                        });
+                                    }
+                                    ProofStateChange::AddN { derivation, .. } => {
+                                        if let Derivation::Demodulation { target, .. } = derivation {
+                                            backward_effects.push(BackwardSimplification::Demodulation {
+                                                old_clause: *target,
+                                                result: current_new_idx,
+                                            });
+                                            current_new_idx += 1;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            all_backward_changes.extend(changes);
+                        }
+                    }
+                }
+
+                // Apply all collected changes after borrows end
+                for change in all_backward_changes {
+                    self.apply_change(change, &mut profile);
+                }
+
+                // Transfer: move to unprocessed (U)
+                self.unprocessed.push_back(clause_idx);
+                self.notify_add_unprocessed(clause_idx);
+
+                // Record: clause survived and was transferred
+                self.current_simplifications.push(ClauseSimplification {
+                    clause_idx,
+                    outcome: Some(SimplificationOutcome::Backward {
+                        effects: backward_effects,
+                    }),
+                });
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.forward_simplify_time += t.elapsed();
@@ -626,16 +758,18 @@ impl SaturationState {
             // Flush the previous iteration's simplifications with the given clause selection
             self.flush_iteration(Some(given_idx));
 
-            // === Step 4: Generate inferences and activate ===
+            // === Step 4: Transfer given clause from U to P ===
+            self.notify_remove_unprocessed(given_idx);
+            self.processed.insert(given_idx);
+            self.notify_add_processed(given_idx);
+
+            // === Step 5: Generate inferences using polymorphic rules ===
             let t0 = profile.as_ref().map(|_| Instant::now());
-            let new_inferences = self.generate_inferences(given_idx, &mut profile);
+            let new_inferences = self.generate_inferences_polymorphic(given_idx, &mut profile);
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.generate_inferences_time += t.elapsed();
                 p.clauses_generated += new_inferences.len();
             }
-
-            // Move given clause to processed
-            self.processed.insert(given_idx);
 
             // Add new inferences to new set (deduplicate within the batch first)
             let t0 = profile.as_ref().map(|_| Instant::now());
@@ -651,9 +785,6 @@ impl SaturationState {
                         self.current_generation.push(
                             GeneratingInference::from_derivation(new_idx, &derivation),
                         );
-                        if let Some(p) = profile.as_mut() {
-                            p.clauses_added += 1;
-                        }
                     }
                 }
             }
@@ -684,16 +815,14 @@ impl SaturationState {
         (result, profile, trace)
     }
 
-    // forward_simplify_new is now inlined in saturate() as Step 1
-
     /// Select the next given clause using the configured selector
     fn select_given_clause(&mut self) -> Option<usize> {
         self.clause_selector
             .select(&mut self.unprocessed, &self.clauses)
     }
 
-    /// Generate all inferences between given clause and processed clauses
-    fn generate_inferences(
+    /// Generate all inferences using polymorphic rules
+    fn generate_inferences_polymorphic(
         &self,
         given_idx: usize,
         profile: &mut Option<SaturationProfile>,
@@ -702,117 +831,61 @@ impl SaturationState {
         let given_clause = &self.clauses[given_idx];
         let selector = self.literal_selector.as_ref();
 
-        // Factoring on given clause
-        let t0 = profile.as_ref().map(|_| Instant::now());
-        let before = results.len();
-        results.extend(factoring(given_clause, given_idx, selector));
-        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-            p.factoring_count += results.len() - before;
-            p.factoring_time += t.elapsed();
-        }
+        // Build view of processed clauses (excluding given, which was just added)
+        let p_indices: Vec<usize> = self.processed.iter().copied().filter(|&idx| idx != given_idx).collect();
+        let p_view = ClauseView::new(&p_indices, &self.clauses);
 
-        // Equality resolution on given clause
-        let t0 = profile.as_ref().map(|_| Instant::now());
-        let before = results.len();
-        results.extend(equality_resolution(given_clause, given_idx, selector));
-        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-            p.equality_resolution_count += results.len() - before;
-            p.equality_resolution_time += t.elapsed();
-        }
-
-        // Equality factoring on given clause
-        let t0 = profile.as_ref().map(|_| Instant::now());
-        let before = results.len();
-        results.extend(equality_factoring(given_clause, given_idx, selector));
-        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-            p.equality_factoring_count += results.len() - before;
-            p.equality_factoring_time += t.elapsed();
-        }
-
-        // Inferences with each processed clause
-        for &processed_idx in &self.processed {
-            let processed_clause = &self.clauses[processed_idx];
-
-            // Resolution
+        // Apply each generating rule
+        for rule in &self.generating_rules {
+            let rule_name = rule.name();
             let t0 = profile.as_ref().map(|_| Instant::now());
             let before = results.len();
-            results.extend(resolution(
-                given_clause,
-                processed_clause,
-                given_idx,
-                processed_idx,
-                selector,
-            ));
-            results.extend(resolution(
-                processed_clause,
-                given_clause,
-                processed_idx,
-                given_idx,
-                selector,
-            ));
-            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-                p.resolution_count += results.len() - before;
-                p.resolution_time += t.elapsed();
+
+            let changes = rule.generate(given_idx, given_clause, &p_view, selector);
+
+            // Convert ProofStateChange::AddN to InferenceResult
+            for change in changes {
+                if let ProofStateChange::AddN { clause, derivation } = change {
+                    results.push(InferenceResult {
+                        conclusion: clause,
+                        derivation,
+                    });
+                }
             }
 
-            // Superposition
-            let t0 = profile.as_ref().map(|_| Instant::now());
-            let before = results.len();
-            results.extend(superposition(
-                given_clause,
-                processed_clause,
-                given_idx,
-                processed_idx,
-                selector,
-            ));
-            results.extend(superposition(
-                processed_clause,
-                given_clause,
-                processed_idx,
-                given_idx,
-                selector,
-            ));
+            // Update profile based on rule name
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-                p.superposition_count += results.len() - before;
-                p.superposition_time += t.elapsed();
+                let count = results.len() - before;
+                match rule_name {
+                    "Resolution" => {
+                        p.resolution_count += count;
+                        p.resolution_time += t.elapsed();
+                    }
+                    "Superposition" => {
+                        p.superposition_count += count;
+                        p.superposition_time += t.elapsed();
+                    }
+                    "Factoring" => {
+                        p.factoring_count += count;
+                        p.factoring_time += t.elapsed();
+                    }
+                    "EqualityResolution" => {
+                        p.equality_resolution_count += count;
+                        p.equality_resolution_time += t.elapsed();
+                    }
+                    "EqualityFactoring" => {
+                        p.equality_factoring_count += count;
+                        p.equality_factoring_time += t.elapsed();
+                    }
+                    _ => {}
+                }
             }
-        }
-
-        // IMPORTANT: Also do self-inferences (given clause with itself)
-        // This is needed for cases like associativity self-superposition
-        let t0 = profile.as_ref().map(|_| Instant::now());
-        let before = results.len();
-        results.extend(resolution(
-            given_clause,
-            given_clause,
-            given_idx,
-            given_idx,
-            selector,
-        ));
-        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-            p.resolution_count += results.len() - before;
-            p.resolution_time += t.elapsed();
-        }
-
-        let t0 = profile.as_ref().map(|_| Instant::now());
-        let before = results.len();
-        results.extend(superposition(
-            given_clause,
-            given_clause,
-            given_idx,
-            given_idx,
-            selector,
-        ));
-        if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-            p.superposition_count += results.len() - before;
-            p.superposition_time += t.elapsed();
         }
 
         results
     }
 
     /// Add a new clause to the new set (no forward simplification yet).
-    /// Tautology and subsumption checks are deferred to Step 1 of the main loop.
     fn add_clause_to_new(&mut self, inference: InferenceResult) -> Option<usize> {
         // Check clause size limit
         if inference.conclusion.literals.len() > self.config.max_clause_size {
@@ -830,11 +903,10 @@ impl SaturationState {
         clause_with_id.age = self.current_iteration;
         clause_with_id.role = crate::fol::ClauseRole::Derived;
 
-        // Add to subsumption checker as pending
-        let idx_from_subsumption = self
-            .subsumption_checker
-            .add_clause_pending(current_clause.clone());
-        assert_eq!(idx_from_subsumption, new_idx);
+        // Notify rules about pending clause
+        for rule in &mut self.simplification_rules {
+            rule.on_clause_pending(new_idx, &current_clause);
+        }
 
         // Track clause memory
         self.clause_memory_bytes += clause_with_id.memory_bytes();
@@ -845,71 +917,6 @@ impl SaturationState {
 
         Some(new_idx)
     }
-
-    /// Perform backward demodulation using a newly processed unit equality.
-    /// Returns the backward simplification effects for the trace.
-    fn backward_demodulate_with_unit(&mut self, unit_idx: usize) -> Vec<BackwardSimplification> {
-        let unit_clause = &self.clauses[unit_idx];
-        let mut effects = Vec::new();
-
-        // Collect clauses to demodulate (avoid modifying while iterating)
-        let mut clauses_to_demodulate = Vec::new();
-
-        // Check all processed clauses (except the unit itself)
-        for &idx in &self.processed {
-            if idx != unit_idx {
-                clauses_to_demodulate.push(idx);
-            }
-        }
-
-        // Check all unprocessed clauses
-        for &idx in &self.unprocessed {
-            if idx != unit_idx {
-                clauses_to_demodulate.push(idx);
-            }
-        }
-
-        // Track which clauses were replaced
-        let mut replaced_clauses = Vec::new();
-
-        // Try to demodulate each clause
-        for clause_idx in clauses_to_demodulate {
-            let original_clause = self.clauses[clause_idx].clone();
-
-            // Try demodulation
-            let results =
-                demodulation::demodulate(unit_clause, &original_clause, unit_idx, clause_idx);
-
-            if !results.is_empty() {
-                // Clause was simplified - mark it for replacement
-                let simplified_clause = results[0].conclusion.clone();
-
-                // Only replace if actually different
-                if simplified_clause != original_clause {
-                    replaced_clauses.push((clause_idx, simplified_clause, results[0].clone()));
-                }
-            }
-        }
-
-        // Now process replacements
-        for (old_idx, _new_clause, inference_result) in replaced_clauses {
-            // Mark old clause as inactive by removing from processed/unprocessed
-            self.processed.remove(&old_idx);
-            self.unprocessed.retain(|&idx| idx != old_idx);
-            self.unit_equalities.remove(&old_idx);
-
-            // Add the simplified clause to the new set
-            if let Some(new_idx) = self.add_clause_to_new(inference_result) {
-                effects.push(BackwardSimplification::Demodulation {
-                    old_clause: old_idx,
-                    result: new_idx,
-                });
-            }
-        }
-
-        effects
-    }
-
 }
 
 #[cfg(test)]
