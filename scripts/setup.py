@@ -183,16 +183,12 @@ def install_prerequisites(cpu: bool):
         print("  tqdm, pytest already installed")
 
 
-def setup_libtorch():
-    """Configure .cargo/config.toml for libtorch linking."""
-    script = PROJECT_ROOT / "scripts" / "setup_libtorch.py"
-    run_script(script, "libtorch config")
-
-
 def build_extension():
     """Build the Rust extension with maturin."""
     print("  Running maturin develop...")
-    subprocess.run(["maturin", "develop"], cwd=PROJECT_ROOT, check=True)
+    env = os.environ.copy()
+    env["LIBTORCH_USE_PYTORCH"] = "1"
+    subprocess.run(["maturin", "develop"], cwd=PROJECT_ROOT, check=True, env=env)
 
 
 def setup_external_tools():
@@ -282,36 +278,31 @@ def main():
     print("Setting up ProofAtlas\n")
 
     # Step 1: Virtual environment
-    print("[1/6] Virtual environment")
+    print("[1/5] Virtual environment")
     check_venv()
     print("  OK\n")
 
     # Step 2: Rust toolchain
-    print("[2/6] Rust toolchain")
+    print("[2/5] Rust toolchain")
     check_rust()
     print("  OK\n")
 
     # Step 3: Python prerequisites
-    print("[3/6] Python prerequisites")
+    print("[3/5] Python prerequisites")
     install_prerequisites(cpu=args.cpu)
     print()
 
-    # Step 4: Libtorch config
-    print("[4/6] Libtorch config")
-    setup_libtorch()
-    print()
-
-    # Step 5: Build extension
-    print("[5/6] Build extension")
+    # Step 4: Build extension
+    print("[4/5] Build extension")
     build_extension()
     print()
 
-    # Step 6a: External tools
+    # Step 5: External tools
     if not args.skip_external:
-        print("[6/6] External tools")
+        print("[5/5] External tools")
         setup_external_tools()
     else:
-        print("[6/6] External tools (skipped)")
+        print("[5/5] External tools (skipped)")
     print()
 
     # Step 6b: WASM (optional, not counted in steps)

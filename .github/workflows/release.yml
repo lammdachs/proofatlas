@@ -8,22 +8,26 @@ on:
 permissions:
   contents: read
 
-# TODO: Add macOS wheels (arm64 + x86_64) and Python 3.10/3.11/3.13 matrix
-# once bugs are resolved. See git history for full matrix config.
+# TODO: Add macOS wheels and Python version matrix
 
 jobs:
   linux-wheels:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v4
 
-      - uses: PyO3/maturin-action@v1
-        with:
-          manylinux: auto
-          args: --release -o dist -i python3.12
-          before-script-linux: |
-            pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
-            python scripts/setup_libtorch.py
+      - name: Install CPU PyTorch and maturin
+        run: |
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install maturin
+
+      - name: Build wheel
+        run: |
+          source .venv/bin/activate
+          maturin build --release -o dist -i python3.12 --skip-auditwheel --compatibility manylinux_2_28
         env:
           LIBTORCH_USE_PYTORCH: "1"
 
@@ -36,23 +40,25 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Install PyTorch and maturin
+        run: |
+          uv venv
+          uv pip install torch
+          uv pip install maturin
 
-      - name: Install build deps
-        run: pip install numpy torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Configure libtorch
-        run: python scripts/setup_libtorch.py
-
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: x86_64-pc-windows-msvc
-          args: --release -o dist
+      - name: Build wheel
+        run: |
+          .venv\Scripts\activate
+          maturin build --release -o dist --target x86_64-pc-windows-msvc
         env:
           LIBTORCH_USE_PYTORCH: "1"
+          # All native code must use dynamic CRT (/MD) to match libtorch
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=-crt-static"
+          CFLAGS: "/MD"
+          CXXFLAGS: "/MD"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -65,7 +71,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi
     permissions:
-      id-token: write  # trusted publishing
+      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:

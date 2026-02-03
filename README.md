@@ -48,7 +48,7 @@ proofatlas/
 │   ├── setup.py                # One-command project setup
 │   ├── bench.py                # Multi-prover benchmarking with trace collection
 │   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup libtorch, TPTP, Vampire, SPASS
+│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
 │
 ├── .data/                      # Runtime data (gitignored)
 │   ├── traces/                 # Proof search traces for ML training
