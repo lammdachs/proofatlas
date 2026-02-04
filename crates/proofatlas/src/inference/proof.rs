@@ -2,7 +2,6 @@
 
 use crate::fol::Clause;
 use super::derivation::Derivation;
-use super::common::InferenceResult;
 
 /// A single step in a proof derivation. Every step produces a clause.
 #[derive(Debug, Clone)]
@@ -10,17 +9,6 @@ pub struct ProofStep {
     pub clause_idx: usize,
     pub derivation: Derivation,
     pub conclusion: Clause,
-}
-
-impl ProofStep {
-    /// Create from an inference result
-    pub fn from_inference(clause_idx: usize, result: InferenceResult) -> Self {
-        ProofStep {
-            clause_idx,
-            derivation: result.derivation,
-            conclusion: result.conclusion,
-        }
-    }
 }
 
 /// A proof is a sequence of inference steps

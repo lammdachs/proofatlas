@@ -144,10 +144,6 @@ pub struct InferenceJson {
 pub struct ProofStepJson {
     pub clause_idx: usize,
     pub inference: InferenceJson,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub processed_count: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unprocessed_count: Option<usize>,
 }
 
 impl From<&ProofStep> for ProofStepJson {
@@ -158,8 +154,6 @@ impl From<&ProofStep> for ProofStepJson {
                 rule: step.derivation.rule_name.clone(),
                 premises: step.derivation.premises.clone(),
             },
-            processed_count: None,
-            unprocessed_count: None,
         }
     }
 }

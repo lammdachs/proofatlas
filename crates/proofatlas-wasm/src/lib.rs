@@ -146,14 +146,31 @@ impl ProofAtlasWasm {
             }).collect()
         };
 
+        // Helper to build result for non-proof cases
+        let build_incomplete_result = |status: &str, message: &str, steps: &[proofatlas::ProofStep], final_clauses_count: usize| {
+            let all_steps = convert_steps(steps);
+            ProverResult {
+                success: false,
+                status: status.to_string(),
+                message: message.to_string(),
+                proof: None,
+                all_clauses: Some(all_steps),
+                statistics: ProverStatistics {
+                    initial_clauses,
+                    generated_clauses: steps.len(),
+                    final_clauses: final_clauses_count,
+                    time_ms,
+                },
+                trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
+                profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
+            }
+        };
+
         // Build result
         let prover_result = match result {
             SaturationResult::Proof(proof) => {
                 // Proof found
                 let all_steps = convert_steps(&proof.steps);
-
-                // All clauses: all proof steps (all are real derivations now)
-                let all_clauses = all_steps.clone();
 
                 // Extract the proof path - trace back from empty clause
                 let mut proof_indices = std::collections::HashSet::new();
@@ -187,75 +204,35 @@ impl ProofAtlasWasm {
                     status: "proof_found".to_string(),
                     message: format!("Proof found with {} steps", proof_path.len()),
                     proof: Some(proof_path),
-                    all_clauses: Some(all_clauses),
+                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
                         generated_clauses: proof.steps.len(),
                         final_clauses: proof.steps.len(),
                         time_ms,
                     },
-                    trace: if include_trace {
-                        Some(events_to_js_value(&sat_trace))
-                    } else {
-                        None
-                    },
-                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
-                }
-            }
-            SaturationResult::Saturated(steps, clauses) => {
-                let all_steps = convert_steps(&steps);
-                ProverResult {
-                    success: false,
-                    status: "saturated".to_string(),
-                    message: "Saturated without finding a proof - the formula may be satisfiable".to_string(),
-                    proof: None,
-                    all_clauses: Some(all_steps),
-                    statistics: ProverStatistics {
-                        initial_clauses,
-                        generated_clauses: steps.len(),
-                        final_clauses: clauses.len(),
-                        time_ms,
-                    },
                     trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            SaturationResult::Timeout(steps, clauses) => {
-                let all_steps = convert_steps(&steps);
-                ProverResult {
-                    success: false,
-                    status: "timeout".to_string(),
-                    message: "Timeout reached before finding a proof".to_string(),
-                    proof: None,
-                    all_clauses: Some(all_steps),
-                    statistics: ProverStatistics {
-                        initial_clauses,
-                        generated_clauses: steps.len(),
-                        final_clauses: clauses.len(),
-                        time_ms,
-                    },
-                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
-                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
-                }
-            }
-            SaturationResult::ResourceLimit(steps, clauses) => {
-                let all_steps = convert_steps(&steps);
-                ProverResult {
-                    success: false,
-                    status: "resource_limit".to_string(),
-                    message: "Resource limit reached".to_string(),
-                    proof: None,
-                    all_clauses: Some(all_steps),
-                    statistics: ProverStatistics {
-                        initial_clauses,
-                        generated_clauses: steps.len(),
-                        final_clauses: clauses.len(),
-                        time_ms,
-                    },
-                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
-                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
-                }
-            }
+            SaturationResult::Saturated(steps, clauses) => build_incomplete_result(
+                "saturated",
+                "Saturated without finding a proof - the formula may be satisfiable",
+                &steps,
+                clauses.len(),
+            ),
+            SaturationResult::Timeout(steps, clauses) => build_incomplete_result(
+                "timeout",
+                "Timeout reached before finding a proof",
+                &steps,
+                clauses.len(),
+            ),
+            SaturationResult::ResourceLimit(steps, clauses) => build_incomplete_result(
+                "resource_limit",
+                "Resource limit reached",
+                &steps,
+                clauses.len(),
+            ),
         };
 
         // Convert to JS value (use json_compatible to serialize Maps as plain objects)

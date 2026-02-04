@@ -152,8 +152,6 @@ impl SaturationResult {
 pub struct SaturationState {
     /// Storage for all clauses, indexed by clause ID
     clauses: Vec<Clause>,
-    /// Derivations parallel to clauses (how each clause was derived)
-    derivations: Vec<Option<Derivation>>,
     /// Set P: Processed/active clauses (used for generating inferences)
     processed: HashSet<usize>,
     /// Set U: Unprocessed/passive clauses (awaiting selection)
@@ -211,7 +209,6 @@ impl SaturationState {
         }
 
         let mut clauses = Vec::new();
-        let mut derivations = Vec::new();
         let mut new = VecDeque::new();
         let mut clause_memory_bytes = 0usize;
 
@@ -231,9 +228,6 @@ impl SaturationState {
             for rule in &mut simplification_rules {
                 rule.on_clause_pending(clause_idx, &oriented);
             }
-
-            // Record derivation for input clause
-            derivations.push(Some(Derivation::input()));
 
             clauses.push(clause);
             new.push_back(clause_idx);
@@ -272,7 +266,6 @@ impl SaturationState {
 
         SaturationState {
             clauses,
-            derivations,
             processed: HashSet::new(),
             unprocessed: VecDeque::new(),
             new,
@@ -305,6 +298,16 @@ impl SaturationState {
 
     /// Extract a proof by backward traversal from the empty clause.
     pub fn extract_proof(&self, empty_clause_idx: usize) -> Proof {
+        // Build derivation map from event log
+        let mut derivation_map = std::collections::HashMap::new();
+        for event in &self.event_log {
+            if let ProofStateChange::AddN { clause, derivation } = event {
+                if let Some(idx) = clause.id {
+                    derivation_map.insert(idx, derivation.clone());
+                }
+            }
+        }
+
         let mut proof_clause_indices = Vec::new();
         let mut visited = HashSet::new();
         let mut to_visit = vec![empty_clause_idx];
@@ -314,7 +317,7 @@ impl SaturationState {
                 continue;
             }
             proof_clause_indices.push(idx);
-            if let Some(Some(derivation)) = self.derivations.get(idx) {
+            if let Some(derivation) = derivation_map.get(&idx) {
                 to_visit.extend(&derivation.premises);
             }
         }
@@ -326,7 +329,7 @@ impl SaturationState {
             .iter()
             .map(|&idx| ProofStep {
                 clause_idx: idx,
-                derivation: self.derivations[idx].clone().unwrap(),
+                derivation: derivation_map.get(&idx).cloned().unwrap_or_else(Derivation::input),
                 conclusion: self.clauses[idx].clone(),
             })
             .collect();
@@ -336,11 +339,6 @@ impl SaturationState {
             empty_clause_idx,
             all_clauses: self.clauses.clone(),
         }
-    }
-
-    /// Get the derivations (for external proof extraction)
-    pub fn derivations(&self) -> &[Option<Derivation>] {
-        &self.derivations
     }
 
     /// Get the event log (raw state changes)
@@ -353,17 +351,20 @@ impl SaturationState {
         self.initial_clause_count
     }
 
-    /// Build proof steps from derivations (for backward-compatible SaturationResult).
+    /// Build proof steps from event log (for backward-compatible SaturationResult).
     fn build_proof_steps(&self) -> Vec<ProofStep> {
-        self.derivations
+        self.event_log
             .iter()
-            .enumerate()
-            .filter_map(|(idx, d)| {
-                d.as_ref().map(|derivation| ProofStep {
-                    clause_idx: idx,
-                    derivation: derivation.clone(),
-                    conclusion: self.clauses[idx].clone(),
-                })
+            .filter_map(|event| {
+                if let ProofStateChange::AddN { clause, derivation } = event {
+                    clause.id.map(|idx| ProofStep {
+                        clause_idx: idx,
+                        derivation: derivation.clone(),
+                        conclusion: clause.clone(),
+                    })
+                } else {
+                    None
+                }
             })
             .collect()
     }
@@ -375,40 +376,27 @@ impl SaturationState {
         (u_indices, p_indices)
     }
 
-    /// Notify all rules about a clause being added to U
-    fn notify_add_unprocessed(&mut self, clause_idx: usize) {
+    /// Notify all rules about a clause being added to or removed from U
+    fn notify_unprocessed(&mut self, clause_idx: usize, is_add: bool) {
         let clause = &self.clauses[clause_idx];
-        let notif = ClauseNotification::Added { clause_idx, clause };
+        let notif = if is_add {
+            ClauseNotification::Added { clause_idx, clause }
+        } else {
+            ClauseNotification::Removed { clause_idx, clause }
+        };
         for rule in &mut self.simplification_rules {
             rule.notify_unprocessed(notif.clone());
         }
     }
 
-    /// Notify all rules about a clause being removed from U
-    fn notify_remove_unprocessed(&mut self, clause_idx: usize) {
+    /// Notify all rules about a clause being added to or removed from P
+    fn notify_processed(&mut self, clause_idx: usize, is_add: bool) {
         let clause = &self.clauses[clause_idx];
-        let notif = ClauseNotification::Removed { clause_idx, clause };
-        for rule in &mut self.simplification_rules {
-            rule.notify_unprocessed(notif.clone());
-        }
-    }
-
-    /// Notify all rules about a clause being added to P
-    fn notify_add_processed(&mut self, clause_idx: usize) {
-        let clause = &self.clauses[clause_idx];
-        let notif = ClauseNotification::Added { clause_idx, clause };
-        for rule in &mut self.simplification_rules {
-            rule.notify_processed(notif.clone());
-        }
-        for rule in &mut self.generating_rules {
-            rule.notify(notif.clone());
-        }
-    }
-
-    /// Notify all rules about a clause being removed from P
-    fn notify_remove_processed(&mut self, clause_idx: usize) {
-        let clause = &self.clauses[clause_idx];
-        let notif = ClauseNotification::Removed { clause_idx, clause };
+        let notif = if is_add {
+            ClauseNotification::Added { clause_idx, clause }
+        } else {
+            ClauseNotification::Removed { clause_idx, clause }
+        };
         for rule in &mut self.simplification_rules {
             rule.notify_processed(notif.clone());
         }
@@ -441,7 +429,6 @@ impl SaturationState {
 
                 self.clause_memory_bytes += clause_with_id.memory_bytes();
                 self.clauses.push(clause_with_id.clone());
-                self.derivations.push(Some(derivation.clone()));
                 self.new.push_back(new_idx);
 
                 // Record event with the actual stored clause
@@ -461,24 +448,24 @@ impl SaturationState {
             }
             ProofStateChange::AddU { clause_idx } => {
                 self.unprocessed.push_back(*clause_idx);
-                self.notify_add_unprocessed(*clause_idx);
+                self.notify_unprocessed(*clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::RemoveU { clause_idx, rule_name: _ } => {
                 if self.unprocessed.iter().any(|&x| x == *clause_idx) {
                     self.unprocessed.retain(|&x| x != *clause_idx);
-                    self.notify_remove_unprocessed(*clause_idx);
+                    self.notify_unprocessed(*clause_idx, false);
                     self.event_log.push(change);
                 }
             }
             ProofStateChange::AddP { clause_idx } => {
                 self.processed.insert(*clause_idx);
-                self.notify_add_processed(*clause_idx);
+                self.notify_processed(*clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
                 if self.processed.remove(clause_idx) {
-                    self.notify_remove_processed(*clause_idx);
+                    self.notify_processed(*clause_idx, false);
                     self.event_log.push(change);
                 }
             }
@@ -588,7 +575,7 @@ impl SaturationState {
 
                 // Transfer: move to unprocessed (U)
                 self.unprocessed.push_back(clause_idx);
-                self.notify_add_unprocessed(clause_idx);
+                self.notify_unprocessed(clause_idx, true);
                 self.event_log.push(ProofStateChange::AddU { clause_idx });
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
@@ -657,10 +644,10 @@ impl SaturationState {
 
             // === Step 4: Transfer given clause from U to P ===
             self.unprocessed.retain(|&x| x != given_idx);
-            self.notify_remove_unprocessed(given_idx);
+            self.notify_unprocessed(given_idx, false);
             self.event_log.push(ProofStateChange::RemoveU { clause_idx: given_idx, rule_name: "Selection".into() });
             self.processed.insert(given_idx);
-            self.notify_add_processed(given_idx);
+            self.notify_processed(given_idx, true);
             self.event_log.push(ProofStateChange::AddP { clause_idx: given_idx });
 
             // === Step 5: Generate inferences using polymorphic rules ===
@@ -780,11 +767,10 @@ impl SaturationState {
         // Record event
         self.event_log.push(ProofStateChange::AddN {
             clause: clause_with_id.clone(),
-            derivation: inference.derivation.clone(),
+            derivation: inference.derivation,
         });
 
         self.clauses.push(clause_with_id);
-        self.derivations.push(Some(inference.derivation));
         self.new.push_back(new_idx);
 
         Some(new_idx)

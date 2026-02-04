@@ -214,8 +214,8 @@ pub struct Derivation {
 Constructor methods (`Derivation::resolution()`, `Derivation::factoring()`, etc.) ensure consistent naming. New rules simply use `Derivation { rule_name: "MyRule".into(), premises: vec![...] }`.
 
 ### Event Log
-The saturation state maintains an event log (`Vec<ProofStateChange>`) recording all state transitions. This enables:
-- **Proof extraction**: Backward traversal from empty clause via `extract_proof_from_events()`
+The saturation state maintains an event log (`Vec<ProofStateChange>`) as the single source of truth for derivations. All clause additions (`AddN`) include the derivation info. This enables:
+- **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
 - **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
 - **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection
 
