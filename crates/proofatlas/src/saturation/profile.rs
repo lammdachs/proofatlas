@@ -36,15 +36,27 @@ pub struct SimplificationStats {
     pub forward_time: Duration,
     pub backward_count: usize,
     pub backward_time: Duration,
+    /// Number of forward simplification attempts (successful + unsuccessful)
+    pub forward_attempts: usize,
+    /// Total time spent on all forward simplification attempts
+    pub forward_attempt_time: Duration,
+    /// Number of backward simplification attempts (successful + unsuccessful)
+    pub backward_attempts: usize,
+    /// Total time spent on all backward simplification attempts
+    pub backward_attempt_time: Duration,
 }
 
 impl Serialize for SimplificationStats {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SimplificationStats", 4)?;
+        let mut s = serializer.serialize_struct("SimplificationStats", 8)?;
         s.serialize_field("forward_count", &self.forward_count)?;
         s.serialize_field("forward_time", &secs(&self.forward_time))?;
         s.serialize_field("backward_count", &self.backward_count)?;
         s.serialize_field("backward_time", &secs(&self.backward_time))?;
+        s.serialize_field("forward_attempts", &self.forward_attempts)?;
+        s.serialize_field("forward_attempt_time", &secs(&self.forward_attempt_time))?;
+        s.serialize_field("backward_attempts", &self.backward_attempts)?;
+        s.serialize_field("backward_attempt_time", &secs(&self.backward_attempt_time))?;
         s.end()
     }
 }
@@ -100,6 +112,28 @@ impl SaturationProfile {
         let stats = self.simplification_rules.entry(name.to_string()).or_default();
         stats.backward_count += count;
         stats.backward_time += time;
+    }
+
+    /// Record a forward simplification attempt (successful or not).
+    pub fn record_simplification_forward_attempt(&mut self, name: &str, success: bool, time: Duration) {
+        let stats = self.simplification_rules.entry(name.to_string()).or_default();
+        stats.forward_attempts += 1;
+        stats.forward_attempt_time += time;
+        if success {
+            stats.forward_count += 1;
+            stats.forward_time += time;
+        }
+    }
+
+    /// Record a backward simplification attempt (successful or not).
+    pub fn record_simplification_backward_attempt(&mut self, name: &str, count: usize, time: Duration) {
+        let stats = self.simplification_rules.entry(name.to_string()).or_default();
+        stats.backward_attempts += 1;
+        stats.backward_attempt_time += time;
+        if count > 0 {
+            stats.backward_count += count;
+            stats.backward_time += time;
+        }
     }
 }
 

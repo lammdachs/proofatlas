@@ -2,8 +2,10 @@
 
 use super::interner::Interner;
 use super::literal::Literal;
+use super::term::Term;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::hash::Hash;
 
 /// Role of a clause in the proof (from TPTP or derived)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -216,5 +218,89 @@ impl fmt::Display for Clause {
             }
             Ok(())
         }
+    }
+}
+
+// =============================================================================
+// ClauseKey - Structural hash key for clause deduplication
+// =============================================================================
+
+/// A sortable representation of a literal for use in ClauseKey.
+/// Sorting order: polarity (negative first), then predicate ID, then args.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct LiteralKey {
+    /// Polarity: false (negative) sorts before true (positive)
+    polarity: bool,
+    /// Predicate ID
+    predicate_id: u32,
+    /// Predicate arity
+    predicate_arity: u8,
+    /// Serialized arguments (for consistent ordering)
+    args: Vec<TermKey>,
+}
+
+/// A sortable representation of a term for use in LiteralKey.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum TermKey {
+    /// Variable with ID
+    Variable(u32),
+    /// Constant with ID
+    Constant(u32),
+    /// Function with ID, arity, and args
+    Function(u32, u8, Vec<TermKey>),
+}
+
+impl TermKey {
+    fn from_term(term: &Term) -> Self {
+        match term {
+            Term::Variable(v) => TermKey::Variable(v.id.as_u32()),
+            Term::Constant(c) => TermKey::Constant(c.id.as_u32()),
+            Term::Function(f, args) => {
+                TermKey::Function(
+                    f.id.as_u32(),
+                    f.arity,
+                    args.iter().map(TermKey::from_term).collect(),
+                )
+            }
+        }
+    }
+}
+
+impl LiteralKey {
+    fn from_literal(lit: &Literal) -> Self {
+        LiteralKey {
+            polarity: lit.polarity,
+            predicate_id: lit.atom.predicate.id.as_u32(),
+            predicate_arity: lit.atom.predicate.arity,
+            args: lit.atom.args.iter().map(TermKey::from_term).collect(),
+        }
+    }
+}
+
+/// A structural key for a clause that enables O(1) duplicate detection.
+///
+/// The key sorts literals in a canonical order to ensure that logically equivalent
+/// clauses (differing only in literal order) produce the same key. This replaces
+/// string-based hashing (`format!("{}", clause)`) which was a major bottleneck.
+///
+/// Sorting order for literals: polarity (negative first), then predicate ID, then args.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClauseKey {
+    /// Sorted literal keys
+    literals: Vec<LiteralKey>,
+}
+
+impl ClauseKey {
+    /// Create a ClauseKey from a clause.
+    ///
+    /// The literals are sorted to produce a canonical representation.
+    pub fn from_clause(clause: &Clause) -> Self {
+        let mut literals: Vec<LiteralKey> = clause
+            .literals
+            .iter()
+            .map(LiteralKey::from_literal)
+            .collect();
+        literals.sort();
+        ClauseKey { literals }
     }
 }

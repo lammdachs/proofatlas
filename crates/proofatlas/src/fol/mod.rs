@@ -11,7 +11,7 @@ pub mod substitution;
 pub mod term;
 
 // Re-export commonly used types
-pub use clause::{CNFFormula, Clause, ClauseDisplay, ClauseRole};
+pub use clause::{CNFFormula, Clause, ClauseDisplay, ClauseKey, ClauseRole};
 pub use interner::{ConstantId, FunctionId, Interner, PredicateId, VariableId};
 pub use literal::{Atom, AtomDisplay, Literal, LiteralDisplay, PredicateSymbol};
 pub use ordering::{KBOConfig, Ordering as TermOrdering, KBO};

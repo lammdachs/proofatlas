@@ -44,7 +44,7 @@ use super::rule::{
     ResolutionRule, SaturationEventLog, SimplificationRule, SubsumptionRule, SuperpositionRule,
     TautologyRule,
 };
-use crate::fol::{Clause, Interner};
+use crate::fol::{Clause, ClauseKey, Interner};
 use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
 use crate::parser::orient_equalities::orient_clause_equalities;
 use crate::selection::{
@@ -553,12 +553,14 @@ impl SaturationState {
 
                     let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses, &self.interner);
 
-                    if !changes.is_empty() {
-                        // Update profiling stats
-                        if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
-                            p.record_simplification_forward(rule_name, 1, t.elapsed());
-                        }
+                    let success = !changes.is_empty();
 
+                    // Record ALL attempts (successful or not) to track unsuccessful subsumption checks
+                    if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
+                        p.record_simplification_forward_attempt(rule_name, success, t.elapsed());
+                    }
+
+                    if success {
                         collected_changes = changes;
                         forward_deleted = true;
                         break;
@@ -595,16 +597,17 @@ impl SaturationState {
 
                         let changes = rule.simplify_backward(clause_idx, clause, &u_view, &p_view, &self.interner);
 
-                        if !changes.is_empty() {
-                            // Update profiling stats
-                            if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
-                                // Count affected clauses (removals for subsumption, additions for demodulation)
-                                let count = changes.iter().filter(|c| {
-                                    matches!(c, ProofStateChange::DeleteU { .. } | ProofStateChange::DeleteP { .. } | ProofStateChange::New { .. })
-                                }).count();
-                                p.record_simplification_backward(rule_name, count, t.elapsed());
-                            }
+                        // Count affected clauses (removals for subsumption, additions for demodulation)
+                        let count = changes.iter().filter(|c| {
+                            matches!(c, ProofStateChange::DeleteU { .. } | ProofStateChange::DeleteP { .. } | ProofStateChange::New { .. })
+                        }).count();
 
+                        // Record ALL attempts (successful or not) to track unsuccessful subsumption checks
+                        if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
+                            p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
+                        }
+
+                        if !changes.is_empty() {
                             all_backward_changes.extend(changes);
                         }
                     }
@@ -684,13 +687,14 @@ impl SaturationState {
 
             // Add new inferences to new set (deduplicate within the batch first)
             let t0 = profile.as_ref().map(|_| Instant::now());
-            let mut seen_in_batch = HashSet::new();
+            let mut seen_in_batch: HashSet<ClauseKey> = HashSet::new();
             for inference in new_inferences {
                 // Orient the clause first to get canonical form
                 let mut oriented = inference.conclusion.clone();
                 orient_clause_equalities(&mut oriented, &self.interner);
-                let clause_str = format!("{}", oriented);
-                if seen_in_batch.insert(clause_str) {
+                // Use structural hashing instead of string formatting
+                let clause_key = ClauseKey::from_clause(&oriented);
+                if seen_in_batch.insert(clause_key) {
                     self.apply_change(
                         ProofStateChange::New {
                             clause: oriented,

@@ -6,10 +6,14 @@ use super::literal::{Atom, Literal};
 use super::term::{Term, Variable};
 use std::collections::HashMap;
 
-/// A substitution mapping variable IDs to terms
+/// A substitution mapping variable IDs to terms.
+///
+/// Supports optional trail-based backtracking for efficient subsumption checking.
+/// The trail is only used when `mark()`/`backtrack()` or `bind()` are called.
 #[derive(Debug, Clone, Default)]
 pub struct Substitution {
     pub map: HashMap<VariableId, Term>,
+    trail: Vec<VariableId>, // Empty when not using backtracking
 }
 
 impl Substitution {
@@ -17,17 +21,49 @@ impl Substitution {
     pub fn new() -> Self {
         Substitution {
             map: HashMap::new(),
+            trail: Vec::new(),
         }
     }
 
-    /// Add a variable -> term mapping
+    /// Create a new substitution with pre-allocated capacity for backtracking
+    pub fn with_capacity(var_count: usize) -> Self {
+        Substitution {
+            map: HashMap::with_capacity(var_count),
+            trail: Vec::with_capacity(var_count * 2), // Extra space for backtracking
+        }
+    }
+
+    /// Add a variable -> term mapping (without recording on trail)
     pub fn insert(&mut self, var: Variable, term: Term) {
         self.map.insert(var.id, term);
     }
 
-    /// Add a variable ID -> term mapping
+    /// Add a variable ID -> term mapping (without recording on trail)
     pub fn insert_id(&mut self, var_id: VariableId, term: Term) {
         self.map.insert(var_id, term);
+    }
+
+    /// Bind variable, recording on trail for backtracking
+    #[inline]
+    pub fn bind(&mut self, var: Variable, term: Term) {
+        self.trail.push(var.id);
+        self.map.insert(var.id, term);
+    }
+
+    /// Save current position for later backtrack
+    #[inline]
+    pub fn mark(&self) -> usize {
+        self.trail.len()
+    }
+
+    /// Undo bindings back to saved position
+    #[inline]
+    pub fn backtrack(&mut self, mark: usize) {
+        while self.trail.len() > mark {
+            if let Some(var_id) = self.trail.pop() {
+                self.map.remove(&var_id);
+            }
+        }
     }
 
     /// Add a variable -> term mapping with eager substitution propagation
@@ -50,6 +86,7 @@ impl Substitution {
                         .iter()
                         .cloned()
                         .collect(),
+                    trail: Vec::new(),
                 };
                 updated_map.insert(existing_var_id, existing_term.apply_substitution(&single_subst));
             } else {
