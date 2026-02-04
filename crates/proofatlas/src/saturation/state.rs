@@ -258,7 +258,7 @@ impl SaturationState {
         // Build initial event log with input clauses
         let mut event_log = Vec::new();
         for idx in 0..clause_idx {
-            event_log.push(ProofStateChange::AddN {
+            event_log.push(ProofStateChange::New {
                 clause: clauses[idx].clone(),
                 derivation: Derivation::input(),
             });
@@ -301,7 +301,7 @@ impl SaturationState {
         // Build derivation map from event log
         let mut derivation_map = std::collections::HashMap::new();
         for event in &self.event_log {
-            if let ProofStateChange::AddN { clause, derivation } = event {
+            if let ProofStateChange::New { clause, derivation } = event {
                 if let Some(idx) = clause.id {
                     derivation_map.insert(idx, derivation.clone());
                 }
@@ -356,7 +356,7 @@ impl SaturationState {
         self.event_log
             .iter()
             .filter_map(|event| {
-                if let ProofStateChange::AddN { clause, derivation } = event {
+                if let ProofStateChange::New { clause, derivation } = event {
                     clause.id.map(|idx| ProofStep {
                         clause_idx: idx,
                         derivation: derivation.clone(),
@@ -408,7 +408,7 @@ impl SaturationState {
     /// Apply a single ProofStateChange, update internal state, and record to event log
     fn apply_change(&mut self, change: ProofStateChange, profile: &mut Option<SaturationProfile>) {
         match &change {
-            ProofStateChange::AddN { clause, derivation } => {
+            ProofStateChange::New { clause, derivation } => {
                 // Check clause size limit
                 if clause.literals.len() > self.config.max_clause_size {
                     return;
@@ -432,7 +432,7 @@ impl SaturationState {
                 self.new.push_back(new_idx);
 
                 // Record event with the actual stored clause
-                self.event_log.push(ProofStateChange::AddN {
+                self.event_log.push(ProofStateChange::New {
                     clause: clause_with_id,
                     derivation: derivation.clone(),
                 });
@@ -441,29 +441,31 @@ impl SaturationState {
                     p.clauses_added += 1;
                 }
             }
-            ProofStateChange::RemoveN { clause_idx: _, rule_name: _ } => {
+            ProofStateChange::DeleteN { clause_idx: _, rule_name: _ } => {
                 // Clause is just not transferred - no action needed for state
                 // Record event
                 self.event_log.push(change);
             }
-            ProofStateChange::AddU { clause_idx } => {
+            ProofStateChange::Transfer { clause_idx } => {
+                // Implicit: clause removed from N, added to U
                 self.unprocessed.push_back(*clause_idx);
                 self.notify_unprocessed(*clause_idx, true);
                 self.event_log.push(change);
             }
-            ProofStateChange::RemoveU { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
                 if self.unprocessed.iter().any(|&x| x == *clause_idx) {
                     self.unprocessed.retain(|&x| x != *clause_idx);
                     self.notify_unprocessed(*clause_idx, false);
                     self.event_log.push(change);
                 }
             }
-            ProofStateChange::AddP { clause_idx } => {
+            ProofStateChange::Select { clause_idx } => {
+                // Implicit: clause removed from U, added to P
                 self.processed.insert(*clause_idx);
                 self.notify_processed(*clause_idx, true);
                 self.event_log.push(change);
             }
-            ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
                 if self.processed.remove(clause_idx) {
                     self.notify_processed(*clause_idx, false);
                     self.event_log.push(change);
@@ -558,7 +560,7 @@ impl SaturationState {
                             if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
                                 // Count affected clauses (removals for subsumption, additions for demodulation)
                                 let count = changes.iter().filter(|c| {
-                                    matches!(c, ProofStateChange::RemoveU { .. } | ProofStateChange::RemoveP { .. } | ProofStateChange::AddN { .. })
+                                    matches!(c, ProofStateChange::DeleteU { .. } | ProofStateChange::DeleteP { .. } | ProofStateChange::New { .. })
                                 }).count();
                                 p.record_simplification_backward(rule_name, count, t.elapsed());
                             }
@@ -576,7 +578,7 @@ impl SaturationState {
                 // Transfer: move to unprocessed (U)
                 self.unprocessed.push_back(clause_idx);
                 self.notify_unprocessed(clause_idx, true);
-                self.event_log.push(ProofStateChange::AddU { clause_idx });
+                self.event_log.push(ProofStateChange::Transfer { clause_idx });
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.forward_simplify_time += t.elapsed();
@@ -642,13 +644,12 @@ impl SaturationState {
                 p.select_given_time += t.elapsed();
             }
 
-            // === Step 4: Transfer given clause from U to P ===
+            // === Step 4: Select given clause (transfer from U to P) ===
             self.unprocessed.retain(|&x| x != given_idx);
             self.notify_unprocessed(given_idx, false);
-            self.event_log.push(ProofStateChange::RemoveU { clause_idx: given_idx, rule_name: "Selection".into() });
             self.processed.insert(given_idx);
             self.notify_processed(given_idx, true);
-            self.event_log.push(ProofStateChange::AddP { clause_idx: given_idx });
+            self.event_log.push(ProofStateChange::Select { clause_idx: given_idx });
 
             // === Step 5: Generate inferences using polymorphic rules ===
             let t0 = profile.as_ref().map(|_| Instant::now());
@@ -718,9 +719,9 @@ impl SaturationState {
 
             let changes = rule.generate(given_idx, given_clause, &p_view, selector);
 
-            // Convert ProofStateChange::AddN to InferenceResult
+            // Convert ProofStateChange::New to InferenceResult
             for change in changes {
-                if let ProofStateChange::AddN { clause, derivation } = change {
+                if let ProofStateChange::New { clause, derivation } = change {
                     results.push(InferenceResult {
                         conclusion: clause,
                         derivation,
@@ -765,7 +766,7 @@ impl SaturationState {
         self.clause_memory_bytes += clause_with_id.memory_bytes();
 
         // Record event
-        self.event_log.push(ProofStateChange::AddN {
+        self.event_log.push(ProofStateChange::New {
             clause: clause_with_id.clone(),
             derivation: inference.derivation,
         });
@@ -955,9 +956,9 @@ mod tests {
         // Event log should have content
         assert!(!event_log.is_empty(), "Should have events in the log");
 
-        // Should have at least the initial 3 AddN events
-        let add_n_count = event_log.iter().filter(|e| matches!(e, ProofStateChange::AddN { .. })).count();
-        assert!(add_n_count >= 3, "Should have at least 3 AddN events for initial clauses");
+        // Should have at least the initial 3 New events
+        let new_count = event_log.iter().filter(|e| matches!(e, ProofStateChange::New { .. })).count();
+        assert!(new_count >= 3, "Should have at least 3 New events for initial clauses");
 
         // Verify serde serialization round-trips
         let json = serde_json::to_string(&event_log).unwrap();

@@ -112,34 +112,34 @@ pub fn extract_training_from_events(events: &SaturationEventLog) -> Vec<Selectio
 
     for event in events {
         match event {
-            ProofStateChange::AddN { clause, derivation: _ } => {
+            ProofStateChange::New { clause, derivation: _ } => {
                 if let Some(idx) = clause.id {
                     n.insert(idx);
                 }
             }
-            ProofStateChange::RemoveN { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteN { clause_idx, rule_name: _ } => {
                 n.remove(clause_idx);
             }
-            ProofStateChange::AddU { clause_idx } => {
+            ProofStateChange::Transfer { clause_idx } => {
                 n.remove(clause_idx);
                 u.insert(*clause_idx);
             }
-            ProofStateChange::RemoveU { clause_idx, rule_name } => {
-                // If this is a selection (N was empty and clause was removed from U for selection)
-                if rule_name == "Selection" && n.is_empty() {
-                    // This is a given clause selection
+            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
+                u.remove(clause_idx);
+            }
+            ProofStateChange::Select { clause_idx } => {
+                // This is the given clause selection - N should be empty at this point
+                if n.is_empty() {
                     let candidates: Vec<usize> = u.iter().copied().collect();
                     contexts.push(SelectionContext {
                         selected_idx: *clause_idx,
                         candidates,
                     });
                 }
+                // Implicit: removed from U, added to P
                 u.remove(clause_idx);
             }
-            ProofStateChange::AddP { clause_idx: _ } => {
-                // Clause moved to P (after selection)
-            }
-            ProofStateChange::RemoveP { clause_idx: _, rule_name: _ } => {
+            ProofStateChange::DeleteP { clause_idx: _, rule_name: _ } => {
                 // Backward simplification
             }
         }
@@ -180,7 +180,7 @@ pub fn extract_clause_labels_from_events(events: &SaturationEventLog) -> Vec<Tra
     // Get all clauses that were ever added
     let mut all_clauses = HashSet::new();
     for event in events {
-        if let ProofStateChange::AddN { clause, derivation: _ } = event {
+        if let ProofStateChange::New { clause, derivation: _ } = event {
             if let Some(idx) = clause.id {
                 all_clauses.insert(idx);
             }

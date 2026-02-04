@@ -18,23 +18,30 @@ use serde::{Deserialize, Serialize};
 /// - U (unprocessed): Simplified clauses awaiting selection
 /// - P (processed): Selected clauses used for inferences
 ///
+/// Semantics distinguish between transitions (implicit removal from source set)
+/// and deletions (explicit removal due to simplification):
+/// - `New`: clause enters N
+/// - `Transfer`: clause moves N→U (implicit N removal)
+/// - `Select`: clause moves U→P (implicit U removal)
+/// - `DeleteN/U/P`: clause deleted from respective set (simplification)
+///
 /// This is the raw event log format. All derived views (proof extraction, training data,
 /// iteration structure) come from replaying these events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ProofStateChange {
-    /// Add a new clause to N (with derivation tracking)
-    AddN { clause: Clause, derivation: Derivation },
-    /// Remove a clause from N (forward simplification deleted it)
-    RemoveN { clause_idx: usize, rule_name: String },
-    /// Transfer clause from N to U (survived forward simplification)
-    AddU { clause_idx: usize },
-    /// Remove clause from U (backward simplification deleted it)
-    RemoveU { clause_idx: usize, rule_name: String },
-    /// Transfer clause from U to P (selected as given clause)
-    AddP { clause_idx: usize },
-    /// Remove clause from P (backward simplification deleted it)
-    RemoveP { clause_idx: usize, rule_name: String },
+    /// New clause added to N (from inference or input)
+    New { clause: Clause, derivation: Derivation },
+    /// Clause deleted from N (forward simplification)
+    DeleteN { clause_idx: usize, rule_name: String },
+    /// Clause transferred from N to U (survived forward simplification)
+    Transfer { clause_idx: usize },
+    /// Clause deleted from U (backward simplification)
+    DeleteU { clause_idx: usize, rule_name: String },
+    /// Clause selected and transferred from U to P
+    Select { clause_idx: usize },
+    /// Clause deleted from P (backward simplification)
+    DeleteP { clause_idx: usize, rule_name: String },
 }
 
 /// Type alias for the event log (replaces semantic SaturationTrace)
@@ -135,8 +142,8 @@ pub trait SimplificationRule: Send + Sync {
     ///
     /// Returns:
     /// - `[]` if no simplification applies
-    /// - `[RemoveN { clause_idx }]` if the clause should be deleted
-    /// - `[RemoveN { clause_idx }, AddN { clause, derivation }]` if the clause is replaced
+    /// - `[DeleteN { clause_idx }]` if the clause should be deleted
+    /// - `[DeleteN { clause_idx }, New { clause, derivation }]` if the clause is replaced
     fn simplify_forward(
         &self,
         clause_idx: usize,
@@ -148,7 +155,7 @@ pub trait SimplificationRule: Send + Sync {
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
     ///
-    /// Returns RemoveU/RemoveP for deleted clauses, AddN for replacements.
+    /// Returns DeleteU/DeleteP for deleted clauses, New for replacements.
     /// Default implementation returns empty (no backward simplification).
     fn simplify_backward(
         &self,
@@ -177,7 +184,7 @@ pub trait GeneratingInferenceRule: Send + Sync {
     /// - The given clause and each clause in P (processed)
     /// - The given clause with itself (self-inferences)
     ///
-    /// Returns AddN changes for each new clause generated.
+    /// Returns New changes for each new clause generated.
     fn generate(
         &self,
         given_idx: usize,
@@ -223,7 +230,7 @@ impl SimplificationRule for TautologyRule {
         _all_clauses: &[Clause],
     ) -> Vec<ProofStateChange> {
         if clause.is_tautology() {
-            vec![ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() }]
+            vec![ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -300,7 +307,7 @@ impl SimplificationRule for SubsumptionRule {
         _all_clauses: &[Clause],
     ) -> Vec<ProofStateChange> {
         if let Some(_subsumer_idx) = self.checker.find_subsumer(clause) {
-            vec![ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() }]
+            vec![ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -329,9 +336,9 @@ impl SimplificationRule for SubsumptionRule {
         let rule_name: String = self.name().into();
         for idx in subsumed {
             if processed.indices().contains(&idx) {
-                changes.push(ProofStateChange::RemoveP { clause_idx: idx, rule_name: rule_name.clone() });
+                changes.push(ProofStateChange::DeleteP { clause_idx: idx, rule_name: rule_name.clone() });
             } else if unprocessed.indices().contains(&idx) {
-                changes.push(ProofStateChange::RemoveU { clause_idx: idx, rule_name: rule_name.clone() });
+                changes.push(ProofStateChange::DeleteU { clause_idx: idx, rule_name: rule_name.clone() });
             }
         }
 
@@ -440,8 +447,8 @@ impl SimplificationRule for DemodulationRule {
                     orient_clause_equalities(&mut simplified_clause);
 
                     return vec![
-                        ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() },
-                        ProofStateChange::AddN {
+                        ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() },
+                        ProofStateChange::New {
                             clause: simplified_clause,
                             derivation: Derivation::demodulation(unit_idx, clause_idx),
                         },
@@ -480,13 +487,13 @@ impl SimplificationRule for DemodulationRule {
 
                 // Determine which set to remove from
                 if processed.indices().contains(&target_idx) {
-                    changes.push(ProofStateChange::RemoveP { clause_idx: target_idx, rule_name: rule_name.clone() });
+                    changes.push(ProofStateChange::DeleteP { clause_idx: target_idx, rule_name: rule_name.clone() });
                 } else {
-                    changes.push(ProofStateChange::RemoveU { clause_idx: target_idx, rule_name: rule_name.clone() });
+                    changes.push(ProofStateChange::DeleteU { clause_idx: target_idx, rule_name: rule_name.clone() });
                 }
 
                 // Add the simplified clause to N
-                changes.push(ProofStateChange::AddN {
+                changes.push(ProofStateChange::New {
                     clause: simplified_clause,
                     derivation: Derivation::demodulation(clause_idx, target_idx),
                 });
@@ -540,14 +547,14 @@ impl GeneratingInferenceRule for ResolutionRule {
         for (processed_idx, processed_clause) in processed.iter() {
             // Given as first clause
             for result in resolution(given, processed_clause, given_idx, processed_idx, selector) {
-                changes.push(ProofStateChange::AddN {
+                changes.push(ProofStateChange::New {
                     clause: result.conclusion,
                     derivation: result.derivation,
                 });
             }
             // Given as second clause
             for result in resolution(processed_clause, given, processed_idx, given_idx, selector) {
-                changes.push(ProofStateChange::AddN {
+                changes.push(ProofStateChange::New {
                     clause: result.conclusion,
                     derivation: result.derivation,
                 });
@@ -556,7 +563,7 @@ impl GeneratingInferenceRule for ResolutionRule {
 
         // Self-resolution
         for result in resolution(given, given, given_idx, given_idx, selector) {
-            changes.push(ProofStateChange::AddN {
+            changes.push(ProofStateChange::New {
                 clause: result.conclusion,
                 derivation: result.derivation,
             });
@@ -602,7 +609,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
             // Given as first clause (rewriter)
             for result in superposition(given, processed_clause, given_idx, processed_idx, selector)
             {
-                changes.push(ProofStateChange::AddN {
+                changes.push(ProofStateChange::New {
                     clause: result.conclusion,
                     derivation: result.derivation,
                 });
@@ -610,7 +617,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
             // Given as second clause (target)
             for result in superposition(processed_clause, given, processed_idx, given_idx, selector)
             {
-                changes.push(ProofStateChange::AddN {
+                changes.push(ProofStateChange::New {
                     clause: result.conclusion,
                     derivation: result.derivation,
                 });
@@ -619,7 +626,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
 
         // Self-superposition
         for result in superposition(given, given, given_idx, given_idx, selector) {
-            changes.push(ProofStateChange::AddN {
+            changes.push(ProofStateChange::New {
                 clause: result.conclusion,
                 derivation: result.derivation,
             });
@@ -660,7 +667,7 @@ impl GeneratingInferenceRule for FactoringRule {
     ) -> Vec<ProofStateChange> {
         factoring(given, given_idx, selector)
             .into_iter()
-            .map(|result| ProofStateChange::AddN {
+            .map(|result| ProofStateChange::New {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -699,7 +706,7 @@ impl GeneratingInferenceRule for EqualityResolutionRule {
     ) -> Vec<ProofStateChange> {
         equality_resolution(given, given_idx, selector)
             .into_iter()
-            .map(|result| ProofStateChange::AddN {
+            .map(|result| ProofStateChange::New {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -738,7 +745,7 @@ impl GeneratingInferenceRule for EqualityFactoringRule {
     ) -> Vec<ProofStateChange> {
         equality_factoring(given, given_idx, selector)
             .into_iter()
-            .map(|result| ProofStateChange::AddN {
+            .map(|result| ProofStateChange::New {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -806,7 +813,7 @@ mod tests {
         ]);
         let changes = rule.simplify_forward(0, &tautology, &u_view, &p_view, &all_clauses);
         assert_eq!(changes.len(), 1);
-        assert!(matches!(changes[0], ProofStateChange::RemoveN { clause_idx: 0, .. }));
+        assert!(matches!(changes[0], ProofStateChange::DeleteN { clause_idx: 0, .. }));
     }
 
     #[test]

@@ -277,7 +277,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
     let mut initial_clause_count = 0;
 
     for event in events {
-        if let ProofStateChange::AddN { clause, derivation } = event {
+        if let ProofStateChange::New { clause, derivation } = event {
             if let Some(idx) = clause.id {
                 clauses.insert(idx, format_clause(clause));
                 derivations.insert(idx, (derivation.rule_name.clone(), derivation.premises.clone()));
@@ -305,7 +305,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
 
     for event in events {
         match event {
-            ProofStateChange::AddN { clause, derivation } => {
+            ProofStateChange::New { clause, derivation } => {
                 if let Some(idx) = clause.id {
                     let clause_str = format_clause(clause);
                     let rule = &derivation.rule_name;
@@ -340,7 +340,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     }
                 }
             }
-            ProofStateChange::RemoveN { clause_idx, rule_name } => {
+            ProofStateChange::DeleteN { clause_idx, rule_name } => {
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 let rule = match rule_name.as_str() {
                     "Tautology" => "TautologyDeletion",
@@ -355,7 +355,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            ProofStateChange::AddU { clause_idx } => {
+            ProofStateChange::Transfer { clause_idx } => {
                 // Clause transferred from N to U
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_simplification.push(json!({
@@ -365,28 +365,25 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            ProofStateChange::RemoveU { clause_idx, rule_name } => {
-                if rule_name == "Selection" {
-                    // This is the given clause selection - will be followed by AddP
-                    let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                    current_selection = Some(json!({
-                        "clause_idx": *clause_idx,
-                        "clause": clause_str,
-                        "rule": "GivenClauseSelection",
-                    }));
-                } else {
-                    // Backward simplification deleted a clause from U
-                    let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                    current_simplification.push(json!({
-                        "clause_idx": *clause_idx,
-                        "clause": clause_str,
-                        "rule": "BackwardSubsumptionDeletion",
-                        "premises": [],
-                    }));
-                }
+            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
+                // Backward simplification deleted a clause from U
+                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                current_simplification.push(json!({
+                    "clause_idx": *clause_idx,
+                    "clause": clause_str,
+                    "rule": "BackwardSubsumptionDeletion",
+                    "premises": [],
+                }));
             }
-            ProofStateChange::AddP { clause_idx: _ } => {
-                // End of iteration - flush current state
+            ProofStateChange::Select { clause_idx } => {
+                // Given clause selection and end of iteration
+                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                current_selection = Some(json!({
+                    "clause_idx": *clause_idx,
+                    "clause": clause_str,
+                    "rule": "GivenClauseSelection",
+                }));
+                // Flush current state
                 if current_selection.is_some() || !current_simplification.is_empty() || !current_generation.is_empty() {
                     iterations.push(json!({
                         "simplification": std::mem::take(&mut current_simplification),
@@ -395,7 +392,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     }));
                 }
             }
-            ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
                 // Backward simplification deleted a clause from P
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_simplification.push(json!({

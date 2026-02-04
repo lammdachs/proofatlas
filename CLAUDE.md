@@ -196,9 +196,10 @@ The saturation loop uses a modular, polymorphic architecture where rules are reg
 - Implementations: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
 
 All rules return `Vec<ProofStateChange>` for atomic state modifications:
-- `AddN { clause, derivation }`: Add new clause to N
-- `RemoveN/U/P { clause_idx, rule_name }`: Remove from respective set
-- `AddU/P { clause_idx }`: Transfer between sets
+- `New { clause, derivation }`: Add new clause to N
+- `DeleteN/U/P { clause_idx, rule_name }`: Delete from respective set (simplification)
+- `Transfer { clause_idx }`: Move clause N→U (implicit N removal)
+- `Select { clause_idx }`: Move clause U→P (implicit U removal)
 
 This architecture enables adding new rules without modifying the main loop.
 
@@ -214,7 +215,7 @@ pub struct Derivation {
 Constructor methods (`Derivation::resolution()`, `Derivation::factoring()`, etc.) ensure consistent naming. New rules simply use `Derivation { rule_name: "MyRule".into(), premises: vec![...] }`.
 
 ### Event Log
-The saturation state maintains an event log (`Vec<ProofStateChange>`) as the single source of truth for derivations. All clause additions (`AddN`) include the derivation info. This enables:
+The saturation state maintains an event log (`Vec<ProofStateChange>`) as the single source of truth for derivations. All clause additions (`New`) include the derivation info. This enables:
 - **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
 - **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
 - **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection

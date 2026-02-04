@@ -8,7 +8,7 @@ use std::collections::HashSet;
 pub fn extract_proof_from_events(events: &SaturationEventLog) -> Option<Vec<usize>> {
     // Find the empty clause
     let empty_clause_idx = events.iter().find_map(|e| {
-        if let ProofStateChange::AddN { clause, derivation: _ } = e {
+        if let ProofStateChange::New { clause, derivation: _ } = e {
             if clause.is_empty() {
                 clause.id
             } else {
@@ -23,7 +23,7 @@ pub fn extract_proof_from_events(events: &SaturationEventLog) -> Option<Vec<usiz
     let mut derivation_map: std::collections::HashMap<usize, (String, Vec<usize>)> =
         std::collections::HashMap::new();
     for event in events {
-        if let ProofStateChange::AddN { clause, derivation } = event {
+        if let ProofStateChange::New { clause, derivation } = event {
             if let Some(idx) = clause.id {
                 derivation_map.insert(idx, (derivation.rule_name.clone(), derivation.premises.clone()));
             }
@@ -89,7 +89,7 @@ impl<'a> EventLogReplayer<'a> {
         self.position += 1;
 
         match event {
-            ProofStateChange::AddN { clause, derivation: _ } => {
+            ProofStateChange::New { clause, derivation: _ } => {
                 let idx = clause.id.unwrap_or(self.clauses.len());
                 if idx >= self.clauses.len() {
                     self.clauses.resize(idx + 1, Clause::new(vec![]));
@@ -97,21 +97,23 @@ impl<'a> EventLogReplayer<'a> {
                 self.clauses[idx] = clause.clone();
                 self.n.insert(idx);
             }
-            ProofStateChange::RemoveN { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteN { clause_idx, rule_name: _ } => {
                 self.n.remove(clause_idx);
             }
-            ProofStateChange::AddU { clause_idx } => {
+            ProofStateChange::Transfer { clause_idx } => {
+                // Implicit: removed from N, added to U
                 self.n.remove(clause_idx);
                 self.u.insert(*clause_idx);
             }
-            ProofStateChange::RemoveU { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
                 self.u.remove(clause_idx);
             }
-            ProofStateChange::AddP { clause_idx } => {
+            ProofStateChange::Select { clause_idx } => {
+                // Implicit: removed from U, added to P
                 self.u.remove(clause_idx);
                 self.p.insert(*clause_idx);
             }
-            ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
+            ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
                 self.p.remove(clause_idx);
             }
         }
