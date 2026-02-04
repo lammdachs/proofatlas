@@ -47,6 +47,15 @@ pub enum ProofStateChange {
 /// Type alias for the event log (replaces semantic SaturationTrace)
 pub type SaturationEventLog = Vec<ProofStateChange>;
 
+/// Which clause set a notification refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClauseSet {
+    /// Unprocessed set (U)
+    Unprocessed,
+    /// Processed set (P)
+    Processed,
+}
+
 /// Notifications sent to rules when clauses are added/removed from U or P.
 ///
 /// Rules can maintain internal indices by listening to these notifications.
@@ -132,11 +141,8 @@ pub trait SimplificationRule: Send + Sync {
     /// Rules can use this to update their active clause indices.
     fn on_clause_activated(&mut self, _clause_idx: usize, _clause: &Clause) {}
 
-    /// Notified when a clause is added to or removed from U (unprocessed)
-    fn notify_unprocessed(&mut self, _notif: ClauseNotification) {}
-
-    /// Notified when a clause is added to or removed from P (processed)
-    fn notify_processed(&mut self, _notif: ClauseNotification) {}
+    /// Notified when a clause is added to or removed from U or P.
+    fn notify(&mut self, _set: ClauseSet, _notif: ClauseNotification) {}
 
     /// Forward simplification: try to simplify/delete a clause in N using U∪P.
     ///
@@ -404,20 +410,8 @@ impl SimplificationRule for DemodulationRule {
         }
     }
 
-    fn notify_unprocessed(&mut self, notif: ClauseNotification) {
-        match notif {
-            ClauseNotification::Added { clause_idx, clause } => {
-                if Self::is_unit_equality(clause) {
-                    self.unit_equalities.insert(clause_idx);
-                }
-            }
-            ClauseNotification::Removed { clause_idx, .. } => {
-                self.unit_equalities.remove(&clause_idx);
-            }
-        }
-    }
-
-    fn notify_processed(&mut self, notif: ClauseNotification) {
+    fn notify(&mut self, _set: ClauseSet, notif: ClauseNotification) {
+        // Track unit equalities in both U and P
         match notif {
             ClauseNotification::Added { clause_idx, clause } => {
                 if Self::is_unit_equality(clause) {

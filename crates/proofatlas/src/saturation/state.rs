@@ -39,9 +39,10 @@
 
 use super::profile::SaturationProfile;
 use super::rule::{
-    ClauseNotification, ClauseView, DemodulationRule, EqualityFactoringRule, EqualityResolutionRule,
-    FactoringRule, GeneratingInferenceRule, ProofStateChange, ResolutionRule, SimplificationRule,
-    SaturationEventLog, SubsumptionRule, SuperpositionRule, TautologyRule,
+    ClauseNotification, ClauseSet, ClauseView, DemodulationRule, EqualityFactoringRule,
+    EqualityResolutionRule, FactoringRule, GeneratingInferenceRule, ProofStateChange,
+    ResolutionRule, SaturationEventLog, SimplificationRule, SubsumptionRule, SuperpositionRule,
+    TautologyRule,
 };
 use crate::fol::Clause;
 use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
@@ -411,8 +412,8 @@ impl SaturationState {
         None
     }
 
-    /// Notify all rules about a clause being added to or removed from U
-    fn notify_unprocessed(&mut self, clause_idx: usize, is_add: bool) {
+    /// Notify all rules about a clause being added to or removed from a set
+    fn notify_rules(&mut self, set: ClauseSet, clause_idx: usize, is_add: bool) {
         let clause = &self.clauses[clause_idx];
         let notif = if is_add {
             ClauseNotification::Added { clause_idx, clause }
@@ -420,23 +421,13 @@ impl SaturationState {
             ClauseNotification::Removed { clause_idx, clause }
         };
         for rule in &mut self.simplification_rules {
-            rule.notify_unprocessed(notif.clone());
+            rule.notify(set, notif.clone());
         }
-    }
-
-    /// Notify all rules about a clause being added to or removed from P
-    fn notify_processed(&mut self, clause_idx: usize, is_add: bool) {
-        let clause = &self.clauses[clause_idx];
-        let notif = if is_add {
-            ClauseNotification::Added { clause_idx, clause }
-        } else {
-            ClauseNotification::Removed { clause_idx, clause }
-        };
-        for rule in &mut self.simplification_rules {
-            rule.notify_processed(notif.clone());
-        }
-        for rule in &mut self.generating_rules {
-            rule.notify(notif.clone());
+        // Generating rules only care about processed clauses
+        if set == ClauseSet::Processed {
+            for rule in &mut self.generating_rules {
+                rule.notify(notif.clone());
+            }
         }
     }
 
@@ -484,25 +475,25 @@ impl SaturationState {
             ProofStateChange::Transfer { clause_idx } => {
                 // Implicit: clause removed from N, added to U
                 self.unprocessed.push_back(*clause_idx);
-                self.notify_unprocessed(*clause_idx, true);
+                self.notify_rules(ClauseSet::Unprocessed,*clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
                 if self.unprocessed.iter().any(|&x| x == *clause_idx) {
                     self.unprocessed.retain(|&x| x != *clause_idx);
-                    self.notify_unprocessed(*clause_idx, false);
+                    self.notify_rules(ClauseSet::Unprocessed,*clause_idx, false);
                     self.event_log.push(change);
                 }
             }
             ProofStateChange::Select { clause_idx } => {
                 // Implicit: clause removed from U, added to P
                 self.processed.insert(*clause_idx);
-                self.notify_processed(*clause_idx, true);
+                self.notify_rules(ClauseSet::Processed,*clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
                 if self.processed.remove(clause_idx) {
-                    self.notify_processed(*clause_idx, false);
+                    self.notify_rules(ClauseSet::Processed,*clause_idx, false);
                     self.event_log.push(change);
                 }
             }
@@ -612,7 +603,7 @@ impl SaturationState {
 
                 // Transfer: move to unprocessed (U)
                 self.unprocessed.push_back(clause_idx);
-                self.notify_unprocessed(clause_idx, true);
+                self.notify_rules(ClauseSet::Unprocessed,clause_idx, true);
                 self.event_log.push(ProofStateChange::Transfer { clause_idx });
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
@@ -662,9 +653,9 @@ impl SaturationState {
 
             // === Step 4: Select given clause (transfer from U to P) ===
             self.unprocessed.retain(|&x| x != given_idx);
-            self.notify_unprocessed(given_idx, false);
+            self.notify_rules(ClauseSet::Unprocessed,given_idx, false);
             self.processed.insert(given_idx);
-            self.notify_processed(given_idx, true);
+            self.notify_rules(ClauseSet::Processed,given_idx, true);
             self.event_log.push(ProofStateChange::Select { clause_idx: given_idx });
 
             // === Step 5: Generate inferences using polymorphic rules ===
