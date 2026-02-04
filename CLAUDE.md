@@ -16,11 +16,10 @@ proofatlas/
 │   │   └── src/
 │   │       ├── fol/            # Pure FOL types: terms, literals, clauses, substitutions, KBO
 │   │       ├── inference/      # Inference rules, derivation tracking, proof types
-│   │       ├── selection/      # Literal + clause selection strategies (tch-rs ML)
+│   │       ├── selection/      # Selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── saturation/     # Saturation loop, trace, forward/backward subsumption, profiling
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── ml/             # Graph building from clauses
 │   │       └── json.rs         # JSON serialization types
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution

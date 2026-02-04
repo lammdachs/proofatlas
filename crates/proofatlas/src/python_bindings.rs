@@ -13,7 +13,7 @@ use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     InferenceResult as RustInferenceResult,
 };
-use crate::ml::{ClauseGraph, GraphBuilder};
+use crate::selection::graph::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::saturation::LiteralSelectionStrategy;
 use crate::selection::{LiteralSelector, SelectAll, SelectMaximal};

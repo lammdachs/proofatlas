@@ -13,7 +13,7 @@ use std::path::Path;
 #[cfg(feature = "ml")]
 use crate::fol::Clause;
 #[cfg(feature = "ml")]
-use crate::ml::graph::GraphBuilder;
+use super::graph::GraphBuilder;
 
 #[cfg(feature = "ml")]
 use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};

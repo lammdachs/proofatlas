@@ -27,7 +27,9 @@ pub mod cached;
 pub mod clause;
 #[cfg(feature = "ml")]
 pub mod gcn;
+pub mod graph;
 pub mod literal;
+pub mod proof_trace;
 #[cfg(feature = "ml")]
 pub mod sentence;
 
@@ -45,3 +47,10 @@ pub use clause::{ClauseSelector, SelectorStats};
 pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]
 pub use sentence::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
+
+// Graph/ML re-exports
+pub use graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};
+pub use proof_trace::{
+    compute_proof_statistics, extract_clause_labels_from_events, extract_training_data,
+    extract_training_from_events, ProofStatistics, SelectionTrainingExample, TrainingExample,
+};

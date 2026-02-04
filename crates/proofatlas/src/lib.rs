@@ -6,7 +6,6 @@
 pub mod fol;
 pub mod inference;
 pub mod json;
-pub mod ml;
 pub mod parser;
 pub mod saturation;
 pub mod selection;
