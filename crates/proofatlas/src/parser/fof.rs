@@ -3,7 +3,7 @@
 //! This module provides structures for representing full first-order logic
 //! formulas before conversion to CNF.
 
-use crate::fol::{Atom, Term, Variable};
+use crate::fol::{Atom, Interner, Term, Variable, VariableId};
 use std::collections::{HashMap, HashSet};
 
 /// Quantifier type
@@ -66,6 +66,36 @@ impl FOFFormula {
     /// Check if the formula is closed (no free variables)
     pub fn is_closed(&self) -> bool {
         self.free_variables().is_empty()
+    }
+
+    /// Get all free variable IDs in the formula
+    pub fn free_variable_ids(&self) -> HashSet<VariableId> {
+        match self {
+            FOFFormula::Atom(atom) => {
+                let mut ids = HashSet::new();
+                for arg in &atom.args {
+                    arg.collect_variable_ids(&mut ids);
+                }
+                ids
+            }
+            FOFFormula::Not(f) => f.free_variable_ids(),
+            FOFFormula::And(f1, f2)
+            | FOFFormula::Or(f1, f2)
+            | FOFFormula::Implies(f1, f2)
+            | FOFFormula::Iff(f1, f2)
+            | FOFFormula::Xor(f1, f2)
+            | FOFFormula::Nand(f1, f2)
+            | FOFFormula::Nor(f1, f2) => {
+                let mut ids = f1.free_variable_ids();
+                ids.extend(f2.free_variable_ids());
+                ids
+            }
+            FOFFormula::Quantified(_, var, f) => {
+                let mut ids = f.free_variable_ids();
+                ids.remove(&var.id);
+                ids
+            }
+        }
     }
 
     /// Convert to negation normal form (NNF) using iterative approach to avoid stack overflow
@@ -279,10 +309,18 @@ impl FOFFormula {
     ///
     /// This ensures that each quantifier binds a unique variable, avoiding
     /// issues with variable capture during CNF conversion.
-    pub fn standardize_apart(self) -> FOFFormula {
-        // Collect all variable names used in the formula to avoid clashes
+    ///
+    /// Requires an interner to create new variable IDs.
+    pub fn standardize_apart(self, interner: &mut Interner) -> FOFFormula {
+        // Collect all variable IDs used in the formula to track existing names
+        let mut used_ids = HashSet::new();
+        self.collect_variable_ids(&mut used_ids);
+
+        // Collect used names to avoid clashes when generating new names
         let mut used_names = HashSet::new();
-        self.collect_variable_names(&mut used_names);
+        for id in &used_ids {
+            used_names.insert(interner.resolve_variable(*id).to_string());
+        }
 
         // Find a starting counter that won't clash
         let mut counter = 0;
@@ -290,17 +328,17 @@ impl FOFFormula {
             counter += 1;
         }
 
-        self.standardize_apart_with_counter(&mut counter, &HashMap::new(), &used_names)
+        self.standardize_apart_with_counter(&mut counter, &HashMap::new(), &used_names, interner)
     }
 
-    fn collect_variable_names(&self, names: &mut HashSet<String>) {
+    fn collect_variable_ids(&self, ids: &mut HashSet<VariableId>) {
         match self {
             FOFFormula::Atom(atom) => {
                 for arg in &atom.args {
-                    Self::collect_term_variable_names(arg, names);
+                    arg.collect_variable_ids(ids);
                 }
             }
-            FOFFormula::Not(f) => f.collect_variable_names(names),
+            FOFFormula::Not(f) => f.collect_variable_ids(ids),
             FOFFormula::And(f1, f2)
             | FOFFormula::Or(f1, f2)
             | FOFFormula::Implies(f1, f2)
@@ -308,26 +346,12 @@ impl FOFFormula {
             | FOFFormula::Xor(f1, f2)
             | FOFFormula::Nand(f1, f2)
             | FOFFormula::Nor(f1, f2) => {
-                f1.collect_variable_names(names);
-                f2.collect_variable_names(names);
+                f1.collect_variable_ids(ids);
+                f2.collect_variable_ids(ids);
             }
             FOFFormula::Quantified(_, var, f) => {
-                names.insert(var.name.clone());
-                f.collect_variable_names(names);
-            }
-        }
-    }
-
-    fn collect_term_variable_names(term: &Term, names: &mut HashSet<String>) {
-        match term {
-            Term::Variable(v) => {
-                names.insert(v.name.clone());
-            }
-            Term::Constant(_) => {}
-            Term::Function(_, args) => {
-                for arg in args {
-                    Self::collect_term_variable_names(arg, names);
-                }
+                ids.insert(var.id);
+                f.collect_variable_ids(ids);
             }
         }
     }
@@ -335,8 +359,9 @@ impl FOFFormula {
     fn standardize_apart_with_counter(
         self,
         counter: &mut usize,
-        renaming: &HashMap<String, String>,
+        renaming: &HashMap<VariableId, VariableId>,
         used_names: &HashSet<String>,
+        interner: &mut Interner,
     ) -> FOFFormula {
         match self {
             FOFFormula::Atom(atom) => {
@@ -353,42 +378,42 @@ impl FOFFormula {
             }
 
             FOFFormula::Not(f) => {
-                FOFFormula::Not(Box::new(f.standardize_apart_with_counter(counter, renaming, used_names)))
+                FOFFormula::Not(Box::new(f.standardize_apart_with_counter(counter, renaming, used_names, interner)))
             }
 
             FOFFormula::And(f1, f2) => FOFFormula::And(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Or(f1, f2) => FOFFormula::Or(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Implies(f1, f2) => FOFFormula::Implies(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Iff(f1, f2) => FOFFormula::Iff(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Xor(f1, f2) => FOFFormula::Xor(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Nand(f1, f2) => FOFFormula::Nand(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Nor(f1, f2) => FOFFormula::Nor(
-                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names)),
-                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names)),
+                Box::new(f1.standardize_apart_with_counter(counter, renaming, used_names, interner)),
+                Box::new(f2.standardize_apart_with_counter(counter, renaming, used_names, interner)),
             ),
 
             FOFFormula::Quantified(quant, var, f) => {
@@ -400,27 +425,27 @@ impl FOFFormula {
                     *counter += 1;
                 }
 
-                // Create new renaming that maps old name to new name
-                let mut new_renaming = renaming.clone();
-                new_renaming.insert(var.name.clone(), new_name.clone());
+                // Create new variable via interner
+                let new_var = Variable::new(interner.intern_variable(&new_name));
 
-                let new_var = Variable { name: new_name };
+                // Create new renaming that maps old ID to new ID
+                let mut new_renaming = renaming.clone();
+                new_renaming.insert(var.id, new_var.id);
+
                 FOFFormula::Quantified(
                     quant,
                     new_var,
-                    Box::new(f.standardize_apart_with_counter(counter, &new_renaming, used_names)),
+                    Box::new(f.standardize_apart_with_counter(counter, &new_renaming, used_names, interner)),
                 )
             }
         }
     }
 
-    fn rename_term_vars(term: Term, renaming: &HashMap<String, String>) -> Term {
+    fn rename_term_vars(term: Term, renaming: &HashMap<VariableId, VariableId>) -> Term {
         match term {
             Term::Variable(v) => {
-                if let Some(new_name) = renaming.get(&v.name) {
-                    Term::Variable(Variable {
-                        name: new_name.clone(),
-                    })
+                if let Some(&new_id) = renaming.get(&v.id) {
+                    Term::Variable(Variable::new(new_id))
                 } else {
                     Term::Variable(v)
                 }
@@ -461,23 +486,22 @@ pub struct NamedFormula {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::PredicateSymbol;
+    use crate::fol::{Interner, PredicateSymbol};
 
     #[test]
     fn test_nnf_conversion() {
+        let mut interner = Interner::new();
+
         // Test: ~(P & Q) -> ~P | ~Q
+        let p_pred = PredicateSymbol::new(interner.intern_predicate("P"), 0);
+        let q_pred = PredicateSymbol::new(interner.intern_predicate("Q"), 0);
+
         let p = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol {
-                name: "P".to_string(),
-                arity: 0,
-            },
+            predicate: p_pred,
             args: vec![],
         });
         let q = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol {
-                name: "Q".to_string(),
-                arity: 0,
-            },
+            predicate: q_pred,
             args: vec![],
         });
 

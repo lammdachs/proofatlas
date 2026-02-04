@@ -1,32 +1,56 @@
 //! Test compliance with calculus_quick_reference.md
 
 use proofatlas::{
-    factoring, resolution, Atom, Clause, Constant, Literal, LiteralSelector, PredicateSymbol,
-    SelectAll, Term, Variable,
+    factoring, resolution, Atom, Clause, Constant, Interner, Literal, LiteralSelector,
+    PredicateSymbol, SelectAll, Term, Variable,
 };
+
+/// Test context that holds the interner and provides helper methods
+struct TestCtx {
+    interner: Interner,
+}
+
+impl TestCtx {
+    fn new() -> Self {
+        Self {
+            interner: Interner::new(),
+        }
+    }
+
+    fn var(&mut self, name: &str) -> Term {
+        Term::Variable(Variable {
+            id: self.interner.intern_variable(name),
+        })
+    }
+
+    fn const_(&mut self, name: &str) -> Term {
+        Term::Constant(Constant {
+            id: self.interner.intern_constant(name),
+        })
+    }
+
+    fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+        PredicateSymbol {
+            id: self.interner.intern_predicate(name),
+            arity,
+        }
+    }
+}
 
 #[test]
 fn test_resolution_should_use_selection() {
+    let mut ctx = TestCtx::new();
+
     // According to calculus_quick_reference.md:
     // P(x) ∨ C₁    ¬P(t) ∨ C₂
     // ------------------------  where σ = mgu(x, t), P(x) and ¬P(t) selected.
     //       (C₁ ∨ C₂)σ
 
-    let p = PredicateSymbol {
-        name: "P".to_string(),
-        arity: 1,
-    };
-    let q = PredicateSymbol {
-        name: "Q".to_string(),
-        arity: 1,
-    };
+    let p = ctx.pred("P", 1);
+    let q = ctx.pred("Q", 1);
 
-    let x = Term::Variable(Variable {
-        name: "X".to_string(),
-    });
-    let a = Term::Constant(Constant {
-        name: "a".to_string(),
-    });
+    let x = ctx.var("X");
+    let a = ctx.const_("a");
 
     // Clause 1: P(X) ∨ Q(X)
     let clause1 = Clause::new(vec![
@@ -68,7 +92,7 @@ fn test_resolution_should_use_selection() {
 
     // Apply resolution with SelectAll
     let selector = SelectAll;
-    let results = resolution(&clause1, &clause2, 0, 1, &selector);
+    let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
 
     // With SelectAll, resolution can happen on any complementary pair
     println!("Number of resolvents: {}", results.len());
@@ -79,29 +103,19 @@ fn test_resolution_should_use_selection() {
 
 #[test]
 fn test_factoring_should_use_selection() {
+    let mut ctx = TestCtx::new();
+
     // According to calculus_quick_reference.md:
     // P(s) ∨ P(t) ∨ C
     // ----------------  where σ = mgu(s, t), P(s) selected.
     //    (P(s) ∨ C)σ
 
-    let p = PredicateSymbol {
-        name: "P".to_string(),
-        arity: 1,
-    };
-    let q = PredicateSymbol {
-        name: "Q".to_string(),
-        arity: 1,
-    };
+    let p = ctx.pred("P", 1);
+    let q = ctx.pred("Q", 1);
 
-    let x = Term::Variable(Variable {
-        name: "X".to_string(),
-    });
-    let y = Term::Variable(Variable {
-        name: "Y".to_string(),
-    });
-    let z = Term::Variable(Variable {
-        name: "Z".to_string(),
-    });
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let z = ctx.var("Z");
 
     // Mixed polarity clause: ~P(X) ∨ P(Y) ∨ P(Z) ∨ Q(X)
     let clause = Clause::new(vec![

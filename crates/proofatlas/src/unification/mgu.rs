@@ -1,6 +1,6 @@
 //! Most General Unifier (MGU) computation
 
-use crate::fol::{Substitution, Term, Variable};
+use crate::fol::{ConstantId, FunctionId, Interner, Substitution, Term, Variable, VariableId};
 use std::collections::HashSet;
 
 /// Result of a unification attempt
@@ -12,11 +12,13 @@ pub enum UnificationError {
     /// Occurs check failed - variable occurs in term
     OccursCheck(Variable, Term),
     /// Function symbols don't match
-    FunctionClash(String, String),
+    FunctionClash(FunctionId, FunctionId),
     /// Arities don't match
     ArityMismatch(usize, usize),
     /// Constant symbols don't match
-    ConstantClash(String, String),
+    ConstantClash(ConstantId, ConstantId),
+    /// Function-constant clash
+    FunctionConstantClash(FunctionId, ConstantId),
 }
 
 /// Unify two terms, returning a most general unifier (MGU) if one exists
@@ -42,27 +44,23 @@ fn unify_with_subst(
         // Variable cases
         (Term::Variable(v), t) | (t, Term::Variable(v)) => {
             if occurs_check(v, t) {
-                Err(UnificationError::OccursCheck(v.clone(), t.clone()))
+                Err(UnificationError::OccursCheck(*v, t.clone()))
             } else {
                 // Use normalized insert to ensure all substitutions are propagated
-                subst.insert_normalized(v.clone(), t.clone());
+                subst.insert_normalized(*v, t.clone());
                 Ok(())
             }
         }
 
         // Constant clash
-        (Term::Constant(c1), Term::Constant(c2)) => Err(UnificationError::ConstantClash(
-            c1.name.clone(),
-            c2.name.clone(),
-        )),
+        (Term::Constant(c1), Term::Constant(c2)) => {
+            Err(UnificationError::ConstantClash(c1.id, c2.id))
+        }
 
         // Function terms
         (Term::Function(f1, args1), Term::Function(f2, args2)) => {
-            if f1.name != f2.name {
-                return Err(UnificationError::FunctionClash(
-                    f1.name.clone(),
-                    f2.name.clone(),
-                ));
+            if f1.id != f2.id {
+                return Err(UnificationError::FunctionClash(f1.id, f2.id));
             }
             if args1.len() != args2.len() {
                 return Err(UnificationError::ArityMismatch(args1.len(), args2.len()));
@@ -77,10 +75,7 @@ fn unify_with_subst(
 
         // Function-Constant clash
         (Term::Function(f, _), Term::Constant(c)) | (Term::Constant(c), Term::Function(f, _)) => {
-            Err(UnificationError::FunctionClash(
-                f.name.clone(),
-                c.name.clone(),
-            ))
+            Err(UnificationError::FunctionConstantClash(f.id, c.id))
         }
     }
 }
@@ -88,23 +83,26 @@ fn unify_with_subst(
 /// Check if variable occurs in term (occurs check)
 fn occurs_check(var: &Variable, term: &Term) -> bool {
     match term {
-        Term::Variable(v) => v == var,
+        Term::Variable(v) => v.id == var.id,
         Term::Constant(_) => false,
         Term::Function(_, args) => args.iter().any(|arg| occurs_check(var, arg)),
     }
 }
 
 /// Rename variables in a term to avoid conflicts
-pub fn rename_variables(term: &Term, suffix: &str) -> Term {
+pub fn rename_variables(term: &Term, suffix: &str, interner: &mut Interner) -> Term {
     match term {
-        Term::Variable(v) => Term::Variable(Variable {
-            name: format!("{}_{}", v.name, suffix),
-        }),
-        Term::Constant(c) => Term::Constant(c.clone()),
+        Term::Variable(v) => {
+            let old_name = interner.resolve_variable(v.id);
+            let new_name = format!("{}_{}", old_name, suffix);
+            let new_id = interner.intern_variable(&new_name);
+            Term::Variable(Variable::new(new_id))
+        }
+        Term::Constant(c) => Term::Constant(*c),
         Term::Function(f, args) => Term::Function(
-            f.clone(),
+            *f,
             args.iter()
-                .map(|arg| rename_variables(arg, suffix))
+                .map(|arg| rename_variables(arg, suffix, interner))
                 .collect(),
         ),
     }
@@ -115,11 +113,24 @@ pub fn variables_in_term(term: &Term) -> HashSet<Variable> {
     match term {
         Term::Variable(v) => {
             let mut set = HashSet::new();
-            set.insert(v.clone());
+            set.insert(*v);
             set
         }
         Term::Constant(_) => HashSet::new(),
-        Term::Function(_, args) => args.iter().flat_map(|arg| variables_in_term(arg)).collect(),
+        Term::Function(_, args) => args.iter().flat_map(variables_in_term).collect(),
+    }
+}
+
+/// Get all variable IDs in a term
+pub fn variable_ids_in_term(term: &Term) -> HashSet<VariableId> {
+    match term {
+        Term::Variable(v) => {
+            let mut set = HashSet::new();
+            set.insert(v.id);
+            set
+        }
+        Term::Constant(_) => HashSet::new(),
+        Term::Function(_, args) => args.iter().flat_map(variable_ids_in_term).collect(),
     }
 }
 
@@ -128,14 +139,43 @@ mod tests {
     use super::*;
     use crate::fol::{Constant, FunctionSymbol};
 
+    /// Test context for building terms with interned symbols
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn var_id(&mut self, name: &str) -> VariableId {
+            self.interner.intern_variable(name)
+        }
+    }
+
     #[test]
     fn test_unify_variables() {
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let y = Term::Variable(Variable {
-            name: "Y".to_string(),
-        });
+        let mut ctx = TestContext::new();
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
 
         let result = unify(&x, &y).unwrap();
         assert_eq!(result.map.len(), 1);
@@ -143,40 +183,26 @@ mod tests {
 
     #[test]
     fn test_unify_constant_variable() {
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
+        let mut ctx = TestContext::new();
+        let x_id = ctx.var_id("X");
+        let x = ctx.var("X");
+        let a = ctx.const_("a");
 
         let result = unify(&x, &a).unwrap();
         assert_eq!(result.map.len(), 1);
-
-        let x_var = Variable {
-            name: "X".to_string(),
-        };
-        assert_eq!(result.map.get(&x_var), Some(&a));
+        assert_eq!(result.map.get(&x_id), Some(&a));
     }
 
     #[test]
     fn test_unify_functions() {
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 2,
-        };
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let y = Term::Variable(Variable {
-            name: "Y".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-
-        let t1 = Term::Function(f.clone(), vec![x.clone(), y.clone()]);
-        let t2 = Term::Function(f.clone(), vec![a.clone(), a.clone()]);
+        let mut ctx = TestContext::new();
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
+        let a = ctx.const_("a");
+        let t1 = ctx.func("f", vec![x, y]);
+        let a2 = ctx.const_("a");
+        let a3 = ctx.const_("a");
+        let t2 = ctx.func("f", vec![a2, a3]);
 
         let result = unify(&t1, &t2).unwrap();
         assert_eq!(result.map.len(), 2);
@@ -184,17 +210,33 @@ mod tests {
 
     #[test]
     fn test_occurs_check() {
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 1,
-        };
-        let x = Variable {
-            name: "X".to_string(),
-        };
-        let x_term = Term::Variable(x.clone());
-        let fx = Term::Function(f, vec![x_term.clone()]);
+        let mut ctx = TestContext::new();
+        let x = ctx.var("X");
+        let x2 = ctx.var("X");
+        let fx = ctx.func("f", vec![x2]);
 
-        let result = unify(&x_term, &fx);
+        let result = unify(&x, &fx);
         assert!(matches!(result, Err(UnificationError::OccursCheck(_, _))));
+    }
+
+    #[test]
+    fn test_rename_variables() {
+        let mut ctx = TestContext::new();
+        let x = ctx.var("X");
+        let a = ctx.const_("a");
+        let term = ctx.func("f", vec![x, a]);
+
+        let renamed = rename_variables(&term, "1", &mut ctx.interner);
+
+        // Check that the renamed variable has a new name
+        if let Term::Function(_, args) = &renamed {
+            if let Term::Variable(v) = &args[0] {
+                assert_eq!(ctx.interner.resolve_variable(v.id), "X_1");
+            } else {
+                panic!("Expected variable");
+            }
+        } else {
+            panic!("Expected function");
+        }
     }
 }

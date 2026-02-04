@@ -225,7 +225,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Literal, PredicateSymbol, Term, Constant};
+    use crate::fol::{Atom, Interner, Literal, PredicateSymbol, Term, Constant};
 
     /// Simple test embedder that returns clause length as embedding
     struct TestEmbedder;
@@ -260,13 +260,13 @@ mod tests {
         }
     }
 
-    fn make_clause(num_literals: usize) -> Clause {
+    fn make_clause(num_literals: usize, interner: &mut Interner) -> Clause {
         let p = PredicateSymbol {
-            name: "P".to_string(),
+            id: interner.intern_predicate("P"),
             arity: 1,
         };
         let a = Term::Constant(Constant {
-            name: "a".to_string(),
+            id: interner.intern_constant("a"),
         });
         let literals: Vec<Literal> = (0..num_literals)
             .map(|_| Literal::positive(Atom {
@@ -279,11 +279,16 @@ mod tests {
 
     #[test]
     fn test_caching_selector_caches_embeddings() {
+        let mut interner = Interner::new();
         let embedder = TestEmbedder;
         let scorer = TestScorer;
         let mut selector = CachingSelector::new(embedder, scorer);
 
-        let clauses = vec![make_clause(1), make_clause(2), make_clause(3)];
+        let clauses = vec![
+            make_clause(1, &mut interner),
+            make_clause(2, &mut interner),
+            make_clause(3, &mut interner),
+        ];
         let mut unprocessed: VecDeque<usize> = (0..3).collect();
 
         // First selection populates cache

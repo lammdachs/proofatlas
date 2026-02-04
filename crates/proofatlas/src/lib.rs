@@ -17,8 +17,8 @@ pub mod python_bindings;
 
 // Re-export commonly used types from fol
 pub use fol::{
-    Atom, CNFFormula, Clause, Constant, FunctionSymbol, KBOConfig, Literal, PredicateSymbol,
-    Substitution, Term, TermOrdering, Variable, KBO,
+    Atom, CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal,
+    PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO,
 };
 
 // Re-export inference types

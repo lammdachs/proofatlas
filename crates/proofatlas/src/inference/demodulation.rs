@@ -1,7 +1,7 @@
 //! Demodulation - rewriting terms using unit equalities
 
 use super::common::InferenceResult;
-use crate::fol::{Atom, Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
+use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, Term, TermOrdering, KBO};
 use super::derivation::Derivation;
 use crate::unification::match_term;
 
@@ -11,6 +11,7 @@ pub fn demodulate(
     target: &Clause,
     unit_idx: usize,
     target_idx: usize,
+    interner: &Interner,
 ) -> Vec<InferenceResult> {
     let mut results = Vec::new();
 
@@ -20,7 +21,7 @@ pub fn demodulate(
     }
 
     let unit_lit = &unit_eq.literals[0];
-    if !unit_lit.polarity || !unit_lit.atom.is_equality() {
+    if !unit_lit.polarity || !unit_lit.atom.is_equality(interner) {
         return results;
     }
 
@@ -109,7 +110,7 @@ fn rewrite_literal(lit: &Literal, lhs: &Term, rhs: &Term, kbo: &KBO) -> Literal 
 /// Rewrite an atom by replacing occurrences of lhs with rhs
 fn rewrite_atom(atom: &Atom, lhs: &Term, rhs: &Term, kbo: &KBO) -> Atom {
     Atom {
-        predicate: atom.predicate.clone(),
+        predicate: atom.predicate,
         args: atom
             .args
             .iter()
@@ -138,7 +139,7 @@ fn rewrite_term(term: &Term, lhs: &Term, rhs: &Term, kbo: &KBO) -> Term {
     match term {
         Term::Variable(_) | Term::Constant(_) => term.clone(),
         Term::Function(f, args) => Term::Function(
-            f.clone(),
+            *f,
             args.iter()
                 .map(|arg| rewrite_term(arg, lhs, rhs, kbo))
                 .collect(),
@@ -149,28 +150,51 @@ fn rewrite_term(term: &Term, lhs: &Term, rhs: &Term, kbo: &KBO) -> Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol, PredicateSymbol};
+    use crate::fol::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
 
     #[test]
     fn test_demodulation_basic() {
+        let mut ctx = TestContext::new();
+
         // Unit equality: f(a) = b
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let b = Term::Constant(Constant {
-            name: "b".to_string(),
-        });
-        let fa = Term::Function(f.clone(), vec![a.clone()]);
+        let a = ctx.const_("a");
+        let b = ctx.const_("b");
+        let fa = ctx.func("f", vec![a.clone()]);
 
         // Create equality atom manually
-        let eq_pred = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
+        let eq_pred = ctx.pred("=", 2);
         let eq_atom = Atom {
             predicate: eq_pred,
             args: vec![fa.clone(), b.clone()],
@@ -179,21 +203,18 @@ mod tests {
         let unit_eq = Clause::new(vec![Literal::positive(eq_atom)]);
 
         // Target clause: P(f(a))
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
+        let p = ctx.pred("P", 1);
         let target = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
+            predicate: p,
             args: vec![fa.clone()],
         })]);
 
-        let results = demodulate(&unit_eq, &target, 0, 1);
+        let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
         assert_eq!(results.len(), 1);
 
         // Should produce P(b)
         let expected = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
+            predicate: p,
             args: vec![b.clone()],
         })]);
         assert_eq!(results[0].conclusion.literals, expected.literals);

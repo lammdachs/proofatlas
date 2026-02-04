@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, ToPyArray};
 
-use crate::fol::Clause;
+use crate::fol::{Clause, Interner};
 use crate::inference::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     InferenceResult as RustInferenceResult,
@@ -21,6 +21,8 @@ use crate::selection::{LiteralSelector, SelectAll, SelectMaximal};
 /// Python-accessible proof state
 #[pyclass]
 pub struct ProofState {
+    /// Symbol interner for resolving symbol names
+    interner: Interner,
     /// All clauses (processed and unprocessed)
     clauses: Vec<Clause>,
     /// Indices of processed clauses
@@ -164,6 +166,7 @@ impl ProofState {
     #[new]
     pub fn new() -> Self {
         ProofState {
+            interner: Interner::new(),
             clauses: Vec::new(),
             processed: HashSet::new(),
             unprocessed: VecDeque::new(),
@@ -191,7 +194,7 @@ impl ProofState {
 
         // Run parsing in a thread with larger stack to handle deeply nested formulas
         // Default Python thread stack is too small for formulas with depth > 2000
-        let cnf = std::thread::Builder::new()
+        let parsed = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || {
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
@@ -201,6 +204,10 @@ impl ProofState {
             .join()
             .map_err(|_| PyValueError::new_err("Parser thread panicked"))?
             .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+
+        // Extract interner and formula from parsed problem
+        self.interner = parsed.interner;
+        let cnf = parsed.formula;
 
         let mut ids = Vec::new();
         for mut clause in cnf.clauses {
@@ -238,7 +245,7 @@ impl ProofState {
     pub fn clause_to_string(&self, clause_id: usize) -> PyResult<String> {
         self.clauses
             .get(clause_id)
-            .map(|c| c.to_string())
+            .map(|c| c.display(&self.interner).to_string())
             .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", clause_id)))
     }
 
@@ -251,14 +258,14 @@ impl ProofState {
 
         // Extract literal strings
         let literal_strings: Vec<String> =
-            clause.literals.iter().map(|lit| lit.to_string()).collect();
+            clause.literals.iter().map(|lit| lit.display(&self.interner).to_string()).collect();
 
         // Extract variables
         let mut variables = HashSet::new();
         for lit in &clause.literals {
             lit.collect_variables(&mut variables);
         }
-        let variables: Vec<String> = variables.into_iter().map(|v| v.name.clone()).collect();
+        let variables: Vec<String> = variables.into_iter().map(|v| v.name(&self.interner).to_string()).collect();
 
         // Count symbols for weight
         let weight = clause.symbol_count();
@@ -266,7 +273,7 @@ impl ProofState {
         // Check properties
         let is_unit = clause.literals.len() == 1;
         let is_horn = clause.literals.iter().filter(|l| l.polarity).count() <= 1;
-        let is_equality = clause.literals.iter().any(|l| l.atom.is_equality());
+        let is_equality = clause.literals.iter().any(|l| l.atom.is_equality(&self.interner));
 
         // Get role as string
         let role = match clause.role {
@@ -280,7 +287,7 @@ impl ProofState {
 
         Ok(ClauseInfo {
             clause_id,
-            clause_string: clause.to_string(),
+            clause_string: clause.display(&self.interner).to_string(),
             num_literals: clause.literals.len(),
             literal_strings,
             is_unit,
@@ -301,7 +308,7 @@ impl ProofState {
             .get(clause_id)
             .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", clause_id)))?;
 
-        Ok(clause.literals.iter().map(|lit| lit.to_string()).collect())
+        Ok(clause.literals.iter().map(|lit| lit.display(&self.interner).to_string()).collect())
     }
 
     /// Get parent clause IDs and inference rule name
@@ -358,68 +365,74 @@ impl ProofState {
     }
 
     /// Generate inferences with given clause
-    pub fn generate_inferences(&self, given_id: usize) -> PyResult<Vec<InferenceResult>> {
+    pub fn generate_inferences(&mut self, given_id: usize) -> PyResult<Vec<InferenceResult>> {
         let given_clause = self
             .clauses
             .get(given_id)
-            .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", given_id)))?;
+            .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", given_id)))?
+            .clone();
 
         let mut results = Vec::new();
         let selector = self.literal_selector.as_ref();
 
         // Self-inferences on given clause
-        for rust_result in factoring(given_clause, given_id, selector) {
+        for rust_result in factoring(&given_clause, given_id, selector) {
             results.push(self.convert_inference_result(rust_result));
         }
 
-        for rust_result in equality_resolution(given_clause, given_id, selector) {
+        for rust_result in equality_resolution(&given_clause, given_id, selector, &self.interner) {
             results.push(self.convert_inference_result(rust_result));
         }
 
-        for rust_result in equality_factoring(given_clause, given_id, selector) {
+        for rust_result in equality_factoring(&given_clause, given_id, selector, &mut self.interner) {
             results.push(self.convert_inference_result(rust_result));
         }
 
         // Binary inferences with processed clauses
-        for &processed_id in &self.processed {
-            let processed_clause = &self.clauses[processed_id];
+        let processed_ids: Vec<usize> = self.processed.iter().copied().collect();
+        for processed_id in processed_ids {
+            let processed_clause = self.clauses[processed_id].clone();
 
             // Resolution in both directions
             for rust_result in resolution(
-                given_clause,
-                processed_clause,
+                &given_clause,
+                &processed_clause,
                 given_id,
                 processed_id,
                 selector,
+                &mut self.interner,
             ) {
                 results.push(self.convert_inference_result(rust_result));
             }
             for rust_result in resolution(
-                processed_clause,
-                given_clause,
+                &processed_clause,
+                &given_clause,
                 processed_id,
                 given_id,
                 selector,
+                &mut self.interner,
             ) {
                 results.push(self.convert_inference_result(rust_result));
             }
 
             // Superposition
             for rust_result in superposition(
-                given_clause,
-                processed_clause,
+                &given_clause,
+                &processed_clause,
                 given_id,
                 processed_id,
                 selector,
+                &mut self.interner,
             ) {
                 results.push(self.convert_inference_result(rust_result));
             }
             for rust_result in superposition(
-                processed_clause,
-                given_clause,
+                &processed_clause,
+                &given_clause,
                 processed_id,
                 given_id,
                 selector,
+                &mut self.interner,
             ) {
                 results.push(self.convert_inference_result(rust_result));
             }
@@ -433,7 +446,7 @@ impl ProofState {
         let clause = inference.clause;
 
         // Check if tautology
-        if clause.is_tautology() {
+        if clause.is_tautology(&self.interner) {
             return Ok(None);
         }
 
@@ -642,15 +655,19 @@ impl ProofState {
 
         // Create saturation state from current clauses
         let initial_clauses: Vec<Clause> = self.clauses.clone();
-        let state = SaturationState::new(initial_clauses, config, clause_selector);
+        let interner = self.interner.clone();
+        let state = SaturationState::new(initial_clauses, config, clause_selector, interner);
 
         // Run saturation in a thread with larger stack to handle deep recursion
-        let (result, profile, sat_trace) = std::thread::Builder::new()
+        let (result, profile, sat_trace, returned_interner) = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || state.saturate())
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
             .join()
             .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
+
+        // Update interner with new symbols created during saturation
+        self.interner = returned_interner;
 
         // Serialize profile to JSON if present
         let profile_json = profile
@@ -681,7 +698,7 @@ impl ProofState {
         // Rebuild proof trace
         self.proof_trace.clear();
         for step in proof_steps {
-            let clause_string = step.conclusion.to_string();
+            let clause_string = step.conclusion.display(&self.interner).to_string();
             self.proof_trace.push(ProofStep {
                 clause_id: step.clause_idx,
                 parent_ids: step.derivation.premises.clone(),
@@ -751,7 +768,7 @@ impl ProofState {
                     // Input clause
                     trace.push(ProofStep {
                         clause_id: current_id,
-                        clause_string: self.clauses[current_id].to_string(),
+                        clause_string: self.clauses[current_id].display(&self.interner).to_string(),
                         parent_ids: Vec::new(),
                         rule_name: "input".to_string(),
                     });
@@ -786,7 +803,7 @@ impl ProofState {
             .get(clause_id)
             .ok_or_else(|| PyValueError::new_err(format!("Invalid clause ID: {}", clause_id)))?;
 
-        let graph = GraphBuilder::build_from_clause_with_context(clause, max_age);
+        let graph = GraphBuilder::build_from_clause_with_context(clause, max_age, &self.interner);
 
         Ok(ClauseGraphData { graph })
     }
@@ -932,7 +949,7 @@ impl ProofState {
                     .get(&idx)
                     .cloned()
                     .unwrap_or_else(|| (vec![], String::new()));
-                TrainingClauseJson::from_clause(clause, in_proof, parents, rule)
+                TrainingClauseJson::from_clause(clause, &self.interner, in_proof, parents, rule)
             })
             .collect();
 
@@ -950,7 +967,7 @@ impl ProofState {
 impl ProofState {
     /// Convert Rust inference result to Python inference result
     fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
-        let clause_string = rust_result.conclusion.to_string();
+        let clause_string = rust_result.conclusion.display(&self.interner).to_string();
         let rule_name = rust_result.derivation.rule_name.to_lowercase();
         let parent_ids = rust_result.derivation.premises.clone();
 

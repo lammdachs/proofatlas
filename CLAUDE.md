@@ -14,7 +14,7 @@ proofatlas/
 ├── crates/
 │   ├── proofatlas/             # Core theorem prover (Rust)
 │   │   └── src/
-│   │       ├── fol/            # Pure FOL types: terms, literals, clauses, substitutions, KBO
+│   │       ├── fol/            # FOL types: terms, literals, clauses, substitutions, KBO, interner
 │   │       ├── inference/      # Inference rules, derivation tracking, proof types
 │   │       ├── selection/      # Selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── saturation/     # Saturation loop, trace, forward/backward subsumption, profiling
@@ -150,11 +150,21 @@ If the prover finds a proof for a satisfiable problem, there is a bug.
 
 ## Key Implementation Details
 
+### Symbol Interning
+All symbol names (variables, constants, functions, predicates) are interned into an `Interner` that maps strings to compact integer IDs:
+- `VariableId`, `ConstantId`, `FunctionId`, `PredicateId` - 4-byte `Copy` types
+- `Interner` is created during parsing and passed through the prover
+- Substitution uses `HashMap<VariableId, Term>` for O(1) lookups instead of string hashing
+- Symbol comparison is integer comparison (O(1) vs O(n) string comparison)
+- JSON serialization resolves IDs back to strings
+
+The interner is problem-scoped (not global) for WASM compatibility and clean memory management.
+
 ### Unification
 Uses eager substitution propagation. When adding a new binding, all existing substitutions are immediately updated to prevent unsound inferences.
 
 ### Variable Renaming
-Variables from different clauses are renamed to avoid capture (e.g., X becomes X_c10 for clause 10).
+Variables from different clauses are renamed to avoid capture (e.g., X becomes X_c10 for clause 10). New variable names are interned during inference.
 
 ### Superposition Calculus
 - Only applies to positive equalities

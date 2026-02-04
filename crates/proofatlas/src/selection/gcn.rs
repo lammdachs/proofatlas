@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_gcn_selector_caching() {
-        use crate::fol::{Atom, Literal, PredicateSymbol, Term, Constant};
+        use crate::fol::{Atom, Interner, Literal, PredicateSymbol, Term, Constant};
         use crate::selection::ClauseSelector;
         use std::collections::VecDeque;
 
@@ -315,18 +315,19 @@ mod tests {
             return;
         }
 
+        let mut interner = Interner::new();
         let mut selector = load_gcn_selector(model_path, false).unwrap();
 
         // Create test clauses
         let p = PredicateSymbol {
-            name: "P".to_string(),
+            id: interner.intern_predicate("P"),
             arity: 1,
         };
         let a = Term::Constant(Constant {
-            name: "a".to_string(),
+            id: interner.intern_constant("a"),
         });
         let b = Term::Constant(Constant {
-            name: "b".to_string(),
+            id: interner.intern_constant("b"),
         });
 
         let clause1 = Clause::new(vec![Literal::positive(Atom {

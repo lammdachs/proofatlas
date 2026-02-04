@@ -3,14 +3,14 @@
 //! Orients equality literals so that the larger term (according to KBO)
 //! is on the left side. This improves superposition performance.
 
-use crate::fol::{Clause, KBOConfig, TermOrdering, KBO};
+use crate::fol::{Clause, Interner, KBOConfig, TermOrdering, KBO};
 
 /// Orient all equality literals in a clause
-pub fn orient_clause_equalities(clause: &mut Clause) {
+pub fn orient_clause_equalities(clause: &mut Clause, interner: &Interner) {
     let kbo = KBO::new(KBOConfig::default());
 
     for literal in &mut clause.literals {
-        if literal.atom.is_equality() && literal.atom.args.len() == 2 {
+        if literal.atom.is_equality(interner) && literal.atom.args.len() == 2 {
             let left = &literal.atom.args[0];
             let right = &literal.atom.args[1];
 
@@ -30,9 +30,9 @@ pub fn orient_clause_equalities(clause: &mut Clause) {
 }
 
 /// Orient equalities in all clauses
-pub fn orient_all_equalities(clauses: &mut [Clause]) {
+pub fn orient_all_equalities(clauses: &mut [Clause], interner: &Interner) {
     for clause in clauses {
-        orient_clause_equalities(clause);
+        orient_clause_equalities(clause, interner);
     }
 }
 
@@ -43,28 +43,26 @@ mod tests {
 
     #[test]
     fn test_orient_simple_equality() {
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let b = Term::Constant(Constant {
-            name: "b".to_string(),
-        });
+        let mut interner = Interner::new();
+        let a_id = interner.intern_constant("a");
+        let b_id = interner.intern_constant("b");
+        let eq_id = interner.intern_predicate("=");
 
-        let eq_pred = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
+        let a = Term::Constant(Constant::new(a_id));
+        let b = Term::Constant(Constant::new(b_id));
+
+        let eq_pred = PredicateSymbol::new(eq_id, 2);
 
         // Create clause: a = b
         let mut clause = Clause::new(vec![Literal {
             atom: Atom {
-                predicate: eq_pred.clone(),
+                predicate: eq_pred,
                 args: vec![a.clone(), b.clone()],
             },
             polarity: true,
         }]);
 
-        orient_clause_equalities(&mut clause);
+        orient_clause_equalities(&mut clause, &interner);
 
         // Should be reoriented to b = a (since b > a alphabetically)
         assert_eq!(clause.literals[0].atom.args[0], b);
@@ -73,30 +71,30 @@ mod tests {
 
     #[test]
     fn test_keep_correct_orientation() {
-        let c = Term::Constant(Constant {
-            name: "c".to_string(),
-        });
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
+        let mut interner = Interner::new();
+        // Intern "a" first so it gets lower ID, then "c" gets higher ID
+        // This means c > a in KBO precedence (higher ID = higher precedence)
+        let a_id = interner.intern_constant("a");
+        let c_id = interner.intern_constant("c");
+        let eq_id = interner.intern_predicate("=");
 
-        let eq_pred = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
+        let c = Term::Constant(Constant::new(c_id));
+        let a = Term::Constant(Constant::new(a_id));
 
-        // Create clause: c = a (already correctly oriented)
+        let eq_pred = PredicateSymbol::new(eq_id, 2);
+
+        // Create clause: c = a (already correctly oriented since c > a)
         let mut clause = Clause::new(vec![Literal {
             atom: Atom {
-                predicate: eq_pred.clone(),
+                predicate: eq_pred,
                 args: vec![c.clone(), a.clone()],
             },
             polarity: true,
         }]);
 
-        orient_clause_equalities(&mut clause);
+        orient_clause_equalities(&mut clause, &interner);
 
-        // Should remain c = a
+        // Should remain c = a (c has higher ID, so c > a in precedence)
         assert_eq!(clause.literals[0].atom.args[0], c);
         assert_eq!(clause.literals[0].atom.args[1], a);
     }

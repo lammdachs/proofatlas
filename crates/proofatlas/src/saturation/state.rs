@@ -44,7 +44,7 @@ use super::rule::{
     ResolutionRule, SaturationEventLog, SimplificationRule, SubsumptionRule, SuperpositionRule,
     TautologyRule,
 };
-use crate::fol::Clause;
+use crate::fol::{Clause, Interner};
 use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
 use crate::parser::orient_equalities::orient_clause_equalities;
 use crate::selection::{
@@ -117,29 +117,29 @@ pub enum SaturationResult {
 
 impl SaturationResult {
     /// Convert to JSON representation
-    pub fn to_json(&self, time_seconds: f64) -> crate::json::SaturationResultJson {
-        use crate::json::SaturationResultJson;
+    pub fn to_json(&self, time_seconds: f64, interner: &Interner) -> crate::json::SaturationResultJson {
+        use crate::json::{ClauseJson, SaturationResultJson};
 
         match self {
             SaturationResult::Proof(proof) => SaturationResultJson::Proof {
-                proof: proof.into(),
+                proof: proof.to_json(interner),
                 time_seconds,
             },
             SaturationResult::Saturated(steps, clauses) => SaturationResultJson::Saturated {
-                final_clauses: clauses.iter().map(|c| c.into()).collect(),
+                final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
                 proof_steps: steps.iter().map(|s| s.into()).collect(),
                 time_seconds,
             },
             SaturationResult::ResourceLimit(steps, clauses) => {
                 SaturationResultJson::ResourceLimit {
                     reason: "Clause or iteration limit exceeded".to_string(),
-                    final_clauses: clauses.iter().map(|c| c.into()).collect(),
+                    final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
                     proof_steps: steps.iter().map(|s| s.into()).collect(),
                     time_seconds,
                 }
             }
             SaturationResult::Timeout(steps, clauses) => SaturationResultJson::Timeout {
-                final_clauses: clauses.iter().map(|c| c.into()).collect(),
+                final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
                 proof_steps: steps.iter().map(|s| s.into()).collect(),
                 time_seconds,
             },
@@ -151,12 +151,16 @@ impl SaturationResult {
 ///
 /// See module documentation for algorithm details.
 pub struct SaturationState {
+    /// Symbol interner for resolving symbol names
+    interner: Interner,
     /// Storage for all clauses, indexed by clause ID
     clauses: Vec<Clause>,
     /// Set P: Processed/active clauses (used for generating inferences)
     processed: HashSet<usize>,
     /// Set U: Unprocessed/passive clauses (awaiting selection)
     unprocessed: VecDeque<usize>,
+    /// Lazily deleted clauses from U (avoids O(n) retain)
+    deleted_from_unprocessed: HashSet<usize>,
     /// Set N: New clauses (awaiting forward simplification)
     new: VecDeque<usize>,
     /// Configuration
@@ -190,18 +194,20 @@ impl SaturationState {
     /// * `initial_clauses` - The initial clause set
     /// * `config` - Saturation configuration
     /// * `clause_selector` - Clause selection strategy
+    /// * `interner` - Symbol interner for resolving symbol names
     pub fn new(
         initial_clauses: Vec<Clause>,
         config: SaturationConfig,
         clause_selector: Box<dyn ClauseSelector>,
+        interner: Interner,
     ) -> Self {
         let initial_clause_count = initial_clauses.len();
 
         // Initialize simplification rules
         let mut simplification_rules: Vec<Box<dyn SimplificationRule>> = vec![
-            Box::new(TautologyRule::new()),
-            Box::new(DemodulationRule::new()),
-            Box::new(SubsumptionRule::new()),
+            Box::new(TautologyRule::new(&interner)),
+            Box::new(DemodulationRule::new(&interner)),
+            Box::new(SubsumptionRule::new(&interner)),
         ];
 
         // Initialize all simplification rules with input clauses
@@ -218,7 +224,7 @@ impl SaturationState {
         for mut clause in initial_clauses.into_iter() {
             // Orient equalities before adding
             let mut oriented = clause.clone();
-            orient_clause_equalities(&mut oriented);
+            orient_clause_equalities(&mut oriented, &interner);
 
             clause.id = Some(clause_idx);
 
@@ -266,9 +272,11 @@ impl SaturationState {
         }
 
         SaturationState {
+            interner,
             clauses,
             processed: HashSet::new(),
             unprocessed: VecDeque::new(),
+            deleted_from_unprocessed: HashSet::new(),
             new,
             config,
             clause_selector,
@@ -372,7 +380,11 @@ impl SaturationState {
 
     /// Build clause index vectors for U and P
     fn build_views(&self) -> (Vec<usize>, Vec<usize>) {
-        let u_indices: Vec<usize> = self.unprocessed.iter().copied().collect();
+        // Filter out lazily deleted clauses from U
+        let u_indices: Vec<usize> = self.unprocessed.iter()
+            .copied()
+            .filter(|idx| !self.deleted_from_unprocessed.contains(idx))
+            .collect();
         let p_indices: Vec<usize> = self.processed.iter().copied().collect();
         (u_indices, p_indices)
     }
@@ -448,7 +460,7 @@ impl SaturationState {
 
                 // Notify rules about pending clause
                 let mut oriented = clause.clone();
-                orient_clause_equalities(&mut oriented);
+                orient_clause_equalities(&mut oriented, &self.interner);
                 for rule in &mut self.simplification_rules {
                     rule.on_clause_pending(new_idx, &oriented);
                 }
@@ -479,9 +491,11 @@ impl SaturationState {
                 self.event_log.push(change);
             }
             ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
-                if self.unprocessed.iter().any(|&x| x == *clause_idx) {
-                    self.unprocessed.retain(|&x| x != *clause_idx);
-                    self.notify_rules(ClauseSet::Unprocessed,*clause_idx, false);
+                // Lazy deletion: mark as deleted instead of O(n) retain
+                // The clause will be skipped when encountered during iteration
+                if !self.deleted_from_unprocessed.contains(clause_idx) {
+                    self.deleted_from_unprocessed.insert(*clause_idx);
+                    self.notify_rules(ClauseSet::Unprocessed, *clause_idx, false);
                     self.event_log.push(change);
                 }
             }
@@ -500,7 +514,7 @@ impl SaturationState {
         }
     }
 
-    pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>, SaturationEventLog) {
+    pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>, SaturationEventLog, Interner) {
         let mut profile = if self.config.enable_profiling {
             Some(SaturationProfile::default())
         } else {
@@ -537,7 +551,7 @@ impl SaturationState {
                     let rule_name = rule.name();
                     let t_rule = profile.as_ref().map(|_| Instant::now());
 
-                    let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses);
+                    let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses, &self.interner);
 
                     if !changes.is_empty() {
                         // Update profiling stats
@@ -579,7 +593,7 @@ impl SaturationState {
                         let rule_name = rule.name();
                         let t_rule = profile.as_ref().map(|_| Instant::now());
 
-                        let changes = rule.simplify_backward(clause_idx, clause, &u_view, &p_view);
+                        let changes = rule.simplify_backward(clause_idx, clause, &u_view, &p_view, &self.interner);
 
                         if !changes.is_empty() {
                             // Update profiling stats
@@ -611,7 +625,9 @@ impl SaturationState {
             }
 
             // === Step 2: Check saturation ===
-            if self.unprocessed.is_empty() {
+            // Account for lazily deleted entries
+            let effective_unprocessed_len = self.unprocessed.len().saturating_sub(self.deleted_from_unprocessed.len());
+            if effective_unprocessed_len == 0 {
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::Saturated(steps, clauses);
@@ -624,10 +640,10 @@ impl SaturationState {
 
             self.current_iteration += 1;
 
-            // Track max sizes
+            // Track max sizes (account for lazy deletions)
             if let Some(p) = profile.as_mut() {
                 p.iterations = self.current_iteration;
-                let up_size = self.unprocessed.len();
+                let up_size = effective_unprocessed_len;
                 let pr_size = self.processed.len();
                 if up_size > p.max_unprocessed_size {
                     p.max_unprocessed_size = up_size;
@@ -652,10 +668,10 @@ impl SaturationState {
             }
 
             // === Step 4: Select given clause (transfer from U to P) ===
-            self.unprocessed.retain(|&x| x != given_idx);
-            self.notify_rules(ClauseSet::Unprocessed,given_idx, false);
+            // Note: selector already removed from unprocessed VecDeque
+            self.notify_rules(ClauseSet::Unprocessed, given_idx, false);
             self.processed.insert(given_idx);
-            self.notify_rules(ClauseSet::Processed,given_idx, true);
+            self.notify_rules(ClauseSet::Processed, given_idx, true);
             self.event_log.push(ProofStateChange::Select { clause_idx: given_idx });
 
             // === Step 5: Generate inferences using polymorphic rules ===
@@ -672,7 +688,7 @@ impl SaturationState {
             for inference in new_inferences {
                 // Orient the clause first to get canonical form
                 let mut oriented = inference.conclusion.clone();
-                orient_clause_equalities(&mut oriented);
+                orient_clause_equalities(&mut oriented, &self.interner);
                 let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
                     self.apply_change(
@@ -701,18 +717,25 @@ impl SaturationState {
             }
         }
 
-        (result, profile, self.event_log)
+        (result, profile, self.event_log, self.interner)
     }
 
     /// Select the next given clause using the configured selector
     fn select_given_clause(&mut self) -> Option<usize> {
+        // Compact: remove lazily deleted entries before selection
+        // This is amortized O(1) per delete since we only do this once per selection
+        if !self.deleted_from_unprocessed.is_empty() {
+            self.unprocessed.retain(|idx| !self.deleted_from_unprocessed.contains(idx));
+            self.deleted_from_unprocessed.clear();
+        }
+
         self.clause_selector
             .select(&mut self.unprocessed, &self.clauses)
     }
 
     /// Generate all inferences using polymorphic rules
     fn generate_inferences_polymorphic(
-        &self,
+        &mut self,
         given_idx: usize,
         profile: &mut Option<SaturationProfile>,
     ) -> Vec<InferenceResult> {
@@ -730,7 +753,7 @@ impl SaturationState {
             let t0 = profile.as_ref().map(|_| Instant::now());
             let before = results.len();
 
-            let changes = rule.generate(given_idx, given_clause, &p_view, selector);
+            let changes = rule.generate(given_idx, given_clause, &p_view, selector, &mut self.interner);
 
             // Convert ProofStateChange::New to InferenceResult
             for change in changes {
@@ -764,51 +787,53 @@ mod tests {
         Box::new(AgeWeightSelector::default())
     }
 
-    #[test]
-    fn test_simple_proof() {
+    /// Helper to create a simple proof problem with interner
+    fn create_simple_problem() -> (CNFFormula, Interner) {
         // P(a)
-        // ~P(X) ∨ Q(X)
+        // ~P(X) | Q(X)
         // ~Q(a)
         // Should derive empty clause
 
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
+        let mut interner = Interner::new();
+
+        let p_id = interner.intern_predicate("P");
+        let q_id = interner.intern_predicate("Q");
+        let a_id = interner.intern_constant("a");
+        let x_id = interner.intern_variable("X");
+
+        let p = PredicateSymbol::new(p_id, 1);
+        let q = PredicateSymbol::new(q_id, 1);
+        let a = Term::Constant(Constant::new(a_id));
+        let x = Term::Variable(Variable::new(x_id));
 
         let clauses = vec![
             Clause::new(vec![Literal::positive(Atom {
-                predicate: p.clone(),
+                predicate: p,
                 args: vec![a.clone()],
             })]),
             Clause::new(vec![
                 Literal::negative(Atom {
-                    predicate: p.clone(),
+                    predicate: p,
                     args: vec![x.clone()],
                 }),
                 Literal::positive(Atom {
-                    predicate: q.clone(),
+                    predicate: q,
                     args: vec![x.clone()],
                 }),
             ]),
             Clause::new(vec![Literal::negative(Atom {
-                predicate: q.clone(),
+                predicate: q,
                 args: vec![a.clone()],
             })]),
         ];
 
-        let formula = CNFFormula { clauses };
-        let (result, profile, _) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
+        (CNFFormula { clauses }, interner)
+    }
+
+    #[test]
+    fn test_simple_proof() {
+        let (formula, interner) = create_simple_problem();
+        let (result, profile, _, _) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector(), interner);
 
         match result {
             SaturationResult::Proof(_) => {} // Expected
@@ -819,46 +844,10 @@ mod tests {
 
     #[test]
     fn test_profiling_enabled() {
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-
-        let clauses = vec![
-            Clause::new(vec![Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            })]),
-            Clause::new(vec![
-                Literal::negative(Atom {
-                    predicate: p.clone(),
-                    args: vec![x.clone()],
-                }),
-                Literal::positive(Atom {
-                    predicate: q.clone(),
-                    args: vec![x.clone()],
-                }),
-            ]),
-            Clause::new(vec![Literal::negative(Atom {
-                predicate: q.clone(),
-                args: vec![a.clone()],
-            })]),
-        ];
-
-        let formula = CNFFormula { clauses };
+        let (formula, interner) = create_simple_problem();
         let mut config = SaturationConfig::default();
         config.enable_profiling = true;
-        let (result, profile, _) = crate::saturation::saturate(formula, config, create_selector());
+        let (result, profile, _, _) = crate::saturation::saturate(formula, config, create_selector(), interner);
 
         match result {
             SaturationResult::Proof(_) => {}
@@ -888,44 +877,8 @@ mod tests {
     fn test_event_log_populated() {
         use crate::saturation::rule::ProofStateChange;
 
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-
-        let clauses = vec![
-            Clause::new(vec![Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            })]),
-            Clause::new(vec![
-                Literal::negative(Atom {
-                    predicate: p.clone(),
-                    args: vec![x.clone()],
-                }),
-                Literal::positive(Atom {
-                    predicate: q.clone(),
-                    args: vec![x.clone()],
-                }),
-            ]),
-            Clause::new(vec![Literal::negative(Atom {
-                predicate: q.clone(),
-                args: vec![a.clone()],
-            })]),
-        ];
-
-        let formula = CNFFormula { clauses };
-        let (result, _, event_log) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
+        let (formula, interner) = create_simple_problem();
+        let (result, _, event_log, _) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector(), interner);
 
         assert!(matches!(result, SaturationResult::Proof(_)));
 

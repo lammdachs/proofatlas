@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use super::fof::{FOFFormula, Quantifier};
 use crate::fol::{
-    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, PredicateSymbol, Term,
-    Variable,
+    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
+    PredicateSymbol, Term, Variable,
 };
 
 /// Error during CNF conversion
@@ -52,9 +52,12 @@ impl std::fmt::Display for CNFConversionError {
     }
 }
 
-/// Convert a FOF formula to CNF
-pub fn fof_to_cnf(formula: FOFFormula) -> Result<CNFFormula, CNFConversionError> {
-    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None)
+/// Convert a FOF formula to CNF using the provided interner
+pub fn fof_to_cnf(
+    formula: FOFFormula,
+    interner: &mut Interner,
+) -> Result<CNFFormula, CNFConversionError> {
+    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None, interner)
 }
 
 /// Convert a FOF formula to CNF with a specific role and optional timeout
@@ -62,27 +65,30 @@ pub fn fof_to_cnf_with_role(
     formula: FOFFormula,
     role: ClauseRole,
     timeout: Option<Instant>,
+    interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    let mut converter = CNFConverter::new(role, timeout);
+    let mut converter = CNFConverter::new(role, timeout, interner);
     converter.convert(formula)
 }
 
-struct CNFConverter {
+struct CNFConverter<'a> {
     skolem_counter: usize,
     def_counter: usize,
     universal_vars: Vec<Variable>,
     role: ClauseRole,
     timeout: Option<Instant>,
+    interner: &'a mut Interner,
 }
 
-impl CNFConverter {
-    fn new(role: ClauseRole, timeout: Option<Instant>) -> Self {
+impl<'a> CNFConverter<'a> {
+    fn new(role: ClauseRole, timeout: Option<Instant>, interner: &'a mut Interner) -> Self {
         CNFConverter {
             skolem_counter: 0,
             def_counter: 0,
             universal_vars: Vec::new(),
             role,
             timeout,
+            interner,
         }
     }
 
@@ -128,7 +134,7 @@ impl CNFConverter {
         // Step 0c: Standardize apart - rename bound variables to be unique
         // This prevents variable capture when the same variable name is used
         // in different quantifier scopes (e.g., ∃Y.P(Y) => ∀Y.Q(Y))
-        let standardized = combined.standardize_apart();
+        let standardized = combined.standardize_apart(self.interner);
 
         // Step 1: Convert to NNF
         let nnf = standardized.to_nnf();
@@ -147,43 +153,70 @@ impl CNFConverter {
 
     /// Check if a formula is the $true constant
     fn is_true_constant(&self, formula: &FOFFormula) -> bool {
-        matches!(formula, FOFFormula::Atom(atom) if atom.predicate.name == "$true")
+        if let FOFFormula::Atom(atom) = formula {
+            self.interner.resolve_predicate(atom.predicate.id) == "$true"
+        } else {
+            false
+        }
     }
 
     /// Check if a formula is the $false constant
     fn is_false_constant(&self, formula: &FOFFormula) -> bool {
-        matches!(formula, FOFFormula::Atom(atom) if atom.predicate.name == "$false")
+        if let FOFFormula::Atom(atom) = formula {
+            self.interner.resolve_predicate(atom.predicate.id) == "$false"
+        } else {
+            false
+        }
     }
 
     /// Get the name of a distinct object (without the '"' prefix)
-    fn distinct_object_name(term: &Term) -> Option<&str> {
+    fn distinct_object_name(&self, term: &Term) -> Option<String> {
         match term {
-            Term::Constant(c) if c.name.starts_with('"') => Some(&c.name[1..]),
+            Term::Constant(c) => {
+                let name = self.interner.resolve_constant(c.id);
+                if name.starts_with('"') {
+                    Some(name[1..].to_string())
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
 
+    /// Create an atom for $true
+    fn make_true_atom(&mut self) -> FOFFormula {
+        let pred = PredicateSymbol::new(self.interner.intern_predicate("$true"), 0);
+        FOFFormula::Atom(Atom {
+            predicate: pred,
+            args: vec![],
+        })
+    }
+
+    /// Create an atom for $false
+    fn make_false_atom(&mut self) -> FOFFormula {
+        let pred = PredicateSymbol::new(self.interner.intern_predicate("$false"), 0);
+        FOFFormula::Atom(Atom {
+            predicate: pred,
+            args: vec![],
+        })
+    }
+
     /// Simplify formulas containing $true, $false, and distinct object equalities
-    fn simplify_truth_constants(&self, formula: FOFFormula) -> FOFFormula {
+    fn simplify_truth_constants(&mut self, formula: FOFFormula) -> FOFFormula {
         match formula {
             FOFFormula::Atom(ref atom) => {
                 // Check for equality between distinct objects
-                if atom.is_equality() && atom.args.len() == 2 {
+                if atom.is_equality(self.interner) && atom.args.len() == 2 {
                     if let (Some(left), Some(right)) = (
-                        Self::distinct_object_name(&atom.args[0]),
-                        Self::distinct_object_name(&atom.args[1]),
+                        self.distinct_object_name(&atom.args[0]),
+                        self.distinct_object_name(&atom.args[1]),
                     ) {
                         // "A" = "B" is false if different, true if same
                         if left == right {
-                            return FOFFormula::Atom(Atom {
-                                predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                                args: vec![],
-                            });
+                            return self.make_true_atom();
                         } else {
-                            return FOFFormula::Atom(Atom {
-                                predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-                                args: vec![],
-                            });
+                            return self.make_false_atom();
                         }
                     }
                 }
@@ -194,16 +227,10 @@ impl CNFConverter {
                 let f = self.simplify_truth_constants(*f);
                 if self.is_true_constant(&f) {
                     // ~$true = $false
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_false_atom()
                 } else if self.is_false_constant(&f) {
                     // ~$false = $true
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_true_atom()
                 } else {
                     FOFFormula::Not(Box::new(f))
                 }
@@ -214,10 +241,7 @@ impl CNFConverter {
                 let f2 = self.simplify_truth_constants(*f2);
                 if self.is_false_constant(&f1) || self.is_false_constant(&f2) {
                     // $false & A = $false
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_false_atom()
                 } else if self.is_true_constant(&f1) {
                     // $true & A = A
                     f2
@@ -234,10 +258,7 @@ impl CNFConverter {
                 let f2 = self.simplify_truth_constants(*f2);
                 if self.is_true_constant(&f1) || self.is_true_constant(&f2) {
                     // $true | A = $true
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_true_atom()
                 } else if self.is_false_constant(&f1) {
                     // $false | A = A
                     f2
@@ -254,10 +275,7 @@ impl CNFConverter {
                 let f2 = self.simplify_truth_constants(*f2);
                 if self.is_false_constant(&f1) || self.is_true_constant(&f2) {
                     // $false => A = $true, A => $true = $true
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_true_atom()
                 } else if self.is_true_constant(&f1) {
                     // $true => A = A
                     f2
@@ -314,15 +332,9 @@ impl CNFConverter {
                 let f2 = self.simplify_truth_constants(*f2);
                 // A NAND B = ~(A & B)
                 if self.is_false_constant(&f1) || self.is_false_constant(&f2) {
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_true_atom()
                 } else if self.is_true_constant(&f1) && self.is_true_constant(&f2) {
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_false_atom()
                 } else if self.is_true_constant(&f1) {
                     FOFFormula::Not(Box::new(f2))
                 } else if self.is_true_constant(&f2) {
@@ -337,15 +349,9 @@ impl CNFConverter {
                 let f2 = self.simplify_truth_constants(*f2);
                 // A NOR B = ~(A | B)
                 if self.is_true_constant(&f1) || self.is_true_constant(&f2) {
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_false_atom()
                 } else if self.is_false_constant(&f1) && self.is_false_constant(&f2) {
-                    FOFFormula::Atom(Atom {
-                        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                        args: vec![],
-                    })
+                    self.make_true_atom()
                 } else if self.is_false_constant(&f1) {
                     FOFFormula::Not(Box::new(f2))
                 } else if self.is_false_constant(&f2) {
@@ -491,18 +497,19 @@ impl CNFConverter {
                 free_vars.push(v);
             }
         }
-        free_vars.sort_by(|x, y| x.name.cmp(&y.name));
+        // Sort by variable ID for deterministic ordering
+        free_vars.sort_by(|x, y| x.id.cmp(&y.id));
 
         // Create definition predicate D
         let def_name = format!("def{}", self.def_counter);
         self.def_counter += 1;
 
-        let def_pred = PredicateSymbol {
-            name: def_name,
-            arity: free_vars.len(),
-        };
+        let def_pred = PredicateSymbol::new(
+            self.interner.intern_predicate(&def_name),
+            free_vars.len() as u8,
+        );
 
-        let def_args: Vec<Term> = free_vars.iter().map(|v| Term::Variable(v.clone())).collect();
+        let def_args: Vec<Term> = free_vars.iter().map(|v| Term::Variable(*v)).collect();
         let def_atom = FOFFormula::Atom(Atom {
             predicate: def_pred,
             args: def_args,
@@ -547,7 +554,7 @@ impl CNFConverter {
     /// Wrap a formula with universal quantifiers for the given variables
     fn wrap_with_forall(&self, formula: FOFFormula, vars: &[Variable]) -> FOFFormula {
         vars.iter().rev().fold(formula, |f, v| {
-            FOFFormula::Quantified(Quantifier::Forall, v.clone(), Box::new(f))
+            FOFFormula::Quantified(Quantifier::Forall, *v, Box::new(f))
         })
     }
 
@@ -585,7 +592,7 @@ impl CNFConverter {
 
                     FOFFormula::Quantified(Quantifier::Forall, var, f) => {
                         // Push var to universal_vars scope
-                        self.universal_vars.push(var.clone());
+                        self.universal_vars.push(var);
                         // When body is done, wrap it in Forall and pop the var
                         stack.push(WorkItem::CombineForall(var));
                         stack.push(WorkItem::Process(*f));
@@ -593,19 +600,20 @@ impl CNFConverter {
 
                     FOFFormula::Quantified(Quantifier::Exists, var, f) => {
                         // Create Skolem function/constant
+                        let skolem_name = format!("sk{}", self.skolem_counter);
                         let skolem_term = if self.universal_vars.is_empty() {
-                            Term::Constant(Constant {
-                                name: format!("sk{}", self.skolem_counter),
-                            })
+                            Term::Constant(Constant::new(
+                                self.interner.intern_constant(&skolem_name),
+                            ))
                         } else {
                             Term::Function(
-                                FunctionSymbol {
-                                    name: format!("sk{}", self.skolem_counter),
-                                    arity: self.universal_vars.len(),
-                                },
+                                FunctionSymbol::new(
+                                    self.interner.intern_function(&skolem_name),
+                                    self.universal_vars.len() as u8,
+                                ),
                                 self.universal_vars
                                     .iter()
-                                    .map(|v| Term::Variable(v.clone()))
+                                    .map(|v| Term::Variable(*v))
                                     .collect(),
                             )
                         };
@@ -822,7 +830,7 @@ impl CNFConverter {
                     .iter()
                     .map(|arg| self.substitute_in_term(arg, var, replacement))
                     .collect();
-                Term::Function(f.clone(), new_args)
+                Term::Function(*f, new_args)
             }
         }
     }
@@ -1014,28 +1022,51 @@ impl CNFConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::PredicateSymbol;
+
+    /// Test context for building FOF formulas with interned symbols
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Variable {
+            Variable::new(self.interner.intern_variable(name))
+        }
+
+        fn var_term(&mut self, name: &str) -> Term {
+            Term::Variable(self.var(name))
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            PredicateSymbol::new(self.interner.intern_predicate(name), arity)
+        }
+
+        fn atom(&mut self, name: &str, args: Vec<Term>) -> Atom {
+            let pred = self.pred(name, args.len() as u8);
+            Atom { predicate: pred, args }
+        }
+
+        fn atom_formula(&mut self, name: &str, args: Vec<Term>) -> FOFFormula {
+            FOFFormula::Atom(self.atom(name, args))
+        }
+    }
 
     #[test]
     fn test_simple_cnf_conversion() {
+        let mut ctx = TestContext::new();
+
         // Test: P & Q -> two unit clauses
-        let p = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol {
-                name: "P".to_string(),
-                arity: 0,
-            },
-            args: vec![],
-        });
-        let q = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol {
-                name: "Q".to_string(),
-                arity: 0,
-            },
-            args: vec![],
-        });
+        let p = ctx.atom_formula("P", vec![]);
+        let q = ctx.atom_formula("Q", vec![]);
 
         let formula = FOFFormula::And(Box::new(p), Box::new(q));
-        let cnf = fof_to_cnf(formula).unwrap();
+        let cnf = fof_to_cnf(formula, &mut ctx.interner).unwrap();
 
         assert_eq!(cnf.clauses.len(), 2);
         assert_eq!(cnf.clauses[0].literals.len(), 1);
@@ -1044,27 +1075,25 @@ mod tests {
 
     #[test]
     fn test_skolemization() {
+        let mut ctx = TestContext::new();
+
         // Test: ∃x.P(x) -> P(sk0)
-        let x = Variable {
-            name: "X".to_string(),
-        };
-        let p_x = FOFFormula::Atom(Atom {
-            predicate: PredicateSymbol {
-                name: "P".to_string(),
-                arity: 1,
-            },
-            args: vec![Term::Variable(x.clone())],
-        });
+        let x = ctx.var("X");
+        let x_term = ctx.var_term("X");
+        let p_x = ctx.atom_formula("P", vec![x_term]);
 
         let formula = FOFFormula::Quantified(Quantifier::Exists, x, Box::new(p_x));
-        let cnf = fof_to_cnf(formula).unwrap();
+        let cnf = fof_to_cnf(formula, &mut ctx.interner).unwrap();
 
         assert_eq!(cnf.clauses.len(), 1);
         assert_eq!(cnf.clauses[0].literals.len(), 1);
 
         // Check that the variable was replaced with a Skolem constant
         match &cnf.clauses[0].literals[0].atom.args[0] {
-            Term::Constant(c) => assert!(c.name.starts_with("sk")),
+            Term::Constant(c) => {
+                let name = ctx.interner.resolve_constant(c.id);
+                assert!(name.starts_with("sk"), "Expected Skolem constant, got: {}", name);
+            }
             _ => panic!("Expected Skolem constant"),
         }
     }
@@ -1082,29 +1111,19 @@ mod tests {
     /// duplicating the quantified subformulas.
     #[test]
     fn test_biconditional_with_quantifiers() {
+        let mut ctx = TestContext::new();
+
         // Build: (∃X.p(X) <=> ∀Y.p(Y))
-        let x = Variable {
-            name: "X".to_string(),
-        };
-        let y = Variable {
-            name: "Y".to_string(),
-        };
-        let p = PredicateSymbol {
-            name: "p".to_string(),
-            arity: 1,
-        };
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
 
         // p(X)
-        let p_x = FOFFormula::Atom(Atom {
-            predicate: p.clone(),
-            args: vec![Term::Variable(x.clone())],
-        });
+        let x_term = ctx.var_term("X");
+        let p_x = ctx.atom_formula("p", vec![x_term]);
 
         // p(Y)
-        let p_y = FOFFormula::Atom(Atom {
-            predicate: p.clone(),
-            args: vec![Term::Variable(y.clone())],
-        });
+        let y_term = ctx.var_term("Y");
+        let p_y = ctx.atom_formula("p", vec![y_term]);
 
         // ∃X.p(X)
         let exists_x_px = FOFFormula::Quantified(Quantifier::Exists, x, Box::new(p_x));
@@ -1115,7 +1134,7 @@ mod tests {
         // (∃X.p(X) <=> ∀Y.p(Y))
         let formula = FOFFormula::Iff(Box::new(exists_x_px), Box::new(forall_y_py));
 
-        let cnf = fof_to_cnf(formula).unwrap();
+        let cnf = fof_to_cnf(formula, &mut ctx.interner).unwrap();
 
         // With definitional CNF, we should have:
         // 1. A definition predicate (def0 or similar)
@@ -1123,7 +1142,9 @@ mod tests {
         let has_definition_predicate = cnf
             .clauses
             .iter()
-            .any(|c| c.literals.iter().any(|l| l.atom.predicate.name.starts_with("def")));
+            .any(|c| c.literals.iter().any(|l| {
+                ctx.interner.resolve_predicate(l.atom.predicate.id).starts_with("def")
+            }));
 
         assert!(
             has_definition_predicate,
@@ -1140,7 +1161,11 @@ mod tests {
             .filter(|c| {
                 c.literals.iter().any(|l| {
                     l.atom.args.iter().any(|arg| {
-                        matches!(arg, Term::Constant(c) if c.name.starts_with("sk"))
+                        if let Term::Constant(c) = arg {
+                            ctx.interner.resolve_constant(c.id).starts_with("sk")
+                        } else {
+                            false
+                        }
                     })
                 })
             })

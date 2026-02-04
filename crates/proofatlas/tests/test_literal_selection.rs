@@ -1,37 +1,60 @@
 //! Test to verify literal selection behavior
 
 use proofatlas::{
-    factoring, resolution, Atom, Clause, Constant, Literal, PredicateSymbol, SelectAll, Term,
-    Variable,
+    factoring, resolution, Atom, Clause, Constant, Interner, Literal, PredicateSymbol, SelectAll,
+    Term, Variable,
 };
+
+/// Test context that holds the interner and provides helper methods
+struct TestCtx {
+    interner: Interner,
+}
+
+impl TestCtx {
+    fn new() -> Self {
+        Self {
+            interner: Interner::new(),
+        }
+    }
+
+    fn var(&mut self, name: &str) -> Term {
+        Term::Variable(Variable {
+            id: self.interner.intern_variable(name),
+        })
+    }
+
+    fn const_(&mut self, name: &str) -> Term {
+        Term::Constant(Constant {
+            id: self.interner.intern_constant(name),
+        })
+    }
+
+    fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+        PredicateSymbol {
+            id: self.interner.intern_predicate(name),
+            arity,
+        }
+    }
+}
 
 #[test]
 fn test_resolution_tries_all_literals() {
-    // Create a clause with multiple literals:
-    // P(X) ∨ Q(Y) ∨ R(Z)
-    let p = PredicateSymbol {
-        name: "P".to_string(),
-        arity: 1,
-    };
-    let q = PredicateSymbol {
-        name: "Q".to_string(),
-        arity: 1,
-    };
-    let r = PredicateSymbol {
-        name: "R".to_string(),
-        arity: 1,
-    };
+    let mut ctx = TestCtx::new();
 
-    let x = Term::Variable(Variable {
-        name: "X".to_string(),
-    });
-    let y = Term::Variable(Variable {
-        name: "Y".to_string(),
-    });
-    let z = Term::Variable(Variable {
-        name: "Z".to_string(),
-    });
+    // Create predicates
+    let p = ctx.pred("P", 1);
+    let q = ctx.pred("Q", 1);
+    let r = ctx.pred("R", 1);
 
+    // Create terms
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let z = ctx.var("Z");
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let c = ctx.const_("c");
+
+    // Create a clause with multiple literals: P(X) ∨ Q(Y) ∨ R(Z)
     let clause1 = Clause::new(vec![
         Literal::positive(Atom {
             predicate: p.clone(),
@@ -47,18 +70,7 @@ fn test_resolution_tries_all_literals() {
         }),
     ]);
 
-    // Create another clause with negations of all three:
-    // ~P(a) ∨ ~Q(b) ∨ ~R(c)
-    let a = Term::Constant(Constant {
-        name: "a".to_string(),
-    });
-    let b = Term::Constant(Constant {
-        name: "b".to_string(),
-    });
-    let c = Term::Constant(Constant {
-        name: "c".to_string(),
-    });
-
+    // Create another clause with negations of all three: ~P(a) ∨ ~Q(b) ∨ ~R(c)
     let clause2 = Clause::new(vec![
         Literal::negative(Atom {
             predicate: p.clone(),
@@ -76,7 +88,7 @@ fn test_resolution_tries_all_literals() {
 
     // Apply resolution with SelectAll (all literals eligible)
     let selector = SelectAll;
-    let results = resolution(&clause1, &clause2, 0, 1, &selector);
+    let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
 
     // WITHOUT literal selection, we should get 3 different resolvents
     // (one for each pair of complementary literals)
@@ -95,23 +107,17 @@ fn test_resolution_tries_all_literals() {
 
 #[test]
 fn test_factoring_tries_all_pairs() {
-    // Create a clause with multiple identical predicates:
-    // P(X) ∨ P(Y) ∨ P(Z)
-    let p = PredicateSymbol {
-        name: "P".to_string(),
-        arity: 1,
-    };
+    let mut ctx = TestCtx::new();
 
-    let x = Term::Variable(Variable {
-        name: "X".to_string(),
-    });
-    let y = Term::Variable(Variable {
-        name: "Y".to_string(),
-    });
-    let z = Term::Variable(Variable {
-        name: "Z".to_string(),
-    });
+    // Create predicate
+    let p = ctx.pred("P", 1);
 
+    // Create terms
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let z = ctx.var("Z");
+
+    // Create a clause with multiple identical predicates: P(X) ∨ P(Y) ∨ P(Z)
     let clause = Clause::new(vec![
         Literal::positive(Atom {
             predicate: p.clone(),

@@ -37,7 +37,7 @@
 //! - Full subsumption checking becomes expensive for larger clauses
 //! - A greedy heuristic catches many subsumptions with reasonable cost
 
-use crate::fol::{Clause, Literal, Substitution, Term};
+use crate::fol::{Clause, FunctionId, Literal, PredicateId, Substitution, Term, VariableId};
 use std::collections::{HashMap, HashSet};
 
 // =============================================================================
@@ -100,10 +100,10 @@ impl FeatureVector {
 /// Maps symbols to feature vector indices
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
-    /// Maps predicate name to index in feature vector (base index for positive count)
-    predicate_ids: HashMap<String, usize>,
-    /// Maps function name to index in feature vector
-    function_ids: HashMap<String, usize>,
+    /// Maps predicate ID to index in feature vector (base index for positive count)
+    predicate_ids: HashMap<PredicateId, usize>,
+    /// Maps function ID to index in feature vector
+    function_ids: HashMap<FunctionId, usize>,
     /// Total dimension of feature vectors
     dimension: usize,
 }
@@ -118,24 +118,24 @@ impl SymbolTable {
     }
 
     /// Get or create index for a predicate (returns base index, positive is base, negative is base+1)
-    pub fn get_or_create_predicate(&mut self, name: &str) -> usize {
-        if let Some(&idx) = self.predicate_ids.get(name) {
+    pub fn get_or_create_predicate(&mut self, id: PredicateId) -> usize {
+        if let Some(&idx) = self.predicate_ids.get(&id) {
             idx
         } else {
             let idx = self.dimension;
-            self.predicate_ids.insert(name.to_string(), idx);
+            self.predicate_ids.insert(id, idx);
             self.dimension += 2; // positive and negative counts
             idx
         }
     }
 
     /// Get or create index for a function symbol
-    pub fn get_or_create_function(&mut self, name: &str) -> usize {
-        if let Some(&idx) = self.function_ids.get(name) {
+    pub fn get_or_create_function(&mut self, id: FunctionId) -> usize {
+        if let Some(&idx) = self.function_ids.get(&id) {
             idx
         } else {
             let idx = self.dimension;
-            self.function_ids.insert(name.to_string(), idx);
+            self.function_ids.insert(id, idx);
             self.dimension += 1;
             idx
         }
@@ -147,13 +147,13 @@ impl SymbolTable {
     }
 
     /// Get predicate index (if exists)
-    pub fn get_predicate(&self, name: &str) -> Option<usize> {
-        self.predicate_ids.get(name).copied()
+    pub fn get_predicate(&self, id: PredicateId) -> Option<usize> {
+        self.predicate_ids.get(&id).copied()
     }
 
     /// Get function index (if exists)
-    pub fn get_function(&self, name: &str) -> Option<usize> {
-        self.function_ids.get(name).copied()
+    pub fn get_function(&self, id: FunctionId) -> Option<usize> {
+        self.function_ids.get(&id).copied()
     }
 }
 
@@ -231,7 +231,7 @@ impl FeatureIndex {
         for clause in clauses {
             for lit in &clause.literals {
                 self.symbol_table
-                    .get_or_create_predicate(&lit.atom.predicate.name);
+                    .get_or_create_predicate(lit.atom.predicate.id);
                 self.collect_function_symbols_from_args(&lit.atom.args);
             }
         }
@@ -251,7 +251,7 @@ impl FeatureIndex {
         match term {
             Term::Variable(_) | Term::Constant(_) => {}
             Term::Function(f, args) => {
-                self.symbol_table.get_or_create_function(&f.name);
+                self.symbol_table.get_or_create_function(f.id);
                 for arg in args {
                     self.collect_function_symbols(arg);
                 }
@@ -265,7 +265,7 @@ impl FeatureIndex {
         if !self.symbols_finalized {
             for lit in &clause.literals {
                 self.symbol_table
-                    .get_or_create_predicate(&lit.atom.predicate.name);
+                    .get_or_create_predicate(lit.atom.predicate.id);
                 self.collect_function_symbols_from_args(&lit.atom.args);
             }
             self.dimension = self.symbol_table.dimension();
@@ -290,7 +290,7 @@ impl FeatureIndex {
 
         for lit in &clause.literals {
             // Count predicate occurrences
-            if let Some(base_idx) = self.symbol_table.get_predicate(&lit.atom.predicate.name) {
+            if let Some(base_idx) = self.symbol_table.get_predicate(lit.atom.predicate.id) {
                 let idx = if lit.polarity {
                     base_idx
                 } else {
@@ -315,7 +315,7 @@ impl FeatureIndex {
         match term {
             Term::Variable(_) | Term::Constant(_) => {}
             Term::Function(f, args) => {
-                if let Some(idx) = self.symbol_table.get_function(&f.name) {
+                if let Some(idx) = self.symbol_table.get_function(f.id) {
                     if idx < features.counts.len() {
                         features.counts[idx] = features.counts[idx].saturating_add(1);
                     }
@@ -769,11 +769,11 @@ impl SubsumptionChecker {
 }
 
 /// Get the "shape" of a clause (predicates and polarities)
-fn get_clause_shape(clause: &Clause) -> Vec<(String, bool)> {
+fn get_clause_shape(clause: &Clause) -> Vec<(PredicateId, bool)> {
     let mut shape: Vec<_> = clause
         .literals
         .iter()
-        .map(|lit| (lit.atom.predicate.name.clone(), lit.polarity))
+        .map(|lit| (lit.atom.predicate.id, lit.polarity))
         .collect();
     shape.sort();
     shape
@@ -786,7 +786,7 @@ fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
     }
 
     // Try to find a variable mapping
-    let mut var_map: HashMap<String, String> = HashMap::new();
+    let mut var_map: HashMap<VariableId, VariableId> = HashMap::new();
 
     for (lit1, lit2) in clause1.literals.iter().zip(&clause2.literals) {
         if lit1.polarity != lit2.polarity {
@@ -805,7 +805,7 @@ fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
 fn atoms_match_with_mapping(
     atom1: &crate::fol::Atom,
     atom2: &crate::fol::Atom,
-    var_map: &mut HashMap<String, String>,
+    var_map: &mut HashMap<VariableId, VariableId>,
 ) -> bool {
     if atom1.predicate != atom2.predicate {
         return false;
@@ -828,13 +828,13 @@ fn atoms_match_with_mapping(
 fn terms_match_with_mapping(
     term1: &Term,
     term2: &Term,
-    var_map: &mut HashMap<String, String>,
+    var_map: &mut HashMap<VariableId, VariableId>,
 ) -> bool {
     match (term1, term2) {
-        (Term::Variable(v1), Term::Variable(v2)) => match var_map.get(&v1.name) {
-            Some(mapped) => mapped == &v2.name,
+        (Term::Variable(v1), Term::Variable(v2)) => match var_map.get(&v1.id) {
+            Some(&mapped) => mapped == v2.id,
             None => {
-                var_map.insert(v1.name.clone(), v2.name.clone());
+                var_map.insert(v1.id, v2.id);
                 true
             }
         },
@@ -1011,12 +1011,12 @@ fn match_terms(term1: &Term, term2: &Term, subst: &mut Substitution) -> bool {
     match term1 {
         Term::Variable(v) => {
             // Check if variable is already bound
-            if let Some(bound_term) = subst.map.get(v) {
+            if let Some(bound_term) = subst.map.get(&v.id) {
                 // Must match the bound term
                 terms_equal(bound_term, term2)
             } else {
                 // Bind the variable
-                subst.insert(v.clone(), term2.clone());
+                subst.insert(*v, term2.clone());
                 true
             }
         }

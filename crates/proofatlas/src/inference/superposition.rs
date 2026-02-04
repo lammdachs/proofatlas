@@ -4,7 +4,7 @@ use super::common::{
     collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
     InferenceResult,
 };
-use crate::fol::{Atom, Clause, KBOConfig, Literal, Substitution, Term, KBO};
+use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, Substitution, Term, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -26,6 +26,7 @@ pub fn superposition(
     idx1: usize,
     idx2: usize,
     selector: &dyn LiteralSelector,
+    interner: &mut Interner,
 ) -> Vec<InferenceResult> {
     let mut results = Vec::new();
     let kbo = KBO::new(KBOConfig::default());
@@ -40,14 +41,14 @@ pub fn superposition(
     }
 
     // Rename variables to avoid conflicts
-    let renamed_into = rename_clause_variables(into_clause, &"2");
-    let renamed_from = rename_clause_variables(from_clause, &"1");
+    let renamed_into = rename_clause_variables(into_clause, "2", interner);
+    let renamed_from = rename_clause_variables(from_clause, "1", interner);
 
     // Find positive equality literals in selected literals of from_clause
     for &from_idx in &selected_from {
         let from_lit = &renamed_from.literals[from_idx];
 
-        if from_lit.polarity && from_lit.atom.is_equality() {
+        if from_lit.polarity && from_lit.atom.is_equality(interner) {
             if let [ref left, ref right] = from_lit.atom.args.as_slice() {
                 // Try superposition in BOTH directions:
                 // 1. Find occurrences of left, replace with right (left → right)
@@ -88,7 +89,7 @@ pub fn superposition(
 
                                 // Additional check for superposition into equalities
                                 // The side containing l' must not be smaller than the other side
-                                if into_lit.atom.is_equality() && !pos.path.is_empty() {
+                                if into_lit.atom.is_equality(interner) && !pos.path.is_empty() {
                                     let s = &into_lit.atom.args[0];
                                     let t = &into_lit.atom.args[1];
 
@@ -205,7 +206,7 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
         (Term::Variable(_), _) | (_, Term::Variable(_)) => true,
         (Term::Constant(c1), Term::Constant(c2)) => c1 == c2,
         (Term::Function(f1, args1), Term::Function(f2, args2)) => {
-            f1.name == f2.name && args1.len() == args2.len()
+            f1.id == f2.id && args1.len() == args2.len()
         }
         _ => false,
     }
@@ -225,7 +226,7 @@ fn replace_at_position(
         let mut new_args = atom.args.clone();
         new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
         Atom {
-            predicate: atom.predicate.clone(),
+            predicate: atom.predicate,
             args: new_args,
         }
         .apply_substitution(subst)
@@ -242,7 +243,7 @@ fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
             Term::Function(f, args) => {
                 let mut new_args = args.clone();
                 new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
-                Term::Function(f.clone(), new_args)
+                Term::Function(*f, new_args)
             }
         }
     }
@@ -254,12 +255,46 @@ mod tests {
     use crate::fol::{Constant, FunctionSymbol, PredicateSymbol, Variable};
     use crate::selection::SelectAll;
 
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
+
     /// Test superposition into the RIGHT side of an equality
     /// This verifies that we search both sides of equalities for superposition positions.
     /// The ordering constraint s[l']σ ⪯̸ tσ must be satisfied (the side containing l'
     /// must not be smaller than the other side).
     #[test]
     fn test_superposition_into_right_side_of_equality() {
+        let mut ctx = TestContext::new();
+
         // From: f(X) = X (f(X) > X in KBO)
         // Into: a = f(b) (f(b) > a in KBO, so RIGHT side is larger)
         //
@@ -268,41 +303,28 @@ mod tests {
         // Constraint: s[l']σ ⪯̸ tσ means f(b) ⪯̸ a, which is satisfied since f(b) > a
         // After superposition: a = b
 
-        let eq = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
-        let f = FunctionSymbol {
-            name: "f".to_string(),
-            arity: 1,
-        };
+        let eq = ctx.pred("=", 2);
 
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let b = Term::Constant(Constant {
-            name: "b".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let f_x = Term::Function(f.clone(), vec![x.clone()]);
-        let f_b = Term::Function(f.clone(), vec![b.clone()]);
+        let a = ctx.const_("a");
+        let b = ctx.const_("b");
+        let x = ctx.var("X");
+        let f_x = ctx.func("f", vec![x.clone()]);
+        let f_b = ctx.func("f", vec![b.clone()]);
 
         // f(X) = X
         let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq.clone(),
+            predicate: eq,
             args: vec![f_x.clone(), x.clone()],
         })]);
 
         // a = f(b) (note: right side f(b) is larger than left side a)
         let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq.clone(),
+            predicate: eq,
             args: vec![a.clone(), f_b.clone()],
         })]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector);
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
 
         // Should derive: a = b
         assert!(
@@ -314,72 +336,67 @@ mod tests {
         let found = results.iter().any(|r| {
             r.conclusion.literals.len() == 1
                 && r.conclusion.literals[0].polarity
-                && r.conclusion.literals[0].atom.predicate.name == "="
+                && r.conclusion.literals[0].atom.predicate.name(&ctx.interner) == "="
                 && r.conclusion.literals[0].atom.args.len() == 2
         });
 
         assert!(
             found,
             "Expected to derive a = b, got: {:?}",
-            results.iter().map(|r| r.conclusion.to_string()).collect::<Vec<_>>()
+            results
+                .iter()
+                .map(|r| r.conclusion.display(&ctx.interner).to_string())
+                .collect::<Vec<_>>()
         );
     }
 
     #[test]
     fn test_superposition_with_selection() {
+        let mut ctx = TestContext::new();
+
         // Test superposition with corrected implementation
         // From: mult(e,X) = X
         // Into: P(mult(e,c))
         // Should derive: P(c)
 
-        let eq = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let mult = FunctionSymbol {
-            name: "mult".to_string(),
-            arity: 2,
-        };
+        let eq = ctx.pred("=", 2);
+        let p = ctx.pred("P", 1);
 
-        let e = Term::Constant(Constant {
-            name: "e".to_string(),
-        });
-        let c = Term::Constant(Constant {
-            name: "c".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let mult_ex = Term::Function(mult.clone(), vec![e.clone(), x.clone()]);
-        let mult_ec = Term::Function(mult.clone(), vec![e.clone(), c.clone()]);
+        let e = ctx.const_("e");
+        let c = ctx.const_("c");
+        let x = ctx.var("X");
+        let mult_ex = ctx.func("mult", vec![e.clone(), x.clone()]);
+        let mult_ec = ctx.func("mult", vec![e.clone(), c.clone()]);
 
         // mult(e,X) = X
         let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq.clone(),
+            predicate: eq,
             args: vec![mult_ex.clone(), x.clone()],
         })]);
 
         // P(mult(e,c))
         let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
+            predicate: p,
             args: vec![mult_ec.clone()],
         })]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector);
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
 
         // Should derive P(c)
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].conclusion.literals.len(), 1);
         assert!(results[0].conclusion.literals[0].polarity);
-        assert_eq!(results[0].conclusion.literals[0].atom.predicate.name, "P");
+        assert_eq!(
+            results[0].conclusion.literals[0]
+                .atom
+                .predicate
+                .name(&ctx.interner),
+            "P"
+        );
         assert_eq!(results[0].conclusion.literals[0].atom.args.len(), 1);
         match &results[0].conclusion.literals[0].atom.args[0] {
-            Term::Constant(constant) => assert_eq!(constant.name, "c"),
+            Term::Constant(constant) => assert_eq!(constant.name(&ctx.interner), "c"),
             _ => panic!("Expected constant c"),
         }
     }

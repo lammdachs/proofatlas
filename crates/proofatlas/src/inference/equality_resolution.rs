@@ -1,7 +1,7 @@
 //! Equality resolution inference rule
 
 use super::common::{collect_literals_except, InferenceResult};
-use crate::fol::Clause;
+use crate::fol::{Clause, Interner};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -12,6 +12,7 @@ pub fn equality_resolution(
     clause: &Clause,
     idx: usize,
     selector: &dyn LiteralSelector,
+    interner: &Interner,
 ) -> Vec<InferenceResult> {
     let mut results = Vec::new();
 
@@ -28,7 +29,7 @@ pub fn equality_resolution(
         let lit = &clause.literals[i];
 
         // Look for negative equality literals
-        if !lit.polarity && lit.atom.is_equality() {
+        if !lit.polarity && lit.atom.is_equality(interner) {
             if let [ref s, ref t] = lit.atom.args.as_slice() {
                 // Try to unify s and t
                 if let Ok(mgu) = unify(s, t) {
@@ -54,32 +55,64 @@ pub fn equality_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, Literal, PredicateSymbol, Term};
+    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
 
     #[test]
     fn test_equality_resolution_with_select_all() {
+        let mut ctx = TestContext::new();
+
         // Test ~a = a should resolve to empty clause
-        let eq_pred = PredicateSymbol {
-            name: "=".to_string(),
-            arity: 2,
-        };
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
+        let eq_pred = ctx.pred("=", 2);
+        let a = ctx.const_("a");
 
         let clause = Clause::new(vec![Literal::negative(Atom {
-            predicate: eq_pred.clone(),
+            predicate: eq_pred,
             args: vec![a.clone(), a.clone()],
         })]);
 
         let selector = SelectAll;
-        let results = equality_resolution(&clause, 0, &selector);
+        let results = equality_resolution(&clause, 0, &selector, &ctx.interner);
         assert_eq!(results.len(), 1);
         assert!(results[0].conclusion.is_empty());
-        assert_eq!(results[0].derivation, Derivation {
-            rule_name: "EqualityResolution".into(),
-            premises: vec![0],
-        });
+        assert_eq!(
+            results[0].derivation,
+            Derivation {
+                rule_name: "EqualityResolution".into(),
+                premises: vec![0],
+            }
+        );
     }
 }

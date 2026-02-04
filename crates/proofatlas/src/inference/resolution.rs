@@ -4,8 +4,8 @@ use super::common::{
     collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
     InferenceResult,
 };
-use crate::fol::Clause;
 use super::derivation::Derivation;
+use crate::fol::{Clause, Interner};
 use crate::selection::LiteralSelector;
 
 /// Apply binary resolution between two clauses using literal selection
@@ -15,6 +15,7 @@ pub fn resolution(
     idx1: usize,
     idx2: usize,
     selector: &dyn LiteralSelector,
+    interner: &mut Interner,
 ) -> Vec<InferenceResult> {
     let mut results = Vec::new();
 
@@ -28,7 +29,7 @@ pub fn resolution(
     }
 
     // Rename variables in clause2 to avoid conflicts
-    let renamed_clause2 = rename_clause_variables(clause2, &format!("c{}", idx2));
+    let renamed_clause2 = rename_clause_variables(clause2, &format!("c{}", idx2), interner);
 
     // Only try to resolve SELECTED literals
     for &i in &selected1 {
@@ -69,62 +70,81 @@ pub fn resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
 
     #[test]
     fn test_resolution_with_select_all() {
+        let mut ctx = TestContext::new();
+
         // P(a) ∨ Q(X)
         // ~P(a) ∨ R(b)
         // Should resolve to Q(X) ∨ R(b)
 
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
-        let r = PredicateSymbol {
-            name: "R".to_string(),
-            arity: 1,
-        };
+        let p = ctx.pred("P", 1);
+        let q = ctx.pred("Q", 1);
+        let r = ctx.pred("R", 1);
 
-        let a = Term::Constant(Constant {
-            name: "a".to_string(),
-        });
-        let b = Term::Constant(Constant {
-            name: "b".to_string(),
-        });
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
+        let a = ctx.const_("a");
+        let b = ctx.const_("b");
+        let x = ctx.var("X");
 
         let clause1 = Clause::new(vec![
             Literal::positive(Atom {
-                predicate: p.clone(),
+                predicate: p,
                 args: vec![a.clone()],
             }),
             Literal::positive(Atom {
-                predicate: q.clone(),
+                predicate: q,
                 args: vec![x.clone()],
             }),
         ]);
 
         let clause2 = Clause::new(vec![
             Literal::negative(Atom {
-                predicate: p.clone(),
+                predicate: p,
                 args: vec![a.clone()],
             }),
             Literal::positive(Atom {
-                predicate: r.clone(),
+                predicate: r,
                 args: vec![b.clone()],
             }),
         ]);
 
         let selector = SelectAll;
-        let results = resolution(&clause1, &clause2, 0, 1, &selector);
+        let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].conclusion.literals.len(), 2);
     }

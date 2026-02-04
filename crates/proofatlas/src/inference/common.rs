@@ -1,7 +1,7 @@
 //! Common types and utilities for inference rules
 
-use crate::fol::{Atom, Clause, Literal, Substitution, Term, TermOrdering, Variable, KBO};
 use super::derivation::Derivation;
+use crate::fol::{Atom, Clause, Interner, Literal, Substitution, Term, TermOrdering, Variable, KBO};
 use crate::unification::unify;
 use std::collections::HashSet;
 
@@ -13,19 +13,19 @@ pub struct InferenceResult {
 }
 
 /// Rename all variables in a clause to avoid conflicts
-pub fn rename_clause_variables(clause: &Clause, suffix: &str) -> Clause {
+pub fn rename_clause_variables(clause: &Clause, suffix: &str, interner: &mut Interner) -> Clause {
     Clause {
         literals: clause
             .literals
             .iter()
             .map(|lit| Literal {
                 atom: Atom {
-                    predicate: lit.atom.predicate.clone(),
+                    predicate: lit.atom.predicate,
                     args: lit
                         .atom
                         .args
                         .iter()
-                        .map(|arg| rename_variables(arg, suffix))
+                        .map(|arg| rename_variables(arg, suffix, interner))
                         .collect(),
                 },
                 polarity: lit.polarity,
@@ -38,16 +38,19 @@ pub fn rename_clause_variables(clause: &Clause, suffix: &str) -> Clause {
 }
 
 /// Rename variables in a term
-pub fn rename_variables(term: &Term, suffix: &str) -> Term {
+pub fn rename_variables(term: &Term, suffix: &str, interner: &mut Interner) -> Term {
     match term {
-        Term::Variable(v) => Term::Variable(Variable {
-            name: format!("{}_{}", v.name, suffix),
-        }),
-        Term::Constant(c) => Term::Constant(c.clone()),
+        Term::Variable(v) => {
+            let old_name = interner.resolve_variable(v.id);
+            let new_name = format!("{}_{}", old_name, suffix);
+            let new_id = interner.intern_variable(&new_name);
+            Term::Variable(Variable::new(new_id))
+        }
+        Term::Constant(c) => Term::Constant(*c),
         Term::Function(f, args) => Term::Function(
-            f.clone(),
+            *f,
             args.iter()
-                .map(|arg| rename_variables(arg, suffix))
+                .map(|arg| rename_variables(arg, suffix, interner))
                 .collect(),
         ),
     }
@@ -113,5 +116,8 @@ pub fn collect_literals_except(
 /// This is used for the ordering constraint ⪯̸ (not smaller than),
 /// which means Greater or Incomparable.
 pub fn is_ordered_greater(t1: &Term, t2: &Term, kbo: &KBO) -> bool {
-    matches!(kbo.compare(t1, t2), TermOrdering::Greater | TermOrdering::Incomparable)
+    matches!(
+        kbo.compare(t1, t2),
+        TermOrdering::Greater | TermOrdering::Incomparable
+    )
 }

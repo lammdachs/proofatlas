@@ -9,7 +9,7 @@
 //! - Selection 21: Select unique maximal, else negative with max weight, else all maximal
 //! - Selection 22: Select negative literal with max weight, else all maximal
 
-use crate::fol::{Clause, KBOConfig, Literal, Term, TermOrdering, KBO};
+use crate::fol::{Clause, KBOConfig, Literal, Term, TermOrdering, VariableId, KBO};
 use std::collections::HashSet;
 
 /// Trait for literal selection strategies
@@ -78,9 +78,9 @@ fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
     }
 
     // Equal weight - use lexicographic comparison (cases 2.2 and 2.3)
-    // Compare predicates by name (alphabetic precedence) - case 2.2
-    if lit1.atom.predicate.name != lit2.atom.predicate.name {
-        return lit1.atom.predicate.name > lit2.atom.predicate.name;
+    // Compare predicates by ID (stable precedence) - case 2.2
+    if lit1.atom.predicate.id != lit2.atom.predicate.id {
+        return lit1.atom.predicate.id > lit2.atom.predicate.id;
     }
 
     // Same predicate - lexicographic comparison of arguments (case 2.3)
@@ -97,7 +97,7 @@ fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
 }
 
 /// Count occurrences of each variable in a literal
-fn count_literal_variables(lit: &Literal) -> std::collections::HashMap<String, usize> {
+fn count_literal_variables(lit: &Literal) -> std::collections::HashMap<VariableId, usize> {
     let mut counts = std::collections::HashMap::new();
     for arg in &lit.atom.args {
         count_term_variables(arg, &mut counts);
@@ -106,10 +106,10 @@ fn count_literal_variables(lit: &Literal) -> std::collections::HashMap<String, u
 }
 
 /// Recursively count variables in a term
-fn count_term_variables(term: &Term, counts: &mut std::collections::HashMap<String, usize>) {
+fn count_term_variables(term: &Term, counts: &mut std::collections::HashMap<VariableId, usize>) {
     match term {
         Term::Variable(v) => {
-            *counts.entry(v.name.clone()).or_insert(0) += 1;
+            *counts.entry(v.id).or_insert(0) += 1;
         }
         Term::Constant(_) => {}
         Term::Function(_, args) => {
@@ -351,49 +351,73 @@ pub type SelectLargestNegative = SelectNegMaxWeightOrMaximal;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Clause, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, Clause, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+
+        fn literal(&mut self, pred_name: &str, args: Vec<Term>, positive: bool) -> Literal {
+            let pred = self.pred(pred_name, args.len() as u8);
+            let atom = Atom {
+                predicate: pred,
+                args,
+            };
+            if positive {
+                Literal::positive(atom)
+            } else {
+                Literal::negative(atom)
+            }
+        }
+    }
 
     fn make_clause(literals: Vec<Literal>) -> Clause {
         Clause::new(literals)
     }
 
-    fn make_literal(pred: &str, args: Vec<Term>, positive: bool) -> Literal {
-        let atom = Atom {
-            predicate: PredicateSymbol {
-                name: pred.to_string(),
-                arity: args.len(),
-            },
-            args,
-        };
-        if positive {
-            Literal::positive(atom)
-        } else {
-            Literal::negative(atom)
-        }
-    }
-
-    fn var(name: &str) -> Term {
-        Term::Variable(Variable { name: name.to_string() })
-    }
-
-    fn const_(name: &str) -> Term {
-        Term::Constant(Constant { name: name.to_string() })
-    }
-
-    fn func(name: &str, args: Vec<Term>) -> Term {
-        Term::Function(
-            FunctionSymbol { name: name.to_string(), arity: args.len() },
-            args,
-        )
-    }
-
     #[test]
     fn test_select_all() {
-        let clause = make_clause(vec![
-            make_literal("P", vec![var("X")], true),
-            make_literal("Q", vec![const_("a")], false),
-            make_literal("R", vec![func("f", vec![var("Y")])], true),
-        ]);
+        let mut ctx = TestContext::new();
+
+        // Build args first to avoid nested mutable borrows
+        let x = ctx.var("X");
+        let lit0 = ctx.literal("P", vec![x], true);
+
+        let a = ctx.const_("a");
+        let lit1 = ctx.literal("Q", vec![a], false);
+
+        let y = ctx.var("Y");
+        let f_y = ctx.func("f", vec![y]);
+        let lit2 = ctx.literal("R", vec![f_y], true);
+
+        let clause = make_clause(vec![lit0, lit1, lit2]);
 
         let selector = SelectAll;
         let selected = selector.select(&clause);
@@ -407,10 +431,17 @@ mod tests {
     #[test]
     fn test_select_maximal() {
         // P(a) ∨ Q(f(g(a))) - both ground, Q has higher weight so Q > P
-        let clause = make_clause(vec![
-            make_literal("P", vec![const_("a")], true),
-            make_literal("Q", vec![func("f", vec![func("g", vec![const_("a")])])], true),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let a = ctx.const_("a");
+        let lit0 = ctx.literal("P", vec![a], true);
+
+        let a2 = ctx.const_("a");
+        let inner_g = ctx.func("g", vec![a2]);
+        let outer_f = ctx.func("f", vec![inner_g]);
+        let lit1 = ctx.literal("Q", vec![outer_f], true);
+
+        let clause = make_clause(vec![lit0, lit1]);
 
         let selector = SelectMaximal::new();
         let selected = selector.select(&clause);
@@ -423,10 +454,17 @@ mod tests {
     #[test]
     fn test_select_maximal_with_variables() {
         // P(X) ∨ Q(f(g(a))) - incomparable due to variable condition, both maximal
-        let clause = make_clause(vec![
-            make_literal("P", vec![var("X")], true),
-            make_literal("Q", vec![func("f", vec![func("g", vec![const_("a")])])], true),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let x = ctx.var("X");
+        let lit0 = ctx.literal("P", vec![x], true);
+
+        let a = ctx.const_("a");
+        let inner_g = ctx.func("g", vec![a]);
+        let outer_f = ctx.func("f", vec![inner_g]);
+        let lit1 = ctx.literal("Q", vec![outer_f], true);
+
+        let clause = make_clause(vec![lit0, lit1]);
 
         let selector = SelectMaximal::new();
         let selected = selector.select(&clause);
@@ -440,11 +478,19 @@ mod tests {
     #[test]
     fn test_select_neg_max_weight_or_maximal() {
         // P(X) ∨ ~Q(f(a)) ∨ ~R(a) - should select ~Q(f(a)) as largest negative
-        let clause = make_clause(vec![
-            make_literal("P", vec![var("X")], true),
-            make_literal("Q", vec![func("f", vec![const_("a")])], false),
-            make_literal("R", vec![const_("a")], false),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let x = ctx.var("X");
+        let lit0 = ctx.literal("P", vec![x], true);
+
+        let a1 = ctx.const_("a");
+        let f_a = ctx.func("f", vec![a1]);
+        let lit1 = ctx.literal("Q", vec![f_a], false);
+
+        let a2 = ctx.const_("a");
+        let lit2 = ctx.literal("R", vec![a2], false);
+
+        let clause = make_clause(vec![lit0, lit1, lit2]);
 
         let selector = SelectNegMaxWeightOrMaximal::new();
         let selected = selector.select(&clause);
@@ -457,10 +503,16 @@ mod tests {
     #[test]
     fn test_select_neg_max_weight_fallback() {
         // P(a) ∨ Q(f(a)) - all positive, should fall back to maximal
-        let clause = make_clause(vec![
-            make_literal("P", vec![const_("a")], true),
-            make_literal("Q", vec![func("f", vec![const_("a")])], true),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let a = ctx.const_("a");
+        let lit0 = ctx.literal("P", vec![a], true);
+
+        let a2 = ctx.const_("a");
+        let f_a = ctx.func("f", vec![a2]);
+        let lit1 = ctx.literal("Q", vec![f_a], true);
+
+        let clause = make_clause(vec![lit0, lit1]);
 
         let selector = SelectNegMaxWeightOrMaximal::new();
         let selected = selector.select(&clause);
@@ -473,10 +525,18 @@ mod tests {
     #[test]
     fn test_select_unique_maximal() {
         // P(a) ∨ Q(f(g(h(a)))) - Q is uniquely maximal (ground terms, higher weight)
-        let clause = make_clause(vec![
-            make_literal("P", vec![const_("a")], true),
-            make_literal("Q", vec![func("f", vec![func("g", vec![func("h", vec![const_("a")])])])], true),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let a = ctx.const_("a");
+        let lit0 = ctx.literal("P", vec![a], true);
+
+        let a2 = ctx.const_("a");
+        let h_a = ctx.func("h", vec![a2]);
+        let g_h_a = ctx.func("g", vec![h_a]);
+        let f_g_h_a = ctx.func("f", vec![g_h_a]);
+        let lit1 = ctx.literal("Q", vec![f_g_h_a], true);
+
+        let clause = make_clause(vec![lit0, lit1]);
 
         let selector = SelectUniqueMaximalOrNegOrMaximal::new();
         let selected = selector.select(&clause);
@@ -490,11 +550,20 @@ mod tests {
     fn test_select_unique_maximal_fallback_to_negative() {
         // P(f(X)) ∨ Q(f(Y)) ∨ ~R(c) - P and Q have incomparable terms due to different variables,
         // so both are maximal. Should fall back to selecting the negative literal.
-        let clause = make_clause(vec![
-            make_literal("P", vec![func("f", vec![var("X")])], true),
-            make_literal("Q", vec![func("f", vec![var("Y")])], true),
-            make_literal("R", vec![const_("c")], false),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let x = ctx.var("X");
+        let f_x = ctx.func("f", vec![x]);
+        let lit0 = ctx.literal("P", vec![f_x], true);
+
+        let y = ctx.var("Y");
+        let f_y = ctx.func("f", vec![y]);
+        let lit1 = ctx.literal("Q", vec![f_y], true);
+
+        let c = ctx.const_("c");
+        let lit2 = ctx.literal("R", vec![c], false);
+
+        let clause = make_clause(vec![lit0, lit1, lit2]);
 
         let selector = SelectUniqueMaximalOrNegOrMaximal::new();
         let selected = selector.select(&clause);
@@ -509,10 +578,17 @@ mod tests {
     fn test_select_one_negative_when_equal_weight() {
         // ~P(f(X)) ∨ ~Q(f(Y)) - two negatives with equal weight
         // Only one should be selected (completeness requires selecting A negative, not all)
-        let clause = make_clause(vec![
-            make_literal("P", vec![func("f", vec![var("X")])], false),
-            make_literal("Q", vec![func("f", vec![var("Y")])], false),
-        ]);
+        let mut ctx = TestContext::new();
+
+        let x = ctx.var("X");
+        let f_x = ctx.func("f", vec![x]);
+        let lit0 = ctx.literal("P", vec![f_x], false);
+
+        let y = ctx.var("Y");
+        let f_y = ctx.func("f", vec![y]);
+        let lit1 = ctx.literal("Q", vec![f_y], false);
+
+        let clause = make_clause(vec![lit0, lit1]);
 
         let selector = SelectUniqueMaximalOrNegOrMaximal::new();
         let selected = selector.select(&clause);

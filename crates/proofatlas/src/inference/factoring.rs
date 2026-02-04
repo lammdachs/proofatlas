@@ -61,42 +61,64 @@ pub fn factoring(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
 
     #[test]
     fn test_factoring_with_select_all() {
-        // P(X) ∨ P(Y) ∨ Q(Z)
-        let p = PredicateSymbol {
-            name: "P".to_string(),
-            arity: 1,
-        };
-        let q = PredicateSymbol {
-            name: "Q".to_string(),
-            arity: 1,
-        };
+        let mut ctx = TestContext::new();
 
-        let x = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
-        let y = Term::Variable(Variable {
-            name: "Y".to_string(),
-        });
-        let z = Term::Variable(Variable {
-            name: "Z".to_string(),
-        });
+        // P(X) ∨ P(Y) ∨ Q(Z)
+        let p = ctx.pred("P", 1);
+        let q = ctx.pred("Q", 1);
+
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
+        let z = ctx.var("Z");
 
         let clause = Clause::new(vec![
             Literal::positive(Atom {
-                predicate: p.clone(),
+                predicate: p,
                 args: vec![x.clone()],
             }),
             Literal::positive(Atom {
-                predicate: p.clone(),
+                predicate: p,
                 args: vec![y.clone()],
             }),
             Literal::positive(Atom {
-                predicate: q.clone(),
+                predicate: q,
                 args: vec![z.clone()],
             }),
         ]);

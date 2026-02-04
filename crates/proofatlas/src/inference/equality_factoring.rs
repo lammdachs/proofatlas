@@ -1,7 +1,7 @@
 //! Equality factoring inference rule
 
 use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
-use crate::fol::{Atom, Clause, KBOConfig, Literal, PredicateSymbol, KBO};
+use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, PredicateSymbol, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -14,6 +14,7 @@ pub fn equality_factoring(
     clause: &Clause,
     idx: usize,
     selector: &dyn LiteralSelector,
+    interner: &mut Interner,
 ) -> Vec<InferenceResult> {
     let mut results = Vec::new();
     let selected = selector.select(clause);
@@ -24,7 +25,7 @@ pub fn equality_factoring(
         .literals
         .iter()
         .enumerate()
-        .filter(|(_, lit)| lit.polarity && is_equality(&lit.atom))
+        .filter(|(_, lit)| lit.polarity && lit.atom.is_equality(interner))
         .collect();
 
     if positive_eq_literals.len() < 2 {
@@ -66,12 +67,9 @@ pub fn equality_factoring(
                     let mut new_literals = Vec::new();
 
                     // Add r ≉ t
-                    let eq_symbol = PredicateSymbol {
-                        name: "=".to_string(),
-                        arity: 2,
-                    };
+                    let eq_symbol = PredicateSymbol::new(interner.intern_predicate("="), 2);
                     let neq_literal = Literal::negative(Atom {
-                        predicate: eq_symbol.clone(),
+                        predicate: eq_symbol,
                         args: vec![r_sigma.clone(), t_sigma.clone()],
                     });
                     new_literals.push(neq_literal);
@@ -103,14 +101,9 @@ pub fn equality_factoring(
     results
 }
 
-/// Check if an atom is an equality
-fn is_equality(atom: &Atom) -> bool {
-    atom.predicate.name == "=" && atom.predicate.arity == 2
-}
-
-/// Get the two terms from an equality atom
+/// Get the two terms from an equality atom (assumes already verified to be equality)
 fn get_equality_terms(atom: &Atom) -> Option<(&crate::fol::Term, &crate::fol::Term)> {
-    if is_equality(atom) && atom.args.len() == 2 {
+    if atom.predicate.arity == 2 && atom.args.len() == 2 {
         Some((&atom.args[0], &atom.args[1]))
     } else {
         None

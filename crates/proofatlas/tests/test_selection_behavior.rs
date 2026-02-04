@@ -1,24 +1,43 @@
 //! Test to verify how literal selection affects inference rules
 
-use proofatlas::{factoring, Atom, Clause, Literal, PredicateSymbol, SelectAll, Term, Variable};
+use proofatlas::{factoring, Atom, Clause, Interner, Literal, PredicateSymbol, SelectAll, Term, Variable};
+
+/// Test context that holds the interner and provides helper methods
+struct TestCtx {
+    interner: Interner,
+}
+
+impl TestCtx {
+    fn new() -> Self {
+        Self {
+            interner: Interner::new(),
+        }
+    }
+
+    fn var(&mut self, name: &str) -> Term {
+        Term::Variable(Variable {
+            id: self.interner.intern_variable(name),
+        })
+    }
+
+    fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+        PredicateSymbol {
+            id: self.interner.intern_predicate(name),
+            arity,
+        }
+    }
+}
 
 #[test]
 fn test_factoring_with_select_all_detailed() {
-    // P(X) ∨ P(Y) ∨ P(Z)
-    let p = PredicateSymbol {
-        name: "P".to_string(),
-        arity: 1,
-    };
+    let mut ctx = TestCtx::new();
 
-    let x = Term::Variable(Variable {
-        name: "X".to_string(),
-    });
-    let y = Term::Variable(Variable {
-        name: "Y".to_string(),
-    });
-    let z = Term::Variable(Variable {
-        name: "Z".to_string(),
-    });
+    // P(X) ∨ P(Y) ∨ P(Z)
+    let p = ctx.pred("P", 1);
+
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let z = ctx.var("Z");
 
     let clause = Clause::new(vec![
         Literal::positive(Atom {

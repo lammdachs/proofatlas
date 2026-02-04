@@ -1,6 +1,6 @@
 //! JSON serialization types for proof data
 
-use crate::fol::{Atom, Clause, Literal, Term};
+use crate::fol::{Atom, Clause, Interner, Literal, Term};
 use crate::inference::proof::{Proof, ProofStep};
 use serde::{Deserialize, Serialize};
 
@@ -13,18 +13,18 @@ pub enum TermJson {
     Function { name: String, args: Vec<TermJson> },
 }
 
-impl From<&Term> for TermJson {
-    fn from(term: &Term) -> Self {
+impl TermJson {
+    pub fn from_term(term: &Term, interner: &Interner) -> Self {
         match term {
             Term::Variable(v) => TermJson::Variable {
-                name: v.name.clone(),
+                name: v.name(interner).to_string(),
             },
             Term::Constant(c) => TermJson::Constant {
-                name: c.name.clone(),
+                name: c.name(interner).to_string(),
             },
             Term::Function(func_sym, args) => TermJson::Function {
-                name: func_sym.name.clone(),
-                args: args.iter().map(|t| t.into()).collect(),
+                name: func_sym.name(interner).to_string(),
+                args: args.iter().map(|t| TermJson::from_term(t, interner)).collect(),
             },
         }
     }
@@ -38,11 +38,11 @@ pub struct AtomJson {
     pub args: Vec<TermJson>,
 }
 
-impl From<&Atom> for AtomJson {
-    fn from(atom: &Atom) -> Self {
+impl AtomJson {
+    pub fn from_atom(atom: &Atom, interner: &Interner) -> Self {
         AtomJson {
-            predicate: atom.predicate.name.clone(),
-            args: atom.args.iter().map(|t| t.into()).collect(),
+            predicate: atom.predicate.name(interner).to_string(),
+            args: atom.args.iter().map(|t| TermJson::from_term(t, interner)).collect(),
         }
     }
 }
@@ -54,11 +54,11 @@ pub struct LiteralJson {
     pub atom: AtomJson,
 }
 
-impl From<&Literal> for LiteralJson {
-    fn from(lit: &Literal) -> Self {
+impl LiteralJson {
+    pub fn from_literal(lit: &Literal, interner: &Interner) -> Self {
         LiteralJson {
             polarity: lit.polarity,
-            atom: (&lit.atom).into(),
+            atom: AtomJson::from_atom(&lit.atom, interner),
         }
     }
 }
@@ -71,11 +71,11 @@ pub struct ClauseJson {
     pub literals: Vec<LiteralJson>,
 }
 
-impl From<&Clause> for ClauseJson {
-    fn from(clause: &Clause) -> Self {
+impl ClauseJson {
+    pub fn from_clause(clause: &Clause, interner: &Interner) -> Self {
         ClauseJson {
             id: clause.id,
-            literals: clause.literals.iter().map(|l| l.into()).collect(),
+            literals: clause.literals.iter().map(|l| LiteralJson::from_literal(l, interner)).collect(),
         }
     }
 }
@@ -101,7 +101,7 @@ pub struct TrainingClauseJson {
 
 impl TrainingClauseJson {
     /// Create from a Clause with a label and optional derivation info
-    pub fn from_clause(clause: &Clause, label: bool, parents: Vec<usize>, rule: String) -> Self {
+    pub fn from_clause(clause: &Clause, interner: &Interner, label: bool, parents: Vec<usize>, rule: String) -> Self {
         let role = match clause.role {
             crate::fol::ClauseRole::Axiom => "axiom",
             crate::fol::ClauseRole::Hypothesis => "hypothesis",
@@ -110,7 +110,7 @@ impl TrainingClauseJson {
             crate::fol::ClauseRole::Derived => "derived",
         };
         TrainingClauseJson {
-            literals: clause.literals.iter().map(|l| l.into()).collect(),
+            literals: clause.literals.iter().map(|l| LiteralJson::from_literal(l, interner)).collect(),
             label: if label { 1 } else { 0 },
             age: clause.age,
             role: role.to_string(),

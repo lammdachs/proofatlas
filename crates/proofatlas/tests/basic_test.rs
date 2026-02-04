@@ -14,9 +14,9 @@ fn test_simple_resolution() {
         cnf(not_q_a, negated_conjecture, ~q(a)).
     "#;
 
-    let formula = parse_tptp(tptp, &[], None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
-    let (result, _, _) = saturate(formula, config, create_selector());
+    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
         SaturationResult::Proof(_) => {
@@ -32,9 +32,9 @@ fn test_equality_reflexivity() {
         cnf(not_self_equal, negated_conjecture, a != a).
     "#;
 
-    let formula = parse_tptp(tptp, &[], None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None).unwrap();
     let config = SaturationConfig::default();
-    let (result, _, _) = saturate(formula, config, create_selector());
+    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
         SaturationResult::Proof(_) => {
@@ -51,10 +51,10 @@ fn test_satisfiable_formula() {
         cnf(q_b, axiom, q(b)).
     "#;
 
-    let formula = parse_tptp(tptp, &[], None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None).unwrap();
     let mut config = SaturationConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
-    let (result, _, _) = saturate(formula, config, create_selector());
+    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
         SaturationResult::Saturated(_, _) => {

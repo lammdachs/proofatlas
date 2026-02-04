@@ -4,8 +4,8 @@ use super::cnf_conversion::fof_to_cnf_with_role;
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
 use super::orient_equalities::orient_all_equalities;
 use crate::fol::{
-    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Literal, PredicateSymbol, Term,
-    Variable,
+    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
+    PredicateSymbol, Term, Variable,
 };
 use nom::{
     branch::alt,
@@ -16,19 +16,82 @@ use nom::{
     sequence::{delimited, preceded, tuple},
     IResult,
 };
+use std::cell::RefCell;
+use std::ops::Deref;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-/// Parse result containing formulas and included files
+/// Result of parsing a TPTP problem
 #[derive(Debug)]
-pub struct ParseResult {
-    pub cnf_formulas: Vec<Clause>,
-    pub fof_formulas: Vec<NamedFormula>,
+pub struct ParsedProblem {
+    pub formula: CNFFormula,
+    pub interner: Interner,
 }
 
-/// Parse a TPTP file
+/// Parse result containing formulas and included files (internal)
+#[derive(Debug)]
+struct ParseResult {
+    cnf_formulas: Vec<Clause>,
+    fof_formulas: Vec<NamedFormula>,
+}
+
+/// Parsing context holding the interner
+struct ParseContext {
+    interner: RefCell<Interner>,
+}
+
+impl ParseContext {
+    fn new() -> Self {
+        ParseContext {
+            interner: RefCell::new(Interner::new()),
+        }
+    }
+
+    fn intern_variable(&self, name: &str) -> Variable {
+        Variable::new(self.interner.borrow_mut().intern_variable(name))
+    }
+
+    fn intern_constant(&self, name: &str) -> Constant {
+        Constant::new(self.interner.borrow_mut().intern_constant(name))
+    }
+
+    fn intern_function(&self, name: &str, arity: usize) -> FunctionSymbol {
+        FunctionSymbol::new(
+            self.interner.borrow_mut().intern_function(name),
+            arity as u8,
+        )
+    }
+
+    fn intern_predicate(&self, name: &str, arity: usize) -> PredicateSymbol {
+        PredicateSymbol::new(
+            self.interner.borrow_mut().intern_predicate(name),
+            arity as u8,
+        )
+    }
+
+    fn into_interner(self) -> Interner {
+        self.interner.into_inner()
+    }
+}
+
+// Thread-local parsing context for use during parsing
+thread_local! {
+    static PARSE_CTX: RefCell<Option<ParseContext>> = const { RefCell::new(None) };
+}
+
+fn with_ctx<F, R>(f: F) -> R
+where
+    F: FnOnce(&ParseContext) -> R,
+{
+    PARSE_CTX.with(|ctx| {
+        let ctx_ref = ctx.borrow();
+        f(ctx_ref.as_ref().expect("ParseContext not initialized"))
+    })
+}
+
+/// Parse a TPTP file and return the CNF formula with interner
 ///
 /// Args:
 ///   - file_path: Path to the TPTP file
@@ -38,13 +101,23 @@ pub fn parse_tptp_file(
     file_path: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
-) -> Result<CNFFormula, String> {
+) -> Result<ParsedProblem, String> {
+    // Initialize parsing context
+    PARSE_CTX.with(|ctx| {
+        *ctx.borrow_mut() = Some(ParseContext::new());
+    });
+
     let mut visited = HashSet::new();
     let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)?;
-    convert_to_cnf(result, timeout)
+    let formula = convert_to_cnf(result, timeout)?;
+
+    // Extract interner from context
+    let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
+
+    Ok(ParsedProblem { formula, interner })
 }
 
-/// Parse a TPTP string
+/// Parse a TPTP string and return the CNF formula with interner
 ///
 /// Args:
 ///   - input: TPTP content as string
@@ -54,10 +127,20 @@ pub fn parse_tptp(
     input: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
-) -> Result<CNFFormula, String> {
+) -> Result<ParsedProblem, String> {
+    // Initialize parsing context
+    PARSE_CTX.with(|ctx| {
+        *ctx.borrow_mut() = Some(ParseContext::new());
+    });
+
     let mut visited = HashSet::new();
     let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)?;
-    convert_to_cnf(result, timeout)
+    let formula = convert_to_cnf(result, timeout)?;
+
+    // Extract interner from context
+    let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
+
+    Ok(ParsedProblem { formula, interner })
 }
 
 /// Convert parsed FOF formulas to CNF
@@ -78,8 +161,11 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFo
     // Convert non-conjecture formulas to CNF with their roles
     for (formula, role) in other_formulas {
         let clause_role = formula_role_to_clause_role(&role);
-        let cnf = fof_to_cnf_with_role(formula, clause_role, timeout)
-            .map_err(|e| e.to_string())?;
+        let cnf = PARSE_CTX.with(|ctx| {
+            let mut ctx_ref = ctx.borrow_mut();
+            let parse_ctx = ctx_ref.as_mut().unwrap();
+            fof_to_cnf_with_role(formula, clause_role, timeout, parse_ctx.interner.get_mut())
+        }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
 
@@ -102,12 +188,20 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFo
             result
         };
 
-        let cnf = fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout)
-            .map_err(|e| e.to_string())?;
+        let cnf = PARSE_CTX.with(|ctx| {
+            let mut ctx_ref = ctx.borrow_mut();
+            let parse_ctx = ctx_ref.as_mut().unwrap();
+            fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, parse_ctx.interner.get_mut())
+        }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
 
-    orient_all_equalities(&mut all_clauses);
+    // Get interner reference for orient_all_equalities
+    PARSE_CTX.with(|ctx| {
+        let ctx_ref = ctx.borrow();
+        let parse_ctx = ctx_ref.as_ref().unwrap();
+        orient_all_equalities(&mut all_clauses, parse_ctx.interner.borrow().deref());
+    });
 
     Ok(CNFFormula {
         clauses: all_clauses,
@@ -222,7 +316,6 @@ fn parse_content(
                 }
 
                 // Skip extremely large statements (> 100KB) as they will timeout anyway
-                // These are typically machine-generated formulas with depth > 3000
                 if statement.len() > 100_000 {
                     return Err(format!(
                         "Formula too large to parse ({} bytes, max 100KB)",
@@ -407,19 +500,27 @@ fn parse_fof_binary(input: &str) -> IResult<&str, FOFFormula> {
 /// Parse $true as a special atom
 fn parse_fof_true(input: &str) -> IResult<&str, FOFFormula> {
     let (input, _) = tag("$true")(input)?;
-    Ok((input, FOFFormula::Atom(Atom {
-        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-        args: vec![],
-    })))
+    let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
+    Ok((
+        input,
+        FOFFormula::Atom(Atom {
+            predicate: pred,
+            args: vec![],
+        }),
+    ))
 }
 
 /// Parse $false as a special atom
 fn parse_fof_false(input: &str) -> IResult<&str, FOFFormula> {
     let (input, _) = tag("$false")(input)?;
-    Ok((input, FOFFormula::Atom(Atom {
-        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-        args: vec![],
-    })))
+    let pred = with_ctx(|ctx| ctx.intern_predicate("$false", 0));
+    Ok((
+        input,
+        FOFFormula::Atom(Atom {
+            predicate: pred,
+            args: vec![],
+        }),
+    ))
 }
 
 /// Parse unary formula
@@ -457,10 +558,7 @@ fn parse_fof_infix_unary(input: &str) -> IResult<&str, FOFFormula> {
     let (input, right) = parse_term(input)?;
 
     // Create negated equality
-    let eq_pred = PredicateSymbol {
-        name: "=".to_string(),
-        arity: 2,
-    };
+    let eq_pred = with_ctx(|ctx| ctx.intern_predicate("=", 2));
     let eq_atom = Atom {
         predicate: eq_pred,
         args: vec![left, right],
@@ -491,13 +589,8 @@ fn parse_fof_quantified(input: &str) -> IResult<&str, FOFFormula> {
     // Build nested quantifiers for multiple variables
     let mut result = formula;
     for var_name in vars.into_iter().rev() {
-        result = FOFFormula::Quantified(
-            quantifier.clone(),
-            Variable {
-                name: var_name.to_string(),
-            },
-            Box::new(result),
-        );
+        let var = with_ctx(|ctx| ctx.intern_variable(var_name));
+        result = FOFFormula::Quantified(quantifier.clone(), var, Box::new(result));
     }
 
     Ok((input, result))
@@ -524,14 +617,11 @@ fn parse_formula_role(input: &str) -> IResult<&str, FormulaRole> {
 }
 
 /// Parse a name (atomic_word or integer)
-/// <name> ::= <atomic_word> | <integer>
-/// <atomic_word> ::= <lower_word> | <single_quoted>
 fn parse_name(input: &str) -> IResult<&str, &str> {
     alt((parse_single_quoted, parse_integer_name, parse_lower_word))(input)
 }
 
 /// Parse a single-quoted name
-/// Handles escape sequences: \' for quote, \\ for backslash, '' for quote
 fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
     if !input.starts_with('\'') {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -545,14 +635,11 @@ fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
 
     while pos < chars.len() {
         if chars[pos] == '\\' && pos + 1 < chars.len() {
-            // Backslash escape: \' or \\
             pos += 2;
         } else if chars[pos] == '\'' {
-            // Check if it's an escaped quote ''
             if pos + 1 < chars.len() && chars[pos + 1] == '\'' {
-                pos += 2; // Skip escaped quote
+                pos += 2;
             } else {
-                // Found closing quote - calculate byte position
                 let byte_pos: usize = chars[..=pos].iter().map(|c| c.len_utf8()).sum();
                 return Ok((&input[byte_pos..], &input[0..byte_pos]));
             }
@@ -571,7 +658,6 @@ fn parse_single_quoted(input: &str) -> IResult<&str, &str> {
 fn parse_integer_name(input: &str) -> IResult<&str, &str> {
     let (remaining, digits) = take_while1(|c: char| c.is_numeric())(input)?;
 
-    // Make sure it's not followed by more identifier characters
     if let Some(c) = remaining.chars().next() {
         if c.is_alphabetic() || c == '_' {
             return Err(nom::Err::Error(nom::error::Error::new(
@@ -585,7 +671,6 @@ fn parse_integer_name(input: &str) -> IResult<&str, &str> {
 }
 
 /// Parse a double-quoted string (distinct object)
-/// Handles escape sequences: \" for quote, \\ for backslash
 fn parse_double_quoted(input: &str) -> IResult<&str, &str> {
     if !input.starts_with('"') {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -599,10 +684,8 @@ fn parse_double_quoted(input: &str) -> IResult<&str, &str> {
 
     while pos < chars.len() {
         if chars[pos] == '\\' && pos + 1 < chars.len() {
-            // Backslash escape: \" or \\
             pos += 2;
         } else if chars[pos] == '"' {
-            // Found closing quote - calculate byte position
             let byte_pos: usize = chars[..=pos].iter().map(|c| c.len_utf8()).sum();
             return Ok((&input[byte_pos..], &input[0..byte_pos]));
         } else {
@@ -620,7 +703,6 @@ fn parse_double_quoted(input: &str) -> IResult<&str, &str> {
 fn strip_double_quotes(s: &str) -> String {
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
         let inner = &s[1..s.len() - 1];
-        // Unescape: \" -> ", \\ -> \
         let mut result = String::with_capacity(inner.len());
         let mut chars = inner.chars().peekable();
         while let Some(c) = chars.next() {
@@ -687,44 +769,47 @@ fn parse_clause(input: &str) -> IResult<&str, Clause> {
 /// Parse CNF formula (supports arbitrary parenthesization)
 fn parse_cnf_formula(input: &str) -> IResult<&str, Clause> {
     alt((
-        // Parenthesized formula - recursively parse what's inside
         delimited(
             tuple((char('('), multispace0)),
             parse_cnf_formula,
             tuple((multispace0, char(')'))),
         ),
-        // Disjunction of literals
         parse_cnf_disjunction,
     ))(input)
 }
 
 /// Get the name of a distinct object (without the '"' prefix)
-fn distinct_object_name(term: &Term) -> Option<&str> {
+fn distinct_object_name(term: &Term, interner: &Interner) -> Option<String> {
     match term {
-        Term::Constant(c) if c.name.starts_with('"') => Some(&c.name[1..]),
+        Term::Constant(c) => {
+            let name = interner.resolve_constant(c.id);
+            if name.starts_with('"') {
+                Some(name[1..].to_string())
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
 
 /// Check if a literal is trivially true or false due to distinct object semantics
-/// Returns: Some(true) if tautology, Some(false) if contradiction, None if unknown
-fn eval_distinct_object_equality(lit: &Literal) -> Option<bool> {
-    if !lit.atom.is_equality() || lit.atom.args.len() != 2 {
+fn eval_distinct_object_equality(lit: &Literal, interner: &Interner) -> Option<bool> {
+    if !lit.atom.is_equality(interner) || lit.atom.args.len() != 2 {
         return None;
     }
 
     let left = &lit.atom.args[0];
     let right = &lit.atom.args[1];
 
-    // Both must be distinct objects for special handling
-    if let (Some(left_name), Some(right_name)) = (distinct_object_name(left), distinct_object_name(right)) {
+    if let (Some(left_name), Some(right_name)) =
+        (distinct_object_name(left, interner), distinct_object_name(right, interner))
+    {
         let same = left_name == right_name;
-        // For positive equality: "A" = "B" is false if different, true if same
-        // For negative equality: "A" != "B" is true if different, false if same
         if lit.polarity {
-            Some(same) // positive equality: true iff same
+            Some(same)
         } else {
-            Some(!same) // negative equality: true iff different
+            Some(!same)
         }
     } else {
         None
@@ -732,76 +817,93 @@ fn eval_distinct_object_equality(lit: &Literal) -> Option<bool> {
 }
 
 /// Parse CNF disjunction
-/// Handles $true/$false and distinct object equalities
 fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
-    separated_list1(tuple((multispace0, char('|'), multispace0)), parse_literal)(input)
-        .map(|(remaining, literals)| {
-            // Check for tautology conditions
-            let is_tautology = literals.iter().any(|lit| {
-                // $true makes clause a tautology
-                if lit.polarity && lit.atom.predicate.name == "$true" {
-                    return true;
-                }
-                // Distinct object inequality like "A" != "B" (different names) is always true
-                if let Some(true) = eval_distinct_object_equality(lit) {
-                    return true;
-                }
-                false
+    separated_list1(tuple((multispace0, char('|'), multispace0)), parse_literal)(input).map(
+        |(remaining, literals)| {
+            // Get interner reference
+            let (is_tautology, filtered) = with_ctx(|ctx| {
+                let interner = ctx.interner.borrow();
+
+                let is_tautology = literals.iter().any(|lit| {
+                    if lit.polarity {
+                        let pred_name = interner.resolve_predicate(lit.atom.predicate.id);
+                        if pred_name == "$true" {
+                            return true;
+                        }
+                    }
+                    if let Some(true) = eval_distinct_object_equality(lit, &interner) {
+                        return true;
+                    }
+                    false
+                });
+
+                let filtered: Vec<Literal> = literals
+                    .into_iter()
+                    .filter(|lit| {
+                        if lit.polarity {
+                            let pred_name = interner.resolve_predicate(lit.atom.predicate.id);
+                            if pred_name == "$false" {
+                                return false;
+                            }
+                        }
+                        if let Some(false) = eval_distinct_object_equality(lit, &interner) {
+                            return false;
+                        }
+                        true
+                    })
+                    .collect();
+
+                (is_tautology, filtered)
             });
 
             if is_tautology {
-                return (remaining, Clause::new(vec![Literal::positive(Atom {
-                    predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-                    args: vec![],
-                })]));
+                let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
+                return (
+                    remaining,
+                    Clause::new(vec![Literal::positive(Atom {
+                        predicate: pred,
+                        args: vec![],
+                    })]),
+                );
             }
 
-            // Filter out always-false literals
-            let filtered: Vec<Literal> = literals
-                .into_iter()
-                .filter(|lit| {
-                    // Remove $false
-                    if lit.polarity && lit.atom.predicate.name == "$false" {
-                        return false;
-                    }
-                    // Remove distinct object equalities that are false (e.g., "A" = "B")
-                    if let Some(false) = eval_distinct_object_equality(lit) {
-                        return false;
-                    }
-                    true
-                })
-                .collect();
-
             (remaining, Clause::new(filtered))
-        })
+        },
+    )
 }
 
-/// Parse $true as a literal (always true - makes clause a tautology)
+/// Parse $true as a literal
 fn parse_cnf_true(input: &str) -> IResult<&str, Literal> {
     let (input, _) = tag("$true")(input)?;
-    Ok((input, Literal::positive(Atom {
-        predicate: PredicateSymbol { name: "$true".to_string(), arity: 0 },
-        args: vec![],
-    })))
+    let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
+    Ok((
+        input,
+        Literal::positive(Atom {
+            predicate: pred,
+            args: vec![],
+        }),
+    ))
 }
 
-/// Parse $false as a literal (always false - contributes nothing to clause)
+/// Parse $false as a literal
 fn parse_cnf_false(input: &str) -> IResult<&str, Literal> {
     let (input, _) = tag("$false")(input)?;
-    Ok((input, Literal::positive(Atom {
-        predicate: PredicateSymbol { name: "$false".to_string(), arity: 0 },
-        args: vec![],
-    })))
+    let pred = with_ctx(|ctx| ctx.intern_predicate("$false", 0));
+    Ok((
+        input,
+        Literal::positive(Atom {
+            predicate: pred,
+            args: vec![],
+        }),
+    ))
 }
 
 /// Parse a literal
 fn parse_literal(input: &str) -> IResult<&str, Literal> {
     let (input, _) = multispace0(input)?;
     alt((
-        // $true and $false (before other atoms)
         parse_cnf_true,
         parse_cnf_false,
-        // ~$true and ~$false
         map(
             preceded(tuple((char('~'), multispace0)), parse_cnf_true),
             |lit| Literal::negative(lit.atom),
@@ -810,14 +912,10 @@ fn parse_literal(input: &str) -> IResult<&str, Literal> {
             preceded(tuple((char('~'), multispace0)), parse_cnf_false),
             |lit| Literal::negative(lit.atom),
         ),
-        // ~atom
-        map(
-            preceded(tuple((char('~'), multispace0)), parse_atom),
-            |atom| Literal::negative(atom),
-        ),
-        // term != term
+        map(preceded(tuple((char('~'), multispace0)), parse_atom), |atom| {
+            Literal::negative(atom)
+        }),
         parse_negative_equality,
-        // atom
         map(parse_atom, |atom| Literal::positive(atom)),
     ))(input)
 }
@@ -830,10 +928,7 @@ fn parse_negative_equality(input: &str) -> IResult<&str, Literal> {
     let (input, _) = multispace0(input)?;
     let (input, right) = parse_term(input)?;
 
-    let eq_pred = PredicateSymbol {
-        name: "=".to_string(),
-        arity: 2,
-    };
+    let eq_pred = with_ctx(|ctx| ctx.intern_predicate("=", 2));
 
     Ok((
         input,
@@ -857,10 +952,7 @@ fn parse_equality(input: &str) -> IResult<&str, Atom> {
     let (input, _) = multispace0(input)?;
     let (input, right) = parse_term(input)?;
 
-    let eq_pred = PredicateSymbol {
-        name: "=".to_string(),
-        arity: 2,
-    };
+    let eq_pred = with_ctx(|ctx| ctx.intern_predicate("=", 2));
 
     Ok((
         input,
@@ -876,31 +968,26 @@ fn parse_predicate(input: &str) -> IResult<&str, Atom> {
     let (input, name) = parse_identifier(input)?;
     let name = strip_quotes(name);
 
-    // Check if it has arguments
     if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('(')(input) {
         let (input, args) =
             separated_list0(tuple((multispace0, char(','), multispace0)), parse_term)(input)?;
         let (input, _) = char(')')(input)?;
 
+        let pred = with_ctx(|ctx| ctx.intern_predicate(&name, args.len()));
+
         Ok((
             input,
             Atom {
-                predicate: PredicateSymbol {
-                    name,
-                    arity: args.len(),
-                },
+                predicate: pred,
                 args,
             },
         ))
     } else {
-        // Propositional atom
+        let pred = with_ctx(|ctx| ctx.intern_predicate(&name, 0));
         Ok((
             input,
             Atom {
-                predicate: PredicateSymbol {
-                    name,
-                    arity: 0,
-                },
+                predicate: pred,
                 args: vec![],
             },
         ))
@@ -917,17 +1004,13 @@ fn parse_term(input: &str) -> IResult<&str, Term> {
     ))(input)
 }
 
-/// Parse a distinct object term (double-quoted string like "Apple")
-/// Distinct objects are prefixed with '"' to mark them for special equality handling
+/// Parse a distinct object term
 fn parse_distinct_object_term(input: &str) -> IResult<&str, Term> {
     let (input, quoted) = parse_double_quoted(input)?;
     let inner = strip_double_quotes(quoted);
-    // Prefix with '"' to mark as distinct object
     let name = format!("\"{}", inner);
-    Ok((
-        input,
-        Term::Constant(Constant { name }),
-    ))
+    let constant = with_ctx(|ctx| ctx.intern_constant(&name));
+    Ok((input, Term::Constant(constant)))
 }
 
 /// Parse a function term
@@ -938,42 +1021,26 @@ fn parse_function_term(input: &str) -> IResult<&str, Term> {
         separated_list1(tuple((multispace0, char(','), multispace0)), parse_term)(input)?;
     let (input, _) = char(')')(input)?;
 
-    Ok((
-        input,
-        Term::Function(
-            FunctionSymbol {
-                name,
-                arity: args.len(),
-            },
-            args,
-        ),
-    ))
+    let func = with_ctx(|ctx| ctx.intern_function(&name, args.len()));
+
+    Ok((input, Term::Function(func, args)))
 }
 
 /// Parse a variable term
 fn parse_variable_term(input: &str) -> IResult<&str, Term> {
     let (input, name) = parse_uppercase_ident(input)?;
-    Ok((
-        input,
-        Term::Variable(Variable {
-            name: name.to_string(),
-        }),
-    ))
+    let var = with_ctx(|ctx| ctx.intern_variable(name));
+    Ok((input, Term::Variable(var)))
 }
 
 /// Parse a constant term
 fn parse_constant_term(input: &str) -> IResult<&str, Term> {
     let (input, name) = parse_functor_name(input)?;
-    Ok((
-        input,
-        Term::Constant(Constant {
-            name,
-        }),
-    ))
+    let constant = with_ctx(|ctx| ctx.intern_constant(&name));
+    Ok((input, Term::Constant(constant)))
 }
 
-/// Parse an identifier (atomic_word)
-/// <atomic_word> ::= <lower_word> | <single_quoted>
+/// Parse an identifier
 fn parse_identifier(input: &str) -> IResult<&str, &str> {
     alt((
         parse_single_quoted,
@@ -981,7 +1048,7 @@ fn parse_identifier(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
-/// Parse a lowercase identifier (must start with lowercase, then any alphanumeric or underscore)
+/// Parse a lowercase identifier
 fn parse_lowercase_ident(input: &str) -> IResult<&str, &str> {
     use nom::bytes::complete::take_while;
     use nom::character::complete::satisfy;
@@ -994,11 +1061,10 @@ fn parse_lowercase_ident(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
-/// Strip quotes from a single-quoted string and unescape content
+/// Strip quotes from a single-quoted string
 fn strip_quotes(s: &str) -> String {
     if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
         let inner = &s[1..s.len() - 1];
-        // Unescape: \' -> ', \\ -> \, '' -> '
         let mut result = String::with_capacity(inner.len());
         let mut chars = inner.chars().peekable();
         while let Some(c) = chars.next() {
@@ -1012,7 +1078,7 @@ fn strip_quotes(s: &str) -> String {
                 result.push(c);
             } else if c == '\'' {
                 if chars.peek() == Some(&'\'') {
-                    chars.next(); // Skip second quote
+                    chars.next();
                 }
                 result.push('\'');
             } else {
@@ -1025,8 +1091,7 @@ fn strip_quotes(s: &str) -> String {
     }
 }
 
-/// Parse a functor name (for functions and constants)
-/// Can be a lowercase identifier or a single-quoted string
+/// Parse a functor name
 fn parse_functor_name(input: &str) -> IResult<&str, String> {
     alt((
         map(parse_single_quoted, |s| strip_quotes(s)),
@@ -1034,13 +1099,11 @@ fn parse_functor_name(input: &str) -> IResult<&str, String> {
     ))(input)
 }
 
-/// Parse an uppercase identifier (starts with uppercase letter)
+/// Parse an uppercase identifier
 fn parse_uppercase_ident(input: &str) -> IResult<&str, &str> {
-    // Match an identifier that starts with an uppercase letter
     let mut chars = input.chars();
     if let Some(first) = chars.next() {
         if first.is_uppercase() {
-            // Find the end of the identifier
             let mut end = 1;
             while let Some(ch) = chars.next() {
                 if ch.is_alphanumeric() || ch == '_' {
@@ -1058,36 +1121,26 @@ fn parse_uppercase_ident(input: &str) -> IResult<&str, &str> {
     )))
 }
 
-/// Parse annotations (source and optional info)
-/// <annotations> ::= ,<source><optional_info> | <nothing>
+/// Parse annotations
 fn parse_annotations(input: &str) -> IResult<&str, ()> {
-    // Try to parse comma followed by source
     if let Ok((input, _)) = char::<_, nom::error::Error<_>>(',')(input) {
         let (input, _) = multispace0(input)?;
-
-        // Source can be a term or a list
         let (input, _) = alt((
             map(parse_general_term, |_| ()),
             map(parse_general_list, |_| ()),
         ))(input)?;
-
-        // Optionally parse additional info (comma followed by another term or list)
         let (input, _) = parse_optional_info(input)?;
-
         Ok((input, ()))
     } else {
-        // No annotations
         Ok((input, ()))
     }
 }
 
-/// Parse optional info after source
+/// Parse optional info
 fn parse_optional_info(input: &str) -> IResult<&str, ()> {
-    // Try to parse comma followed by more info
     if let Ok((input, _)) =
         tuple::<_, _, nom::error::Error<_>, _>((multispace0, char(','), multispace0))(input)
     {
-        // Could be a list or another term
         let (input, _) = alt((
             map(parse_general_list, |_| ()),
             map(parse_general_term, |_| ()),
@@ -1098,27 +1151,24 @@ fn parse_optional_info(input: &str) -> IResult<&str, ()> {
     }
 }
 
-/// Parse a general term (used in annotations)
+/// Parse a general term
 fn parse_general_term(input: &str) -> IResult<&str, ()> {
     alt((
-        // Function-like term: name(args)
         map(
             tuple((parse_general_data, char('('), parse_general_args, char(')'))),
             |_| (),
         ),
-        // Simple term
         map(parse_general_data, |_| ()),
     ))(input)
 }
 
-/// Parse general data (identifier or quoted string)
+/// Parse general data
 fn parse_general_data(input: &str) -> IResult<&str, &str> {
     alt((parse_single_quoted, parse_identifier))(input)
 }
 
 /// Parse general arguments
 fn parse_general_args(input: &str) -> IResult<&str, ()> {
-    // Skip arbitrary argument list
     let mut depth = 0;
     let mut pos = 0;
     let chars: Vec<char> = input.chars().collect();
@@ -1133,11 +1183,10 @@ fn parse_general_args(input: &str) -> IResult<&str, ()> {
                 depth -= 1;
             }
             '\'' => {
-                // Skip quoted string
                 pos += 1;
                 while pos < chars.len() && chars[pos] != '\'' {
                     if pos + 1 < chars.len() && chars[pos] == '\'' && chars[pos + 1] == '\'' {
-                        pos += 2; // Skip escaped quote
+                        pos += 2;
                     } else {
                         pos += 1;
                     }
@@ -1151,11 +1200,10 @@ fn parse_general_args(input: &str) -> IResult<&str, ()> {
     Ok((&input[pos..], ()))
 }
 
-/// Parse a general list [item1, item2, ...]
+/// Parse a general list
 fn parse_general_list(input: &str) -> IResult<&str, ()> {
     let (input, _) = char('[')(input)?;
 
-    // Skip list contents
     let mut depth = 1;
     let mut pos = 0;
     let chars: Vec<char> = input.chars().collect();
@@ -1165,7 +1213,6 @@ fn parse_general_list(input: &str) -> IResult<&str, ()> {
             '[' => depth += 1,
             ']' => depth -= 1,
             '\'' => {
-                // Skip quoted string
                 pos += 1;
                 while pos < chars.len() && chars[pos] != '\'' {
                     if pos + 1 < chars.len() && chars[pos] == '\'' && chars[pos + 1] == '\'' {
@@ -1189,44 +1236,40 @@ mod tests {
 
     #[test]
     fn test_parse_simple_clause() {
-        let input = "cnf(test, axiom, p(a)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses.len(), 1);
-        assert_eq!(result.clauses[0].literals.len(), 1);
+        let result = parse_tptp("cnf(test, axiom, p(a)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+        assert_eq!(result.formula.clauses[0].literals.len(), 1);
     }
 
     #[test]
     fn test_parse_equality() {
-        let input = "cnf(test, axiom, X = f(a)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses.len(), 1);
-        assert_eq!(result.clauses[0].literals.len(), 1);
-        assert!(result.clauses[0].literals[0].atom.is_equality());
+        let result = parse_tptp("cnf(test, axiom, X = f(a)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+        assert_eq!(result.formula.clauses[0].literals.len(), 1);
+        assert!(result.formula.clauses[0].literals[0]
+            .atom
+            .is_equality(&result.interner));
     }
 
     #[test]
     fn test_parse_negation() {
-        let input = "cnf(test, axiom, ~p(X) | q(X)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses.len(), 1);
-        assert_eq!(result.clauses[0].literals.len(), 2);
-        assert!(!result.clauses[0].literals[0].polarity);
-        assert!(result.clauses[0].literals[1].polarity);
+        let result = parse_tptp("cnf(test, axiom, ~p(X) | q(X)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+        assert_eq!(result.formula.clauses[0].literals.len(), 2);
+        assert!(!result.formula.clauses[0].literals[0].polarity);
+        assert!(result.formula.clauses[0].literals[1].polarity);
     }
 
     #[test]
     fn test_parse_fof_conjunction() {
-        let input = "fof(test, axiom, p(a) & q(b)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        // Should produce two unit clauses after CNF conversion
-        assert_eq!(result.clauses.len(), 2);
+        let result = parse_tptp("fof(test, axiom, p(a) & q(b)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses.len(), 2);
     }
 
     #[test]
     fn test_parse_fof_quantified() {
-        let input = "fof(test, axiom, ![X]: p(X)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses.len(), 1);
+        let result = parse_tptp("fof(test, axiom, ![X]: p(X)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
     }
 
     #[test]
@@ -1241,43 +1284,40 @@ mod tests {
     fn test_clause_role_parsing() {
         use crate::fol::ClauseRole;
 
-        // Test CNF axiom role
-        let input = "cnf(c1, axiom, p(a)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses[0].role, ClauseRole::Axiom);
+        let result = parse_tptp("cnf(c1, axiom, p(a)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses[0].role, ClauseRole::Axiom);
 
-        // Test CNF negated_conjecture role
-        let input = "cnf(c2, negated_conjecture, ~p(a)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
+        let result = parse_tptp("cnf(c2, negated_conjecture, ~p(a)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses[0].role, ClauseRole::NegatedConjecture);
 
-        // Test CNF hypothesis role
-        let input = "cnf(c3, hypothesis, q(X)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
+        let result = parse_tptp("cnf(c3, hypothesis, q(X)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses[0].role, ClauseRole::Hypothesis);
     }
 
     #[test]
     fn test_fof_role_propagation() {
         use crate::fol::ClauseRole;
 
-        // Test FOF axiom role
-        let input = "fof(ax1, axiom, p(a) & q(b)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        // All clauses from an axiom should have Axiom role
-        for clause in &result.clauses {
+        let result = parse_tptp("fof(ax1, axiom, p(a) & q(b)).", &[], None).unwrap();
+        for clause in &result.formula.clauses {
             assert_eq!(clause.role, ClauseRole::Axiom);
         }
 
-        // Test FOF conjecture role (should become NegatedConjecture)
-        let input = "fof(conj, conjecture, p(a)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        // Negated conjecture clauses should have NegatedConjecture role
-        assert_eq!(result.clauses[0].role, ClauseRole::NegatedConjecture);
+        let result = parse_tptp("fof(conj, conjecture, p(a)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses[0].role, ClauseRole::NegatedConjecture);
 
-        // Test FOF hypothesis role
-        let input = "fof(hyp1, hypothesis, r(X)).";
-        let result = parse_tptp(input, &[], None).unwrap();
-        assert_eq!(result.clauses[0].role, ClauseRole::Hypothesis);
+        let result = parse_tptp("fof(hyp1, hypothesis, r(X)).", &[], None).unwrap();
+        assert_eq!(result.formula.clauses[0].role, ClauseRole::Hypothesis);
+    }
+
+    #[test]
+    fn test_interner_populated() {
+        let result = parse_tptp("cnf(test, axiom, p(X, f(a))).", &[], None).unwrap();
+
+        // Check that interner has correct symbols
+        assert!(result.interner.get_variable("X").is_some());
+        assert!(result.interner.get_constant("a").is_some());
+        assert!(result.interner.get_function("f").is_some());
+        assert!(result.interner.get_predicate("p").is_some());
     }
 }

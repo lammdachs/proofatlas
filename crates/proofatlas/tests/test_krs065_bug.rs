@@ -12,17 +12,17 @@ fn test_simple_resolution_proof() {
         cnf(c1, axiom, ~cowlNothing(V)).
         cnf(c2, axiom, cowlNothing(sk0)).
     ";
-    
-    let formula = parse_tptp(tptp, &[], None).expect("parse failed");
-    println!("Parsed {} clauses", formula.clauses.len());
-    for (i, c) in formula.clauses.iter().enumerate() {
+
+    let parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+    println!("Parsed {} clauses", parsed.formula.clauses.len());
+    for (i, c) in parsed.formula.clauses.iter().enumerate() {
         println!("  [{}] {}", i, c);
     }
-    
+
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
-    
-    let (result, _, _) = saturate(formula, config, selector);
+
+    let (result, _, _, _) = saturate(parsed.formula, config, selector, parsed.interner);
 
     match &result {
         SaturationResult::Proof(proof) => {
@@ -51,16 +51,16 @@ fn test_with_duplicate_clause() {
         cnf(c7, axiom, cowlNothing(sk0)).
     ";
 
-    let formula = parse_tptp(tptp, &[], None).expect("parse failed");
-    println!("Parsed {} clauses", formula.clauses.len());
-    for (i, c) in formula.clauses.iter().enumerate() {
+    let parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+    println!("Parsed {} clauses", parsed.formula.clauses.len());
+    for (i, c) in parsed.formula.clauses.iter().enumerate() {
         println!("  [{}] {}", i, c);
     }
 
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
 
-    let (result, _, _) = saturate(formula, config, selector);
+    let (result, _, _, _) = saturate(parsed.formula, config, selector, parsed.interner);
 
     match &result {
         SaturationResult::Proof(proof) => {
@@ -95,29 +95,29 @@ fn test_with_precloned_clauses() {
         cnf(c5, axiom, cowlNothing(sk0)).
         cnf(c7, axiom, cowlNothing(sk0)).
     ";
-    
-    let mut formula = parse_tptp(tptp, &[], None).expect("parse failed");
-    
+
+    let mut parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+
     // Assign IDs like Python's add_clauses_from_tptp does
-    for (i, clause) in formula.clauses.iter_mut().enumerate() {
+    for (i, clause) in parsed.formula.clauses.iter_mut().enumerate() {
         clause.id = Some(i);
     }
-    
+
     println!("After assigning IDs:");
-    for (i, c) in formula.clauses.iter().enumerate() {
+    for (i, c) in parsed.formula.clauses.iter().enumerate() {
         println!("  [{}] {} (id={:?})", i, c, c.id);
     }
-    
+
     // Clone like Python does
-    let cloned_clauses: Vec<_> = formula.clauses.clone();
+    let cloned_clauses: Vec<_> = parsed.formula.clauses.clone();
     println!("Cloned {} clauses", cloned_clauses.len());
-    
+
     let config = SaturationConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
-    
-    let state = SaturationState::new(cloned_clauses, config, selector);
-    let (result, _, _) = state.saturate();
-    
+
+    let state = SaturationState::new(cloned_clauses, config, selector, parsed.interner);
+    let (result, _, _, _) = state.saturate();
+
     match &result {
         SaturationResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());

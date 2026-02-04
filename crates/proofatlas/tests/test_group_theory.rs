@@ -12,7 +12,7 @@ fn create_selector() -> Box<dyn ClauseSelector> {
 
 /// Run a group theory problem and return the result
 fn run_group_problem(problem_file: &str, timeout_secs: u64) -> SaturationResult {
-    let formula = parse_tptp_file(problem_file, &[], None).expect("Failed to parse TPTP file");
+    let parsed = parse_tptp_file(problem_file, &[], None).expect("Failed to parse TPTP file");
 
     let config = SaturationConfig {
         max_clauses: 10000,
@@ -22,8 +22,8 @@ fn run_group_problem(problem_file: &str, timeout_secs: u64) -> SaturationResult 
         ..Default::default()
     };
 
-    let state = SaturationState::new(formula.clauses, config, create_selector());
-    let (result, _, _) = state.saturate();
+    let state = SaturationState::new(parsed.formula.clauses, config, create_selector(), parsed.interner);
+    let (result, _, _, _) = state.saturate();
     result
 }
 

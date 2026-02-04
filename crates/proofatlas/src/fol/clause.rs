@@ -1,5 +1,6 @@
 //! Clauses and CNF formulas
 
+use super::interner::Interner;
 use super::literal::Literal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -103,8 +104,8 @@ impl Clause {
         self.literals.is_empty()
     }
 
-    /// Check if this clause is a tautology
-    pub fn is_tautology(&self) -> bool {
+    /// Check if this clause is a tautology (needs interner for equality check)
+    pub fn is_tautology(&self, interner: &Interner) -> bool {
         // Check for complementary literals
         for i in 0..self.literals.len() {
             for j in (i + 1)..self.literals.len() {
@@ -118,7 +119,7 @@ impl Clause {
 
         // Check for reflexive equality
         for lit in &self.literals {
-            if lit.polarity && lit.atom.is_equality() {
+            if lit.polarity && lit.atom.is_equality(interner) {
                 if let [ref t1, ref t2] = lit.atom.args.as_slice() {
                     if t1 == t2 {
                         return true;
@@ -169,6 +170,39 @@ impl Clause {
     }
 }
 
+impl Clause {
+    /// Format this clause with an interner for name resolution
+    pub fn display<'a>(&'a self, interner: &'a Interner) -> ClauseDisplay<'a> {
+        ClauseDisplay {
+            clause: self,
+            interner,
+        }
+    }
+}
+
+/// Display wrapper for Clause that includes an interner for name resolution
+pub struct ClauseDisplay<'a> {
+    clause: &'a Clause,
+    interner: &'a Interner,
+}
+
+impl<'a> fmt::Display for ClauseDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.clause.is_empty() {
+            write!(f, "⊥")
+        } else {
+            for (i, lit) in self.clause.literals.iter().enumerate() {
+                if i > 0 {
+                    write!(f, " ∨ ")?;
+                }
+                write!(f, "{}", lit.display(self.interner))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+// Display implementation that shows IDs (for debugging without interner)
 impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_empty() {

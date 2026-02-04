@@ -77,9 +77,9 @@ impl ProofAtlasWasm {
         let cnf = parse_tptp(tptp_input, &[], None)
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
-        web_sys::console::log_1(&format!("Parsed {} clauses", cnf.clauses.len()).into());
+        web_sys::console::log_1(&format!("Parsed {} clauses", cnf.formula.clauses.len()).into());
 
-        let initial_clauses = cnf.clauses.len();
+        let initial_clauses = cnf.formula.clauses.len();
         let start_time = web_sys::window()
             .unwrap()
             .performance()
@@ -121,8 +121,8 @@ impl ProofAtlasWasm {
         };
 
         // Run saturation
-        let state = SaturationState::new(cnf.clauses, config, clause_selector);
-        let (result, profile, sat_trace) = state.saturate();
+        let state = SaturationState::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
+        let (result, profile, sat_trace, _interner) = state.saturate();
 
         web_sys::console::log_1(&"Saturation completed".into());
 
@@ -246,7 +246,7 @@ impl ProofAtlasWasm {
     pub fn validate_tptp(&self, input: &str) -> Result<String, JsError> {
         // Just parse and return success/error for validation
         match parse_tptp(input, &[], None) {
-            Ok(cnf) => Ok(format!("Valid TPTP input with {} clauses", cnf.clauses.len())),
+            Ok(cnf) => Ok(format!("Valid TPTP input with {} clauses", cnf.formula.clauses.len())),
             Err(e) => Err(JsError::new(&format!("Parse error: {}", e))),
         }
     }

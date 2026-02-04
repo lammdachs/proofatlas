@@ -116,23 +116,53 @@ impl Default for AgeWeightSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Atom, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
 
     /// Create a clause with a predicate of given arity (number of variable arguments).
-    fn make_clause(predicate_name: &str, num_args: usize) -> Clause {
+    fn make_clause(ctx: &mut TestContext, predicate_name: &str, num_args: usize) -> Clause {
+        // Build args first to avoid nested mutable borrows
         let args: Vec<Term> = (0..num_args)
             .map(|j| {
-                Term::Variable(Variable {
-                    name: format!("X{}", j),
-                })
+                let id = ctx.interner.intern_variable(&format!("X{}", j));
+                Term::Variable(Variable::new(id))
             })
             .collect();
 
+        let pred = ctx.pred(predicate_name, num_args as u8);
         let atom = Atom {
-            predicate: PredicateSymbol {
-                name: predicate_name.to_string(),
-                arity: num_args,
-            },
+            predicate: pred,
             args,
         };
 
@@ -140,26 +170,16 @@ mod tests {
     }
 
     /// Create a clause with nested functions to increase weight.
-    fn make_heavy_clause(depth: usize) -> Clause {
+    fn make_heavy_clause(ctx: &mut TestContext, depth: usize) -> Clause {
         // Build nested function: f(f(f(...f(X)...)))
-        let mut term = Term::Variable(Variable {
-            name: "X".to_string(),
-        });
+        let mut term = ctx.var("X");
         for _ in 0..depth {
-            term = Term::Function(
-                FunctionSymbol {
-                    name: "f".to_string(),
-                    arity: 1,
-                },
-                vec![term],
-            );
+            term = ctx.func("f", vec![term]);
         }
 
+        let pred = ctx.pred("P", 1);
         let atom = Atom {
-            predicate: PredicateSymbol {
-                name: "P".to_string(),
-                arity: 1,
-            },
+            predicate: pred,
             args: vec![term],
         };
 
@@ -168,11 +188,12 @@ mod tests {
 
     #[test]
     fn test_age_selection() {
+        let mut ctx = TestContext::new();
         let mut selector = AgeWeightSelector::new(1.0); // Always select by age
         let clauses = vec![
-            make_clause("P", 3),
-            make_clause("Q", 1),
-            make_clause("R", 2),
+            make_clause(&mut ctx, "P", 3),
+            make_clause(&mut ctx, "Q", 1),
+            make_clause(&mut ctx, "R", 2),
         ];
         let mut unprocessed: VecDeque<usize> = (0..3).collect();
 
@@ -184,11 +205,12 @@ mod tests {
 
     #[test]
     fn test_weight_selection() {
+        let mut ctx = TestContext::new();
         let mut selector = AgeWeightSelector::new(0.0); // Always select by weight
         let clauses = vec![
-            make_heavy_clause(5), // Heavy: P(f(f(f(f(f(X)))))) = 1 + 6 = 7 symbols
-            make_clause("Q", 0),  // Light: Q() = 1 symbol
-            make_heavy_clause(2), // Medium: P(f(f(X))) = 1 + 3 = 4 symbols
+            make_heavy_clause(&mut ctx, 5), // Heavy: P(f(f(f(f(f(X)))))) = 1 + 6 = 7 symbols
+            make_clause(&mut ctx, "Q", 0),  // Light: Q() = 1 symbol
+            make_heavy_clause(&mut ctx, 2), // Medium: P(f(f(X))) = 1 + 3 = 4 symbols
         ];
         let mut unprocessed: VecDeque<usize> = (0..3).collect();
 
@@ -207,16 +229,18 @@ mod tests {
 
     #[test]
     fn test_clause_weight() {
+        let mut ctx = TestContext::new();
+
         // P(X, Y) = predicate(1) + var(1) + var(1) = 3
-        let c1 = make_clause("P", 2);
+        let c1 = make_clause(&mut ctx, "P", 2);
         assert_eq!(AgeWeightSelector::clause_weight(&c1), 3);
 
         // P(f(X)) = predicate(1) + function(1) + var(1) = 3
-        let c2 = make_heavy_clause(1);
+        let c2 = make_heavy_clause(&mut ctx, 1);
         assert_eq!(AgeWeightSelector::clause_weight(&c2), 3);
 
         // P(f(f(X))) = predicate(1) + function(1) + function(1) + var(1) = 4
-        let c3 = make_heavy_clause(2);
+        let c3 = make_heavy_clause(&mut ctx, 2);
         assert_eq!(AgeWeightSelector::clause_weight(&c3), 4);
     }
 }
