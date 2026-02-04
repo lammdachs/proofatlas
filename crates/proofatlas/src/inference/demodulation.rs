@@ -41,7 +41,7 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    derivation: Derivation::Demodulation { demodulator: unit_idx, target: target_idx },
+                    derivation: Derivation::demodulation(unit_idx, target_idx),
                     conclusion: new_clause,
                 });
             }
@@ -52,7 +52,7 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    derivation: Derivation::Demodulation { demodulator: unit_idx, target: target_idx },
+                    derivation: Derivation::demodulation(unit_idx, target_idx),
                     conclusion: new_clause,
                 });
             }

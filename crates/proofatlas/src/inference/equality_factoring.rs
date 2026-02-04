@@ -104,7 +104,7 @@ pub fn equality_factoring(
                     let conclusion = Clause::new(new_literals);
 
                     results.push(InferenceResult {
-                        derivation: Derivation::EqualityFactoring { parent: idx },
+                        derivation: Derivation::equality_factoring(idx),
                         conclusion,
                     });
                 }

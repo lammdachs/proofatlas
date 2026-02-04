@@ -187,6 +187,10 @@ pub struct SaturationState {
     simplification_rules: Vec<Box<dyn SimplificationRule>>,
     /// Generating inference rules (resolution, superposition, factoring, etc.)
     generating_rules: Vec<Box<dyn GeneratingInferenceRule>>,
+
+    // === Event Log ===
+    /// Raw event log capturing all state changes
+    event_log: Vec<ProofStateChange>,
 }
 
 impl SaturationState {
@@ -238,7 +242,7 @@ impl SaturationState {
             }
 
             // Record derivation for input clause
-            derivations.push(Some(Derivation::Input));
+            derivations.push(Some(Derivation::input()));
 
             clauses.push(clause);
             new.push_back(clause_idx);
@@ -266,6 +270,15 @@ impl SaturationState {
             Box::new(SuperpositionRule::new()),
         ];
 
+        // Build initial event log with input clauses
+        let mut event_log = Vec::new();
+        for idx in 0..clause_idx {
+            event_log.push(ProofStateChange::AddN {
+                clause: clauses[idx].clone(),
+                derivation: Derivation::input(),
+            });
+        }
+
         SaturationState {
             clauses,
             derivations,
@@ -283,6 +296,7 @@ impl SaturationState {
             current_generation: Vec::new(),
             simplification_rules,
             generating_rules,
+            event_log,
         }
     }
 
@@ -353,6 +367,11 @@ impl SaturationState {
     /// Get the iterations (for external trace building)
     pub fn iterations(&self) -> &[SaturationStep] {
         &self.iterations
+    }
+
+    /// Get the event log (raw state changes)
+    pub fn event_log(&self) -> &[ProofStateChange] {
+        &self.event_log
     }
 
     /// Flush accumulated simplification/generation events into a completed iteration.
@@ -428,9 +447,9 @@ impl SaturationState {
         }
     }
 
-    /// Apply a single ProofStateChange and return any follow-up actions needed
+    /// Apply a single ProofStateChange, update internal state, and record to event log
     fn apply_change(&mut self, change: ProofStateChange, profile: &mut Option<SaturationProfile>) {
-        match change {
+        match &change {
             ProofStateChange::AddN { clause, derivation } => {
                 // Check clause size limit
                 if clause.literals.len() > self.config.max_clause_size {
@@ -451,34 +470,46 @@ impl SaturationState {
                 }
 
                 self.clause_memory_bytes += clause_with_id.memory_bytes();
-                self.clauses.push(clause_with_id);
-                self.derivations.push(Some(derivation));
+                self.clauses.push(clause_with_id.clone());
+                self.derivations.push(Some(derivation.clone()));
                 self.new.push_back(new_idx);
+
+                // Record event with the actual stored clause
+                self.event_log.push(ProofStateChange::AddN {
+                    clause: clause_with_id,
+                    derivation: derivation.clone(),
+                });
 
                 if let Some(p) = profile.as_mut() {
                     p.clauses_added += 1;
                 }
             }
-            ProofStateChange::RemoveN { clause_idx: _ } => {
-                // Clause is just not transferred - no action needed
+            ProofStateChange::RemoveN { clause_idx: _, rule_name: _ } => {
+                // Clause is just not transferred - no action needed for state
+                // Record event
+                self.event_log.push(change);
             }
             ProofStateChange::AddU { clause_idx } => {
-                self.unprocessed.push_back(clause_idx);
-                self.notify_add_unprocessed(clause_idx);
+                self.unprocessed.push_back(*clause_idx);
+                self.notify_add_unprocessed(*clause_idx);
+                self.event_log.push(change);
             }
-            ProofStateChange::RemoveU { clause_idx } => {
-                if self.unprocessed.iter().any(|&x| x == clause_idx) {
-                    self.unprocessed.retain(|&x| x != clause_idx);
-                    self.notify_remove_unprocessed(clause_idx);
+            ProofStateChange::RemoveU { clause_idx, rule_name: _ } => {
+                if self.unprocessed.iter().any(|&x| x == *clause_idx) {
+                    self.unprocessed.retain(|&x| x != *clause_idx);
+                    self.notify_remove_unprocessed(*clause_idx);
+                    self.event_log.push(change);
                 }
             }
             ProofStateChange::AddP { clause_idx } => {
-                self.processed.insert(clause_idx);
-                self.notify_add_processed(clause_idx);
+                self.processed.insert(*clause_idx);
+                self.notify_add_processed(*clause_idx);
+                self.event_log.push(change);
             }
-            ProofStateChange::RemoveP { clause_idx } => {
-                if self.processed.remove(&clause_idx) {
-                    self.notify_remove_processed(clause_idx);
+            ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
+                if self.processed.remove(clause_idx) {
+                    self.notify_remove_processed(*clause_idx);
+                    self.event_log.push(change);
                 }
             }
         }
@@ -533,23 +564,9 @@ impl SaturationState {
                     let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses);
 
                     if !changes.is_empty() {
-                        // Update profiling stats based on rule
+                        // Update profiling stats
                         if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
-                            match rule_name {
-                                "Tautology" => {
-                                    p.tautologies_deleted += 1;
-                                }
-                                "Demodulation" => {
-                                    p.clauses_demodulated_forward += 1;
-                                    p.demodulation_count += 1;
-                                    p.forward_demod_time += t.elapsed();
-                                }
-                                "Subsumption" => {
-                                    p.clauses_subsumed_forward += 1;
-                                    p.forward_subsumption_time += t.elapsed();
-                                }
-                                _ => {}
-                            }
+                            p.record_simplification_forward(rule_name, 1, t.elapsed());
                         }
 
                         // Determine the outcome for tracing
@@ -579,11 +596,11 @@ impl SaturationState {
                     if let ProofStateChange::AddN { clause, derivation } = change {
                         // For demodulation, update the outcome with correct indices
                         if is_demodulation_rule {
-                            if let Derivation::Demodulation { demodulator, target: _ } = &derivation {
+                            if let Some(demodulator) = derivation.demodulator() {
                                 let new_idx = self.clauses.len();
                                 forward_outcome = Some(SimplificationOutcome::Forward(
                                     ForwardSimplification::Demodulation {
-                                        demodulator: *demodulator,
+                                        demodulator,
                                         result: new_idx,
                                     },
                                 ));
@@ -626,34 +643,26 @@ impl SaturationState {
                         if !changes.is_empty() {
                             // Update profiling stats
                             if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
-                                match rule_name {
-                                    "Subsumption" => {
-                                        let count = changes.iter().filter(|c| matches!(c, ProofStateChange::RemoveU { .. } | ProofStateChange::RemoveP { .. })).count();
-                                        p.clauses_subsumed_backward += count;
-                                        p.backward_subsumption_time += t.elapsed();
-                                    }
-                                    "Demodulation" => {
-                                        let count = changes.iter().filter(|c| matches!(c, ProofStateChange::AddN { .. })).count();
-                                        p.clauses_demodulated_backward += count;
-                                        p.backward_demod_time += t.elapsed();
-                                    }
-                                    _ => {}
-                                }
+                                // Count affected clauses (removals for subsumption, additions for demodulation)
+                                let count = changes.iter().filter(|c| {
+                                    matches!(c, ProofStateChange::RemoveU { .. } | ProofStateChange::RemoveP { .. } | ProofStateChange::AddN { .. })
+                                }).count();
+                                p.record_simplification_backward(rule_name, count, t.elapsed());
                             }
 
                             // Track effects for trace (compute new_idx before collecting)
                             let mut current_new_idx = self.clauses.len();
                             for change in &changes {
                                 match change {
-                                    ProofStateChange::RemoveU { clause_idx: idx } | ProofStateChange::RemoveP { clause_idx: idx } => {
+                                    ProofStateChange::RemoveU { clause_idx: idx, .. } | ProofStateChange::RemoveP { clause_idx: idx, .. } => {
                                         backward_effects.push(BackwardSimplification::Subsumption {
                                             deleted_clause: *idx,
                                         });
                                     }
                                     ProofStateChange::AddN { derivation, .. } => {
-                                        if let Derivation::Demodulation { target, .. } = derivation {
+                                        if let Some(target) = derivation.target() {
                                             backward_effects.push(BackwardSimplification::Demodulation {
-                                                old_clause: *target,
+                                                old_clause: target,
                                                 result: current_new_idx,
                                             });
                                             current_new_idx += 1;
@@ -676,6 +685,7 @@ impl SaturationState {
                 // Transfer: move to unprocessed (U)
                 self.unprocessed.push_back(clause_idx);
                 self.notify_add_unprocessed(clause_idx);
+                self.event_log.push(ProofStateChange::AddU { clause_idx });
 
                 // Record: clause survived and was transferred
                 self.current_simplifications.push(ClauseSimplification {
@@ -759,9 +769,12 @@ impl SaturationState {
             self.flush_iteration(Some(given_idx));
 
             // === Step 4: Transfer given clause from U to P ===
+            self.unprocessed.retain(|&x| x != given_idx);
             self.notify_remove_unprocessed(given_idx);
+            self.event_log.push(ProofStateChange::RemoveU { clause_idx: given_idx, rule_name: "Selection".into() });
             self.processed.insert(given_idx);
             self.notify_add_processed(given_idx);
+            self.event_log.push(ProofStateChange::AddP { clause_idx: given_idx });
 
             // === Step 5: Generate inferences using polymorphic rules ===
             let t0 = profile.as_ref().map(|_| Instant::now());
@@ -853,32 +866,10 @@ impl SaturationState {
                 }
             }
 
-            // Update profile based on rule name
+            // Update profile
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 let count = results.len() - before;
-                match rule_name {
-                    "Resolution" => {
-                        p.resolution_count += count;
-                        p.resolution_time += t.elapsed();
-                    }
-                    "Superposition" => {
-                        p.superposition_count += count;
-                        p.superposition_time += t.elapsed();
-                    }
-                    "Factoring" => {
-                        p.factoring_count += count;
-                        p.factoring_time += t.elapsed();
-                    }
-                    "EqualityResolution" => {
-                        p.equality_resolution_count += count;
-                        p.equality_resolution_time += t.elapsed();
-                    }
-                    "EqualityFactoring" => {
-                        p.equality_factoring_count += count;
-                        p.equality_factoring_time += t.elapsed();
-                    }
-                    _ => {}
-                }
+                p.record_generating_rule(rule_name, count, t.elapsed());
             }
         }
 
@@ -1033,7 +1024,10 @@ mod tests {
         let profile = profile.expect("Profile should be present when enabled");
         assert!(profile.total_time.as_nanos() > 0, "total_time should be non-zero");
         assert!(profile.iterations > 0, "iterations should be non-zero");
-        assert!(profile.resolution_count > 0, "should have resolution inferences");
+        assert!(
+            profile.generating_rules.get("Resolution").map_or(0, |s| s.count) > 0,
+            "should have resolution inferences"
+        );
         assert_eq!(profile.selector_name, "AgeWeight");
 
         // Verify JSON serialization works
@@ -1042,6 +1036,8 @@ mod tests {
         assert!(value["total_time"].as_f64().unwrap() > 0.0);
         assert!(value["iterations"].as_u64().unwrap() > 0);
         assert_eq!(value["selector_name"].as_str().unwrap(), "AgeWeight");
+        // Verify generating_rules structure
+        assert!(value["generating_rules"]["Resolution"]["count"].as_u64().unwrap() > 0);
     }
 
     #[test]

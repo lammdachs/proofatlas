@@ -7,10 +7,12 @@ pub mod subsumption;
 pub mod trace;
 
 pub use profile::SaturationProfile;
+pub use rule::{ProofStateChange, SaturationEventLog};
 pub use state::{LiteralSelectionStrategy, SaturationConfig, SaturationResult, SaturationState};
 pub use trace::{
-    BackwardSimplification, ClauseSimplification, ForwardSimplification, GeneratingInference,
-    SaturationStep, SaturationTrace, SimplificationOutcome,
+    extract_proof_from_events, BackwardSimplification, ClauseSimplification, EventLogReplayer,
+    ForwardSimplification, GeneratingInference, SaturationStep, SaturationTrace,
+    SimplificationOutcome,
 };
 
 use crate::fol::CNFFormula;

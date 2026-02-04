@@ -9,6 +9,7 @@
 use crate::fol::Clause;
 use crate::inference::Derivation;
 use crate::selection::LiteralSelector;
+use serde::{Deserialize, Serialize};
 
 /// Atomic operations on the proof state.
 ///
@@ -16,21 +17,28 @@ use crate::selection::LiteralSelector;
 /// - N (new): Fresh clauses awaiting simplification
 /// - U (unprocessed): Simplified clauses awaiting selection
 /// - P (processed): Selected clauses used for inferences
-#[derive(Debug, Clone)]
+///
+/// This is the raw event log format. All derived views (proof extraction, training data,
+/// iteration structure) come from replaying these events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ProofStateChange {
     /// Add a new clause to N (with derivation tracking)
     AddN { clause: Clause, derivation: Derivation },
     /// Remove a clause from N (forward simplification deleted it)
-    RemoveN { clause_idx: usize },
+    RemoveN { clause_idx: usize, rule_name: String },
     /// Transfer clause from N to U (survived forward simplification)
     AddU { clause_idx: usize },
     /// Remove clause from U (backward simplification deleted it)
-    RemoveU { clause_idx: usize },
+    RemoveU { clause_idx: usize, rule_name: String },
     /// Transfer clause from U to P (selected as given clause)
     AddP { clause_idx: usize },
     /// Remove clause from P (backward simplification deleted it)
-    RemoveP { clause_idx: usize },
+    RemoveP { clause_idx: usize, rule_name: String },
 }
+
+/// Type alias for the event log (replaces semantic SaturationTrace)
+pub type SaturationEventLog = Vec<ProofStateChange>;
 
 /// Notifications sent to rules when clauses are added/removed from U or P.
 ///
@@ -215,7 +223,7 @@ impl SimplificationRule for TautologyRule {
         _all_clauses: &[Clause],
     ) -> Vec<ProofStateChange> {
         if clause.is_tautology() {
-            vec![ProofStateChange::RemoveN { clause_idx }]
+            vec![ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -292,7 +300,7 @@ impl SimplificationRule for SubsumptionRule {
         _all_clauses: &[Clause],
     ) -> Vec<ProofStateChange> {
         if let Some(_subsumer_idx) = self.checker.find_subsumer(clause) {
-            vec![ProofStateChange::RemoveN { clause_idx }]
+            vec![ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -318,11 +326,12 @@ impl SimplificationRule for SubsumptionRule {
         // Find clauses subsumed by this clause
         let subsumed = self.checker.find_subsumed_by(clause_idx, &all_indices);
 
+        let rule_name: String = self.name().into();
         for idx in subsumed {
             if processed.indices().contains(&idx) {
-                changes.push(ProofStateChange::RemoveP { clause_idx: idx });
+                changes.push(ProofStateChange::RemoveP { clause_idx: idx, rule_name: rule_name.clone() });
             } else if unprocessed.indices().contains(&idx) {
-                changes.push(ProofStateChange::RemoveU { clause_idx: idx });
+                changes.push(ProofStateChange::RemoveU { clause_idx: idx, rule_name: rule_name.clone() });
             }
         }
 
@@ -431,13 +440,10 @@ impl SimplificationRule for DemodulationRule {
                     orient_clause_equalities(&mut simplified_clause);
 
                     return vec![
-                        ProofStateChange::RemoveN { clause_idx },
+                        ProofStateChange::RemoveN { clause_idx, rule_name: self.name().into() },
                         ProofStateChange::AddN {
                             clause: simplified_clause,
-                            derivation: Derivation::Demodulation {
-                                demodulator: unit_idx,
-                                target: clause_idx,
-                            },
+                            derivation: Derivation::demodulation(unit_idx, clause_idx),
                         },
                     ];
                 }
@@ -459,6 +465,7 @@ impl SimplificationRule for DemodulationRule {
         }
 
         let mut changes = Vec::new();
+        let rule_name: String = self.name().into();
 
         // Try to demodulate each clause in U∪P
         for (target_idx, target_clause) in unprocessed.iter().chain(processed.iter()) {
@@ -473,18 +480,15 @@ impl SimplificationRule for DemodulationRule {
 
                 // Determine which set to remove from
                 if processed.indices().contains(&target_idx) {
-                    changes.push(ProofStateChange::RemoveP { clause_idx: target_idx });
+                    changes.push(ProofStateChange::RemoveP { clause_idx: target_idx, rule_name: rule_name.clone() });
                 } else {
-                    changes.push(ProofStateChange::RemoveU { clause_idx: target_idx });
+                    changes.push(ProofStateChange::RemoveU { clause_idx: target_idx, rule_name: rule_name.clone() });
                 }
 
                 // Add the simplified clause to N
                 changes.push(ProofStateChange::AddN {
                     clause: simplified_clause,
-                    derivation: Derivation::Demodulation {
-                        demodulator: clause_idx,
-                        target: target_idx,
-                    },
+                    derivation: Derivation::demodulation(clause_idx, target_idx),
                 });
             }
         }
@@ -802,7 +806,7 @@ mod tests {
         ]);
         let changes = rule.simplify_forward(0, &tautology, &u_view, &p_view, &all_clauses);
         assert_eq!(changes.len(), 1);
-        assert!(matches!(changes[0], ProofStateChange::RemoveN { clause_idx: 0 }));
+        assert!(matches!(changes[0], ProofStateChange::RemoveN { clause_idx: 0, .. }));
     }
 
     #[test]

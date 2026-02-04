@@ -1,10 +1,11 @@
 //! Clauses and CNF formulas
 
 use super::literal::Literal;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Role of a clause in the proof (from TPTP or derived)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ClauseRole {
     /// Axiom from the problem
     #[default]
@@ -50,7 +51,7 @@ impl ClauseRole {
 }
 
 /// A clause (disjunction of literals)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Clause {
     pub literals: Vec<Literal>,
     pub id: Option<usize>,

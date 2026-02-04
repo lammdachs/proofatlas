@@ -148,7 +148,7 @@ pub fn superposition(
 
                                 if !new_clause.is_tautology() {
                                     results.push(InferenceResult {
-                                        derivation: Derivation::Superposition { parent1: idx1, parent2: idx2 },
+                                        derivation: Derivation::superposition(idx1, idx2),
                                         conclusion: new_clause,
                                     });
                                 }

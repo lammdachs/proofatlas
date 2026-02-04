@@ -1,28 +1,29 @@
 //! Terms in first-order logic
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A variable in first-order logic
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Variable {
     pub name: String,
 }
 
 /// A constant symbol
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Constant {
     pub name: String,
 }
 
 /// A function symbol with arity
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FunctionSymbol {
     pub name: String,
     pub arity: usize,
 }
 
 /// A term in first-order logic
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Term {
     Variable(Variable),
     Constant(Constant),

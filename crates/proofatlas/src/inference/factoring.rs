@@ -51,7 +51,7 @@ pub fn factoring(
 
                         if !new_clause.is_tautology() {
                             results.push(InferenceResult {
-                                derivation: Derivation::Factoring { parent: idx },
+                                derivation: Derivation::factoring(idx),
                                 conclusion: new_clause,
                             });
                         }

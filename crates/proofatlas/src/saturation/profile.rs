@@ -6,10 +6,47 @@
 
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
+use std::collections::HashMap;
 use std::time::Duration;
 
 fn secs(d: &Duration) -> f64 {
     d.as_secs_f64()
+}
+
+/// Statistics for a generating inference rule.
+#[derive(Debug, Clone, Default)]
+pub struct RuleStats {
+    pub count: usize,
+    pub time: Duration,
+}
+
+impl Serialize for RuleStats {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut s = serializer.serialize_struct("RuleStats", 2)?;
+        s.serialize_field("count", &self.count)?;
+        s.serialize_field("time", &secs(&self.time))?;
+        s.end()
+    }
+}
+
+/// Statistics for a simplification rule (with forward and backward phases).
+#[derive(Debug, Clone, Default)]
+pub struct SimplificationStats {
+    pub forward_count: usize,
+    pub forward_time: Duration,
+    pub backward_count: usize,
+    pub backward_time: Duration,
+}
+
+impl Serialize for SimplificationStats {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut s = serializer.serialize_struct("SimplificationStats", 4)?;
+        s.serialize_field("forward_count", &self.forward_count)?;
+        s.serialize_field("forward_time", &secs(&self.forward_time))?;
+        s.serialize_field("backward_count", &self.backward_count)?;
+        s.serialize_field("backward_time", &secs(&self.backward_time))?;
+        s.end()
+    }
 }
 
 /// Profiling data collected during saturation.
@@ -24,38 +61,16 @@ pub struct SaturationProfile {
     pub generate_inferences_time: Duration,
     pub add_inferences_time: Duration,
 
-    // Forward simplification sub-phases
-    pub forward_demod_time: Duration,
-    pub forward_subsumption_time: Duration,
-    pub backward_subsumption_time: Duration,
-    pub backward_demod_time: Duration,
-
-    // Inference rule counts
-    pub resolution_count: usize,
-    pub superposition_count: usize,
-    pub factoring_count: usize,
-    pub equality_resolution_count: usize,
-    pub equality_factoring_count: usize,
-    pub demodulation_count: usize,
-
-    // Inference rule timings
-    pub resolution_time: Duration,
-    pub superposition_time: Duration,
-    pub factoring_time: Duration,
-    pub equality_resolution_time: Duration,
-    pub equality_factoring_time: Duration,
-
     // Aggregate counters
     pub iterations: usize,
     pub clauses_generated: usize,
     pub clauses_added: usize,
-    pub clauses_subsumed_forward: usize,
-    pub clauses_subsumed_backward: usize,
-    pub clauses_demodulated_forward: usize,
-    pub clauses_demodulated_backward: usize,
-    pub tautologies_deleted: usize,
     pub max_unprocessed_size: usize,
     pub max_processed_size: usize,
+
+    // Dynamic rule stats
+    pub generating_rules: HashMap<String, RuleStats>,
+    pub simplification_rules: HashMap<String, SimplificationStats>,
 
     // Selector stats (filled post-saturation)
     pub selector_name: String,
@@ -65,9 +80,32 @@ pub struct SaturationProfile {
     pub selector_score_time: Duration,
 }
 
+impl SaturationProfile {
+    /// Record statistics for a generating inference rule.
+    pub fn record_generating_rule(&mut self, name: &str, count: usize, time: Duration) {
+        let stats = self.generating_rules.entry(name.to_string()).or_default();
+        stats.count += count;
+        stats.time += time;
+    }
+
+    /// Record forward simplification statistics.
+    pub fn record_simplification_forward(&mut self, name: &str, count: usize, time: Duration) {
+        let stats = self.simplification_rules.entry(name.to_string()).or_default();
+        stats.forward_count += count;
+        stats.forward_time += time;
+    }
+
+    /// Record backward simplification statistics.
+    pub fn record_simplification_backward(&mut self, name: &str, count: usize, time: Duration) {
+        let stats = self.simplification_rules.entry(name.to_string()).or_default();
+        stats.backward_count += count;
+        stats.backward_time += time;
+    }
+}
+
 impl Serialize for SaturationProfile {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SaturationProfile", 32)?;
+        let mut s = serializer.serialize_struct("SaturationProfile", 15)?;
 
         // Top-level phase timings
         s.serialize_field("total_time", &secs(&self.total_time))?;
@@ -76,38 +114,16 @@ impl Serialize for SaturationProfile {
         s.serialize_field("generate_inferences_time", &secs(&self.generate_inferences_time))?;
         s.serialize_field("add_inferences_time", &secs(&self.add_inferences_time))?;
 
-        // Forward simplification sub-phases
-        s.serialize_field("forward_demod_time", &secs(&self.forward_demod_time))?;
-        s.serialize_field("forward_subsumption_time", &secs(&self.forward_subsumption_time))?;
-        s.serialize_field("backward_subsumption_time", &secs(&self.backward_subsumption_time))?;
-        s.serialize_field("backward_demod_time", &secs(&self.backward_demod_time))?;
-
-        // Inference rule counts
-        s.serialize_field("resolution_count", &self.resolution_count)?;
-        s.serialize_field("superposition_count", &self.superposition_count)?;
-        s.serialize_field("factoring_count", &self.factoring_count)?;
-        s.serialize_field("equality_resolution_count", &self.equality_resolution_count)?;
-        s.serialize_field("equality_factoring_count", &self.equality_factoring_count)?;
-        s.serialize_field("demodulation_count", &self.demodulation_count)?;
-
-        // Inference rule timings
-        s.serialize_field("resolution_time", &secs(&self.resolution_time))?;
-        s.serialize_field("superposition_time", &secs(&self.superposition_time))?;
-        s.serialize_field("factoring_time", &secs(&self.factoring_time))?;
-        s.serialize_field("equality_resolution_time", &secs(&self.equality_resolution_time))?;
-        s.serialize_field("equality_factoring_time", &secs(&self.equality_factoring_time))?;
-
         // Aggregate counters
         s.serialize_field("iterations", &self.iterations)?;
         s.serialize_field("clauses_generated", &self.clauses_generated)?;
         s.serialize_field("clauses_added", &self.clauses_added)?;
-        s.serialize_field("clauses_subsumed_forward", &self.clauses_subsumed_forward)?;
-        s.serialize_field("clauses_subsumed_backward", &self.clauses_subsumed_backward)?;
-        s.serialize_field("clauses_demodulated_forward", &self.clauses_demodulated_forward)?;
-        s.serialize_field("clauses_demodulated_backward", &self.clauses_demodulated_backward)?;
-        s.serialize_field("tautologies_deleted", &self.tautologies_deleted)?;
         s.serialize_field("max_unprocessed_size", &self.max_unprocessed_size)?;
         s.serialize_field("max_processed_size", &self.max_processed_size)?;
+
+        // Dynamic rule stats
+        s.serialize_field("generating_rules", &self.generating_rules)?;
+        s.serialize_field("simplification_rules", &self.simplification_rules)?;
 
         // Selector stats
         s.serialize_field("selector_name", &self.selector_name)?;
@@ -131,6 +147,8 @@ mod tests {
         assert!(json.contains("\"total_time\":0.0"));
         assert!(json.contains("\"iterations\":0"));
         assert!(json.contains("\"selector_name\":\"\""));
+        assert!(json.contains("\"generating_rules\":{}"));
+        assert!(json.contains("\"simplification_rules\":{}"));
     }
 
     #[test]
@@ -152,12 +170,54 @@ mod tests {
     fn test_profile_deserializes_as_value() {
         let mut profile = SaturationProfile::default();
         profile.total_time = Duration::from_secs(2);
-        profile.resolution_count = 10;
+        profile.record_generating_rule("Resolution", 10, Duration::from_millis(100));
 
         let json = serde_json::to_string(&profile).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(value["total_time"], 2.0);
-        assert_eq!(value["resolution_count"], 10);
+        assert_eq!(value["generating_rules"]["Resolution"]["count"], 10);
+        assert_eq!(value["generating_rules"]["Resolution"]["time"], 0.1);
+    }
+
+    #[test]
+    fn test_record_generating_rule() {
+        let mut profile = SaturationProfile::default();
+        profile.record_generating_rule("Resolution", 5, Duration::from_millis(50));
+        profile.record_generating_rule("Resolution", 3, Duration::from_millis(30));
+        profile.record_generating_rule("Superposition", 2, Duration::from_millis(20));
+
+        assert_eq!(profile.generating_rules["Resolution"].count, 8);
+        assert_eq!(profile.generating_rules["Resolution"].time, Duration::from_millis(80));
+        assert_eq!(profile.generating_rules["Superposition"].count, 2);
+    }
+
+    #[test]
+    fn test_record_simplification() {
+        let mut profile = SaturationProfile::default();
+        profile.record_simplification_forward("Subsumption", 1, Duration::from_millis(10));
+        profile.record_simplification_backward("Subsumption", 3, Duration::from_millis(30));
+        profile.record_simplification_forward("Demodulation", 2, Duration::from_millis(20));
+
+        assert_eq!(profile.simplification_rules["Subsumption"].forward_count, 1);
+        assert_eq!(profile.simplification_rules["Subsumption"].backward_count, 3);
+        assert_eq!(profile.simplification_rules["Demodulation"].forward_count, 2);
+        assert_eq!(profile.simplification_rules["Demodulation"].backward_count, 0);
+    }
+
+    #[test]
+    fn test_simplification_stats_serializes() {
+        let mut profile = SaturationProfile::default();
+        profile.record_simplification_forward("Subsumption", 5, Duration::from_millis(100));
+        profile.record_simplification_backward("Subsumption", 3, Duration::from_millis(50));
+
+        let json = serde_json::to_string(&profile).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let subsumption = &value["simplification_rules"]["Subsumption"];
+        assert_eq!(subsumption["forward_count"], 5);
+        assert_eq!(subsumption["forward_time"], 0.1);
+        assert_eq!(subsumption["backward_count"], 3);
+        assert_eq!(subsumption["backward_time"], 0.05);
     }
 }

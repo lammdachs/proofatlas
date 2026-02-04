@@ -65,7 +65,10 @@ pub fn resolution(
                     // Don't generate tautologies
                     if !new_clause.is_tautology() {
                         results.push(InferenceResult {
-                            derivation: Derivation::Resolution { parent1: idx1, parent2: idx2 },
+                            derivation: Derivation {
+                                rule_name: "Resolution".into(),
+                                premises: vec![idx1, idx2],
+                            },
                             conclusion: new_clause,
                         });
                     }

@@ -8,7 +8,7 @@ from proofatlas.ml import to_torch_tensors
 
 def run_saturation(state: ProofState, max_iterations: int = 100) -> bool:
     """Run saturation and return whether proof was found."""
-    proof_found, _, _ = state.run_saturation(max_iterations=max_iterations)
+    proof_found, _, _, _ = state.run_saturation(max_iterations=max_iterations)
     return proof_found
 
 

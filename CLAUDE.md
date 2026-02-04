@@ -197,10 +197,29 @@ The saturation loop uses a modular, polymorphic architecture where rules are reg
 
 All rules return `Vec<ProofStateChange>` for atomic state modifications:
 - `AddN { clause, derivation }`: Add new clause to N
-- `RemoveN/U/P { clause_idx }`: Remove from respective set
+- `RemoveN/U/P { clause_idx, rule_name }`: Remove from respective set
 - `AddU/P { clause_idx }`: Transfer between sets
 
 This architecture enables adding new rules without modifying the main loop.
+
+### Derivation Tracking
+The `Derivation` struct tracks how each clause was derived:
+```rust
+pub struct Derivation {
+    pub rule_name: String,
+    pub premises: Vec<usize>,
+}
+```
+
+Constructor methods (`Derivation::resolution()`, `Derivation::factoring()`, etc.) ensure consistent naming. New rules simply use `Derivation { rule_name: "MyRule".into(), premises: vec![...] }`.
+
+### Event Log
+The saturation state maintains an event log (`Vec<ProofStateChange>`) recording all state transitions. This enables:
+- **Proof extraction**: Backward traversal from empty clause via `extract_proof_from_events()`
+- **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
+- **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection
+
+The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying events.
 
 ### Profiling
 `SaturationConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `saturate()` returns `(SaturationResult, Option<SaturationProfile>)` with timing and counting data for every phase:
@@ -213,7 +232,7 @@ This architecture enables adding new rules without modifying the main loop.
 
 Zero overhead when disabled: all instrumentation is gated on `Option::None`, costing a single predicted-not-taken branch per instrumentation point.
 
-`SaturationProfile` implements `serde::Serialize` with `Duration` fields serialized as `f64` seconds. From Python, pass `enable_profiling=True` to `run_saturation()` to receive the profile as a JSON string in the third return element: `(proof_found, status, profile_json)`.
+`SaturationProfile` implements `serde::Serialize` with `Duration` fields serialized as `f64` seconds. From Python, `run_saturation()` returns `(proof_found, status, profile_json, trace_json)`. Pass `enable_profiling=True` to populate the profile.
 
 ## ML Architecture
 

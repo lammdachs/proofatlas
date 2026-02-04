@@ -1,24 +1,25 @@
 //! Atoms and literals in first-order logic
 
 use super::term::Term;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A predicate symbol with arity
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PredicateSymbol {
     pub name: String,
     pub arity: usize,
 }
 
 /// An atomic formula (predicate applied to terms)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Atom {
     pub predicate: PredicateSymbol,
     pub args: Vec<Term>,
 }
 
 /// A literal (positive or negative atom)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Literal {
     pub atom: Atom,
     pub polarity: bool, // true = positive, false = negative
