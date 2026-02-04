@@ -212,7 +212,7 @@ pub struct Derivation {
 }
 ```
 
-Constructor methods (`Derivation::resolution()`, `Derivation::factoring()`, etc.) ensure consistent naming. New rules simply use `Derivation { rule_name: "MyRule".into(), premises: vec![...] }`.
+Rules construct derivations directly: `Derivation { rule_name: "Resolution".into(), premises: vec![p1, p2] }`. Only `Derivation::input()` helper exists for input clauses (no premises).
 
 ### Event Log
 The saturation state maintains an event log (`Vec<ProofStateChange>`) as the single source of truth for derivations. All clause additions (`New`) include the derivation info. This enables:

@@ -1,11 +1,10 @@
 //! Superposition inference rule for equality reasoning
 
 use super::common::{
-    remove_duplicate_literals, rename_clause_variables, InferenceResult,
+    collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
+    InferenceResult,
 };
-use crate::fol::{
-    Atom, Clause, KBOConfig, Literal, Substitution, Term, TermOrdering as Ordering, KBO,
-};
+use crate::fol::{Atom, Clause, KBOConfig, Literal, Substitution, Term, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -83,9 +82,8 @@ pub fn superposition(
                                 // Check ordering constraint: pattern_sigma ⪯̸ replacement_sigma
                                 // i.e., pattern_sigma must NOT be smaller than replacement_sigma
                                 // This ensures we're rewriting larger to smaller (simplifying)
-                                match kbo.compare(&pattern_sigma, &replacement_sigma) {
-                                    Ordering::Less | Ordering::Equal => continue,
-                                    Ordering::Greater | Ordering::Incomparable => {}
+                                if !is_ordered_greater(&pattern_sigma, &replacement_sigma, &kbo) {
+                                    continue;
                                 }
 
                                 // Additional check for superposition into equalities
@@ -99,59 +97,52 @@ pub fn superposition(
 
                                     if pos.path[0] == 0 {
                                         // l' is in s (left side): need sσ ⪯̸ tσ
-                                        match kbo.compare(&s_sigma, &t_sigma) {
-                                            Ordering::Less | Ordering::Equal => continue,
-                                            Ordering::Greater | Ordering::Incomparable => {}
+                                        if !is_ordered_greater(&s_sigma, &t_sigma, &kbo) {
+                                            continue;
                                         }
                                     } else if pos.path[0] == 1 {
                                         // l' is in t (right side): need tσ ⪯̸ sσ
-                                        match kbo.compare(&t_sigma, &s_sigma) {
-                                            Ordering::Less | Ordering::Equal => continue,
-                                            Ordering::Greater | Ordering::Incomparable => {}
+                                        if !is_ordered_greater(&t_sigma, &s_sigma, &kbo) {
+                                            continue;
                                         }
                                     }
                                 }
 
                                 // Apply superposition: replace pattern with replacement
-                                let mut new_literals = Vec::new();
+                                // Collect side literals from from_clause
+                                let mut new_literals = collect_literals_except(&renamed_from, &[from_idx], &mgu);
 
-                                // Add literals from from_clause EXCEPT the equality being used
-                                for (i, lit) in renamed_from.literals.iter().enumerate() {
-                                    if i != from_idx {
-                                        new_literals.push(lit.apply_substitution(&mgu));
+                                // Add the modified literal from into_clause
+                                let into_lit_modified = {
+                                    let new_atom = replace_at_position(
+                                        &into_lit.atom,
+                                        &pos.path,
+                                        &replacement_sigma,
+                                        &mgu,
+                                    );
+                                    Literal {
+                                        atom: new_atom,
+                                        polarity: into_lit.polarity,
                                     }
-                                }
+                                };
+                                new_literals.push(into_lit_modified);
 
-                                // Add the modified literal and other literals from into_clause
-                                for (k, lit) in renamed_into.literals.iter().enumerate() {
-                                    if k == into_idx {
-                                        let new_atom = replace_at_position(
-                                            &lit.atom,
-                                            &pos.path,
-                                            &replacement_sigma,
-                                            &mgu,
-                                        );
-
-                                        new_literals.push(Literal {
-                                            atom: new_atom,
-                                            polarity: lit.polarity,
-                                        });
-                                    } else {
-                                        new_literals.push(lit.apply_substitution(&mgu));
-                                    }
-                                }
+                                // Add other literals from into_clause
+                                new_literals.extend(collect_literals_except(&renamed_into, &[into_idx], &mgu));
 
                                 // Remove duplicates
                                 new_literals = remove_duplicate_literals(new_literals);
 
                                 let new_clause = Clause::new(new_literals);
 
-                                if !new_clause.is_tautology() {
-                                    results.push(InferenceResult {
-                                        derivation: Derivation::superposition(idx1, idx2),
-                                        conclusion: new_clause,
-                                    });
-                                }
+                                // Tautology check delegated to TautologyRule during forward simplification
+                                results.push(InferenceResult {
+                                    derivation: Derivation {
+                                        rule_name: "Superposition".into(),
+                                        premises: vec![idx1, idx2],
+                                    },
+                                    conclusion: new_clause,
+                                });
                             }
                         }
                     }

@@ -450,7 +450,10 @@ impl SimplificationRule for DemodulationRule {
                         ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() },
                         ProofStateChange::New {
                             clause: simplified_clause,
-                            derivation: Derivation::demodulation(unit_idx, clause_idx),
+                            derivation: Derivation {
+                                rule_name: "Demodulation".into(),
+                                premises: vec![unit_idx, clause_idx],
+                            },
                         },
                     ];
                 }
@@ -495,7 +498,10 @@ impl SimplificationRule for DemodulationRule {
                 // Add the simplified clause to N
                 changes.push(ProofStateChange::New {
                     clause: simplified_clause,
-                    derivation: Derivation::demodulation(clause_idx, target_idx),
+                    derivation: Derivation {
+                        rule_name: "Demodulation".into(),
+                        premises: vec![clause_idx, target_idx],
+                    },
                 });
             }
         }

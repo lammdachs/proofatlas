@@ -1,7 +1,8 @@
 //! Binary resolution inference rule
 
 use super::common::{
-    remove_duplicate_literals, rename_clause_variables, unify_atoms, InferenceResult,
+    collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
+    InferenceResult,
 };
 use crate::fol::Clause;
 use super::derivation::Derivation;
@@ -40,38 +41,23 @@ pub fn resolution(
             if lit1.polarity != lit2.polarity && lit1.atom.predicate == lit2.atom.predicate {
                 // Try to unify the atoms
                 if let Ok(mgu) = unify_atoms(&lit1.atom, &lit2.atom) {
-                    // Build resolvent
-                    let mut new_literals = Vec::new();
-
-                    // Add literals from clause1 except the resolved one
-                    for (k, lit) in clause1.literals.iter().enumerate() {
-                        if k != i {
-                            new_literals.push(lit.apply_substitution(&mgu));
-                        }
-                    }
-
-                    // Add literals from clause2 except the resolved one
-                    for (k, lit) in renamed_clause2.literals.iter().enumerate() {
-                        if k != j {
-                            new_literals.push(lit.apply_substitution(&mgu));
-                        }
-                    }
+                    // Collect side literals from both clauses
+                    let mut new_literals = collect_literals_except(clause1, &[i], &mgu);
+                    new_literals.extend(collect_literals_except(&renamed_clause2, &[j], &mgu));
 
                     // Remove duplicates
                     new_literals = remove_duplicate_literals(new_literals);
 
                     let new_clause = Clause::new(new_literals);
 
-                    // Don't generate tautologies
-                    if !new_clause.is_tautology() {
-                        results.push(InferenceResult {
-                            derivation: Derivation {
-                                rule_name: "Resolution".into(),
-                                premises: vec![idx1, idx2],
-                            },
-                            conclusion: new_clause,
-                        });
-                    }
+                    // Tautology check delegated to TautologyRule during forward simplification
+                    results.push(InferenceResult {
+                        derivation: Derivation {
+                            rule_name: "Resolution".into(),
+                            premises: vec![idx1, idx2],
+                        },
+                        conclusion: new_clause,
+                    });
                 }
             }
         }

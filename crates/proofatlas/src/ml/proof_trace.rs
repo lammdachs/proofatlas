@@ -211,9 +211,15 @@ mod tests {
         let derivation = if premises.is_empty() {
             Derivation::input()
         } else if premises.len() == 1 {
-            Derivation::factoring(premises[0])
+            Derivation {
+                rule_name: "Factoring".into(),
+                premises,
+            }
         } else {
-            Derivation::resolution(premises[0], premises[1])
+            Derivation {
+                rule_name: "Resolution".into(),
+                premises,
+            }
         };
         ProofStep {
             clause_idx,

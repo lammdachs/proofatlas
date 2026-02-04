@@ -1,6 +1,6 @@
 //! Factoring inference rule
 
-use super::common::{remove_duplicate_literals, unify_atoms, InferenceResult};
+use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms, InferenceResult};
 use crate::fol::Clause;
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
@@ -34,27 +34,21 @@ pub fn factoring(
                 // Must have same polarity and predicate
                 if lit1.polarity == lit2.polarity && lit1.atom.predicate == lit2.atom.predicate {
                     if let Ok(mgu) = unify_atoms(&lit1.atom, &lit2.atom) {
-                        // Build factor
-                        let mut new_literals = Vec::new();
-
-                        // Add all literals except lit2, applying substitution
-                        for (k, lit) in clause.literals.iter().enumerate() {
-                            if k != j {
-                                new_literals.push(lit.apply_substitution(&mgu));
-                            }
-                        }
-
-                        // Remove duplicates
-                        new_literals = remove_duplicate_literals(new_literals);
+                        // Collect all literals except the factored one (j)
+                        let new_literals = remove_duplicate_literals(
+                            collect_literals_except(clause, &[j], &mgu)
+                        );
 
                         let new_clause = Clause::new(new_literals);
 
-                        if !new_clause.is_tautology() {
-                            results.push(InferenceResult {
-                                derivation: Derivation::factoring(idx),
-                                conclusion: new_clause,
-                            });
-                        }
+                        // Tautology check delegated to TautologyRule during forward simplification
+                        results.push(InferenceResult {
+                            derivation: Derivation {
+                                rule_name: "Factoring".into(),
+                                premises: vec![idx],
+                            },
+                            conclusion: new_clause,
+                        });
                     }
                 }
             }

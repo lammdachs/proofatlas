@@ -1,9 +1,7 @@
 //! Equality factoring inference rule
 
-use super::common::InferenceResult;
-use crate::fol::{
-    Atom, Clause, KBOConfig, Literal, PredicateSymbol, TermOrdering as Ordering, KBO,
-};
+use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
+use crate::fol::{Atom, Clause, KBOConfig, Literal, PredicateSymbol, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -59,18 +57,9 @@ pub fn equality_factoring(
 
                 // Check ordering constraints: lσ ⪯̸ rσ, lσ ⪯̸ tσ, rσ ⪯̸ tσ
                 // ⪯̸ means "not smaller", i.e., Greater or Incomparable
-                let l_not_smaller_r = matches!(
-                    kbo.compare(&l_sigma, &r_sigma),
-                    Ordering::Greater | Ordering::Incomparable
-                );
-                let l_not_smaller_t = matches!(
-                    kbo.compare(&l_sigma, &t_sigma),
-                    Ordering::Greater | Ordering::Incomparable
-                );
-                let r_not_smaller_t = matches!(
-                    kbo.compare(&r_sigma, &t_sigma),
-                    Ordering::Greater | Ordering::Incomparable
-                );
+                let l_not_smaller_r = is_ordered_greater(&l_sigma, &r_sigma, &kbo);
+                let l_not_smaller_t = is_ordered_greater(&l_sigma, &t_sigma, &kbo);
+                let r_not_smaller_t = is_ordered_greater(&r_sigma, &t_sigma, &kbo);
 
                 if l_not_smaller_r && l_not_smaller_t && r_not_smaller_t {
                     // Build the conclusion: (l ≈ r ∨ r ≉ t ∨ C)σ
@@ -95,16 +84,15 @@ pub fn equality_factoring(
                     new_literals.push(eq_literal);
 
                     // Add all other literals from C (except the two equalities we're factoring)
-                    for (k, lit) in clause.literals.iter().enumerate() {
-                        if k != idx1 && k != idx2 {
-                            new_literals.push(lit.apply_substitution(&sigma));
-                        }
-                    }
+                    new_literals.extend(collect_literals_except(clause, &[idx1, idx2], &sigma));
 
                     let conclusion = Clause::new(new_literals);
 
                     results.push(InferenceResult {
-                        derivation: Derivation::equality_factoring(idx),
+                        derivation: Derivation {
+                            rule_name: "EqualityFactoring".into(),
+                            premises: vec![idx],
+                        },
                         conclusion,
                     });
                 }

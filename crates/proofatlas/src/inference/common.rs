@@ -1,6 +1,6 @@
 //! Common types and utilities for inference rules
 
-use crate::fol::{Atom, Clause, Literal, Substitution, Term, Variable};
+use crate::fol::{Atom, Clause, Literal, Substitution, Term, TermOrdering, Variable, KBO};
 use super::derivation::Derivation;
 use crate::unification::unify;
 use std::collections::HashSet;
@@ -87,4 +87,31 @@ pub fn remove_duplicate_literals(literals: Vec<Literal>) -> Vec<Literal> {
     }
 
     result
+}
+
+/// Collect literals from a clause, excluding specified indices, with substitution applied.
+///
+/// Used by inference rules to collect side literals while excluding the literals
+/// being resolved/factored/etc.
+pub fn collect_literals_except(
+    clause: &Clause,
+    exclude: &[usize],
+    subst: &Substitution,
+) -> Vec<Literal> {
+    clause
+        .literals
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !exclude.contains(i))
+        .map(|(_, lit)| lit.apply_substitution(subst))
+        .collect()
+}
+
+/// Check if t1 is "ordered greater" than t2 according to KBO.
+///
+/// Returns true if t1 ≻ t2 or t1 and t2 are incomparable.
+/// This is used for the ordering constraint ⪯̸ (not smaller than),
+/// which means Greater or Incomparable.
+pub fn is_ordered_greater(t1: &Term, t2: &Term, kbo: &KBO) -> bool {
+    matches!(kbo.compare(t1, t2), TermOrdering::Greater | TermOrdering::Incomparable)
 }

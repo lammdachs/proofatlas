@@ -1,6 +1,6 @@
 //! Equality resolution inference rule
 
-use super::common::InferenceResult;
+use super::common::{collect_literals_except, InferenceResult};
 use crate::fol::Clause;
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
@@ -32,19 +32,15 @@ pub fn equality_resolution(
             if let [ref s, ref t] = lit.atom.args.as_slice() {
                 // Try to unify s and t
                 if let Ok(mgu) = unify(s, t) {
-                    // Apply substitution to all other literals
-                    let mut new_literals = Vec::new();
-                    for (j, other_lit) in clause.literals.iter().enumerate() {
-                        if i != j {
-                            new_literals.push(other_lit.apply_substitution(&mgu));
-                        }
-                    }
-
                     // The negative equality disappears, leaving the remaining literals
+                    let new_literals = collect_literals_except(clause, &[i], &mgu);
                     let new_clause = Clause::new(new_literals);
 
                     results.push(InferenceResult {
-                        derivation: Derivation::equality_resolution(idx),
+                        derivation: Derivation {
+                            rule_name: "EqualityResolution".into(),
+                            premises: vec![idx],
+                        },
                         conclusion: new_clause,
                     });
                 }
@@ -81,6 +77,9 @@ mod tests {
         let results = equality_resolution(&clause, 0, &selector);
         assert_eq!(results.len(), 1);
         assert!(results[0].conclusion.is_empty());
-        assert_eq!(results[0].derivation, Derivation::equality_resolution(0));
+        assert_eq!(results[0].derivation, Derivation {
+            rule_name: "EqualityResolution".into(),
+            premises: vec![0],
+        });
     }
 }

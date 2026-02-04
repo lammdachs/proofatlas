@@ -369,11 +369,46 @@ impl SaturationState {
             .collect()
     }
 
-    /// Build clause views for U and P
+    /// Build clause index vectors for U and P
     fn build_views(&self) -> (Vec<usize>, Vec<usize>) {
         let u_indices: Vec<usize> = self.unprocessed.iter().copied().collect();
         let p_indices: Vec<usize> = self.processed.iter().copied().collect();
         (u_indices, p_indices)
+    }
+
+    /// Check resource limits and return termination result if exceeded
+    fn check_limits(&self, start_time: Instant) -> Option<SaturationResult> {
+        // Memory limit
+        if let Some(limit_mb) = self.config.max_clause_memory_mb {
+            if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
+                return Some(SaturationResult::ResourceLimit(
+                    self.build_proof_steps(),
+                    self.clauses.clone(),
+                ));
+            }
+        }
+        // Iteration limit
+        if self.config.max_iterations > 0 && self.current_iteration >= self.config.max_iterations {
+            return Some(SaturationResult::ResourceLimit(
+                self.build_proof_steps(),
+                self.clauses.clone(),
+            ));
+        }
+        // Clause count limit
+        if self.config.max_clauses > 0 && self.clauses.len() >= self.config.max_clauses {
+            return Some(SaturationResult::ResourceLimit(
+                self.build_proof_steps(),
+                self.clauses.clone(),
+            ));
+        }
+        // Timeout
+        if start_time.elapsed() > self.config.timeout {
+            return Some(SaturationResult::Timeout(
+                self.build_proof_steps(),
+                self.clauses.clone(),
+            ));
+        }
+        None
     }
 
     /// Notify all rules about a clause being added to or removed from U
@@ -592,27 +627,8 @@ impl SaturationState {
             }
 
             // Check resource limits
-            if let Some(limit_mb) = self.config.max_clause_memory_mb {
-                if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
-                    let steps = self.build_proof_steps();
-                    let clauses = self.clauses.clone();
-                    break SaturationResult::ResourceLimit(steps, clauses);
-                }
-            }
-            if self.config.max_iterations > 0 && self.current_iteration >= self.config.max_iterations {
-                let steps = self.build_proof_steps();
-                let clauses = self.clauses.clone();
-                break SaturationResult::ResourceLimit(steps, clauses);
-            }
-            if self.config.max_clauses > 0 && self.clauses.len() >= self.config.max_clauses {
-                let steps = self.build_proof_steps();
-                let clauses = self.clauses.clone();
-                break SaturationResult::ResourceLimit(steps, clauses);
-            }
-            if start_time.elapsed() > self.config.timeout {
-                let steps = self.build_proof_steps();
-                let clauses = self.clauses.clone();
-                break SaturationResult::Timeout(steps, clauses);
+            if let Some(result) = self.check_limits(start_time) {
+                break result;
             }
 
             self.current_iteration += 1;
@@ -668,7 +684,13 @@ impl SaturationState {
                 orient_clause_equalities(&mut oriented);
                 let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
-                    self.add_clause_to_new(inference);
+                    self.apply_change(
+                        ProofStateChange::New {
+                            clause: oriented,
+                            derivation: inference.derivation,
+                        },
+                        &mut profile,
+                    );
                 }
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
@@ -739,43 +761,6 @@ impl SaturationState {
         results
     }
 
-    /// Add a new clause to the new set (no forward simplification yet).
-    fn add_clause_to_new(&mut self, inference: InferenceResult) -> Option<usize> {
-        // Check clause size limit
-        if inference.conclusion.literals.len() > self.config.max_clause_size {
-            return None;
-        }
-
-        // Orient equalities first so we store the canonical form
-        let mut current_clause = inference.conclusion.clone();
-        orient_clause_equalities(&mut current_clause);
-
-        // Add the clause to new set (pending, not active yet)
-        let new_idx = self.clauses.len();
-        let mut clause_with_id = current_clause.clone();
-        clause_with_id.id = Some(new_idx);
-        clause_with_id.age = self.current_iteration;
-        clause_with_id.role = crate::fol::ClauseRole::Derived;
-
-        // Notify rules about pending clause
-        for rule in &mut self.simplification_rules {
-            rule.on_clause_pending(new_idx, &current_clause);
-        }
-
-        // Track clause memory
-        self.clause_memory_bytes += clause_with_id.memory_bytes();
-
-        // Record event
-        self.event_log.push(ProofStateChange::New {
-            clause: clause_with_id.clone(),
-            derivation: inference.derivation,
-        });
-
-        self.clauses.push(clause_with_id);
-        self.new.push_back(new_idx);
-
-        Some(new_idx)
-    }
 }
 
 #[cfg(test)]

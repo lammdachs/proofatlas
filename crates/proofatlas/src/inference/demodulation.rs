@@ -41,7 +41,10 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    derivation: Derivation::demodulation(unit_idx, target_idx),
+                    derivation: Derivation {
+                        rule_name: "Demodulation".into(),
+                        premises: vec![unit_idx, target_idx],
+                    },
                     conclusion: new_clause,
                 });
             }
@@ -52,7 +55,10 @@ pub fn demodulate(
                 let mut new_clause = new_clause;
                 new_clause.id = None;
                 results.push(InferenceResult {
-                    derivation: Derivation::demodulation(unit_idx, target_idx),
+                    derivation: Derivation {
+                        rule_name: "Demodulation".into(),
+                        premises: vec![unit_idx, target_idx],
+                    },
                     conclusion: new_clause,
                 });
             }
