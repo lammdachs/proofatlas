@@ -41,11 +41,7 @@ use super::profile::SaturationProfile;
 use super::rule::{
     ClauseNotification, ClauseView, DemodulationRule, EqualityFactoringRule, EqualityResolutionRule,
     FactoringRule, GeneratingInferenceRule, ProofStateChange, ResolutionRule, SimplificationRule,
-    SubsumptionRule, SuperpositionRule, TautologyRule,
-};
-use super::trace::{
-    BackwardSimplification, ClauseSimplification, ForwardSimplification, GeneratingInference,
-    SaturationStep, SaturationTrace, SimplificationOutcome,
+    SaturationEventLog, SubsumptionRule, SuperpositionRule, TautologyRule,
 };
 use crate::fol::Clause;
 use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
@@ -176,11 +172,6 @@ pub struct SaturationState {
     current_iteration: usize,
     /// Number of initial input clauses
     initial_clause_count: usize,
-    /// Completed saturation iterations (for trace)
-    iterations: Vec<SaturationStep>,
-    /// Per-iteration accumulators (reset each iteration)
-    current_simplifications: Vec<ClauseSimplification>,
-    current_generation: Vec<GeneratingInference>,
 
     // === Polymorphic Rules ===
     /// Simplification rules (tautology, demodulation, subsumption)
@@ -291,9 +282,6 @@ impl SaturationState {
             clause_memory_bytes,
             current_iteration: 0,
             initial_clause_count,
-            iterations: Vec::new(),
-            current_simplifications: Vec::new(),
-            current_generation: Vec::new(),
             simplification_rules,
             generating_rules,
             event_log,
@@ -327,7 +315,7 @@ impl SaturationState {
             }
             proof_clause_indices.push(idx);
             if let Some(Some(derivation)) = self.derivations.get(idx) {
-                to_visit.extend(derivation.premises());
+                to_visit.extend(&derivation.premises);
             }
         }
 
@@ -350,23 +338,9 @@ impl SaturationState {
         }
     }
 
-    /// Convert the saturation state into a structured trace.
-    pub fn into_trace(self) -> SaturationTrace {
-        SaturationTrace {
-            clauses: self.clauses.iter().map(|c| c.to_string()).collect(),
-            initial_clause_count: self.initial_clause_count,
-            iterations: self.iterations,
-        }
-    }
-
     /// Get the derivations (for external proof extraction)
     pub fn derivations(&self) -> &[Option<Derivation>] {
         &self.derivations
-    }
-
-    /// Get the iterations (for external trace building)
-    pub fn iterations(&self) -> &[SaturationStep] {
-        &self.iterations
     }
 
     /// Get the event log (raw state changes)
@@ -374,13 +348,9 @@ impl SaturationState {
         &self.event_log
     }
 
-    /// Flush accumulated simplification/generation events into a completed iteration.
-    fn flush_iteration(&mut self, given_clause: Option<usize>) {
-        self.iterations.push(SaturationStep {
-            simplifications: std::mem::take(&mut self.current_simplifications),
-            given_clause,
-            generating_inferences: std::mem::take(&mut self.current_generation),
-        });
+    /// Get the initial clause count
+    pub fn initial_clause_count(&self) -> usize {
+        self.initial_clause_count
     }
 
     /// Build proof steps from derivations (for backward-compatible SaturationResult).
@@ -515,7 +485,7 @@ impl SaturationState {
         }
     }
 
-    pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>, SaturationTrace) {
+    pub fn saturate(mut self) -> (SaturationResult, Option<SaturationProfile>, SaturationEventLog) {
         let mut profile = if self.config.enable_profiling {
             Some(SaturationProfile::default())
         } else {
@@ -533,13 +503,6 @@ impl SaturationState {
                     if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                         p.forward_simplify_time += t.elapsed();
                     }
-                    // Record simplification event for empty clause
-                    self.current_simplifications.push(ClauseSimplification {
-                        clause_idx,
-                        outcome: None, // Empty clause found
-                    });
-                    // Flush the final partial iteration
-                    self.flush_iteration(None);
                     let proof = self.extract_proof(clause_idx);
                     break 'outer SaturationResult::Proof(proof);
                 }
@@ -553,9 +516,7 @@ impl SaturationState {
                 // Collect changes first to avoid borrow conflict, then apply after loop
                 let clause = &self.clauses[clause_idx];
                 let mut forward_deleted = false;
-                let mut forward_outcome = None;
                 let mut collected_changes: Vec<ProofStateChange> = Vec::new();
-                let mut is_demodulation_rule = false;
 
                 for rule in self.simplification_rules.iter() {
                     let rule_name = rule.name();
@@ -569,23 +530,7 @@ impl SaturationState {
                             p.record_simplification_forward(rule_name, 1, t.elapsed());
                         }
 
-                        // Determine the outcome for tracing
-                        forward_outcome = Some(match rule_name {
-                            "Tautology" => SimplificationOutcome::Forward(ForwardSimplification::Tautology),
-                            "Demodulation" => {
-                                SimplificationOutcome::Forward(ForwardSimplification::Demodulation {
-                                    demodulator: 0, // Will be set properly below
-                                    result: 0,      // Will be set properly below
-                                })
-                            }
-                            "Subsumption" => SimplificationOutcome::Forward(ForwardSimplification::Subsumption {
-                                subsumer: 0, // Could track this if needed
-                            }),
-                            _ => SimplificationOutcome::Forward(ForwardSimplification::Tautology),
-                        });
-
                         collected_changes = changes;
-                        is_demodulation_rule = rule_name == "Demodulation";
                         forward_deleted = true;
                         break;
                     }
@@ -593,28 +538,10 @@ impl SaturationState {
 
                 // Apply collected changes after the borrow ends
                 for change in collected_changes {
-                    if let ProofStateChange::AddN { clause, derivation } = change {
-                        // For demodulation, update the outcome with correct indices
-                        if is_demodulation_rule {
-                            if let Some(demodulator) = derivation.demodulator() {
-                                let new_idx = self.clauses.len();
-                                forward_outcome = Some(SimplificationOutcome::Forward(
-                                    ForwardSimplification::Demodulation {
-                                        demodulator,
-                                        result: new_idx,
-                                    },
-                                ));
-                            }
-                        }
-                        self.apply_change(ProofStateChange::AddN { clause, derivation }, &mut profile);
-                    }
+                    self.apply_change(change, &mut profile);
                 }
 
                 if forward_deleted {
-                    self.current_simplifications.push(ClauseSimplification {
-                        clause_idx,
-                        outcome: forward_outcome,
-                    });
                     continue 'process_n;
                 }
 
@@ -626,7 +553,6 @@ impl SaturationState {
                 // 1d: Apply backward simplification rules
                 // Collect all changes first to avoid borrow conflict, then apply after
                 let mut all_backward_changes: Vec<ProofStateChange> = Vec::new();
-                let mut backward_effects = Vec::new();
 
                 {
                     let (u_indices, p_indices) = self.build_views();
@@ -650,28 +576,6 @@ impl SaturationState {
                                 p.record_simplification_backward(rule_name, count, t.elapsed());
                             }
 
-                            // Track effects for trace (compute new_idx before collecting)
-                            let mut current_new_idx = self.clauses.len();
-                            for change in &changes {
-                                match change {
-                                    ProofStateChange::RemoveU { clause_idx: idx, .. } | ProofStateChange::RemoveP { clause_idx: idx, .. } => {
-                                        backward_effects.push(BackwardSimplification::Subsumption {
-                                            deleted_clause: *idx,
-                                        });
-                                    }
-                                    ProofStateChange::AddN { derivation, .. } => {
-                                        if let Some(target) = derivation.target() {
-                                            backward_effects.push(BackwardSimplification::Demodulation {
-                                                old_clause: target,
-                                                result: current_new_idx,
-                                            });
-                                            current_new_idx += 1;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-
                             all_backward_changes.extend(changes);
                         }
                     }
@@ -686,14 +590,6 @@ impl SaturationState {
                 self.unprocessed.push_back(clause_idx);
                 self.notify_add_unprocessed(clause_idx);
                 self.event_log.push(ProofStateChange::AddU { clause_idx });
-
-                // Record: clause survived and was transferred
-                self.current_simplifications.push(ClauseSimplification {
-                    clause_idx,
-                    outcome: Some(SimplificationOutcome::Backward {
-                        effects: backward_effects,
-                    }),
-                });
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.forward_simplify_time += t.elapsed();
@@ -701,7 +597,6 @@ impl SaturationState {
 
             // === Step 2: Check saturation ===
             if self.unprocessed.is_empty() {
-                self.flush_iteration(None);
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::Saturated(steps, clauses);
@@ -710,26 +605,22 @@ impl SaturationState {
             // Check resource limits
             if let Some(limit_mb) = self.config.max_clause_memory_mb {
                 if self.clause_memory_bytes >= limit_mb * 1024 * 1024 {
-                    self.flush_iteration(None);
                     let steps = self.build_proof_steps();
                     let clauses = self.clauses.clone();
                     break SaturationResult::ResourceLimit(steps, clauses);
                 }
             }
             if self.config.max_iterations > 0 && self.current_iteration >= self.config.max_iterations {
-                self.flush_iteration(None);
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::ResourceLimit(steps, clauses);
             }
             if self.config.max_clauses > 0 && self.clauses.len() >= self.config.max_clauses {
-                self.flush_iteration(None);
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::ResourceLimit(steps, clauses);
             }
             if start_time.elapsed() > self.config.timeout {
-                self.flush_iteration(None);
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::Timeout(steps, clauses);
@@ -755,7 +646,6 @@ impl SaturationState {
             let given_idx = match self.select_given_clause() {
                 Some(idx) => idx,
                 None => {
-                    self.flush_iteration(None);
                     let steps = self.build_proof_steps();
                     let clauses = self.clauses.clone();
                     break SaturationResult::Saturated(steps, clauses);
@@ -764,9 +654,6 @@ impl SaturationState {
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.select_given_time += t.elapsed();
             }
-
-            // Flush the previous iteration's simplifications with the given clause selection
-            self.flush_iteration(Some(given_idx));
 
             // === Step 4: Transfer given clause from U to P ===
             self.unprocessed.retain(|&x| x != given_idx);
@@ -793,24 +680,12 @@ impl SaturationState {
                 orient_clause_equalities(&mut oriented);
                 let clause_str = format!("{}", oriented);
                 if seen_in_batch.insert(clause_str) {
-                    let derivation = inference.derivation.clone();
-                    if let Some(new_idx) = self.add_clause_to_new(inference) {
-                        self.current_generation.push(
-                            GeneratingInference::from_derivation(new_idx, &derivation),
-                        );
-                    }
+                    self.add_clause_to_new(inference);
                 }
             }
             if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
                 p.add_inferences_time += t.elapsed();
             }
-        };
-
-        // Build structured trace from accumulated iterations
-        let trace = SaturationTrace {
-            clauses: self.clauses.iter().map(|c| c.to_string()).collect(),
-            initial_clause_count: self.initial_clause_count,
-            iterations: std::mem::take(&mut self.iterations),
         };
 
         // Finalize profile
@@ -825,7 +700,7 @@ impl SaturationState {
             }
         }
 
-        (result, profile, trace)
+        (result, profile, self.event_log)
     }
 
     /// Select the next given clause using the configured selector
@@ -901,6 +776,12 @@ impl SaturationState {
 
         // Track clause memory
         self.clause_memory_bytes += clause_with_id.memory_bytes();
+
+        // Record event
+        self.event_log.push(ProofStateChange::AddN {
+            clause: clause_with_id.clone(),
+            derivation: inference.derivation.clone(),
+        });
 
         self.clauses.push(clause_with_id);
         self.derivations.push(Some(inference.derivation));
@@ -1041,7 +922,9 @@ mod tests {
     }
 
     #[test]
-    fn test_saturation_trace_populated() {
+    fn test_event_log_populated() {
+        use crate::saturation::rule::ProofStateChange;
+
         let p = PredicateSymbol {
             name: "P".to_string(),
             arity: 1,
@@ -1079,20 +962,20 @@ mod tests {
         ];
 
         let formula = CNFFormula { clauses };
-        let (result, _, trace) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
+        let (result, _, event_log) = crate::saturation::saturate(formula, SaturationConfig::default(), create_selector());
 
         assert!(matches!(result, SaturationResult::Proof(_)));
 
-        // Trace should have content
-        assert_eq!(trace.initial_clause_count, 3);
-        assert!(trace.clauses.len() >= 3, "Should have at least the 3 input clauses");
-        assert!(!trace.iterations.is_empty(), "Should have at least one iteration");
+        // Event log should have content
+        assert!(!event_log.is_empty(), "Should have events in the log");
+
+        // Should have at least the initial 3 AddN events
+        let add_n_count = event_log.iter().filter(|e| matches!(e, ProofStateChange::AddN { .. })).count();
+        assert!(add_n_count >= 3, "Should have at least 3 AddN events for initial clauses");
 
         // Verify serde serialization round-trips
-        let json = serde_json::to_string(&trace).unwrap();
-        let parsed: SaturationTrace = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.initial_clause_count, trace.initial_clause_count);
-        assert_eq!(parsed.clauses.len(), trace.clauses.len());
-        assert_eq!(parsed.iterations.len(), trace.iterations.len());
+        let json = serde_json::to_string(&event_log).unwrap();
+        let parsed: Vec<ProofStateChange> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), event_log.len());
     }
 }

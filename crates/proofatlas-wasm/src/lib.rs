@@ -2,8 +2,7 @@ use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
     parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy,
-    Clause, Literal, AgeWeightSelector, ClauseSelector, SaturationTrace,
-    ForwardSimplification, BackwardSimplification, SimplificationOutcome, GeneratingInference,
+    Clause, Literal, AgeWeightSelector, ClauseSelector, SaturationEventLog, ProofStateChange,
 };
 use std::time::Duration;
 
@@ -141,8 +140,8 @@ impl ProofAtlasWasm {
                 ProofStep {
                     id: step.clause_idx,
                     clause: format_clause(&step.conclusion),
-                    rule: step.derivation.rule_name().to_string(),
-                    parents: step.derivation.premises(),
+                    rule: step.derivation.rule_name.clone(),
+                    parents: step.derivation.premises.clone(),
                 }
             }).collect()
         };
@@ -196,7 +195,7 @@ impl ProofAtlasWasm {
                         time_ms,
                     },
                     trace: if include_trace {
-                        Some(trace_to_js_value(&sat_trace))
+                        Some(events_to_js_value(&sat_trace))
                     } else {
                         None
                     },
@@ -217,7 +216,7 @@ impl ProofAtlasWasm {
                         final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
+                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
@@ -235,7 +234,7 @@ impl ProofAtlasWasm {
                         final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
+                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
@@ -253,7 +252,7 @@ impl ProofAtlasWasm {
                         final_clauses: clauses.len(),
                         time_ms,
                     },
-                    trace: if include_trace { Some(trace_to_js_value(&sat_trace)) } else { None },
+                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
@@ -276,7 +275,9 @@ impl ProofAtlasWasm {
     }
 }
 
-/// Convert a SaturationTrace into the flat event format expected by the JS ProofInspector.
+/// Convert a SaturationEventLog into the flat event format expected by the JS ProofInspector.
+///
+/// This replays the event log to reconstruct the iteration structure that the JS UI expects.
 ///
 /// Output format:
 /// ```json
@@ -289,143 +290,155 @@ impl ProofAtlasWasm {
 ///   }]
 /// }
 /// ```
-fn trace_to_js_value(trace: &SaturationTrace) -> serde_json::Value {
+fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
     use serde_json::json;
+    use std::collections::HashMap;
+
+    // First pass: collect all clauses and their derivations
+    let mut clauses: HashMap<usize, String> = HashMap::new();
+    let mut derivations: HashMap<usize, (String, Vec<usize>)> = HashMap::new();
+    let mut initial_clause_count = 0;
+
+    for event in events {
+        if let ProofStateChange::AddN { clause, derivation } = event {
+            if let Some(idx) = clause.id {
+                clauses.insert(idx, format_clause(clause));
+                derivations.insert(idx, (derivation.rule_name.clone(), derivation.premises.clone()));
+                if derivation.rule_name == "Input" {
+                    initial_clause_count = initial_clause_count.max(idx + 1);
+                }
+            }
+        }
+    }
 
     // Build initial_clauses array
-    let initial_clauses: Vec<serde_json::Value> = (0..trace.initial_clause_count)
+    let initial_clauses: Vec<serde_json::Value> = (0..initial_clause_count)
         .map(|i| json!({
             "id": i,
-            "clause": trace.clauses.get(i).cloned().unwrap_or_default(),
+            "clause": clauses.get(&i).cloned().unwrap_or_default(),
         }))
         .collect();
 
-    // Build iterations
-    let iterations: Vec<serde_json::Value> = trace.iterations.iter().map(|step| {
-        let mut simplification_events = Vec::new();
+    // Second pass: build iterations by replaying events
+    // An iteration ends when we see AddP (given clause selected)
+    let mut iterations: Vec<serde_json::Value> = Vec::new();
+    let mut current_simplification = Vec::new();
+    let mut current_generation = Vec::new();
+    let mut current_selection: Option<serde_json::Value> = None;
 
-        for cs in &step.simplifications {
-            let clause_str = trace.clauses.get(cs.clause_idx).cloned().unwrap_or_default();
+    for event in events {
+        match event {
+            ProofStateChange::AddN { clause, derivation } => {
+                if let Some(idx) = clause.id {
+                    let clause_str = format_clause(clause);
+                    let rule = &derivation.rule_name;
+                    let premises = &derivation.premises;
 
-            match &cs.outcome {
-                None => {
-                    // Empty clause found — record as special event
-                    simplification_events.push(json!({
-                        "clause_idx": cs.clause_idx,
+                    // Skip initial input clauses for iteration events
+                    if rule == "Input" {
+                        continue;
+                    }
+
+                    // Generating inferences produce new clauses
+                    let is_generating = matches!(
+                        rule.as_str(),
+                        "Resolution" | "Factoring" | "Superposition" | "EqualityResolution" | "EqualityFactoring"
+                    );
+
+                    if is_generating {
+                        current_generation.push(json!({
+                            "clause_idx": idx,
+                            "clause": clause_str,
+                            "rule": rule,
+                            "premises": premises,
+                        }));
+                    } else if rule == "Demodulation" {
+                        // Demodulation is a simplification
+                        current_simplification.push(json!({
+                            "clause_idx": idx,
+                            "clause": clause_str,
+                            "rule": "Demodulation",
+                            "premises": premises,
+                        }));
+                    }
+                }
+            }
+            ProofStateChange::RemoveN { clause_idx, rule_name } => {
+                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                let rule = match rule_name.as_str() {
+                    "Tautology" => "TautologyDeletion",
+                    "Subsumption" => "ForwardSubsumptionDeletion",
+                    "Demodulation" => "ForwardDemodulation",
+                    _ => rule_name.as_str(),
+                };
+                current_simplification.push(json!({
+                    "clause_idx": *clause_idx,
+                    "clause": clause_str,
+                    "rule": rule,
+                    "premises": [],
+                }));
+            }
+            ProofStateChange::AddU { clause_idx } => {
+                // Clause transferred from N to U
+                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                current_simplification.push(json!({
+                    "clause_idx": *clause_idx,
+                    "clause": clause_str,
+                    "rule": "Transfer",
+                    "premises": [],
+                }));
+            }
+            ProofStateChange::RemoveU { clause_idx, rule_name } => {
+                if rule_name == "Selection" {
+                    // This is the given clause selection - will be followed by AddP
+                    let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                    current_selection = Some(json!({
+                        "clause_idx": *clause_idx,
                         "clause": clause_str,
-                        "rule": "EmptyClause",
-                        "premises": [],
+                        "rule": "GivenClauseSelection",
                     }));
-                }
-                Some(SimplificationOutcome::Forward(fwd)) => {
-                    match fwd {
-                        ForwardSimplification::Tautology => {
-                            simplification_events.push(json!({
-                                "clause_idx": cs.clause_idx,
-                                "clause": clause_str,
-                                "rule": "TautologyDeletion",
-                                "premises": [],
-                            }));
-                        }
-                        ForwardSimplification::Subsumption { subsumer } => {
-                            simplification_events.push(json!({
-                                "clause_idx": cs.clause_idx,
-                                "clause": clause_str,
-                                "rule": "ForwardSubsumptionDeletion",
-                                "premises": [subsumer],
-                            }));
-                        }
-                        ForwardSimplification::Demodulation { demodulator, result } => {
-                            // The original clause is deleted; the result is a new clause in N
-                            let result_str = trace.clauses.get(*result).cloned().unwrap_or_default();
-                            simplification_events.push(json!({
-                                "clause_idx": *result,
-                                "clause": result_str,
-                                "rule": "Demodulation",
-                                "premises": [demodulator, cs.clause_idx],
-                            }));
-                        }
-                    }
-                }
-                Some(SimplificationOutcome::Backward { effects }) => {
-                    // Clause survived — emit backward effects first, then Transfer
-                    for effect in effects {
-                        match effect {
-                            BackwardSimplification::Subsumption { deleted_clause } => {
-                                let del_str = trace.clauses.get(*deleted_clause).cloned().unwrap_or_default();
-                                simplification_events.push(json!({
-                                    "clause_idx": *deleted_clause,
-                                    "clause": del_str,
-                                    "rule": "BackwardSubsumptionDeletion",
-                                    "premises": [cs.clause_idx],
-                                }));
-                            }
-                            BackwardSimplification::Demodulation { old_clause, result } => {
-                                let result_str = trace.clauses.get(*result).cloned().unwrap_or_default();
-                                simplification_events.push(json!({
-                                    "clause_idx": *result,
-                                    "clause": result_str,
-                                    "rule": "Demodulation",
-                                    "premises": [cs.clause_idx, old_clause],
-                                }));
-                            }
-                        }
-                    }
-                    // Transfer event
-                    simplification_events.push(json!({
-                        "clause_idx": cs.clause_idx,
+                } else {
+                    // Backward simplification deleted a clause from U
+                    let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                    current_simplification.push(json!({
+                        "clause_idx": *clause_idx,
                         "clause": clause_str,
-                        "rule": "Transfer",
+                        "rule": "BackwardSubsumptionDeletion",
                         "premises": [],
                     }));
                 }
             }
+            ProofStateChange::AddP { clause_idx: _ } => {
+                // End of iteration - flush current state
+                if current_selection.is_some() || !current_simplification.is_empty() || !current_generation.is_empty() {
+                    iterations.push(json!({
+                        "simplification": std::mem::take(&mut current_simplification),
+                        "selection": current_selection.take(),
+                        "generation": std::mem::take(&mut current_generation),
+                    }));
+                }
+            }
+            ProofStateChange::RemoveP { clause_idx, rule_name: _ } => {
+                // Backward simplification deleted a clause from P
+                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
+                current_simplification.push(json!({
+                    "clause_idx": *clause_idx,
+                    "clause": clause_str,
+                    "rule": "BackwardSubsumptionDeletion",
+                    "premises": [],
+                }));
+            }
         }
+    }
 
-        // Selection
-        let selection = step.given_clause.map(|idx| {
-            let clause_str = trace.clauses.get(idx).cloned().unwrap_or_default();
-            json!({
-                "clause_idx": idx,
-                "clause": clause_str,
-                "rule": "GivenClauseSelection",
-            })
-        });
-
-        // Generation
-        let generation_events: Vec<serde_json::Value> = step.generating_inferences.iter().map(|gi| {
-            let (clause_idx, rule, premises) = match gi {
-                GeneratingInference::Resolution { clause_idx, parents } => {
-                    (*clause_idx, "Resolution", vec![parents.0, parents.1])
-                }
-                GeneratingInference::Factoring { clause_idx, parent } => {
-                    (*clause_idx, "Factoring", vec![*parent])
-                }
-                GeneratingInference::Superposition { clause_idx, parents } => {
-                    (*clause_idx, "Superposition", vec![parents.0, parents.1])
-                }
-                GeneratingInference::EqualityResolution { clause_idx, parent } => {
-                    (*clause_idx, "EqualityResolution", vec![*parent])
-                }
-                GeneratingInference::EqualityFactoring { clause_idx, parent } => {
-                    (*clause_idx, "EqualityFactoring", vec![*parent])
-                }
-            };
-            let clause_str = trace.clauses.get(clause_idx).cloned().unwrap_or_default();
-            json!({
-                "clause_idx": clause_idx,
-                "clause": clause_str,
-                "rule": rule,
-                "premises": premises,
-            })
-        }).collect();
-
-        json!({
-            "simplification": simplification_events,
-            "selection": selection,
-            "generation": generation_events,
-        })
-    }).collect();
+    // Flush any remaining events (e.g., final iteration before proof found)
+    if !current_simplification.is_empty() || !current_generation.is_empty() || current_selection.is_some() {
+        iterations.push(json!({
+            "simplification": current_simplification,
+            "selection": current_selection,
+            "generation": current_generation,
+        }));
+    }
 
     json!({
         "initial_clauses": initial_clauses,

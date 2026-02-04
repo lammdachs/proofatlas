@@ -66,7 +66,7 @@ fn test_with_duplicate_clause() {
         SaturationResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
             for step in &proof.steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises());
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises);
             }
         }
         SaturationResult::Saturated(steps, clauses) => {
@@ -76,7 +76,7 @@ fn test_with_duplicate_clause() {
             }
             println!("Steps:");
             for step in steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises());
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises);
             }
         }
         SaturationResult::ResourceLimit(_, clauses) | SaturationResult::Timeout(_, clauses) => {

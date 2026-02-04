@@ -107,15 +107,6 @@ impl Derivation {
         }
     }
 
-    /// Get the premise clause indices (for backwards compatibility)
-    pub fn premises(&self) -> Vec<usize> {
-        self.premises.clone()
-    }
-
-    /// Get a human-readable rule name (for backwards compatibility)
-    pub fn rule_name(&self) -> &str {
-        &self.rule_name
-    }
 }
 
 #[cfg(test)]

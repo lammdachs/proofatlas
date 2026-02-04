@@ -42,9 +42,8 @@ pub use selection::{load_sentence_selector, PassThroughScorer, SentenceEmbedder,
 
 // Re-export saturation types
 pub use saturation::{
-    saturate, BackwardSimplification, ForwardSimplification, GeneratingInference,
-    LiteralSelectionStrategy, SaturationConfig, SaturationProfile, SaturationResult,
-    SaturationState, SaturationTrace, SimplificationOutcome,
+    saturate, EventLogReplayer, LiteralSelectionStrategy, ProofStateChange, SaturationConfig,
+    SaturationEventLog, SaturationProfile, SaturationResult, SaturationState,
 };
 
 pub use unification::{unify, UnificationError, UnificationResult};

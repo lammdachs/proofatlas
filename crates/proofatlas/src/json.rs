@@ -155,8 +155,8 @@ impl From<&ProofStep> for ProofStepJson {
         ProofStepJson {
             clause_idx: step.clause_idx,
             inference: InferenceJson {
-                rule: step.derivation.rule_name().to_string(),
-                premises: step.derivation.premises(),
+                rule: step.derivation.rule_name.clone(),
+                premises: step.derivation.premises.clone(),
             },
             processed_count: None,
             unprocessed_count: None,

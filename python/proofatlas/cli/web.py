@@ -66,118 +66,174 @@ def check_ml_available() -> bool:
 
 
 def _convert_trace(trace_json: str) -> dict:
-    """Convert the Rust SaturationTrace JSON into the flat event format for ProofInspector.
+    """Convert the Rust SaturationEventLog JSON into the flat event format for ProofInspector.
 
-    The Rust format uses structured enums (SimplificationOutcome, ForwardSimplification, etc.).
-    The JS inspector expects flat events with {clause_idx, clause, rule, premises}.
+    The Rust format is a list of ProofStateChange events.
+    The JS inspector expects iterations with {simplification, selection, generation}.
     """
-    raw = json.loads(trace_json)
-    clauses = raw["clauses"]
-    initial_count = raw["initial_clause_count"]
+    events = json.loads(trace_json)
 
+    # First pass: collect all clauses and their derivations
+    clauses = {}
+    derivations = {}
+    initial_clause_count = 0
+
+    for event in events:
+        if event["type"] == "AddN":
+            clause = event["clause"]
+            derivation = event["derivation"]
+            idx = clause.get("id")
+            if idx is not None:
+                # Format clause as string
+                literals = clause.get("literals", [])
+                if not literals:
+                    clause_str = "⊥"
+                else:
+                    lit_strs = []
+                    for lit in literals:
+                        atom = lit["atom"]
+                        pred = atom["predicate"]["name"]
+                        args = atom.get("args", [])
+                        if pred == "=" and len(args) == 2:
+                            atom_str = f"{_format_term(args[0])} = {_format_term(args[1])}"
+                        else:
+                            arg_strs = [_format_term(a) for a in args]
+                            atom_str = f"{pred}({', '.join(arg_strs)})" if arg_strs else pred
+                        if lit["polarity"]:
+                            lit_strs.append(atom_str)
+                        else:
+                            lit_strs.append(f"~{atom_str}")
+                    clause_str = " ∨ ".join(lit_strs)
+                clauses[idx] = clause_str
+                derivations[idx] = (derivation["rule_name"], derivation.get("premises", []))
+                if derivation["rule_name"] == "Input":
+                    initial_clause_count = max(initial_clause_count, idx + 1)
+
+    # Build initial_clauses array
     initial_clauses = [
-        {"id": i, "clause": clauses[i] if i < len(clauses) else ""}
-        for i in range(initial_count)
+        {"id": i, "clause": clauses.get(i, "")}
+        for i in range(initial_clause_count)
     ]
 
+    # Second pass: build iterations by replaying events
     iterations = []
-    for step in raw["iterations"]:
-        simplification_events = []
+    current_simplification = []
+    current_generation = []
+    current_selection = None
 
-        for cs in step["simplifications"]:
-            idx = cs["clause_idx"]
-            clause_str = clauses[idx] if idx < len(clauses) else ""
-            outcome = cs["outcome"]
+    for event in events:
+        event_type = event["type"]
 
-            if outcome is None:
-                # Empty clause found
-                simplification_events.append({
+        if event_type == "AddN":
+            clause = event["clause"]
+            derivation = event["derivation"]
+            idx = clause.get("id")
+            if idx is None:
+                continue
+
+            rule = derivation["rule_name"]
+            premises = derivation.get("premises", [])
+
+            # Skip initial input clauses
+            if rule == "Input":
+                continue
+
+            clause_str = clauses.get(idx, "")
+
+            # Generating inferences produce new clauses
+            if rule in ("Resolution", "Factoring", "Superposition", "EqualityResolution", "EqualityFactoring"):
+                current_generation.append({
                     "clause_idx": idx, "clause": clause_str,
-                    "rule": "EmptyClause", "premises": [],
+                    "rule": rule, "premises": premises,
                 })
-            elif outcome["type"] == "Forward":
-                # Adjacent-tagged: {"type": "Forward", "data": {"type": "Tautology", ...}}
-                fwd = outcome["data"]
-                fwd_type = fwd["type"]
-                if fwd_type == "Tautology":
-                    simplification_events.append({
-                        "clause_idx": idx, "clause": clause_str,
-                        "rule": "TautologyDeletion", "premises": [],
-                    })
-                elif fwd_type == "Subsumption":
-                    simplification_events.append({
-                        "clause_idx": idx, "clause": clause_str,
-                        "rule": "ForwardSubsumptionDeletion",
-                        "premises": [fwd["subsumer"]],
-                    })
-                elif fwd_type == "Demodulation":
-                    result_idx = fwd["result"]
-                    result_str = clauses[result_idx] if result_idx < len(clauses) else ""
-                    simplification_events.append({
-                        "clause_idx": result_idx, "clause": result_str,
-                        "rule": "Demodulation",
-                        "premises": [fwd["demodulator"], idx],
-                    })
-
-            elif outcome["type"] == "Backward":
-                # Adjacent-tagged: {"type": "Backward", "data": {"effects": [...]}}
-                effects = outcome["data"]["effects"]
-                for effect in effects:
-                    if effect["type"] == "Subsumption":
-                        del_idx = effect["deleted_clause"]
-                        del_str = clauses[del_idx] if del_idx < len(clauses) else ""
-                        simplification_events.append({
-                            "clause_idx": del_idx, "clause": del_str,
-                            "rule": "BackwardSubsumptionDeletion", "premises": [idx],
-                        })
-                    elif effect["type"] == "Demodulation":
-                        result_idx = effect["result"]
-                        result_str = clauses[result_idx] if result_idx < len(clauses) else ""
-                        simplification_events.append({
-                            "clause_idx": result_idx, "clause": result_str,
-                            "rule": "Demodulation",
-                            "premises": [idx, effect["old_clause"]],
-                        })
-                # Transfer event
-                simplification_events.append({
+            elif rule == "Demodulation":
+                current_simplification.append({
                     "clause_idx": idx, "clause": clause_str,
-                    "rule": "Transfer", "premises": [],
+                    "rule": "Demodulation", "premises": premises,
                 })
 
-        # Selection
-        given = step.get("given_clause")
-        selection = None
-        if given is not None:
-            sel_str = clauses[given] if given < len(clauses) else ""
-            selection = {
-                "clause_idx": given, "clause": sel_str,
-                "rule": "GivenClauseSelection",
-            }
-
-        # Generation
-        generation_events = []
-        for gi in step["generating_inferences"]:
-            gi_type = gi["type"]
-            gi_idx = gi["clause_idx"]
-            gi_str = clauses[gi_idx] if gi_idx < len(clauses) else ""
-            if gi_type in ("Resolution", "Superposition"):
-                parents = gi["parents"]
-            elif gi_type in ("Factoring", "EqualityResolution", "EqualityFactoring"):
-                parents = [gi["parent"]]
-            else:
-                parents = []
-            generation_events.append({
-                "clause_idx": gi_idx, "clause": gi_str,
-                "rule": gi_type, "premises": parents,
+        elif event_type == "RemoveN":
+            idx = event["clause_idx"]
+            rule_name = event["rule_name"]
+            clause_str = clauses.get(idx, "")
+            rule = {
+                "Tautology": "TautologyDeletion",
+                "Subsumption": "ForwardSubsumptionDeletion",
+                "Demodulation": "ForwardDemodulation",
+            }.get(rule_name, rule_name)
+            current_simplification.append({
+                "clause_idx": idx, "clause": clause_str,
+                "rule": rule, "premises": [],
             })
 
+        elif event_type == "AddU":
+            idx = event["clause_idx"]
+            clause_str = clauses.get(idx, "")
+            current_simplification.append({
+                "clause_idx": idx, "clause": clause_str,
+                "rule": "Transfer", "premises": [],
+            })
+
+        elif event_type == "RemoveU":
+            idx = event["clause_idx"]
+            rule_name = event["rule_name"]
+            if rule_name == "Selection":
+                clause_str = clauses.get(idx, "")
+                current_selection = {
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "GivenClauseSelection",
+                }
+            else:
+                clause_str = clauses.get(idx, "")
+                current_simplification.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "BackwardSubsumptionDeletion", "premises": [],
+                })
+
+        elif event_type == "AddP":
+            # End of iteration
+            if current_selection or current_simplification or current_generation:
+                iterations.append({
+                    "simplification": current_simplification,
+                    "selection": current_selection,
+                    "generation": current_generation,
+                })
+                current_simplification = []
+                current_generation = []
+                current_selection = None
+
+        elif event_type == "RemoveP":
+            idx = event["clause_idx"]
+            clause_str = clauses.get(idx, "")
+            current_simplification.append({
+                "clause_idx": idx, "clause": clause_str,
+                "rule": "BackwardSubsumptionDeletion", "premises": [],
+            })
+
+    # Flush any remaining events
+    if current_simplification or current_generation or current_selection:
         iterations.append({
-            "simplification": simplification_events,
-            "selection": selection,
-            "generation": generation_events,
+            "simplification": current_simplification,
+            "selection": current_selection,
+            "generation": current_generation,
         })
 
     return {"initial_clauses": initial_clauses, "iterations": iterations}
+
+
+def _format_term(term: dict) -> str:
+    """Format a term for display."""
+    if "Variable" in term:
+        return term["Variable"]["name"]
+    elif "Constant" in term:
+        return term["Constant"]["name"]
+    elif "Function" in term:
+        func = term["Function"]
+        name = func["symbol"]["name"]
+        args = [_format_term(a) for a in func.get("args", [])]
+        return f"{name}({', '.join(args)})" if args else name
+    else:
+        return str(term)
 
 
 # Status messages for non-proof results

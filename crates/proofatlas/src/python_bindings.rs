@@ -684,8 +684,8 @@ impl ProofState {
             let clause_string = step.conclusion.to_string();
             self.proof_trace.push(ProofStep {
                 clause_id: step.clause_idx,
-                parent_ids: step.derivation.premises(),
-                rule_name: step.derivation.rule_name().to_string(),
+                parent_ids: step.derivation.premises.clone(),
+                rule_name: step.derivation.rule_name.clone(),
                 clause_string,
             });
         }
@@ -951,8 +951,8 @@ impl ProofState {
     /// Convert Rust inference result to Python inference result
     fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
         let clause_string = rust_result.conclusion.to_string();
-        let rule_name = rust_result.derivation.rule_name().to_lowercase();
-        let parent_ids = rust_result.derivation.premises();
+        let rule_name = rust_result.derivation.rule_name.to_lowercase();
+        let parent_ids = rust_result.derivation.premises.clone();
 
         InferenceResult {
             clause_string,

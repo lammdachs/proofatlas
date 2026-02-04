@@ -49,7 +49,7 @@ fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
         // Find the step that derived this clause
         if let Some(step) = proof.steps.iter().find(|s| s.clause_idx == clause_idx) {
             // Add premises (parent clauses) to the search
-            to_visit.extend(step.derivation.premises());
+            to_visit.extend(&step.derivation.premises);
         }
     }
 
