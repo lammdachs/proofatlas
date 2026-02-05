@@ -10,6 +10,7 @@ USAGE:
 When running locally, the server provides:
   - Static file serving for the web UI
   - GET  /api/health       - Server health check (detects ML availability)
+  - GET  /api/tptp/{name}  - Load TPTP problem by name (e.g., GRP001-1)
   - POST /api/prove        - Server-side proving (supports ML selectors)
   - GET  /configs/*        - Serve config files from project root
 """
@@ -65,46 +66,40 @@ def check_ml_available() -> bool:
         return False
 
 
-def _convert_trace(trace_json: str) -> dict:
+def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     """Convert the Rust SaturationEventLog JSON into the flat event format for ProofInspector.
 
-    The Rust format is a list of ProofStateChange events.
+    The Rust format is a list of ProofStateChange events with types:
+    - New: clause added to N
+    - DeleteN: clause removed from N
+    - Transfer: clause moved from N to U
+    - DeleteU: clause removed from U
+    - Select: clause moved from U to P (given clause selection)
+    - DeleteP: clause removed from P
+
     The JS inspector expects iterations with {simplification, selection, generation}.
+
+    Args:
+        trace_json: JSON string of ProofStateChange events
+        all_clauses: List of clause dicts with 'id' and 'clause' keys (formatted strings)
     """
     events = json.loads(trace_json)
 
-    # First pass: collect all clauses and their derivations
+    # Build clause string lookup from all_clauses (which has resolved symbol names)
     clauses = {}
+    for c in all_clauses:
+        clauses[c["id"]] = c["clause"]
+
+    # First pass: collect derivations and count initial clauses
     derivations = {}
     initial_clause_count = 0
 
     for event in events:
-        if event["type"] == "AddN":
+        if event["type"] == "New":
             clause = event["clause"]
             derivation = event["derivation"]
             idx = clause.get("id")
             if idx is not None:
-                # Format clause as string
-                literals = clause.get("literals", [])
-                if not literals:
-                    clause_str = "⊥"
-                else:
-                    lit_strs = []
-                    for lit in literals:
-                        atom = lit["atom"]
-                        pred = atom["predicate"]["name"]
-                        args = atom.get("args", [])
-                        if pred == "=" and len(args) == 2:
-                            atom_str = f"{_format_term(args[0])} = {_format_term(args[1])}"
-                        else:
-                            arg_strs = [_format_term(a) for a in args]
-                            atom_str = f"{pred}({', '.join(arg_strs)})" if arg_strs else pred
-                        if lit["polarity"]:
-                            lit_strs.append(atom_str)
-                        else:
-                            lit_strs.append(f"~{atom_str}")
-                    clause_str = " ∨ ".join(lit_strs)
-                clauses[idx] = clause_str
                 derivations[idx] = (derivation["rule_name"], derivation.get("premises", []))
                 if derivation["rule_name"] == "Input":
                     initial_clause_count = max(initial_clause_count, idx + 1)
@@ -124,7 +119,7 @@ def _convert_trace(trace_json: str) -> dict:
     for event in events:
         event_type = event["type"]
 
-        if event_type == "AddN":
+        if event_type == "New":
             clause = event["clause"]
             derivation = event["derivation"]
             idx = clause.get("id")
@@ -152,7 +147,7 @@ def _convert_trace(trace_json: str) -> dict:
                     "rule": "Demodulation", "premises": premises,
                 })
 
-        elif event_type == "RemoveN":
+        elif event_type == "DeleteN":
             idx = event["clause_idx"]
             rule_name = event["rule_name"]
             clause_str = clauses.get(idx, "")
@@ -166,7 +161,7 @@ def _convert_trace(trace_json: str) -> dict:
                 "rule": rule, "premises": [],
             })
 
-        elif event_type == "AddU":
+        elif event_type == "Transfer":
             idx = event["clause_idx"]
             clause_str = clauses.get(idx, "")
             current_simplification.append({
@@ -174,24 +169,21 @@ def _convert_trace(trace_json: str) -> dict:
                 "rule": "Transfer", "premises": [],
             })
 
-        elif event_type == "RemoveU":
+        elif event_type == "DeleteU":
             idx = event["clause_idx"]
             rule_name = event["rule_name"]
-            if rule_name == "Selection":
-                clause_str = clauses.get(idx, "")
-                current_selection = {
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": "GivenClauseSelection",
-                }
-            else:
-                clause_str = clauses.get(idx, "")
-                current_simplification.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": "BackwardSubsumptionDeletion", "premises": [],
-                })
+            clause_str = clauses.get(idx, "")
+            current_simplification.append({
+                "clause_idx": idx, "clause": clause_str,
+                "rule": "BackwardSubsumptionDeletion", "premises": [],
+            })
 
-        elif event_type == "AddP":
-            # End of iteration
+        elif event_type == "Select":
+            # Given clause selection - end of one iteration, start of next
+            idx = event["clause_idx"]
+            clause_str = clauses.get(idx, "")
+
+            # If we have accumulated events, save the current iteration first
             if current_selection or current_simplification or current_generation:
                 iterations.append({
                     "simplification": current_simplification,
@@ -200,9 +192,14 @@ def _convert_trace(trace_json: str) -> dict:
                 })
                 current_simplification = []
                 current_generation = []
-                current_selection = None
 
-        elif event_type == "RemoveP":
+            # Start new iteration with this selection
+            current_selection = {
+                "clause_idx": idx, "clause": clause_str,
+                "rule": "GivenClauseSelection",
+            }
+
+        elif event_type == "DeleteP":
             idx = event["clause_idx"]
             clause_str = clauses.get(idx, "")
             current_simplification.append({
@@ -221,21 +218,6 @@ def _convert_trace(trace_json: str) -> dict:
     return {"initial_clauses": initial_clauses, "iterations": iterations}
 
 
-def _format_term(term: dict) -> str:
-    """Format a term for display."""
-    if "Variable" in term:
-        return term["Variable"]["name"]
-    elif "Constant" in term:
-        return term["Constant"]["name"]
-    elif "Function" in term:
-        func = term["Function"]
-        name = func["symbol"]["name"]
-        args = [_format_term(a) for a in func.get("args", [])]
-        return f"{name}({', '.join(args)})" if args else name
-    else:
-        return str(term)
-
-
 # Status messages for non-proof results
 STATUS_MESSAGES = {
     "saturated": "Saturated without finding a proof - the formula may be satisfiable",
@@ -244,13 +226,19 @@ STATUS_MESSAGES = {
 }
 
 
-def run_prove(tptp_input: str, options: dict) -> dict:
-    """Run the prover server-side and return result in WASM-compatible format."""
+def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
+    """Run the prover server-side and return result in WASM-compatible format.
+
+    Args:
+        tptp_input: TPTP problem content
+        options: Prover configuration options
+        tptp_root: Optional path to TPTP root directory for resolving include() directives
+    """
     from proofatlas import ProofState
 
     start = time.time()
     state = ProofState()
-    state.add_clauses_from_tptp(tptp_input)
+    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root)
     initial_count = state.get_statistics()["total"]
 
     # Build saturation kwargs — pass config keys directly,
@@ -290,7 +278,7 @@ def run_prove(tptp_input: str, options: dict) -> dict:
 
     # Parse the structured saturation trace from Rust and convert to
     # the flat event format expected by the JS ProofInspector.
-    trace = _convert_trace(trace_json) if trace_json else None
+    trace = _convert_trace(trace_json, all_clauses) if trace_json else None
 
     return {
         "success": proof_found,
@@ -339,10 +327,50 @@ class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
                 "status": "ok",
                 "ml_available": self.ml_available,
             })
+        elif self.path.startswith("/api/tptp/"):
+            self.serve_tptp_problem()
         elif self.path.startswith("/configs/"):
             self.serve_config_file()
         else:
             super().do_GET()
+
+    def serve_tptp_problem(self):
+        """Serve a TPTP problem from the .tptp directory."""
+        import urllib.parse
+        # Extract problem name from path (e.g., /api/tptp/GRP001-1 -> GRP001-1)
+        problem_name = urllib.parse.unquote(self.path[len("/api/tptp/"):])
+
+        # Sanitize: prevent path traversal
+        if ".." in problem_name or "/" in problem_name or "\\" in problem_name:
+            self.send_json({"error": "Invalid problem name"}, 400)
+            return
+
+        # Find the TPTP directory
+        tptp_dir = self.project_root / ".tptp"
+        if not tptp_dir.exists():
+            self.send_json({"error": "TPTP library not found. Run: uv run scripts/setup_tptp.py"}, 404)
+            return
+
+        # Look for the problem in TPTP directory structure
+        # Problems are organized as: Problems/{DOMAIN}/{PROBLEM}.p
+        # e.g., Problems/GRP/GRP001-1.p
+        domain = problem_name[:3] if len(problem_name) >= 3 else problem_name
+
+        # Try common TPTP version directories
+        for version_dir in sorted(tptp_dir.iterdir(), reverse=True):
+            if not version_dir.is_dir():
+                continue
+            problem_path = version_dir / "Problems" / domain / f"{problem_name}.p"
+            if problem_path.exists():
+                try:
+                    content = problem_path.read_text()
+                    self.send_json({"content": content})
+                    return
+                except Exception as e:
+                    self.send_json({"error": f"Error reading problem: {e}"}, 500)
+                    return
+
+        self.send_json({"error": f"Problem not found: {problem_name}"}, 404)
 
     def do_POST(self):
         if self.path == "/api/prove":
@@ -390,7 +418,17 @@ class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"error": "Missing 'input' field"}, 400)
                 return
 
-            result = run_prove(tptp_input, options)
+            # Find TPTP root for resolving include() directives
+            tptp_root = None
+            tptp_dir = self.project_root / ".tptp"
+            if tptp_dir.exists():
+                # Find the TPTP version directory (e.g., TPTP-v9.0.0)
+                for version_dir in sorted(tptp_dir.iterdir(), reverse=True):
+                    if version_dir.is_dir() and version_dir.name.startswith("TPTP"):
+                        tptp_root = str(version_dir)
+                        break
+
+            result = run_prove(tptp_input, options, tptp_root=tptp_root)
             self.send_json(result)
         except json.JSONDecodeError as e:
             self.send_json({"error": f"Invalid JSON: {e}"}, 400)
@@ -500,7 +538,7 @@ def start_server(port: int, web_dir: Path):
     try:
         with socketserver.TCPServer(("", port), ProofAtlasHandler) as httpd:
             print(f"Serving ProofAtlas at http://localhost:{port}")
-            print(f"API endpoints: /api/health, /api/prove, /configs/*")
+            print(f"API endpoints: /api/health, /api/tptp/{{name}}, /api/prove, /configs/*")
             print("Press Ctrl+C to stop")
             httpd.serve_forever()
     except OSError as e:

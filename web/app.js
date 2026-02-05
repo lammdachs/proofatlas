@@ -610,36 +610,58 @@ function renderProfile(profile) {
 
     let html = '';
 
+    // Helper to get generating rule stats
+    const genRule = (name) => profile.generating_rules?.[name] || {};
+    const simpRule = (name) => profile.simplification_rules?.[name] || {};
+
     // Phase Timings
     html += '<div class="profile-group"><h4>Phase Timings</h4>';
     html += table([
         ['Total', fmt(profile.total_time)],
         ['Forward simplification', fmt(profile.forward_simplify_time)],
-        ['  Forward demodulation', fmt(profile.forward_demod_time)],
-        ['  Forward subsumption', fmt(profile.forward_subsumption_time)],
-        ['  Backward subsumption', fmt(profile.backward_subsumption_time)],
-        ['  Backward demodulation', fmt(profile.backward_demod_time)],
         ['Clause selection', fmt(profile.select_given_time)],
         ['Inference generation', fmt(profile.generate_inferences_time)],
-        ['  Resolution', fmt(profile.resolution_time)],
-        ['  Superposition', fmt(profile.superposition_time)],
-        ['  Factoring', fmt(profile.factoring_time)],
-        ['  Equality resolution', fmt(profile.equality_resolution_time)],
-        ['  Equality factoring', fmt(profile.equality_factoring_time)],
         ['Inference addition', fmt(profile.add_inferences_time)],
     ]);
     html += '</div>';
 
-    // Inference Counts
-    html += '<div class="profile-group"><h4>Inference Counts</h4>';
-    html += table([
-        ['Resolution', num(profile.resolution_count)],
-        ['Superposition', num(profile.superposition_count)],
-        ['Factoring', num(profile.factoring_count)],
-        ['Equality resolution', num(profile.equality_resolution_count)],
-        ['Equality factoring', num(profile.equality_factoring_count)],
-        ['Demodulation', num(profile.demodulation_count)],
-    ]);
+    // Generating Inference Rules
+    html += '<div class="profile-group"><h4>Generating Inferences</h4>';
+    const genRules = profile.generating_rules || {};
+    const genRows = Object.entries(genRules).map(([name, stats]) =>
+        [`${name}`, `${num(stats.count)} inferences in ${fmt(stats.time)}`]
+    );
+    if (genRows.length > 0) {
+        html += table(genRows);
+    } else {
+        html += '<p class="empty-note">No generating inferences recorded</p>';
+    }
+    html += '</div>';
+
+    // Simplification Rules
+    html += '<div class="profile-group"><h4>Simplification Rules</h4>';
+    const simpRules = profile.simplification_rules || {};
+    const simpRows = [];
+    for (const [name, stats] of Object.entries(simpRules)) {
+        // Show attempts (total checks) and successes
+        if (stats.forward_attempts > 0 || stats.forward_count > 0) {
+            const attempts = stats.forward_attempts || stats.forward_count || 0;
+            const successes = stats.forward_count || 0;
+            const time = stats.forward_attempt_time || stats.forward_time || 0;
+            simpRows.push([`${name} (forward)`, `${num(successes)}/${num(attempts)} succeeded in ${fmt(time)}`]);
+        }
+        if (stats.backward_attempts > 0 || stats.backward_count > 0) {
+            const attempts = stats.backward_attempts || stats.backward_count || 0;
+            const successes = stats.backward_count || 0;
+            const time = stats.backward_attempt_time || stats.backward_time || 0;
+            simpRows.push([`${name} (backward)`, `${num(successes)}/${num(attempts)} succeeded in ${fmt(time)}`]);
+        }
+    }
+    if (simpRows.length > 0) {
+        html += table(simpRows);
+    } else {
+        html += '<p class="empty-note">No simplification rules recorded</p>';
+    }
     html += '</div>';
 
     // Clause Lifecycle
@@ -648,11 +670,6 @@ function renderProfile(profile) {
         ['Iterations', num(profile.iterations)],
         ['Clauses generated', num(profile.clauses_generated)],
         ['Clauses added', num(profile.clauses_added)],
-        ['Subsumed (forward)', num(profile.clauses_subsumed_forward)],
-        ['Subsumed (backward)', num(profile.clauses_subsumed_backward)],
-        ['Demodulated (forward)', num(profile.clauses_demodulated_forward)],
-        ['Demodulated (backward)', num(profile.clauses_demodulated_backward)],
-        ['Tautologies deleted', num(profile.tautologies_deleted)],
         ['Max unprocessed size', num(profile.max_unprocessed_size)],
         ['Max processed size', num(profile.max_processed_size)],
     ]);

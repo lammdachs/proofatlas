@@ -870,3 +870,9 @@ footer a:hover {
     text-align: right;
     color: #212529;
 }
+
+.empty-note {
+    color: #6c757d;
+    font-style: italic;
+    margin: 0.5rem 0;
+}
