@@ -76,11 +76,22 @@ impl FeatureVector {
         if self.literal_count > other.literal_count {
             return false;
         }
-        // Use iterators for better performance
-        self.counts
+        // Check overlapping elements
+        if !self.counts
             .iter()
             .zip(&other.counts)
             .all(|(&a, &b)| a <= b)
+        {
+            return false;
+        }
+        // If self (subsumer) has more features than other (target),
+        // those extra features in self must be 0 (since 0 ≤ other's implicit 0)
+        if self.counts.len() > other.counts.len() {
+            if self.counts[other.counts.len()..].iter().any(|&c| c > 0) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Check if this feature vector is compatible with another for backward subsumption.
@@ -90,10 +101,23 @@ impl FeatureVector {
         if self.literal_count < other.literal_count {
             return false;
         }
-        self.counts
+        // Check overlapping elements
+        if !self.counts
             .iter()
             .zip(&other.counts)
             .all(|(&a, &b)| a >= b)
+        {
+            return false;
+        }
+        // If other (source/subsumer) has more features than self (target),
+        // those extra features must all be 0 (i.e., target has implicit 0s which are ≥ 0)
+        // But if any extra feature in source is non-zero, source can't subsume target
+        if other.counts.len() > self.counts.len() {
+            if other.counts[self.counts.len()..].iter().any(|&c| c > 0) {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -779,7 +803,7 @@ fn get_clause_shape(clause: &Clause) -> Vec<(PredicateId, bool)> {
 }
 
 /// Check if two clauses are variants (identical up to variable renaming)
-fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
+pub fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
     if clause1.literals.len() != clause2.literals.len() {
         return false;
     }
@@ -851,7 +875,7 @@ fn terms_match_with_mapping(
 }
 
 /// Check if a unit clause subsumes another clause using trail-based matching
-fn subsumes_unit(unit: &Clause, clause: &Clause) -> bool {
+pub fn subsumes_unit(unit: &Clause, clause: &Clause) -> bool {
     if unit.literals.len() != 1 {
         return false;
     }
@@ -875,7 +899,7 @@ fn subsumes_unit(unit: &Clause, clause: &Clause) -> bool {
 }
 
 /// Full subsumption check using trail-based backtracking
-fn subsumes(subsumer: &Clause, subsumee: &Clause) -> bool {
+pub fn subsumes(subsumer: &Clause, subsumee: &Clause) -> bool {
     if subsumer.literals.len() > subsumee.literals.len() {
         return false;
     }
@@ -894,7 +918,7 @@ fn subsumes(subsumer: &Clause, subsumee: &Clause) -> bool {
 }
 
 /// Greedy subsumption for larger clauses using trail-based backtracking
-fn subsumes_greedy(subsumer: &Clause, subsumee: &Clause) -> bool {
+pub fn subsumes_greedy(subsumer: &Clause, subsumee: &Clause) -> bool {
     if subsumer.literals.len() > subsumee.literals.len() {
         return false;
     }
@@ -930,8 +954,9 @@ fn subsumes_greedy(subsumer: &Clause, subsumee: &Clause) -> bool {
     true
 }
 
-/// Check if two clauses have compatible structure
-fn compatible_structure(clause1: &Clause, clause2: &Clause) -> bool {
+/// Check if two clauses have compatible structure for subsumption.
+/// Returns true if subsumer's predicates are a subset of subsumee's predicates.
+pub fn compatible_structure(clause1: &Clause, clause2: &Clause) -> bool {
     // Check predicate symbols
     let preds1: HashSet<_> = clause1.literals.iter().map(|l| &l.atom.predicate).collect();
     let preds2: HashSet<_> = clause2.literals.iter().map(|l| &l.atom.predicate).collect();

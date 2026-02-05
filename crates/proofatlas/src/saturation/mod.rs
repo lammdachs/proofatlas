@@ -1,5 +1,6 @@
 //! Saturation-based theorem proving using the given clause algorithm
 
+pub mod index;
 pub mod profile;
 pub mod rule;
 mod state;
