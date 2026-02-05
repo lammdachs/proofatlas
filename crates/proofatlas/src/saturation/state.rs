@@ -37,6 +37,7 @@
 //!
 //! All rules return `Vec<ProofStateChange>` for atomic state modifications.
 
+use super::index::IndexRegistry;
 use super::profile::SaturationProfile;
 use super::rule::{
     ClauseNotification, ClauseSet, DemodulationRule, EqualityFactoringRule,
@@ -181,6 +182,10 @@ pub struct SaturationState {
     /// Generating inference rules (resolution, superposition, factoring, etc.)
     generating_rules: Vec<Box<dyn GeneratingInferenceRule>>,
 
+    // === Index Registry ===
+    /// Central registry for shared indices (ClauseKeys, UnitClauses, FeatureVectors)
+    index_registry: IndexRegistry,
+
     // === Event Log ===
     /// Raw event log capturing all state changes
     event_log: Vec<ProofStateChange>,
@@ -214,6 +219,13 @@ impl SaturationState {
             rule.initialize(&initial_clauses);
         }
 
+        // Create IndexRegistry (empty for now - SubsumptionChecker uses internal state)
+        // The registry is still created and receives lifecycle events for future use,
+        // but no indices are requested to avoid duplicate work with SubsumptionChecker.
+        let required_indices: HashSet<IndexKind> = HashSet::new();
+        let mut index_registry = IndexRegistry::new(&required_indices, &interner);
+        index_registry.initialize(&initial_clauses);
+
         let mut clauses = Vec::new();
         let mut new = VecDeque::new();
         let mut clause_memory_bytes = 0usize;
@@ -234,6 +246,9 @@ impl SaturationState {
             for rule in &mut simplification_rules {
                 rule.on_clause_pending(clause_idx, &oriented);
             }
+
+            // Notify index registry about pending clause
+            index_registry.on_clause_pending(clause_idx, &oriented);
 
             clauses.push(clause);
             new.push_back(clause_idx);
@@ -284,6 +299,7 @@ impl SaturationState {
             initial_clause_count,
             simplification_rules,
             generating_rules,
+            index_registry,
             event_log,
         }
     }
@@ -428,6 +444,10 @@ impl SaturationState {
                 rule.notify(notif.clone());
             }
         }
+        // Note: Index registry removal is NOT called here because this function is used
+        // for both true deletions (backward simplification) AND transfers between sets
+        // (U→P). The registry only needs to be notified of true deletions, which is
+        // handled in apply_change for DeleteU/DeleteP events.
     }
 
     /// Apply a single ProofStateChange, update internal state, and record to event log
@@ -451,6 +471,8 @@ impl SaturationState {
                 for rule in &mut self.simplification_rules {
                     rule.on_clause_pending(new_idx, &oriented);
                 }
+                // Notify index registry about pending clause
+                self.index_registry.on_clause_pending(new_idx, &oriented);
 
                 self.clause_memory_bytes += clause_with_id.memory_bytes();
                 self.clauses.push(clause_with_id.clone());
@@ -481,6 +503,9 @@ impl SaturationState {
                 // Direct removal with shift_remove (preserves order)
                 if self.unprocessed.shift_remove(clause_idx) {
                     self.notify_rules(ClauseSet::Unprocessed, *clause_idx, false);
+                    // Notify registry about true deletion
+                    let clause = &self.clauses[*clause_idx];
+                    self.index_registry.on_clause_removed(*clause_idx, clause);
                     self.event_log.push(change);
                 }
             }
@@ -493,6 +518,9 @@ impl SaturationState {
             ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
                 if self.processed.shift_remove(clause_idx) {
                     self.notify_rules(ClauseSet::Processed, *clause_idx, false);
+                    // Notify registry about true deletion
+                    let clause = &self.clauses[*clause_idx];
+                    self.index_registry.on_clause_removed(*clause_idx, clause);
                     self.event_log.push(change);
                 }
             }
@@ -557,6 +585,8 @@ impl SaturationState {
                 for rule in &mut self.simplification_rules {
                     rule.on_clause_activated(clause_idx, &self.clauses[clause_idx]);
                 }
+                // Notify index registry about activated clause
+                self.index_registry.on_clause_activated(clause_idx, &self.clauses[clause_idx]);
 
                 // 1d: Apply backward simplification rules
                 // Collect all changes first to avoid borrow conflict, then apply after
