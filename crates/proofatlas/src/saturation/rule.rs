@@ -9,8 +9,8 @@
 use crate::fol::{Clause, Interner, PredicateId};
 use crate::inference::Derivation;
 use crate::selection::LiteralSelector;
+use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 /// Atomic operations on the proof state.
 ///
@@ -68,63 +68,6 @@ pub enum ClauseNotification<'a> {
     Removed { clause_idx: usize, clause: &'a Clause },
 }
 
-/// Read-only view into a clause set.
-///
-/// Provides iteration and lookup for rules that need to examine clauses in U or P.
-/// Uses a HashSet for O(1) membership checks instead of O(n) linear search.
-pub struct ClauseView<'a> {
-    /// Indices of clauses in this view
-    indices: &'a [usize],
-    /// HashSet for O(1) membership lookup
-    indices_set: HashSet<usize>,
-    /// All clauses (indexed by clause_idx)
-    clauses: &'a [Clause],
-}
-
-impl<'a> ClauseView<'a> {
-    /// Create a new clause view with O(1) membership lookup
-    pub fn new(indices: &'a [usize], clauses: &'a [Clause]) -> Self {
-        let indices_set = indices.iter().copied().collect();
-        ClauseView { indices, indices_set, clauses }
-    }
-
-    /// Check if an index is in this view (O(1))
-    pub fn contains(&self, idx: usize) -> bool {
-        self.indices_set.contains(&idx)
-    }
-
-    /// Iterate over (index, clause) pairs in this view
-    pub fn iter(&self) -> impl Iterator<Item = (usize, &Clause)> + '_ {
-        self.indices
-            .iter()
-            .filter_map(|&idx| self.clauses.get(idx).map(|c| (idx, c)))
-    }
-
-    /// Get a clause by index (returns None if not in this view)
-    pub fn get(&self, idx: usize) -> Option<&Clause> {
-        if self.indices_set.contains(&idx) {
-            self.clauses.get(idx)
-        } else {
-            None
-        }
-    }
-
-    /// Get the number of clauses in this view
-    pub fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    /// Check if this view is empty
-    pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
-    }
-
-    /// Get all clause indices in this view
-    pub fn indices(&self) -> &[usize] {
-        self.indices
-    }
-}
-
 /// Trait for simplification rules (tautology, subsumption, demodulation).
 ///
 /// Simplification rules can:
@@ -164,9 +107,7 @@ pub trait SimplificationRule: Send + Sync {
         &self,
         clause_idx: usize,
         clause: &Clause,
-        unprocessed: &ClauseView,
-        processed: &ClauseView,
-        all_clauses: &[Clause],
+        clauses: &[Clause],
         interner: &Interner,
     ) -> Vec<ProofStateChange>;
 
@@ -178,8 +119,9 @@ pub trait SimplificationRule: Send + Sync {
         &self,
         _clause_idx: usize,
         _clause: &Clause,
-        _unprocessed: &ClauseView,
-        _processed: &ClauseView,
+        _clauses: &[Clause],
+        _unprocessed: &IndexSet<usize>,
+        _processed: &IndexSet<usize>,
         _interner: &Interner,
     ) -> Vec<ProofStateChange> {
         vec![]
@@ -207,7 +149,8 @@ pub trait GeneratingInferenceRule: Send + Sync {
         &self,
         given_idx: usize,
         given: &Clause,
-        processed: &ClauseView,
+        clauses: &[Clause],
+        processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
     ) -> Vec<ProofStateChange>;
@@ -251,9 +194,7 @@ impl SimplificationRule for TautologyRule {
         &self,
         clause_idx: usize,
         clause: &Clause,
-        _unprocessed: &ClauseView,
-        _processed: &ClauseView,
-        _all_clauses: &[Clause],
+        _clauses: &[Clause],
         _interner: &Interner,
     ) -> Vec<ProofStateChange> {
         if self.is_tautology(clause) {
@@ -365,9 +306,7 @@ impl SimplificationRule for SubsumptionRule {
         &self,
         clause_idx: usize,
         clause: &Clause,
-        _unprocessed: &ClauseView,
-        _processed: &ClauseView,
-        _all_clauses: &[Clause],
+        _clauses: &[Clause],
         _interner: &Interner,
     ) -> Vec<ProofStateChange> {
         if let Some(_subsumer_idx) = self.checker.find_subsumer(clause) {
@@ -381,17 +320,17 @@ impl SimplificationRule for SubsumptionRule {
         &self,
         clause_idx: usize,
         _clause: &Clause,
-        unprocessed: &ClauseView,
-        processed: &ClauseView,
+        _clauses: &[Clause],
+        unprocessed: &IndexSet<usize>,
+        processed: &IndexSet<usize>,
         _interner: &Interner,
     ) -> Vec<ProofStateChange> {
         let mut changes = Vec::new();
 
         // Collect all candidate indices
         let all_indices: Vec<usize> = unprocessed
-            .indices()
             .iter()
-            .chain(processed.indices().iter())
+            .chain(processed.iter())
             .copied()
             .collect();
 
@@ -400,9 +339,9 @@ impl SimplificationRule for SubsumptionRule {
 
         let rule_name: String = self.name().into();
         for idx in subsumed {
-            if processed.contains(idx) {
+            if processed.contains(&idx) {
                 changes.push(ProofStateChange::DeleteP { clause_idx: idx, rule_name: rule_name.clone() });
-            } else if unprocessed.contains(idx) {
+            } else if unprocessed.contains(&idx) {
                 changes.push(ProofStateChange::DeleteU { clause_idx: idx, rule_name: rule_name.clone() });
             }
         }
@@ -499,14 +438,12 @@ impl SimplificationRule for DemodulationRule {
         &self,
         clause_idx: usize,
         clause: &Clause,
-        _unprocessed: &ClauseView,
-        _processed: &ClauseView,
-        all_clauses: &[Clause],
+        clauses: &[Clause],
         interner: &Interner,
     ) -> Vec<ProofStateChange> {
         // Try to demodulate using each unit equality
         for &unit_idx in &self.unit_equalities {
-            if let Some(unit_clause) = all_clauses.get(unit_idx) {
+            if let Some(unit_clause) = clauses.get(unit_idx) {
                 let results = demodulation::demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
                 if !results.is_empty() {
                     let mut simplified_clause = results[0].conclusion.clone();
@@ -532,8 +469,9 @@ impl SimplificationRule for DemodulationRule {
         &self,
         clause_idx: usize,
         clause: &Clause,
-        unprocessed: &ClauseView,
-        processed: &ClauseView,
+        clauses: &[Clause],
+        unprocessed: &IndexSet<usize>,
+        processed: &IndexSet<usize>,
         interner: &Interner,
     ) -> Vec<ProofStateChange> {
         // Only unit equalities can backward-demodulate
@@ -545,31 +483,33 @@ impl SimplificationRule for DemodulationRule {
         let rule_name: String = self.name().into();
 
         // Try to demodulate each clause in U∪P
-        for (target_idx, target_clause) in unprocessed.iter().chain(processed.iter()) {
+        for &target_idx in unprocessed.iter().chain(processed.iter()) {
             if target_idx == clause_idx {
                 continue;
             }
 
-            let results = demodulation::demodulate(clause, target_clause, clause_idx, target_idx, interner);
-            if !results.is_empty() {
-                let mut simplified_clause = results[0].conclusion.clone();
-                orient_clause_equalities(&mut simplified_clause, interner);
+            if let Some(target_clause) = clauses.get(target_idx) {
+                let results = demodulation::demodulate(clause, target_clause, clause_idx, target_idx, interner);
+                if !results.is_empty() {
+                    let mut simplified_clause = results[0].conclusion.clone();
+                    orient_clause_equalities(&mut simplified_clause, interner);
 
-                // Determine which set to remove from
-                if processed.contains(target_idx) {
-                    changes.push(ProofStateChange::DeleteP { clause_idx: target_idx, rule_name: rule_name.clone() });
-                } else {
-                    changes.push(ProofStateChange::DeleteU { clause_idx: target_idx, rule_name: rule_name.clone() });
+                    // Determine which set to remove from
+                    if processed.contains(&target_idx) {
+                        changes.push(ProofStateChange::DeleteP { clause_idx: target_idx, rule_name: rule_name.clone() });
+                    } else {
+                        changes.push(ProofStateChange::DeleteU { clause_idx: target_idx, rule_name: rule_name.clone() });
+                    }
+
+                    // Add the simplified clause to N
+                    changes.push(ProofStateChange::New {
+                        clause: simplified_clause,
+                        derivation: Derivation {
+                            rule_name: "Demodulation".into(),
+                            premises: vec![clause_idx, target_idx],
+                        },
+                    });
                 }
-
-                // Add the simplified clause to N
-                changes.push(ProofStateChange::New {
-                    clause: simplified_clause,
-                    derivation: Derivation {
-                        rule_name: "Demodulation".into(),
-                        premises: vec![clause_idx, target_idx],
-                    },
-                });
             }
         }
 
@@ -611,27 +551,33 @@ impl GeneratingInferenceRule for ResolutionRule {
         &self,
         given_idx: usize,
         given: &Clause,
-        processed: &ClauseView,
+        clauses: &[Clause],
+        processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
     ) -> Vec<ProofStateChange> {
         let mut changes = Vec::new();
 
         // Resolution with processed clauses
-        for (processed_idx, processed_clause) in processed.iter() {
-            // Given as first clause
-            for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
-                changes.push(ProofStateChange::New {
-                    clause: result.conclusion,
-                    derivation: result.derivation,
-                });
+        for &processed_idx in processed.iter() {
+            if processed_idx == given_idx {
+                continue;
             }
-            // Given as second clause
-            for result in resolution(processed_clause, given, processed_idx, given_idx, selector, interner) {
-                changes.push(ProofStateChange::New {
-                    clause: result.conclusion,
-                    derivation: result.derivation,
-                });
+            if let Some(processed_clause) = clauses.get(processed_idx) {
+                // Given as first clause
+                for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
+                    changes.push(ProofStateChange::New {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+                // Given as second clause
+                for result in resolution(processed_clause, given, processed_idx, given_idx, selector, interner) {
+                    changes.push(ProofStateChange::New {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
             }
         }
 
@@ -673,29 +619,35 @@ impl GeneratingInferenceRule for SuperpositionRule {
         &self,
         given_idx: usize,
         given: &Clause,
-        processed: &ClauseView,
+        clauses: &[Clause],
+        processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
     ) -> Vec<ProofStateChange> {
         let mut changes = Vec::new();
 
         // Superposition with processed clauses
-        for (processed_idx, processed_clause) in processed.iter() {
-            // Given as first clause (rewriter)
-            for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
-            {
-                changes.push(ProofStateChange::New {
-                    clause: result.conclusion,
-                    derivation: result.derivation,
-                });
+        for &processed_idx in processed.iter() {
+            if processed_idx == given_idx {
+                continue;
             }
-            // Given as second clause (target)
-            for result in superposition(processed_clause, given, processed_idx, given_idx, selector, interner)
-            {
-                changes.push(ProofStateChange::New {
-                    clause: result.conclusion,
-                    derivation: result.derivation,
-                });
+            if let Some(processed_clause) = clauses.get(processed_idx) {
+                // Given as first clause (rewriter)
+                for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
+                {
+                    changes.push(ProofStateChange::New {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+                // Given as second clause (target)
+                for result in superposition(processed_clause, given, processed_idx, given_idx, selector, interner)
+                {
+                    changes.push(ProofStateChange::New {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
             }
         }
 
@@ -737,7 +689,8 @@ impl GeneratingInferenceRule for FactoringRule {
         &self,
         given_idx: usize,
         given: &Clause,
-        _processed: &ClauseView,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         _interner: &mut Interner,
     ) -> Vec<ProofStateChange> {
@@ -777,7 +730,8 @@ impl GeneratingInferenceRule for EqualityResolutionRule {
         &self,
         given_idx: usize,
         given: &Clause,
-        _processed: &ClauseView,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
     ) -> Vec<ProofStateChange> {
@@ -817,7 +771,8 @@ impl GeneratingInferenceRule for EqualityFactoringRule {
         &self,
         given_idx: usize,
         given: &Clause,
-        _processed: &ClauseView,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
     ) -> Vec<ProofStateChange> {
@@ -892,58 +847,40 @@ mod tests {
         let lit4 = ctx.make_literal("P", vec![x3], false);
 
         let rule = TautologyRule::new(&ctx.interner);
-        let empty_u = Vec::new();
-        let empty_p = Vec::new();
-        let all_clauses = Vec::new();
-        let u_view = ClauseView::new(&empty_u, &all_clauses);
-        let p_view = ClauseView::new(&empty_p, &all_clauses);
+        let clauses: Vec<Clause> = Vec::new();
 
         // Non-tautology
         let clause = ctx.make_clause(vec![lit1, lit2]);
-        let changes = rule.simplify_forward(0, &clause, &u_view, &p_view, &all_clauses, &ctx.interner);
+        let changes = rule.simplify_forward(0, &clause, &clauses, &ctx.interner);
         assert!(changes.is_empty());
 
         // Tautology (complementary literals)
         let tautology = ctx.make_clause(vec![lit3, lit4]);
-        let changes = rule.simplify_forward(0, &tautology, &u_view, &p_view, &all_clauses, &ctx.interner);
+        let changes = rule.simplify_forward(0, &tautology, &clauses, &ctx.interner);
         assert_eq!(changes.len(), 1);
         assert!(matches!(changes[0], ProofStateChange::DeleteN { clause_idx: 0, .. }));
     }
 
     #[test]
-    fn test_clause_view() {
-        let mut ctx = TestContext::new();
+    fn test_indexset_operations() {
+        // Test that IndexSet has the properties we need
+        let mut set: IndexSet<usize> = IndexSet::new();
+        set.insert(0);
+        set.insert(2);
+        set.insert(5);
 
-        let a = ctx.const_("a");
-        let b = ctx.const_("b");
-        let c = ctx.const_("c");
+        assert_eq!(set.len(), 3);
+        assert!(set.contains(&0));
+        assert!(set.contains(&2));
+        assert!(!set.contains(&1));
 
-        let lit1 = ctx.make_literal("P", vec![a], true);
-        let lit2 = ctx.make_literal("Q", vec![b], true);
-        let lit3 = ctx.make_literal("R", vec![c], true);
+        // Iteration preserves insertion order
+        let collected: Vec<_> = set.iter().copied().collect();
+        assert_eq!(collected, vec![0, 2, 5]);
 
-        let clauses = vec![
-            ctx.make_clause(vec![lit1]),
-            ctx.make_clause(vec![lit2]),
-            ctx.make_clause(vec![lit3]),
-        ];
-        let indices = vec![0, 2];
-        let view = ClauseView::new(&indices, &clauses);
-
-        assert_eq!(view.len(), 2);
-        assert!(!view.is_empty());
-
-        // Can get clauses in the view
-        assert!(view.get(0).is_some());
-        assert!(view.get(2).is_some());
-
-        // Cannot get clause not in the view
-        assert!(view.get(1).is_none());
-
-        // Iteration works
-        let collected: Vec<_> = view.iter().collect();
-        assert_eq!(collected.len(), 2);
-        assert_eq!(collected[0].0, 0);
-        assert_eq!(collected[1].0, 2);
+        // shift_remove preserves order
+        set.shift_remove(&2);
+        let collected: Vec<_> = set.iter().copied().collect();
+        assert_eq!(collected, vec![0, 5]);
     }
 }

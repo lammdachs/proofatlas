@@ -17,7 +17,8 @@
 use crate::fol::Clause;
 use super::clause::SelectorStats;
 use super::ClauseSelector;
-use std::collections::{HashMap, VecDeque};
+use indexmap::IndexSet;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Trait for models that compute clause embeddings
@@ -129,13 +130,13 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
 }
 
 impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E, S> {
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
         if unprocessed.is_empty() {
             return None;
         }
 
         if unprocessed.len() == 1 {
-            return unprocessed.pop_front();
+            return unprocessed.shift_remove_index(0);
         }
 
         // Find uncached clauses by index
@@ -192,11 +193,11 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
         for (i, &p) in probs.iter().enumerate() {
             cumsum += p;
             if r < cumsum {
-                return unprocessed.remove(i);
+                return unprocessed.shift_remove_index(i);
             }
         }
 
-        unprocessed.pop_back()
+        unprocessed.pop()
     }
 
     fn name(&self) -> &str {
@@ -289,7 +290,7 @@ mod tests {
             make_clause(2, &mut interner),
             make_clause(3, &mut interner),
         ];
-        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+        let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
         // First selection populates cache
         let _ = selector.select(&mut unprocessed, &clauses);

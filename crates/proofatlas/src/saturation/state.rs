@@ -39,7 +39,7 @@
 
 use super::profile::SaturationProfile;
 use super::rule::{
-    ClauseNotification, ClauseSet, ClauseView, DemodulationRule, EqualityFactoringRule,
+    ClauseNotification, ClauseSet, DemodulationRule, EqualityFactoringRule,
     EqualityResolutionRule, FactoringRule, GeneratingInferenceRule, ProofStateChange,
     ResolutionRule, SaturationEventLog, SimplificationRule, SubsumptionRule, SuperpositionRule,
     TautologyRule,
@@ -52,6 +52,7 @@ use crate::selection::{
     SelectUniqueMaximalOrNegOrMaximal,
 };
 use crate::time_compat::Instant;
+use indexmap::IndexSet;
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
@@ -156,11 +157,9 @@ pub struct SaturationState {
     /// Storage for all clauses, indexed by clause ID
     clauses: Vec<Clause>,
     /// Set P: Processed/active clauses (used for generating inferences)
-    processed: HashSet<usize>,
+    processed: IndexSet<usize>,
     /// Set U: Unprocessed/passive clauses (awaiting selection)
-    unprocessed: VecDeque<usize>,
-    /// Lazily deleted clauses from U (avoids O(n) retain)
-    deleted_from_unprocessed: HashSet<usize>,
+    unprocessed: IndexSet<usize>,
     /// Set N: New clauses (awaiting forward simplification)
     new: VecDeque<usize>,
     /// Configuration
@@ -274,9 +273,8 @@ impl SaturationState {
         SaturationState {
             interner,
             clauses,
-            processed: HashSet::new(),
-            unprocessed: VecDeque::new(),
-            deleted_from_unprocessed: HashSet::new(),
+            processed: IndexSet::new(),
+            unprocessed: IndexSet::new(),
             new,
             config,
             clause_selector,
@@ -378,17 +376,6 @@ impl SaturationState {
             .collect()
     }
 
-    /// Build clause index vectors for U and P
-    fn build_views(&self) -> (Vec<usize>, Vec<usize>) {
-        // Filter out lazily deleted clauses from U
-        let u_indices: Vec<usize> = self.unprocessed.iter()
-            .copied()
-            .filter(|idx| !self.deleted_from_unprocessed.contains(idx))
-            .collect();
-        let p_indices: Vec<usize> = self.processed.iter().copied().collect();
-        (u_indices, p_indices)
-    }
-
     /// Check resource limits and return termination result if exceeded
     fn check_limits(&self, start_time: Instant) -> Option<SaturationResult> {
         // Memory limit
@@ -486,15 +473,13 @@ impl SaturationState {
             }
             ProofStateChange::Transfer { clause_idx } => {
                 // Implicit: clause removed from N, added to U
-                self.unprocessed.push_back(*clause_idx);
-                self.notify_rules(ClauseSet::Unprocessed,*clause_idx, true);
+                self.unprocessed.insert(*clause_idx);
+                self.notify_rules(ClauseSet::Unprocessed, *clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
-                // Lazy deletion: mark as deleted instead of O(n) retain
-                // The clause will be skipped when encountered during iteration
-                if !self.deleted_from_unprocessed.contains(clause_idx) {
-                    self.deleted_from_unprocessed.insert(*clause_idx);
+                // Direct removal with shift_remove (preserves order)
+                if self.unprocessed.shift_remove(clause_idx) {
                     self.notify_rules(ClauseSet::Unprocessed, *clause_idx, false);
                     self.event_log.push(change);
                 }
@@ -502,12 +487,12 @@ impl SaturationState {
             ProofStateChange::Select { clause_idx } => {
                 // Implicit: clause removed from U, added to P
                 self.processed.insert(*clause_idx);
-                self.notify_rules(ClauseSet::Processed,*clause_idx, true);
+                self.notify_rules(ClauseSet::Processed, *clause_idx, true);
                 self.event_log.push(change);
             }
             ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
-                if self.processed.remove(clause_idx) {
-                    self.notify_rules(ClauseSet::Processed,*clause_idx, false);
+                if self.processed.shift_remove(clause_idx) {
+                    self.notify_rules(ClauseSet::Processed, *clause_idx, false);
                     self.event_log.push(change);
                 }
             }
@@ -525,21 +510,12 @@ impl SaturationState {
 
         let result = 'outer: loop {
             // === Step 1: Process new clauses ===
-            let t0 = profile.as_ref().map(|_| Instant::now());
             'process_n: while let Some(clause_idx) = self.new.pop_front() {
                 // 1a: Check empty clause immediately
                 if self.clauses[clause_idx].is_empty() {
-                    if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-                        p.forward_simplify_time += t.elapsed();
-                    }
                     let proof = self.extract_proof(clause_idx);
                     break 'outer SaturationResult::Proof(proof);
                 }
-
-                // Build views for simplification rules
-                let (u_indices, p_indices) = self.build_views();
-                let u_view = ClauseView::new(&u_indices, &self.clauses);
-                let p_view = ClauseView::new(&p_indices, &self.clauses);
 
                 // 1b: Apply forward simplification rules
                 // Collect changes first to avoid borrow conflict, then apply after loop
@@ -551,13 +527,14 @@ impl SaturationState {
                     let rule_name = rule.name();
                     let t_rule = profile.as_ref().map(|_| Instant::now());
 
-                    let changes = rule.simplify_forward(clause_idx, clause, &u_view, &p_view, &self.clauses, &self.interner);
+                    let changes = rule.simplify_forward(clause_idx, clause, &self.clauses, &self.interner);
 
                     let success = !changes.is_empty();
 
                     // Record ALL attempts (successful or not) to track unsuccessful subsumption checks
                     if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
                         p.record_simplification_forward_attempt(rule_name, success, t.elapsed());
+                        p.forward_simplify_time += t.elapsed();
                     }
 
                     if success {
@@ -586,16 +563,13 @@ impl SaturationState {
                 let mut all_backward_changes: Vec<ProofStateChange> = Vec::new();
 
                 {
-                    let (u_indices, p_indices) = self.build_views();
-                    let u_view = ClauseView::new(&u_indices, &self.clauses);
-                    let p_view = ClauseView::new(&p_indices, &self.clauses);
                     let clause = &self.clauses[clause_idx];
 
                     for rule in self.simplification_rules.iter() {
                         let rule_name = rule.name();
                         let t_rule = profile.as_ref().map(|_| Instant::now());
 
-                        let changes = rule.simplify_backward(clause_idx, clause, &u_view, &p_view, &self.interner);
+                        let changes = rule.simplify_backward(clause_idx, clause, &self.clauses, &self.unprocessed, &self.processed, &self.interner);
 
                         // Count affected clauses (removals for subsumption, additions for demodulation)
                         let count = changes.iter().filter(|c| {
@@ -605,6 +579,7 @@ impl SaturationState {
                         // Record ALL attempts (successful or not) to track unsuccessful subsumption checks
                         if let (Some(p), Some(t)) = (profile.as_mut(), t_rule) {
                             p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
+                            p.backward_simplify_time += t.elapsed();
                         }
 
                         if !changes.is_empty() {
@@ -619,18 +594,13 @@ impl SaturationState {
                 }
 
                 // Transfer: move to unprocessed (U)
-                self.unprocessed.push_back(clause_idx);
-                self.notify_rules(ClauseSet::Unprocessed,clause_idx, true);
+                self.unprocessed.insert(clause_idx);
+                self.notify_rules(ClauseSet::Unprocessed, clause_idx, true);
                 self.event_log.push(ProofStateChange::Transfer { clause_idx });
-            }
-            if let (Some(p), Some(t)) = (profile.as_mut(), t0) {
-                p.forward_simplify_time += t.elapsed();
             }
 
             // === Step 2: Check saturation ===
-            // Account for lazily deleted entries
-            let effective_unprocessed_len = self.unprocessed.len().saturating_sub(self.deleted_from_unprocessed.len());
-            if effective_unprocessed_len == 0 {
+            if self.unprocessed.is_empty() {
                 let steps = self.build_proof_steps();
                 let clauses = self.clauses.clone();
                 break SaturationResult::Saturated(steps, clauses);
@@ -643,10 +613,10 @@ impl SaturationState {
 
             self.current_iteration += 1;
 
-            // Track max sizes (account for lazy deletions)
+            // Track max sizes
             if let Some(p) = profile.as_mut() {
                 p.iterations = self.current_iteration;
-                let up_size = effective_unprocessed_len;
+                let up_size = self.unprocessed.len();
                 let pr_size = self.processed.len();
                 if up_size > p.max_unprocessed_size {
                     p.max_unprocessed_size = up_size;
@@ -726,13 +696,6 @@ impl SaturationState {
 
     /// Select the next given clause using the configured selector
     fn select_given_clause(&mut self) -> Option<usize> {
-        // Compact: remove lazily deleted entries before selection
-        // This is amortized O(1) per delete since we only do this once per selection
-        if !self.deleted_from_unprocessed.is_empty() {
-            self.unprocessed.retain(|idx| !self.deleted_from_unprocessed.contains(idx));
-            self.deleted_from_unprocessed.clear();
-        }
-
         self.clause_selector
             .select(&mut self.unprocessed, &self.clauses)
     }
@@ -747,17 +710,13 @@ impl SaturationState {
         let given_clause = &self.clauses[given_idx];
         let selector = self.literal_selector.as_ref();
 
-        // Build view of processed clauses (excluding given, which was just added)
-        let p_indices: Vec<usize> = self.processed.iter().copied().filter(|&idx| idx != given_idx).collect();
-        let p_view = ClauseView::new(&p_indices, &self.clauses);
-
         // Apply each generating rule
         for rule in &self.generating_rules {
             let rule_name = rule.name();
             let t0 = profile.as_ref().map(|_| Instant::now());
             let before = results.len();
 
-            let changes = rule.generate(given_idx, given_clause, &p_view, selector, &mut self.interner);
+            let changes = rule.generate(given_idx, given_clause, &self.clauses, &self.processed, selector, &mut self.interner);
 
             // Convert ProofStateChange::New to InferenceResult
             for change in changes {

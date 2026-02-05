@@ -306,7 +306,7 @@ mod tests {
     fn test_gcn_selector_caching() {
         use crate::fol::{Atom, Interner, Literal, PredicateSymbol, Term, Constant};
         use crate::selection::ClauseSelector;
-        use std::collections::VecDeque;
+        use indexmap::IndexSet;
 
         // Skip if model doesn't exist
         let model_path = std::path::Path::new(".weights/gcn_model.pt");
@@ -347,7 +347,7 @@ mod tests {
         })]);
 
         let clauses = vec![clause1, clause2, clause3];
-        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+        let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
         // First selection should populate cache
         let _ = selector.select(&mut unprocessed, &clauses);

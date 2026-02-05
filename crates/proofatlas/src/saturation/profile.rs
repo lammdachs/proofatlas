@@ -69,6 +69,8 @@ pub struct SaturationProfile {
     // Top-level phase timings
     pub total_time: Duration,
     pub forward_simplify_time: Duration,
+    pub backward_simplify_time: Duration,
+    pub simplification_overhead_time: Duration,
     pub select_given_time: Duration,
     pub generate_inferences_time: Duration,
     pub add_inferences_time: Duration,
@@ -139,11 +141,13 @@ impl SaturationProfile {
 
 impl Serialize for SaturationProfile {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SaturationProfile", 15)?;
+        let mut s = serializer.serialize_struct("SaturationProfile", 17)?;
 
         // Top-level phase timings
         s.serialize_field("total_time", &secs(&self.total_time))?;
         s.serialize_field("forward_simplify_time", &secs(&self.forward_simplify_time))?;
+        s.serialize_field("backward_simplify_time", &secs(&self.backward_simplify_time))?;
+        s.serialize_field("simplification_overhead_time", &secs(&self.simplification_overhead_time))?;
         s.serialize_field("select_given_time", &secs(&self.select_given_time))?;
         s.serialize_field("generate_inferences_time", &secs(&self.generate_inferences_time))?;
         s.serialize_field("add_inferences_time", &secs(&self.add_inferences_time))?;

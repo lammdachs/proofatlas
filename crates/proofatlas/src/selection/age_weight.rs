@@ -5,7 +5,7 @@
 //! (by symbol count) based on a configurable probability.
 
 use crate::fol::Clause;
-use std::collections::VecDeque;
+use indexmap::IndexSet;
 
 use super::ClauseSelector;
 
@@ -73,8 +73,8 @@ impl AgeWeightSelector {
         }
     }
 
-    /// Find the index of the lightest clause.
-    fn find_lightest(&self, unprocessed: &VecDeque<usize>, clauses: &[Clause]) -> usize {
+    /// Find the position of the lightest clause.
+    fn find_lightest(&self, unprocessed: &IndexSet<usize>, clauses: &[Clause]) -> usize {
         unprocessed
             .iter()
             .enumerate()
@@ -85,7 +85,7 @@ impl AgeWeightSelector {
 }
 
 impl ClauseSelector for AgeWeightSelector {
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
         if unprocessed.is_empty() {
             return None;
         }
@@ -93,12 +93,12 @@ impl ClauseSelector for AgeWeightSelector {
         let r = self.next_random();
 
         if r < self.age_probability {
-            // Select oldest (FIFO - front of queue)
-            unprocessed.pop_front()
+            // Select oldest (FIFO - first in set, preserves insertion order)
+            unprocessed.shift_remove_index(0)
         } else {
             // Select lightest
-            let lightest_idx = self.find_lightest(unprocessed, clauses);
-            unprocessed.remove(lightest_idx)
+            let lightest_pos = self.find_lightest(unprocessed, clauses);
+            unprocessed.shift_remove_index(lightest_pos)
         }
     }
 
@@ -195,7 +195,7 @@ mod tests {
             make_clause(&mut ctx, "Q", 1),
             make_clause(&mut ctx, "R", 2),
         ];
-        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+        let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
         // Should always select front (oldest)
         assert_eq!(selector.select(&mut unprocessed, &clauses), Some(0));
@@ -212,7 +212,7 @@ mod tests {
             make_clause(&mut ctx, "Q", 0),  // Light: Q() = 1 symbol
             make_heavy_clause(&mut ctx, 2), // Medium: P(f(f(X))) = 1 + 3 = 4 symbols
         ];
-        let mut unprocessed: VecDeque<usize> = (0..3).collect();
+        let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
         // Should select lightest first (index 1, the nullary Q)
         assert_eq!(selector.select(&mut unprocessed, &clauses), Some(1));
@@ -222,7 +222,7 @@ mod tests {
     fn test_empty_unprocessed() {
         let mut selector = AgeWeightSelector::default();
         let clauses: Vec<Clause> = vec![];
-        let mut unprocessed: VecDeque<usize> = VecDeque::new();
+        let mut unprocessed: IndexSet<usize> = IndexSet::new();
 
         assert_eq!(selector.select(&mut unprocessed, &clauses), None);
     }

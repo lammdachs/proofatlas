@@ -6,7 +6,7 @@
 //! - `SentenceSelector` - Sentence transformer selector (requires `torch` + `sentence` features)
 
 use crate::fol::Clause;
-use std::collections::VecDeque;
+use indexmap::IndexSet;
 use std::time::Duration;
 
 /// Accumulated statistics from a clause selector.
@@ -25,7 +25,7 @@ pub struct SelectorStats {
 pub trait ClauseSelector: Send {
     /// Select the next clause from the unprocessed set
     /// Returns the index of the selected clause, or None if empty
-    fn select(&mut self, unprocessed: &mut VecDeque<usize>, clauses: &[Clause]) -> Option<usize>;
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize>;
 
     /// Get the name of this selection strategy
     fn name(&self) -> &str;

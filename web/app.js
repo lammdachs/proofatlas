@@ -615,14 +615,28 @@ function renderProfile(profile) {
     const simpRule = (name) => profile.simplification_rules?.[name] || {};
 
     // Phase Timings
+    const phasesTracked = (profile.forward_simplify_time || 0) +
+                          (profile.backward_simplify_time || 0) +
+                          (profile.simplification_overhead_time || 0) +
+                          (profile.select_given_time || 0) +
+                          (profile.generate_inferences_time || 0) +
+                          (profile.add_inferences_time || 0);
+    const totalOverhead = (profile.total_time || 0) - phasesTracked;
+
     html += '<div class="profile-group"><h4>Phase Timings</h4>';
-    html += table([
+    const phaseRows = [
         ['Total', fmt(profile.total_time)],
         ['Forward simplification', fmt(profile.forward_simplify_time)],
+        ['Backward simplification', fmt(profile.backward_simplify_time)],
+        ['Simplification overhead', fmt(profile.simplification_overhead_time)],
         ['Clause selection', fmt(profile.select_given_time)],
         ['Inference generation', fmt(profile.generate_inferences_time)],
         ['Inference addition', fmt(profile.add_inferences_time)],
-    ]);
+    ];
+    if (totalOverhead > 0.0001) {
+        phaseRows.push(['Other overhead', fmt(totalOverhead)]);
+    }
+    html += table(phaseRows);
     html += '</div>';
 
     // Generating Inference Rules
