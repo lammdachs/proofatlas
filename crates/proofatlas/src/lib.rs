@@ -3,10 +3,12 @@
 //! This library provides a complete implementation of a theorem prover
 //! using the superposition calculus with equality.
 
+pub mod clause_manager;
 pub mod fol;
 pub mod inference;
 pub mod json;
 pub mod parser;
+pub mod prover;
 pub mod saturation;
 pub mod selection;
 pub mod time_compat;
@@ -15,11 +17,16 @@ pub mod unification;
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
+// Re-export ClauseManager and ProofAtlas
+pub use clause_manager::ClauseManager;
+pub use prover::ProofAtlas;
+
 // Re-export commonly used types from fol
 pub use fol::{
-    Atom, CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal,
+    Atom, CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal, Position,
     PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO,
 };
+// Note: Atom is re-exported for FOF formula usage in parsers
 
 // Re-export inference types
 pub use inference::{
@@ -29,8 +36,8 @@ pub use inference::{
 
 // Re-export selection types
 pub use selection::{
-    AgeWeightSelector, ClauseSelector, LiteralSelector, SelectAll, SelectMaximal,
-    SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal,
+    AgeWeightSelector, ClauseSelector, FIFOSelector, LiteralSelector, SelectAll, SelectMaximal,
+    SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal, WeightSelector,
 };
 
 #[cfg(feature = "ml")]
@@ -41,8 +48,8 @@ pub use selection::{load_sentence_selector, PassThroughScorer, SentenceEmbedder,
 
 // Re-export saturation types
 pub use saturation::{
-    saturate, EventLogReplayer, LiteralSelectionStrategy, ProofStateChange, SaturationConfig,
-    SaturationEventLog, SaturationProfile, SaturationResult, SaturationState,
+    saturate, EventLogReplayer, LiteralSelectionStrategy, StateChange, ProverConfig,
+    EventLog, SaturationProfile, ProofResult, SaturationState,
 };
 
 pub use unification::{unify, UnificationError, UnificationResult};

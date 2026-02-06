@@ -24,7 +24,10 @@ impl PredicateSymbol {
     }
 }
 
-/// An atomic formula (predicate applied to terms)
+/// An atomic formula (predicate applied to terms).
+///
+/// Used in FOF formula representation. For CNF/clause representation,
+/// use `Literal` which includes polarity directly.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Atom {
     pub predicate: PredicateSymbol,
@@ -39,10 +42,7 @@ impl Atom {
 
     /// Estimate the heap memory usage of this atom in bytes
     pub fn memory_bytes(&self) -> usize {
-        // PredicateSymbol is now Copy, no heap allocation
-        // Vec overhead: capacity * size_of::<Term>
         let vec_bytes = self.args.capacity() * std::mem::size_of::<super::Term>();
-        // Term memory
         let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
         vec_bytes + args_bytes
     }
@@ -56,48 +56,68 @@ impl Atom {
     }
 }
 
-/// A literal (positive or negative atom)
+/// A literal (positive or negative atomic formula)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Literal {
-    pub atom: Atom,
+    pub predicate: PredicateSymbol,
+    pub args: Vec<Term>,
     pub polarity: bool, // true = positive, false = negative
 }
 
 impl Literal {
     /// Create a new positive literal
-    pub fn positive(atom: Atom) -> Self {
+    pub fn positive(predicate: PredicateSymbol, args: Vec<Term>) -> Self {
         Literal {
-            atom,
+            predicate,
+            args,
             polarity: true,
         }
     }
 
     /// Create a new negative literal
-    pub fn negative(atom: Atom) -> Self {
+    pub fn negative(predicate: PredicateSymbol, args: Vec<Term>) -> Self {
         Literal {
-            atom,
+            predicate,
+            args,
             polarity: false,
         }
+    }
+
+    /// Create a literal from an Atom and polarity
+    pub fn from_atom(atom: Atom, polarity: bool) -> Self {
+        Literal {
+            predicate: atom.predicate,
+            args: atom.args,
+            polarity,
+        }
+    }
+
+    /// Check if this is an equality literal
+    pub fn is_equality(&self, interner: &Interner) -> bool {
+        interner.resolve_predicate(self.predicate.id) == "=" && self.predicate.arity == 2
     }
 
     /// Get the complement of this literal
     pub fn complement(&self) -> Literal {
         Literal {
-            atom: self.atom.clone(),
+            predicate: self.predicate,
+            args: self.args.clone(),
             polarity: !self.polarity,
         }
     }
 
     /// Collect all variables in this literal
     pub fn collect_variables(&self, vars: &mut std::collections::HashSet<super::Variable>) {
-        for term in &self.atom.args {
+        for term in &self.args {
             term.collect_variables(vars);
         }
     }
 
     /// Estimate the heap memory usage of this literal in bytes
     pub fn memory_bytes(&self) -> usize {
-        self.atom.memory_bytes()
+        let vec_bytes = self.args.capacity() * std::mem::size_of::<super::Term>();
+        let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
+        vec_bytes + args_bytes
     }
 
     /// Format this literal with an interner for name resolution
@@ -151,7 +171,24 @@ impl<'a> fmt::Display for LiteralDisplay<'a> {
         if !self.literal.polarity {
             write!(f, "~")?;
         }
-        write!(f, "{}", self.literal.atom.display(self.interner))
+        let pred_name = self.interner.resolve_predicate(self.literal.predicate.id);
+        if pred_name == "=" && self.literal.args.len() == 2 {
+            write!(
+                f,
+                "{} = {}",
+                self.literal.args[0].display(self.interner),
+                self.literal.args[1].display(self.interner)
+            )
+        } else {
+            write!(f, "{}(", pred_name)?;
+            for (i, arg) in self.literal.args.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                write!(f, "{}", arg.display(self.interner))?;
+            }
+            write!(f, ")")
+        }
     }
 }
 
@@ -175,6 +212,13 @@ impl fmt::Display for Literal {
         if !self.polarity {
             write!(f, "~")?;
         }
-        write!(f, "{}", self.atom)
+        write!(f, "P{}(", self.predicate.id.as_u32())?;
+        for (i, arg) in self.args.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", arg)?;
+        }
+        write!(f, ")")
     }
 }

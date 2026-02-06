@@ -1,7 +1,7 @@
 //! Test to verify literal selection behavior
 
 use proofatlas::{
-    factoring, resolution, Atom, Clause, Constant, Interner, Literal, PredicateSymbol, SelectAll,
+    factoring, resolution, Clause, Constant, Interner, Literal, PredicateSymbol, SelectAll,
     Term, Variable,
 };
 
@@ -56,34 +56,16 @@ fn test_resolution_tries_all_literals() {
 
     // Create a clause with multiple literals: P(X) ∨ Q(Y) ∨ R(Z)
     let clause1 = Clause::new(vec![
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![x.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: q.clone(),
-            args: vec![y.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: r.clone(),
-            args: vec![z.clone()],
-        }),
+        Literal::positive(p, vec![x.clone()]),
+        Literal::positive(q, vec![y.clone()]),
+        Literal::positive(r, vec![z.clone()]),
     ]);
 
     // Create another clause with negations of all three: ~P(a) ∨ ~Q(b) ∨ ~R(c)
     let clause2 = Clause::new(vec![
-        Literal::negative(Atom {
-            predicate: p.clone(),
-            args: vec![a.clone()],
-        }),
-        Literal::negative(Atom {
-            predicate: q.clone(),
-            args: vec![b.clone()],
-        }),
-        Literal::negative(Atom {
-            predicate: r.clone(),
-            args: vec![c.clone()],
-        }),
+        Literal::negative(p, vec![a.clone()]),
+        Literal::negative(q, vec![b.clone()]),
+        Literal::negative(r, vec![c.clone()]),
     ]);
 
     // Apply resolution with SelectAll (all literals eligible)
@@ -119,18 +101,9 @@ fn test_factoring_tries_all_pairs() {
 
     // Create a clause with multiple identical predicates: P(X) ∨ P(Y) ∨ P(Z)
     let clause = Clause::new(vec![
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![x.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![y.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![z.clone()],
-        }),
+        Literal::positive(p, vec![x.clone()]),
+        Literal::positive(p, vec![y.clone()]),
+        Literal::positive(p, vec![z.clone()]),
     ]);
 
     // Apply factoring with SelectAll (all literals eligible)

@@ -1,12 +1,12 @@
 //! Polymorphic rule architecture for saturation-based theorem proving.
 //!
 //! This module provides a modular framework for defining and applying inference rules:
-//! - **SimplificationRule**: Rules that simplify or delete clauses (tautology, subsumption, demodulation)
+//! - **SimplifyingInference**: Rules that simplify or delete clauses (tautology, subsumption, demodulation)
 //! - **GeneratingInference**: Rules that generate new clauses (resolution, superposition, factoring)
 //!
-//! All rules return `Vec<ProofStateChange>` representing atomic modifications to the proof state.
+//! All rules return `Vec<StateChange>` representing atomic modifications to the proof state.
 
-use crate::fol::{Clause, Interner, PredicateId};
+use crate::fol::{Clause, Interner, Position, PredicateId};
 use crate::inference::Derivation;
 use crate::selection::LiteralSelector;
 use indexmap::IndexSet;
@@ -21,32 +21,28 @@ use serde::{Deserialize, Serialize};
 ///
 /// Semantics distinguish between transitions (implicit removal from source set)
 /// and deletions (explicit removal due to simplification):
-/// - `New`: clause enters N
+/// - `Add`: clause enters N
 /// - `Transfer`: clause moves N→U (implicit N removal)
-/// - `Select`: clause moves U→P (implicit U removal)
-/// - `DeleteN/U/P`: clause deleted from respective set (simplification)
+/// - `Activate`: clause moves U→P (implicit U removal)
+/// - `Delete`: clause deleted from whichever set it's in (simplification)
 ///
 /// This is the raw event log format. All derived views (proof extraction, training data,
 /// iteration structure) come from replaying these events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ProofStateChange {
+pub enum StateChange {
     /// New clause added to N (from inference or input)
-    New { clause: Clause, derivation: Derivation },
-    /// Clause deleted from N (forward simplification)
-    DeleteN { clause_idx: usize, rule_name: String },
+    Add { clause: Clause, derivation: Derivation },
+    /// Clause deleted from its current set (simplification)
+    Delete { clause_idx: usize, rule_name: String },
     /// Clause transferred from N to U (survived forward simplification)
     Transfer { clause_idx: usize },
-    /// Clause deleted from U (backward simplification)
-    DeleteU { clause_idx: usize, rule_name: String },
     /// Clause selected and transferred from U to P
-    Select { clause_idx: usize },
-    /// Clause deleted from P (backward simplification)
-    DeleteP { clause_idx: usize, rule_name: String },
+    Activate { clause_idx: usize },
 }
 
 /// Type alias for the event log (replaces semantic SaturationTrace)
-pub type SaturationEventLog = Vec<ProofStateChange>;
+pub type EventLog = Vec<StateChange>;
 
 /// Which clause set a notification refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +74,7 @@ pub enum ClauseNotification<'a> {
 /// - `initialize`: Called once with all input clauses
 /// - `on_clause_pending`: Called when a clause is added to N
 /// - `on_clause_activated`: Called when a clause transfers from N to U
-pub trait SimplificationRule: Send + Sync {
+pub trait SimplifyingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
 
@@ -109,7 +105,7 @@ pub trait SimplificationRule: Send + Sync {
         clause: &Clause,
         clauses: &[Clause],
         interner: &Interner,
-    ) -> Vec<ProofStateChange>;
+    ) -> Vec<StateChange>;
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
     ///
@@ -123,7 +119,7 @@ pub trait SimplificationRule: Send + Sync {
         _unprocessed: &IndexSet<usize>,
         _processed: &IndexSet<usize>,
         _interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         vec![]
     }
 }
@@ -131,7 +127,7 @@ pub trait SimplificationRule: Send + Sync {
 /// Trait for generating inference rules (resolution, superposition, factoring, etc.).
 ///
 /// Generating rules produce new clauses by combining the given clause with processed clauses.
-pub trait GeneratingInferenceRule: Send + Sync {
+pub trait GeneratingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
 
@@ -153,7 +149,7 @@ pub trait GeneratingInferenceRule: Send + Sync {
         processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
-    ) -> Vec<ProofStateChange>;
+    ) -> Vec<StateChange>;
 }
 
 // =============================================================================
@@ -185,7 +181,7 @@ impl Default for TautologyRule {
     }
 }
 
-impl SimplificationRule for TautologyRule {
+impl SimplifyingInference for TautologyRule {
     fn name(&self) -> &str {
         "Tautology"
     }
@@ -196,9 +192,9 @@ impl SimplificationRule for TautologyRule {
         clause: &Clause,
         _clauses: &[Clause],
         _interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         if self.is_tautology(clause) {
-            vec![ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() }]
+            vec![StateChange::Delete { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -213,7 +209,7 @@ impl TautologyRule {
             for j in (i + 1)..clause.literals.len() {
                 let lit_i = &clause.literals[i];
                 let lit_j = &clause.literals[j];
-                if lit_i.polarity != lit_j.polarity && lit_i.atom == lit_j.atom {
+                if lit_i.polarity != lit_j.polarity && lit_i.predicate == lit_j.predicate && lit_i.args == lit_j.args {
                     return true;
                 }
             }
@@ -223,10 +219,10 @@ impl TautologyRule {
         if let Some(eq_pred_id) = self.equality_pred_id {
             for lit in &clause.literals {
                 if lit.polarity
-                    && lit.atom.predicate.id == eq_pred_id
-                    && lit.atom.predicate.arity == 2
+                    && lit.predicate.id == eq_pred_id
+                    && lit.predicate.arity == 2
                 {
-                    if let [ref t1, ref t2] = lit.atom.args.as_slice() {
+                    if let [ref t1, ref t2] = lit.args.as_slice() {
                         if t1 == t2 {
                             return true;
                         }
@@ -285,7 +281,7 @@ impl Default for SubsumptionRule {
     }
 }
 
-impl SimplificationRule for SubsumptionRule {
+impl SimplifyingInference for SubsumptionRule {
     fn name(&self) -> &str {
         "Subsumption"
     }
@@ -308,9 +304,9 @@ impl SimplificationRule for SubsumptionRule {
         clause: &Clause,
         _clauses: &[Clause],
         _interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         if let Some(_subsumer_idx) = self.checker.find_subsumer(clause) {
-            vec![ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() }]
+            vec![StateChange::Delete { clause_idx, rule_name: self.name().into() }]
         } else {
             vec![]
         }
@@ -324,7 +320,7 @@ impl SimplificationRule for SubsumptionRule {
         unprocessed: &IndexSet<usize>,
         processed: &IndexSet<usize>,
         _interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         let mut changes = Vec::new();
 
         // Collect all candidate indices
@@ -340,9 +336,9 @@ impl SimplificationRule for SubsumptionRule {
         let rule_name: String = self.name().into();
         for idx in subsumed {
             if processed.contains(&idx) {
-                changes.push(ProofStateChange::DeleteP { clause_idx: idx, rule_name: rule_name.clone() });
+                changes.push(StateChange::Delete { clause_idx: idx, rule_name: rule_name.clone() });
             } else if unprocessed.contains(&idx) {
-                changes.push(ProofStateChange::DeleteU { clause_idx: idx, rule_name: rule_name.clone() });
+                changes.push(StateChange::Delete { clause_idx: idx, rule_name: rule_name.clone() });
             }
         }
 
@@ -377,8 +373,8 @@ impl DemodulationRule {
             return false;
         }
         if let Some(eq_pred_id) = self.equality_pred_id {
-            clause.literals[0].atom.predicate.id == eq_pred_id
-                && clause.literals[0].atom.predicate.arity == 2
+            clause.literals[0].predicate.id == eq_pred_id
+                && clause.literals[0].predicate.arity == 2
         } else {
             false
         }
@@ -409,7 +405,7 @@ impl Default for DemodulationRule {
     }
 }
 
-impl SimplificationRule for DemodulationRule {
+impl SimplifyingInference for DemodulationRule {
     fn name(&self) -> &str {
         "Demodulation"
     }
@@ -440,7 +436,7 @@ impl SimplificationRule for DemodulationRule {
         clause: &Clause,
         clauses: &[Clause],
         interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         // Try to demodulate using each unit equality
         for &unit_idx in &self.unit_equalities {
             if let Some(unit_clause) = clauses.get(unit_idx) {
@@ -450,12 +446,12 @@ impl SimplificationRule for DemodulationRule {
                     orient_clause_equalities(&mut simplified_clause, interner);
 
                     return vec![
-                        ProofStateChange::DeleteN { clause_idx, rule_name: self.name().into() },
-                        ProofStateChange::New {
+                        StateChange::Delete { clause_idx, rule_name: self.name().into() },
+                        StateChange::Add {
                             clause: simplified_clause,
                             derivation: Derivation {
                                 rule_name: "Demodulation".into(),
-                                premises: vec![unit_idx, clause_idx],
+                                premises: vec![Position::clause(unit_idx), Position::clause(clause_idx)],
                             },
                         },
                     ];
@@ -473,7 +469,7 @@ impl SimplificationRule for DemodulationRule {
         unprocessed: &IndexSet<usize>,
         processed: &IndexSet<usize>,
         interner: &Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         // Only unit equalities can backward-demodulate
         if !self.is_unit_equality(clause) {
             return vec![];
@@ -496,17 +492,17 @@ impl SimplificationRule for DemodulationRule {
 
                     // Determine which set to remove from
                     if processed.contains(&target_idx) {
-                        changes.push(ProofStateChange::DeleteP { clause_idx: target_idx, rule_name: rule_name.clone() });
+                        changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
                     } else {
-                        changes.push(ProofStateChange::DeleteU { clause_idx: target_idx, rule_name: rule_name.clone() });
+                        changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
                     }
 
                     // Add the simplified clause to N
-                    changes.push(ProofStateChange::New {
+                    changes.push(StateChange::Add {
                         clause: simplified_clause,
                         derivation: Derivation {
                             rule_name: "Demodulation".into(),
-                            premises: vec![clause_idx, target_idx],
+                            premises: vec![Position::clause(clause_idx), Position::clause(target_idx)],
                         },
                     });
                 }
@@ -542,7 +538,7 @@ impl Default for ResolutionRule {
     }
 }
 
-impl GeneratingInferenceRule for ResolutionRule {
+impl GeneratingInference for ResolutionRule {
     fn name(&self) -> &str {
         "Resolution"
     }
@@ -555,7 +551,7 @@ impl GeneratingInferenceRule for ResolutionRule {
         processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         let mut changes = Vec::new();
 
         // Resolution with processed clauses
@@ -566,14 +562,14 @@ impl GeneratingInferenceRule for ResolutionRule {
             if let Some(processed_clause) = clauses.get(processed_idx) {
                 // Given as first clause
                 for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
-                    changes.push(ProofStateChange::New {
+                    changes.push(StateChange::Add {
                         clause: result.conclusion,
                         derivation: result.derivation,
                     });
                 }
                 // Given as second clause
                 for result in resolution(processed_clause, given, processed_idx, given_idx, selector, interner) {
-                    changes.push(ProofStateChange::New {
+                    changes.push(StateChange::Add {
                         clause: result.conclusion,
                         derivation: result.derivation,
                     });
@@ -583,7 +579,7 @@ impl GeneratingInferenceRule for ResolutionRule {
 
         // Self-resolution
         for result in resolution(given, given, given_idx, given_idx, selector, interner) {
-            changes.push(ProofStateChange::New {
+            changes.push(StateChange::Add {
                 clause: result.conclusion,
                 derivation: result.derivation,
             });
@@ -610,7 +606,7 @@ impl Default for SuperpositionRule {
     }
 }
 
-impl GeneratingInferenceRule for SuperpositionRule {
+impl GeneratingInference for SuperpositionRule {
     fn name(&self) -> &str {
         "Superposition"
     }
@@ -623,7 +619,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
         processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         let mut changes = Vec::new();
 
         // Superposition with processed clauses
@@ -635,7 +631,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
                 // Given as first clause (rewriter)
                 for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
                 {
-                    changes.push(ProofStateChange::New {
+                    changes.push(StateChange::Add {
                         clause: result.conclusion,
                         derivation: result.derivation,
                     });
@@ -643,7 +639,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
                 // Given as second clause (target)
                 for result in superposition(processed_clause, given, processed_idx, given_idx, selector, interner)
                 {
-                    changes.push(ProofStateChange::New {
+                    changes.push(StateChange::Add {
                         clause: result.conclusion,
                         derivation: result.derivation,
                     });
@@ -653,7 +649,7 @@ impl GeneratingInferenceRule for SuperpositionRule {
 
         // Self-superposition
         for result in superposition(given, given, given_idx, given_idx, selector, interner) {
-            changes.push(ProofStateChange::New {
+            changes.push(StateChange::Add {
                 clause: result.conclusion,
                 derivation: result.derivation,
             });
@@ -680,7 +676,7 @@ impl Default for FactoringRule {
     }
 }
 
-impl GeneratingInferenceRule for FactoringRule {
+impl GeneratingInference for FactoringRule {
     fn name(&self) -> &str {
         "Factoring"
     }
@@ -693,10 +689,10 @@ impl GeneratingInferenceRule for FactoringRule {
         _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         _interner: &mut Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         factoring(given, given_idx, selector)
             .into_iter()
-            .map(|result| ProofStateChange::New {
+            .map(|result| StateChange::Add {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -721,7 +717,7 @@ impl Default for EqualityResolutionRule {
     }
 }
 
-impl GeneratingInferenceRule for EqualityResolutionRule {
+impl GeneratingInference for EqualityResolutionRule {
     fn name(&self) -> &str {
         "EqualityResolution"
     }
@@ -734,10 +730,10 @@ impl GeneratingInferenceRule for EqualityResolutionRule {
         _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         equality_resolution(given, given_idx, selector, &*interner)
             .into_iter()
-            .map(|result| ProofStateChange::New {
+            .map(|result| StateChange::Add {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -762,7 +758,7 @@ impl Default for EqualityFactoringRule {
     }
 }
 
-impl GeneratingInferenceRule for EqualityFactoringRule {
+impl GeneratingInference for EqualityFactoringRule {
     fn name(&self) -> &str {
         "EqualityFactoring"
     }
@@ -775,10 +771,10 @@ impl GeneratingInferenceRule for EqualityFactoringRule {
         _processed: &IndexSet<usize>,
         selector: &dyn LiteralSelector,
         interner: &mut Interner,
-    ) -> Vec<ProofStateChange> {
+    ) -> Vec<StateChange> {
         equality_factoring(given, given_idx, selector, interner)
             .into_iter()
-            .map(|result| ProofStateChange::New {
+            .map(|result| StateChange::Add {
                 clause: result.conclusion,
                 derivation: result.derivation,
             })
@@ -789,7 +785,7 @@ impl GeneratingInferenceRule for EqualityFactoringRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Constant, Literal, PredicateSymbol, Term, Variable};
 
     /// Test context with interner for creating FOL terms
     struct TestContext {
@@ -809,14 +805,11 @@ mod tests {
 
         fn make_literal(&mut self, pred: &str, args: Vec<Term>, positive: bool) -> Literal {
             let pred_id = self.interner.intern_predicate(pred);
-            let atom = Atom {
-                predicate: PredicateSymbol::new(pred_id, args.len() as u8),
-                args,
-            };
+            let predicate = PredicateSymbol::new(pred_id, args.len() as u8);
             if positive {
-                Literal::positive(atom)
+                Literal::positive(predicate, args)
             } else {
-                Literal::negative(atom)
+                Literal::negative(predicate, args)
             }
         }
 
@@ -858,7 +851,7 @@ mod tests {
         let tautology = ctx.make_clause(vec![lit3, lit4]);
         let changes = rule.simplify_forward(0, &tautology, &clauses, &ctx.interner);
         assert_eq!(changes.len(), 1);
-        assert!(matches!(changes[0], ProofStateChange::DeleteN { clause_idx: 0, .. }));
+        assert!(matches!(changes[0], StateChange::Delete { clause_idx: 0, .. }));
     }
 
     #[test]

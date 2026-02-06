@@ -40,7 +40,7 @@ pub use literal::{
 };
 
 // Clause selection re-exports
-pub use age_weight::AgeWeightSelector;
+pub use age_weight::{AgeWeightSelector, FIFOSelector, WeightSelector};
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::{ClauseSelector, SelectorStats};
 #[cfg(feature = "ml")]

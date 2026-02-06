@@ -1,7 +1,7 @@
 //! Equality factoring inference rule
 
 use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
-use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, PredicateSymbol, KBO};
+use crate::fol::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -25,7 +25,7 @@ pub fn equality_factoring(
         .literals
         .iter()
         .enumerate()
-        .filter(|(_, lit)| lit.polarity && lit.atom.is_equality(interner))
+        .filter(|(_, lit)| lit.polarity && lit.is_equality(interner))
         .collect();
 
     if positive_eq_literals.len() < 2 {
@@ -41,11 +41,11 @@ pub fn equality_factoring(
             continue;
         }
 
-        let (s1, t1) = get_equality_terms(&lit1.atom).unwrap();
+        let (s1, t1) = get_equality_terms(lit1).unwrap();
 
         for j in i + 1..positive_eq_literals.len() {
             let (idx2, lit2) = positive_eq_literals[j];
-            let (s2, t2) = get_equality_terms(&lit2.atom).unwrap();
+            let (s2, t2) = get_equality_terms(lit2).unwrap();
 
             // Try to unify l with s (s1 with s2)
             if let Ok(sigma) = unify(s1, s2) {
@@ -68,17 +68,11 @@ pub fn equality_factoring(
 
                     // Add r ≉ t
                     let eq_symbol = PredicateSymbol::new(interner.intern_predicate("="), 2);
-                    let neq_literal = Literal::negative(Atom {
-                        predicate: eq_symbol,
-                        args: vec![r_sigma.clone(), t_sigma.clone()],
-                    });
+                    let neq_literal = Literal::negative(eq_symbol, vec![r_sigma.clone(), t_sigma.clone()]);
                     new_literals.push(neq_literal);
 
                     // Add l ≈ r (the first equality literal)
-                    let eq_literal = Literal::positive(Atom {
-                        predicate: eq_symbol,
-                        args: vec![l_sigma, r_sigma],
-                    });
+                    let eq_literal = Literal::positive(eq_symbol, vec![l_sigma, r_sigma]);
                     new_literals.push(eq_literal);
 
                     // Add all other literals from C (except the two equalities we're factoring)
@@ -89,7 +83,7 @@ pub fn equality_factoring(
                     results.push(InferenceResult {
                         derivation: Derivation {
                             rule_name: "EqualityFactoring".into(),
-                            premises: vec![idx],
+                            premises: vec![Position::clause(idx)],
                         },
                         conclusion,
                     });
@@ -101,10 +95,10 @@ pub fn equality_factoring(
     results
 }
 
-/// Get the two terms from an equality atom (assumes already verified to be equality)
-fn get_equality_terms(atom: &Atom) -> Option<(&crate::fol::Term, &crate::fol::Term)> {
-    if atom.predicate.arity == 2 && atom.args.len() == 2 {
-        Some((&atom.args[0], &atom.args[1]))
+/// Get the two terms from an equality literal (assumes already verified to be equality)
+fn get_equality_terms(lit: &Literal) -> Option<(&crate::fol::Term, &crate::fol::Term)> {
+    if lit.predicate.arity == 2 && lit.args.len() == 2 {
+        Some((&lit.args[0], &lit.args[1]))
     } else {
         None
     }

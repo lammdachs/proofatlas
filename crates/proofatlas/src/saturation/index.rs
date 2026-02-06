@@ -196,8 +196,8 @@ impl UnitEqualitiesIndex {
             return false;
         }
         if let Some(eq_pred_id) = self.equality_pred_id {
-            clause.literals[0].atom.predicate.id == eq_pred_id
-                && clause.literals[0].atom.predicate.arity == 2
+            clause.literals[0].predicate.id == eq_pred_id
+                && clause.literals[0].predicate.arity == 2
         } else {
             false
         }
@@ -562,7 +562,7 @@ impl std::fmt::Debug for IndexProvider<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Literal, PredicateSymbol, Term, Variable};
 
     fn create_test_interner() -> Interner {
         Interner::new()
@@ -571,23 +571,23 @@ mod tests {
     fn create_unit_clause(interner: &mut Interner) -> Clause {
         let pred_id = interner.intern_predicate("P");
         let var_id = interner.intern_variable("X");
-        Clause::new(vec![Literal::positive(Atom {
-            predicate: PredicateSymbol::new(pred_id, 1),
-            args: vec![Term::Variable(Variable::new(var_id))],
-        })])
+        Clause::new(vec![Literal::positive(
+            PredicateSymbol::new(pred_id, 1),
+            vec![Term::Variable(Variable::new(var_id))],
+        )])
     }
 
     fn create_unit_equality(interner: &mut Interner) -> Clause {
         let eq_id = interner.intern_predicate("=");
         let a_id = interner.intern_constant("a");
         let b_id = interner.intern_constant("b");
-        Clause::new(vec![Literal::positive(Atom {
-            predicate: PredicateSymbol::new(eq_id, 2),
-            args: vec![
+        Clause::new(vec![Literal::positive(
+            PredicateSymbol::new(eq_id, 2),
+            vec![
                 Term::Constant(crate::fol::Constant::new(a_id)),
                 Term::Constant(crate::fol::Constant::new(b_id)),
             ],
-        })])
+        )])
     }
 
     #[test]

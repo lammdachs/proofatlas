@@ -1,6 +1,6 @@
 //! Integration tests for the theorem prover
 
-use proofatlas::{parse_tptp, saturate, AgeWeightSelector, ClauseSelector, SaturationConfig, SaturationResult};
+use proofatlas::{parse_tptp, saturate, AgeWeightSelector, ClauseSelector, ProverConfig, ProofResult};
 
 fn create_selector() -> Box<dyn ClauseSelector> {
     Box::new(AgeWeightSelector::default())
@@ -15,11 +15,11 @@ fn test_simple_resolution() {
     "#;
 
     let parsed = parse_tptp(tptp, &[], None).unwrap();
-    let config = SaturationConfig::default();
+    let config = ProverConfig::default();
     let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        SaturationResult::Proof(_) => {
+        ProofResult::Proof(_) => {
             // Expected - proof found
         }
         _ => panic!("Expected proof, got {:?}", result),
@@ -33,11 +33,11 @@ fn test_equality_reflexivity() {
     "#;
 
     let parsed = parse_tptp(tptp, &[], None).unwrap();
-    let config = SaturationConfig::default();
+    let config = ProverConfig::default();
     let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        SaturationResult::Proof(_) => {
+        ProofResult::Proof(_) => {
             // Expected - contradiction found
         }
         _ => panic!("Expected proof, got {:?}", result),
@@ -52,15 +52,15 @@ fn test_satisfiable_formula() {
     "#;
 
     let parsed = parse_tptp(tptp, &[], None).unwrap();
-    let mut config = SaturationConfig::default();
+    let mut config = ProverConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
     let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        SaturationResult::Saturated(_, _) => {
+        ProofResult::Saturated(_, _) => {
             // Expected - no contradiction, formula is satisfiable
         }
-        SaturationResult::Proof(_) => {
+        ProofResult::Proof(_) => {
             panic!("Unexpected proof for satisfiable formula");
         }
         _ => {

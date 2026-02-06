@@ -255,8 +255,8 @@ impl FeatureIndex {
         for clause in clauses {
             for lit in &clause.literals {
                 self.symbol_table
-                    .get_or_create_predicate(lit.atom.predicate.id);
-                self.collect_function_symbols_from_args(&lit.atom.args);
+                    .get_or_create_predicate(lit.predicate.id);
+                self.collect_function_symbols_from_args(&lit.args);
             }
         }
         self.dimension = self.symbol_table.dimension();
@@ -289,8 +289,8 @@ impl FeatureIndex {
         if !self.symbols_finalized {
             for lit in &clause.literals {
                 self.symbol_table
-                    .get_or_create_predicate(lit.atom.predicate.id);
-                self.collect_function_symbols_from_args(&lit.atom.args);
+                    .get_or_create_predicate(lit.predicate.id);
+                self.collect_function_symbols_from_args(&lit.args);
             }
             self.dimension = self.symbol_table.dimension();
         }
@@ -314,7 +314,7 @@ impl FeatureIndex {
 
         for lit in &clause.literals {
             // Count predicate occurrences
-            if let Some(base_idx) = self.symbol_table.get_predicate(lit.atom.predicate.id) {
+            if let Some(base_idx) = self.symbol_table.get_predicate(lit.predicate.id) {
                 let idx = if lit.polarity {
                     base_idx
                 } else {
@@ -326,7 +326,7 @@ impl FeatureIndex {
             }
 
             // Count function symbols in arguments
-            for term in &lit.atom.args {
+            for term in &lit.args {
                 self.count_function_symbols(term, &mut features);
             }
         }
@@ -796,7 +796,7 @@ fn get_clause_shape(clause: &Clause) -> Vec<(PredicateId, bool)> {
     let mut shape: Vec<_> = clause
         .literals
         .iter()
-        .map(|lit| (lit.atom.predicate.id, lit.polarity))
+        .map(|lit| (lit.predicate.id, lit.polarity))
         .collect();
     shape.sort();
     shape
@@ -816,7 +816,7 @@ pub fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
             return false;
         }
 
-        if !atoms_match_with_mapping(&lit1.atom, &lit2.atom, &mut var_map) {
+        if !literals_match_with_mapping(lit1, lit2, &mut var_map) {
             return false;
         }
     }
@@ -824,21 +824,21 @@ pub fn are_variants(clause1: &Clause, clause2: &Clause) -> bool {
     true
 }
 
-/// Check if atoms match with a variable mapping
-fn atoms_match_with_mapping(
-    atom1: &crate::fol::Atom,
-    atom2: &crate::fol::Atom,
+/// Check if two literals match with a variable mapping (comparing predicate and args directly)
+fn literals_match_with_mapping(
+    lit1: &Literal,
+    lit2: &Literal,
     var_map: &mut HashMap<VariableId, VariableId>,
 ) -> bool {
-    if atom1.predicate != atom2.predicate {
+    if lit1.predicate != lit2.predicate {
         return false;
     }
 
-    if atom1.args.len() != atom2.args.len() {
+    if lit1.args.len() != lit2.args.len() {
         return false;
     }
 
-    for (term1, term2) in atom1.args.iter().zip(&atom2.args) {
+    for (term1, term2) in lit1.args.iter().zip(&lit2.args) {
         if !terms_match_with_mapping(term1, term2, var_map) {
             return false;
         }
@@ -958,8 +958,8 @@ pub fn subsumes_greedy(subsumer: &Clause, subsumee: &Clause) -> bool {
 /// Returns true if subsumer's predicates are a subset of subsumee's predicates.
 pub fn compatible_structure(clause1: &Clause, clause2: &Clause) -> bool {
     // Check predicate symbols
-    let preds1: HashSet<_> = clause1.literals.iter().map(|l| &l.atom.predicate).collect();
-    let preds2: HashSet<_> = clause2.literals.iter().map(|l| &l.atom.predicate).collect();
+    let preds1: HashSet<_> = clause1.literals.iter().map(|l| &l.predicate).collect();
+    let preds2: HashSet<_> = clause2.literals.iter().map(|l| &l.predicate).collect();
 
     // subsumer's predicates must be subset of subsumee's
     preds1.is_subset(&preds2)
@@ -987,7 +987,7 @@ fn terms_equal(term1: &Term, term2: &Term) -> bool {
 fn count_variables(clause: &Clause) -> usize {
     let mut vars = HashSet::new();
     for lit in &clause.literals {
-        for term in &lit.atom.args {
+        for term in &lit.args {
             term.collect_variable_ids(&mut vars);
         }
     }
@@ -1023,36 +1023,27 @@ fn match_terms_trail(term1: &Term, term2: &Term, subst: &mut Substitution) -> bo
     }
 }
 
-/// Try to match two atoms with a trailed substitution
-fn match_atoms_trail(
-    atom1: &crate::fol::Atom,
-    atom2: &crate::fol::Atom,
-    subst: &mut Substitution,
-) -> bool {
-    if atom1.predicate != atom2.predicate {
-        return false;
-    }
-
-    if atom1.args.len() != atom2.args.len() {
-        return false;
-    }
-
-    for (term1, term2) in atom1.args.iter().zip(&atom2.args) {
-        if !match_terms_trail(term1, term2, subst) {
-            return false;
-        }
-    }
-
-    true
-}
-
 /// Try to match two literals with a trailed substitution
 fn match_literals_trail(lit1: &Literal, lit2: &Literal, subst: &mut Substitution) -> bool {
     if lit1.polarity != lit2.polarity {
         return false;
     }
 
-    match_atoms_trail(&lit1.atom, &lit2.atom, subst)
+    if lit1.predicate != lit2.predicate {
+        return false;
+    }
+
+    if lit1.args.len() != lit2.args.len() {
+        return false;
+    }
+
+    for (term1, term2) in lit1.args.iter().zip(&lit2.args) {
+        if !match_terms_trail(term1, term2, subst) {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Recursive function to find subsumption mapping using trail-based backtracking

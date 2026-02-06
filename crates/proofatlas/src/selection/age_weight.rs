@@ -59,7 +59,7 @@ impl AgeWeightSelector {
             .iter()
             .map(|lit| {
                 // Count predicate symbol + weight of all argument terms
-                1 + lit.atom.args.iter().map(Self::term_weight).sum::<usize>()
+                1 + lit.args.iter().map(Self::term_weight).sum::<usize>()
             })
             .sum()
     }
@@ -113,10 +113,76 @@ impl Default for AgeWeightSelector {
     }
 }
 
+/// FIFO clause selector: always selects the oldest clause.
+///
+/// Equivalent to `AgeWeightSelector` with `age_probability = 1.0`.
+/// Guarantees fairness (every clause is eventually selected), which
+/// is important for completeness.
+pub struct FIFOSelector(AgeWeightSelector);
+
+impl FIFOSelector {
+    pub fn new() -> Self {
+        FIFOSelector(AgeWeightSelector::new(1.0))
+    }
+}
+
+impl Default for FIFOSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClauseSelector for FIFOSelector {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+        self.0.select(unprocessed, clauses)
+    }
+
+    fn name(&self) -> &str {
+        "FIFO"
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
+/// Weight-based clause selector: always selects the lightest clause.
+///
+/// Equivalent to `AgeWeightSelector` with `age_probability = 0.0`.
+/// Aggressively pursues short clauses, which tends to find proofs faster
+/// but may sacrifice completeness.
+pub struct WeightSelector(AgeWeightSelector);
+
+impl WeightSelector {
+    pub fn new() -> Self {
+        WeightSelector(AgeWeightSelector::new(0.0))
+    }
+}
+
+impl Default for WeightSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClauseSelector for WeightSelector {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+        self.0.select(unprocessed, clauses)
+    }
+
+    fn name(&self) -> &str {
+        "Weight"
+    }
+
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
 
     struct TestContext {
         interner: Interner,
@@ -161,12 +227,8 @@ mod tests {
             .collect();
 
         let pred = ctx.pred(predicate_name, num_args as u8);
-        let atom = Atom {
-            predicate: pred,
-            args,
-        };
 
-        Clause::new(vec![Literal::positive(atom)])
+        Clause::new(vec![Literal::positive(pred, args)])
     }
 
     /// Create a clause with nested functions to increase weight.
@@ -178,12 +240,8 @@ mod tests {
         }
 
         let pred = ctx.pred("P", 1);
-        let atom = Atom {
-            predicate: pred,
-            args: vec![term],
-        };
 
-        Clause::new(vec![Literal::positive(atom)])
+        Clause::new(vec![Literal::positive(pred, vec![term])])
     }
 
     #[test]

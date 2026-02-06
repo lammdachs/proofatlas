@@ -1,6 +1,6 @@
 //! JSON serialization types for proof data
 
-use crate::fol::{Atom, Clause, Interner, Literal, Term};
+use crate::fol::{Clause, Interner, Literal, Term};
 use crate::inference::proof::{Proof, ProofStep};
 use serde::{Deserialize, Serialize};
 
@@ -39,10 +39,10 @@ pub struct AtomJson {
 }
 
 impl AtomJson {
-    pub fn from_atom(atom: &Atom, interner: &Interner) -> Self {
+    pub fn from_literal(lit: &Literal, interner: &Interner) -> Self {
         AtomJson {
-            predicate: atom.predicate.name(interner).to_string(),
-            args: atom.args.iter().map(|t| TermJson::from_term(t, interner)).collect(),
+            predicate: lit.predicate.name(interner).to_string(),
+            args: lit.args.iter().map(|t| TermJson::from_term(t, interner)).collect(),
         }
     }
 }
@@ -58,7 +58,7 @@ impl LiteralJson {
     pub fn from_literal(lit: &Literal, interner: &Interner) -> Self {
         LiteralJson {
             polarity: lit.polarity,
-            atom: AtomJson::from_atom(&lit.atom, interner),
+            atom: AtomJson::from_literal(lit, interner),
         }
     }
 }
@@ -152,7 +152,7 @@ impl From<&ProofStep> for ProofStepJson {
             clause_idx: step.clause_idx,
             inference: InferenceJson {
                 rule: step.derivation.rule_name.clone(),
-                premises: step.derivation.premises.clone(),
+                premises: step.derivation.clause_indices(),
             },
         }
     }
@@ -177,7 +177,7 @@ impl From<&Proof> for ProofJson {
 /// JSON representation of a saturation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "result")]
-pub enum SaturationResultJson {
+pub enum ProofResultJson {
     Proof {
         proof: ProofJson,
         time_seconds: f64,
@@ -206,7 +206,7 @@ pub struct ProofAttemptJson {
     pub problem_file: String,
     pub initial_clauses: Vec<ClauseJson>,
     pub config: ConfigJson,
-    pub result: SaturationResultJson,
+    pub result: ProofResultJson,
     pub statistics: StatisticsJson,
 }
 

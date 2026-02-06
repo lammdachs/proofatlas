@@ -14,12 +14,14 @@ proofatlas/
 ├── crates/
 │   ├── proofatlas/             # Core theorem prover (Rust)
 │   │   └── src/
-│   │       ├── fol/            # FOL types: terms, literals, clauses, substitutions, KBO, interner
+│   │       ├── fol/            # FOL types: terms, literals, clauses, substitutions, KBO, interner, Position
 │   │       ├── inference/      # Inference rules, derivation tracking, proof types
 │   │       ├── selection/      # Selection strategies, graph building, proof trace (tch-rs ML)
-│   │       ├── saturation/     # Saturation loop, trace, forward/backward subsumption, profiling
+│   │       ├── saturation/     # State container, rules, trace, subsumption, profiling
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── unification/    # Most General Unifier (MGU) computation
+│   │       ├── clause_manager.rs  # ClauseManager: interner + literal selector + KBO
+│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()
 │   │       └── json.rs         # JSON serialization types
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
@@ -192,23 +194,40 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 ### Subsumption
 Tiered approach: duplicates → variants → units → small clauses → greedy
 
-### Polymorphic Rule Architecture
-The saturation loop uses a modular, polymorphic architecture where rules are registered and applied generically:
+### Architecture
 
-**SimplificationRule trait** (`saturation/rule.rs`):
+The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that orchestrates saturation:
+- `ProofAtlas::new()` initializes all components from initial clauses and config
+- `ProofAtlas::prove()` runs the saturation loop to completion
+- `ProofAtlas::step()` executes a single iteration (useful for debugging/visualization)
+
+**ClauseManager** (`clause_manager.rs`): Centralizes clause-level operations:
+- Symbol interning (`Interner`)
+- Literal selection (`LiteralSelector` trait)
+- Term ordering (`KBO`)
+- Methods: `rename_variables()`, `orient_equalities()`, `normalize_clause()`
+
+**SaturationState** (`saturation/state.rs`): Lean data container holding:
+- `clauses: Vec<Clause>` (append-only storage)
+- `new`, `unprocessed`, `processed` clause sets (N/U/P)
+- `event_log: Vec<StateChange>` (all modifications)
+
+### Polymorphic Rule Architecture
+
+**SimplifyingInference trait** (`saturation/rule.rs`):
 - `simplify_forward()`: Simplify/delete clause in N using U∪P
 - `simplify_backward()`: Simplify clauses in U∪P using new clause
 - Implementations: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
 
-**GeneratingInferenceRule trait** (`saturation/rule.rs`):
+**GeneratingInference trait** (`saturation/rule.rs`):
 - `generate()`: Generate inferences with given clause and clauses in P
 - Implementations: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
 
-All rules return `Vec<ProofStateChange>` for atomic state modifications:
-- `New { clause, derivation }`: Add new clause to N
-- `DeleteN/U/P { clause_idx, rule_name }`: Delete from respective set (simplification)
-- `Transfer { clause_idx }`: Move clause N→U (implicit N removal)
-- `Select { clause_idx }`: Move clause U→P (implicit U removal)
+All rules return `Vec<StateChange>` for atomic state modifications:
+- `Add { clause, derivation }`: Add new clause to N
+- `Delete { clause_idx, rule_name }`: Delete from any set (simplification)
+- `Transfer { clause_idx }`: Move clause N→U
+- `Activate { clause_idx }`: Move clause U→P
 
 This architecture enables adding new rules without modifying the main loop.
 
@@ -217,22 +236,28 @@ The `Derivation` struct tracks how each clause was derived:
 ```rust
 pub struct Derivation {
     pub rule_name: String,
-    pub premises: Vec<usize>,
+    pub premises: Vec<Position>,  // Position = clause index + path into clause
 }
 ```
 
-Rules construct derivations directly: `Derivation { rule_name: "Resolution".into(), premises: vec![p1, p2] }`. Only `Derivation::input()` helper exists for input clauses (no premises).
+Rules construct derivations with `Position::clause(idx)` for premises. `Derivation::clause_indices()` extracts just the clause indices for proof extraction.
 
 ### Event Log
-The saturation state maintains an event log (`Vec<ProofStateChange>`) as the single source of truth for derivations. All clause additions (`New`) include the derivation info. This enables:
+The saturation state maintains an event log (`Vec<StateChange>`) as the single source of truth for derivations. All clause additions (`Add`) include the derivation info. This enables:
 - **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
 - **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
 - **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection
 
 The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying events.
 
+### Literal Representation
+Literals have a flat structure with `predicate`, `args`, and `polarity` directly on the `Literal` struct (no intermediate `Atom` wrapper). `Atom` still exists for FOF formula representation in the parser but is not used in clause-level operations.
+
+### Position
+`Position` (`fol/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `Derivation` premises and throughout the system to reference inference sites.
+
 ### Profiling
-`SaturationConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `saturate()` returns `(SaturationResult, Option<SaturationProfile>)` with timing and counting data for every phase:
+`ProverConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `prove()` returns `(ProofResult, Option<SaturationProfile>, EventLog, Interner)` with timing and counting data for every phase:
 
 - **Phase timings**: forward simplification, clause selection, inference generation, inference addition
 - **Sub-phase timings**: forward/backward demodulation, forward/backward subsumption
@@ -243,6 +268,13 @@ The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying
 Zero overhead when disabled: all instrumentation is gated on `Option::None`, costing a single predicted-not-taken branch per instrumentation point.
 
 `SaturationProfile` implements `serde::Serialize` with `Duration` fields serialized as `f64` seconds. From Python, `run_saturation()` returns `(proof_found, status, profile_json, trace_json)`. Pass `enable_profiling=True` to populate the profile.
+
+### Clause Selection
+Selectors implement `ClauseSelector` trait:
+- `AgeWeightSelector`: Alternates FIFO and lightest with configurable ratio
+- `FIFOSelector`: Pure age-based (wraps AgeWeightSelector with age_probability=1.0)
+- `WeightSelector`: Pure weight-based (wraps AgeWeightSelector with age_probability=0.0)
+- `CachingSelector`: ML-based with embedding cache
 
 ## ML Architecture
 

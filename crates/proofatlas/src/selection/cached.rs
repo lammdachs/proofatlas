@@ -226,7 +226,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Interner, Literal, PredicateSymbol, Term, Constant};
+    use crate::fol::{Interner, Literal, PredicateSymbol, Term, Constant};
 
     /// Simple test embedder that returns clause length as embedding
     struct TestEmbedder;
@@ -270,10 +270,7 @@ mod tests {
             id: interner.intern_constant("a"),
         });
         let literals: Vec<Literal> = (0..num_literals)
-            .map(|_| Literal::positive(Atom {
-                predicate: p.clone(),
-                args: vec![a.clone()],
-            }))
+            .map(|_| Literal::positive(p.clone(), vec![a.clone()]))
             .collect();
         Clause::new(literals)
     }

@@ -1,7 +1,7 @@
 //! Test compliance with calculus_quick_reference.md
 
 use proofatlas::{
-    factoring, resolution, Atom, Clause, Constant, Interner, Literal, LiteralSelector,
+    factoring, resolution, Clause, Constant, Interner, Literal, LiteralSelector,
     PredicateSymbol, SelectAll, Term, Variable,
 };
 
@@ -41,11 +41,6 @@ impl TestCtx {
 fn test_resolution_should_use_selection() {
     let mut ctx = TestCtx::new();
 
-    // According to calculus_quick_reference.md:
-    // P(x) ∨ C₁    ¬P(t) ∨ C₂
-    // ------------------------  where σ = mgu(x, t), P(x) and ¬P(t) selected.
-    //       (C₁ ∨ C₂)σ
-
     let p = ctx.pred("P", 1);
     let q = ctx.pred("Q", 1);
 
@@ -54,26 +49,14 @@ fn test_resolution_should_use_selection() {
 
     // Clause 1: P(X) ∨ Q(X)
     let clause1 = Clause::new(vec![
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![x.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: q.clone(),
-            args: vec![x.clone()],
-        }),
+        Literal::positive(p, vec![x.clone()]),
+        Literal::positive(q, vec![x.clone()]),
     ]);
 
     // Clause 2: ~P(a) ∨ Q(a)
     let clause2 = Clause::new(vec![
-        Literal::negative(Atom {
-            predicate: p.clone(),
-            args: vec![a.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: q.clone(),
-            args: vec![a.clone()],
-        }),
+        Literal::negative(p, vec![a.clone()]),
+        Literal::positive(q, vec![a.clone()]),
     ]);
 
     // With SelectAll, all literals are eligible for resolution
@@ -84,9 +67,6 @@ fn test_resolution_should_use_selection() {
     println!("Clause 1 selected literals: {:?}", selected1);
     println!("Clause 2 selected literals: {:?}", selected2);
 
-    // With SelectAll:
-    // - Clause 1: all literals are selected: {0, 1}
-    // - Clause 2: all literals are selected: {0, 1}
     assert_eq!(selected1.len(), 2);
     assert_eq!(selected2.len(), 2);
 
@@ -94,7 +74,6 @@ fn test_resolution_should_use_selection() {
     let selector = SelectAll;
     let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
 
-    // With SelectAll, resolution can happen on any complementary pair
     println!("Number of resolvents: {}", results.len());
 
     // Since only P(X) and ~P(a) form a complementary pair, we get 1 resolvent
@@ -105,11 +84,6 @@ fn test_resolution_should_use_selection() {
 fn test_factoring_should_use_selection() {
     let mut ctx = TestCtx::new();
 
-    // According to calculus_quick_reference.md:
-    // P(s) ∨ P(t) ∨ C
-    // ----------------  where σ = mgu(s, t), P(s) selected.
-    //    (P(s) ∨ C)σ
-
     let p = ctx.pred("P", 1);
     let q = ctx.pred("Q", 1);
 
@@ -119,22 +93,10 @@ fn test_factoring_should_use_selection() {
 
     // Mixed polarity clause: ~P(X) ∨ P(Y) ∨ P(Z) ∨ Q(X)
     let clause = Clause::new(vec![
-        Literal::negative(Atom {
-            predicate: p.clone(),
-            args: vec![x.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![y.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![z.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: q.clone(),
-            args: vec![x.clone()],
-        }),
+        Literal::negative(p, vec![x.clone()]),
+        Literal::positive(p, vec![y.clone()]),
+        Literal::positive(p, vec![z.clone()]),
+        Literal::positive(q, vec![x.clone()]),
     ]);
 
     // With SelectAll, all literals are selected

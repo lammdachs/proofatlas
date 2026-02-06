@@ -1,7 +1,7 @@
 //! Factoring inference rule
 
 use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms, InferenceResult};
-use crate::fol::Clause;
+use crate::fol::{Clause, Position};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 
@@ -32,8 +32,8 @@ pub fn factoring(
                 let lit2 = &clause.literals[j];
 
                 // Must have same polarity and predicate
-                if lit1.polarity == lit2.polarity && lit1.atom.predicate == lit2.atom.predicate {
-                    if let Ok(mgu) = unify_atoms(&lit1.atom, &lit2.atom) {
+                if lit1.polarity == lit2.polarity && lit1.predicate == lit2.predicate {
+                    if let Ok(mgu) = unify_atoms(lit1.predicate, &lit1.args, lit2.predicate, &lit2.args) {
                         // Collect all literals except the factored one (j)
                         let new_literals = remove_duplicate_literals(
                             collect_literals_except(clause, &[j], &mgu)
@@ -45,7 +45,7 @@ pub fn factoring(
                         results.push(InferenceResult {
                             derivation: Derivation {
                                 rule_name: "Factoring".into(),
-                                premises: vec![idx],
+                                premises: vec![Position::clause(idx)],
                             },
                             conclusion: new_clause,
                         });
@@ -61,7 +61,7 @@ pub fn factoring(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -109,18 +109,9 @@ mod tests {
         let z = ctx.var("Z");
 
         let clause = Clause::new(vec![
-            Literal::positive(Atom {
-                predicate: p,
-                args: vec![x.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: p,
-                args: vec![y.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: q,
-                args: vec![z.clone()],
-            }),
+            Literal::positive(p, vec![x.clone()]),
+            Literal::positive(p, vec![y.clone()]),
+            Literal::positive(q, vec![z.clone()]),
         ]);
 
         let selector = SelectAll;

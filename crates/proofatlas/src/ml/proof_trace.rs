@@ -1,7 +1,7 @@
 //! Extract training data from completed proofs
 
 use crate::inference::Proof;
-use crate::saturation::{extract_proof_from_events, ProofStateChange, SaturationEventLog};
+use crate::saturation::{extract_proof_from_events, StateChange, EventLog};
 use std::collections::HashSet;
 
 /// Training example: a clause with its label
@@ -49,7 +49,7 @@ fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
         // Find the step that derived this clause
         if let Some(step) = proof.steps.iter().find(|s| s.clause_idx == clause_idx) {
             // Add premises (parent clauses) to the search
-            to_visit.extend(step.derivation.premises());
+            to_visit.extend(step.derivation.clause_indices());
         }
     }
 
@@ -98,7 +98,7 @@ pub struct SelectionTrainingExample {
 }
 
 /// Extract training examples from event log by replaying and tracking selections
-pub fn extract_training_from_events(events: &SaturationEventLog) -> Vec<SelectionTrainingExample> {
+pub fn extract_training_from_events(events: &EventLog) -> Vec<SelectionTrainingExample> {
     let mut examples = Vec::new();
     let mut u: HashSet<usize> = HashSet::new();
     let mut n: HashSet<usize> = HashSet::new();
@@ -112,35 +112,30 @@ pub fn extract_training_from_events(events: &SaturationEventLog) -> Vec<Selectio
 
     for event in events {
         match event {
-            ProofStateChange::AddN { clause, derivation: _ } => {
+            StateChange::Add { clause, derivation: _ } => {
                 if let Some(idx) = clause.id {
                     n.insert(idx);
                 }
             }
-            ProofStateChange::RemoveN { clause_idx, rule_name: _ } => {
-                n.remove(clause_idx);
+            StateChange::Delete { clause_idx, rule_name: _ } => {
+                // Remove from whichever set contains it
+                if !n.remove(clause_idx) {
+                    u.remove(clause_idx);
+                }
+                // Note: P removals are also handled implicitly
             }
-            ProofStateChange::AddU { clause_idx } => {
+            StateChange::Transfer { clause_idx } => {
                 n.remove(clause_idx);
                 u.insert(*clause_idx);
             }
-            ProofStateChange::RemoveU { clause_idx, rule_name } => {
-                // If this is a selection (N was empty and clause was removed from U for selection)
-                if rule_name == "Selection" && n.is_empty() {
-                    // This is a given clause selection
-                    let candidates: Vec<usize> = u.iter().copied().collect();
-                    contexts.push(SelectionContext {
-                        selected_idx: *clause_idx,
-                        candidates,
-                    });
-                }
+            StateChange::Activate { clause_idx } => {
+                // This is a given clause selection
+                let candidates: Vec<usize> = u.iter().copied().collect();
+                contexts.push(SelectionContext {
+                    selected_idx: *clause_idx,
+                    candidates,
+                });
                 u.remove(clause_idx);
-            }
-            ProofStateChange::AddP { clause_idx: _ } => {
-                // Clause moved to P (after selection)
-            }
-            ProofStateChange::RemoveP { clause_idx: _, rule_name: _ } => {
-                // Backward simplification
             }
         }
     }
@@ -171,7 +166,7 @@ pub fn extract_training_from_events(events: &SaturationEventLog) -> Vec<Selectio
 }
 
 /// Extract clause-level training data with proof membership labels from event log
-pub fn extract_clause_labels_from_events(events: &SaturationEventLog) -> Vec<TrainingExample> {
+pub fn extract_clause_labels_from_events(events: &EventLog) -> Vec<TrainingExample> {
     // Get proof clause set
     let proof_clause_set: HashSet<usize> = extract_proof_from_events(events)
         .map(|v| v.into_iter().collect())
@@ -180,7 +175,7 @@ pub fn extract_clause_labels_from_events(events: &SaturationEventLog) -> Vec<Tra
     // Get all clauses that were ever added
     let mut all_clauses = HashSet::new();
     for event in events {
-        if let ProofStateChange::AddN { clause, derivation: _ } = event {
+        if let StateChange::Add { clause, derivation: _ } = event {
             if let Some(idx) = clause.id {
                 all_clauses.insert(idx);
             }
@@ -204,16 +199,17 @@ pub fn extract_clause_labels_from_events(events: &SaturationEventLog) -> Vec<Tra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::Clause;
+    use crate::fol::{Clause, Position};
     use crate::inference::{Derivation, ProofStep};
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
+        let positions: Vec<Position> = premises.iter().map(|&p| Position::clause(p)).collect();
         let derivation = if premises.is_empty() {
             Derivation::input()
         } else if premises.len() == 1 {
-            Derivation::factoring(premises[0])
+            Derivation { rule_name: "Factoring".into(), premises: positions }
         } else {
-            Derivation::resolution(premises[0], premises[1])
+            Derivation { rule_name: "Resolution".into(), premises: positions }
         };
         ProofStep {
             clause_idx,

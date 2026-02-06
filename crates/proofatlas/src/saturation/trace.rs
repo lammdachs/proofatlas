@@ -1,14 +1,14 @@
 //! Event log replay utilities for proof extraction and state reconstruction.
 
-use super::rule::{ProofStateChange, SaturationEventLog};
+use super::rule::{StateChange, EventLog};
 use crate::fol::Clause;
 use std::collections::HashSet;
 
 /// Replay event log to extract proof (backward traversal from empty clause)
-pub fn extract_proof_from_events(events: &SaturationEventLog) -> Option<Vec<usize>> {
+pub fn extract_proof_from_events(events: &EventLog) -> Option<Vec<usize>> {
     // Find the empty clause
     let empty_clause_idx = events.iter().find_map(|e| {
-        if let ProofStateChange::New { clause, derivation: _ } = e {
+        if let StateChange::Add { clause, derivation: _ } = e {
             if clause.is_empty() {
                 clause.id
             } else {
@@ -23,9 +23,9 @@ pub fn extract_proof_from_events(events: &SaturationEventLog) -> Option<Vec<usiz
     let mut derivation_map: std::collections::HashMap<usize, (String, Vec<usize>)> =
         std::collections::HashMap::new();
     for event in events {
-        if let ProofStateChange::New { clause, derivation } = event {
+        if let StateChange::Add { clause, derivation } = event {
             if let Some(idx) = clause.id {
-                derivation_map.insert(idx, (derivation.rule_name.clone(), derivation.premises.clone()));
+                derivation_map.insert(idx, (derivation.rule_name.clone(), derivation.clause_indices()));
             }
         }
     }
@@ -52,7 +52,7 @@ pub fn extract_proof_from_events(events: &SaturationEventLog) -> Option<Vec<usiz
 
 /// Replay event log to reconstruct clause sets at any point
 pub struct EventLogReplayer<'a> {
-    events: &'a SaturationEventLog,
+    events: &'a EventLog,
     position: usize,
     n: HashSet<usize>,
     u: HashSet<usize>,
@@ -61,7 +61,7 @@ pub struct EventLogReplayer<'a> {
 }
 
 impl<'a> EventLogReplayer<'a> {
-    pub fn new(events: &'a SaturationEventLog) -> Self {
+    pub fn new(events: &'a EventLog) -> Self {
         EventLogReplayer {
             events,
             position: 0,
@@ -80,7 +80,7 @@ impl<'a> EventLogReplayer<'a> {
     }
 
     /// Step through one event
-    pub fn step(&mut self) -> Option<&ProofStateChange> {
+    pub fn step(&mut self) -> Option<&StateChange> {
         if self.position >= self.events.len() {
             return None;
         }
@@ -89,7 +89,7 @@ impl<'a> EventLogReplayer<'a> {
         self.position += 1;
 
         match event {
-            ProofStateChange::New { clause, derivation: _ } => {
+            StateChange::Add { clause, derivation: _ } => {
                 let idx = clause.id.unwrap_or(self.clauses.len());
                 if idx >= self.clauses.len() {
                     self.clauses.resize(idx + 1, Clause::new(vec![]));
@@ -97,24 +97,23 @@ impl<'a> EventLogReplayer<'a> {
                 self.clauses[idx] = clause.clone();
                 self.n.insert(idx);
             }
-            ProofStateChange::DeleteN { clause_idx, rule_name: _ } => {
-                self.n.remove(clause_idx);
+            StateChange::Delete { clause_idx, rule_name: _ } => {
+                // Remove from whichever set contains it
+                if !self.n.remove(clause_idx) {
+                    if !self.u.remove(clause_idx) {
+                        self.p.remove(clause_idx);
+                    }
+                }
             }
-            ProofStateChange::Transfer { clause_idx } => {
+            StateChange::Transfer { clause_idx } => {
                 // Implicit: removed from N, added to U
                 self.n.remove(clause_idx);
                 self.u.insert(*clause_idx);
             }
-            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
-                self.u.remove(clause_idx);
-            }
-            ProofStateChange::Select { clause_idx } => {
+            StateChange::Activate { clause_idx } => {
                 // Implicit: removed from U, added to P
                 self.u.remove(clause_idx);
                 self.p.insert(*clause_idx);
-            }
-            ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
-                self.p.remove(clause_idx);
             }
         }
 

@@ -111,7 +111,8 @@ impl Clause {
         // Check for complementary literals
         for i in 0..self.literals.len() {
             for j in (i + 1)..self.literals.len() {
-                if self.literals[i].atom == self.literals[j].atom
+                if self.literals[i].predicate == self.literals[j].predicate
+                    && self.literals[i].args == self.literals[j].args
                     && self.literals[i].polarity != self.literals[j].polarity
                 {
                     return true;
@@ -121,8 +122,8 @@ impl Clause {
 
         // Check for reflexive equality
         for lit in &self.literals {
-            if lit.polarity && lit.atom.is_equality(interner) {
-                if let [ref t1, ref t2] = lit.atom.args.as_slice() {
+            if lit.polarity && lit.is_equality(interner) {
+                if let [ref t1, ref t2] = lit.args.as_slice() {
                     if t1 == t2 {
                         return true;
                     }
@@ -140,7 +141,6 @@ impl Clause {
             .map(|lit| {
                 // Count predicate symbol
                 1 + lit
-                    .atom
                     .args
                     .iter()
                     .map(Self::term_symbol_count)
@@ -270,9 +270,9 @@ impl LiteralKey {
     fn from_literal(lit: &Literal) -> Self {
         LiteralKey {
             polarity: lit.polarity,
-            predicate_id: lit.atom.predicate.id.as_u32(),
-            predicate_arity: lit.atom.predicate.arity,
-            args: lit.atom.args.iter().map(TermKey::from_term).collect(),
+            predicate_id: lit.predicate.id.as_u32(),
+            predicate_arity: lit.predicate.arity,
+            args: lit.args.iter().map(TermKey::from_term).collect(),
         }
     }
 }

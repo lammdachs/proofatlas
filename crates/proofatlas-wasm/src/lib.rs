@@ -1,8 +1,8 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
-    parse_tptp, SaturationConfig, SaturationResult, SaturationState, LiteralSelectionStrategy,
-    Clause, Literal, AgeWeightSelector, ClauseSelector, SaturationEventLog, ProofStateChange,
+    parse_tptp, ProverConfig, ProofResult, ProofAtlas, LiteralSelectionStrategy,
+    Clause, Literal, AgeWeightSelector, ClauseSelector, EventLog, StateChange,
 };
 use std::time::Duration;
 
@@ -94,7 +94,7 @@ impl ProofAtlasWasm {
             _ => LiteralSelectionStrategy::Sel0, // Default to Sel0 (all)
         };
 
-        let config = SaturationConfig {
+        let config = ProverConfig {
             max_clauses: 0,
             max_iterations: options.max_iterations.unwrap_or(0),
             max_clause_size: 100,
@@ -121,8 +121,8 @@ impl ProofAtlasWasm {
         };
 
         // Run saturation
-        let state = SaturationState::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
-        let (result, profile, sat_trace, _interner) = state.saturate();
+        let prover = ProofAtlas::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
+        let (result, profile, sat_trace, _interner) = prover.prove();
 
         web_sys::console::log_1(&"Saturation completed".into());
 
@@ -141,7 +141,7 @@ impl ProofAtlasWasm {
                     id: step.clause_idx,
                     clause: format_clause(&step.conclusion),
                     rule: step.derivation.rule_name.clone(),
-                    parents: step.derivation.premises.clone(),
+                    parents: step.derivation.clause_indices(),
                 }
             }).collect()
         };
@@ -168,7 +168,7 @@ impl ProofAtlasWasm {
 
         // Build result
         let prover_result = match result {
-            SaturationResult::Proof(proof) => {
+            ProofResult::Proof(proof) => {
                 // Proof found
                 let all_steps = convert_steps(&proof.steps);
 
@@ -215,19 +215,19 @@ impl ProofAtlasWasm {
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            SaturationResult::Saturated(steps, clauses) => build_incomplete_result(
+            ProofResult::Saturated(steps, clauses) => build_incomplete_result(
                 "saturated",
                 "Saturated without finding a proof - the formula may be satisfiable",
                 &steps,
                 clauses.len(),
             ),
-            SaturationResult::Timeout(steps, clauses) => build_incomplete_result(
+            ProofResult::Timeout(steps, clauses) => build_incomplete_result(
                 "timeout",
                 "Timeout reached before finding a proof",
                 &steps,
                 clauses.len(),
             ),
-            SaturationResult::ResourceLimit(steps, clauses) => build_incomplete_result(
+            ProofResult::ResourceLimit(steps, clauses) => build_incomplete_result(
                 "resource_limit",
                 "Resource limit reached",
                 &steps,
@@ -252,7 +252,7 @@ impl ProofAtlasWasm {
     }
 }
 
-/// Convert a SaturationEventLog into the flat event format expected by the JS ProofInspector.
+/// Convert a EventLog into the flat event format expected by the JS ProofInspector.
 ///
 /// This replays the event log to reconstruct the iteration structure that the JS UI expects.
 ///
@@ -267,7 +267,7 @@ impl ProofAtlasWasm {
 ///   }]
 /// }
 /// ```
-fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
+fn events_to_js_value(events: &EventLog) -> serde_json::Value {
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -277,10 +277,10 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
     let mut initial_clause_count = 0;
 
     for event in events {
-        if let ProofStateChange::New { clause, derivation } = event {
+        if let StateChange::Add { clause, derivation } = event {
             if let Some(idx) = clause.id {
                 clauses.insert(idx, format_clause(clause));
-                derivations.insert(idx, (derivation.rule_name.clone(), derivation.premises.clone()));
+                derivations.insert(idx, (derivation.rule_name.clone(), derivation.clause_indices()));
                 if derivation.rule_name == "Input" {
                     initial_clause_count = initial_clause_count.max(idx + 1);
                 }
@@ -305,11 +305,11 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
 
     for event in events {
         match event {
-            ProofStateChange::New { clause, derivation } => {
+            StateChange::Add { clause, derivation } => {
                 if let Some(idx) = clause.id {
                     let clause_str = format_clause(clause);
                     let rule = &derivation.rule_name;
-                    let premises = &derivation.premises;
+                    let premises = derivation.clause_indices();
 
                     // Skip initial input clauses for iteration events
                     if rule == "Input" {
@@ -340,13 +340,13 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     }
                 }
             }
-            ProofStateChange::DeleteN { clause_idx, rule_name } => {
+            StateChange::Delete { clause_idx, rule_name } => {
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 let rule = match rule_name.as_str() {
                     "Tautology" => "TautologyDeletion",
                     "Subsumption" => "ForwardSubsumptionDeletion",
                     "Demodulation" => "ForwardDemodulation",
-                    _ => rule_name.as_str(),
+                    _ => "BackwardSubsumptionDeletion",
                 };
                 current_simplification.push(json!({
                     "clause_idx": *clause_idx,
@@ -355,7 +355,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            ProofStateChange::Transfer { clause_idx } => {
+            StateChange::Transfer { clause_idx } => {
                 // Clause transferred from N to U
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_simplification.push(json!({
@@ -365,17 +365,7 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            ProofStateChange::DeleteU { clause_idx, rule_name: _ } => {
-                // Backward simplification deleted a clause from U
-                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                current_simplification.push(json!({
-                    "clause_idx": *clause_idx,
-                    "clause": clause_str,
-                    "rule": "BackwardSubsumptionDeletion",
-                    "premises": [],
-                }));
-            }
-            ProofStateChange::Select { clause_idx } => {
+            StateChange::Activate { clause_idx } => {
                 // Given clause selection and end of iteration
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_selection = Some(json!({
@@ -391,16 +381,6 @@ fn events_to_js_value(events: &SaturationEventLog) -> serde_json::Value {
                         "generation": std::mem::take(&mut current_generation),
                     }));
                 }
-            }
-            ProofStateChange::DeleteP { clause_idx, rule_name: _ } => {
-                // Backward simplification deleted a clause from P
-                let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                current_simplification.push(json!({
-                    "clause_idx": *clause_idx,
-                    "clause": clause_str,
-                    "rule": "BackwardSubsumptionDeletion",
-                    "premises": [],
-                }));
             }
         }
     }
@@ -432,11 +412,7 @@ fn format_clause(clause: &Clause) -> String {
 }
 
 fn format_literal(lit: &Literal) -> String {
-    if lit.polarity {
-        lit.atom.to_string()
-    } else {
-        format!("~{}", lit.atom)
-    }
+    lit.to_string()
 }
 
 // Required for wasm-bindgen

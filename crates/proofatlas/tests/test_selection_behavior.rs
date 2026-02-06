@@ -1,6 +1,6 @@
 //! Test to verify how literal selection affects inference rules
 
-use proofatlas::{factoring, Atom, Clause, Interner, Literal, PredicateSymbol, SelectAll, Term, Variable};
+use proofatlas::{factoring, Clause, Interner, Literal, PredicateSymbol, SelectAll, Term, Variable};
 
 /// Test context that holds the interner and provides helper methods
 struct TestCtx {
@@ -40,18 +40,9 @@ fn test_factoring_with_select_all_detailed() {
     let z = ctx.var("Z");
 
     let clause = Clause::new(vec![
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![x.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![y.clone()],
-        }),
-        Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![z.clone()],
-        }),
+        Literal::positive(p, vec![x.clone()]),
+        Literal::positive(p, vec![y.clone()]),
+        Literal::positive(p, vec![z.clone()]),
     ]);
 
     let selector = SelectAll;

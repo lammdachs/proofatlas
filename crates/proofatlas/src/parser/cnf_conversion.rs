@@ -1001,12 +1001,12 @@ impl<'a> CNFConverter<'a> {
                 }
 
                 FOFFormula::Atom(atom) => {
-                    literals.push(Literal::positive(atom));
+                    literals.push(Literal::from_atom(atom, true));
                 }
 
                 FOFFormula::Not(inner) => match *inner {
                     FOFFormula::Atom(atom) => {
-                        literals.push(Literal::negative(atom));
+                        literals.push(Literal::from_atom(atom, false));
                     }
                     _ => panic!("Negation of non-atom in CNF: {:?}", inner),
                 },
@@ -1089,7 +1089,7 @@ mod tests {
         assert_eq!(cnf.clauses[0].literals.len(), 1);
 
         // Check that the variable was replaced with a Skolem constant
-        match &cnf.clauses[0].literals[0].atom.args[0] {
+        match &cnf.clauses[0].literals[0].args[0] {
             Term::Constant(c) => {
                 let name = ctx.interner.resolve_constant(c.id);
                 assert!(name.starts_with("sk"), "Expected Skolem constant, got: {}", name);
@@ -1143,7 +1143,7 @@ mod tests {
             .clauses
             .iter()
             .any(|c| c.literals.iter().any(|l| {
-                ctx.interner.resolve_predicate(l.atom.predicate.id).starts_with("def")
+                ctx.interner.resolve_predicate(l.predicate.id).starts_with("def")
             }));
 
         assert!(
@@ -1160,7 +1160,7 @@ mod tests {
             .iter()
             .filter(|c| {
                 c.literals.iter().any(|l| {
-                    l.atom.args.iter().any(|arg| {
+                    l.args.iter().any(|arg| {
                         if let Term::Constant(c) = arg {
                             ctx.interner.resolve_constant(c.id).starts_with("sk")
                         } else {

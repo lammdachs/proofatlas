@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_gcn_selector_caching() {
-        use crate::fol::{Atom, Interner, Literal, PredicateSymbol, Term, Constant};
+        use crate::fol::{Interner, Literal, PredicateSymbol, Term, Constant};
         use crate::selection::ClauseSelector;
         use indexmap::IndexSet;
 
@@ -330,21 +330,21 @@ mod tests {
             id: interner.intern_constant("b"),
         });
 
-        let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![a.clone()],
-        })]);
-        let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![b.clone()],
-        })]);
-        let clause3 = Clause::new(vec![Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![a.clone()],
-        }), Literal::positive(Atom {
-            predicate: p.clone(),
-            args: vec![b.clone()],
-        })]);
+        let clause1 = Clause::new(vec![Literal::positive(
+            p.clone(),
+            vec![a.clone()],
+        )]);
+        let clause2 = Clause::new(vec![Literal::positive(
+            p.clone(),
+            vec![b.clone()],
+        )]);
+        let clause3 = Clause::new(vec![Literal::positive(
+            p.clone(),
+            vec![a.clone()],
+        ), Literal::positive(
+            p.clone(),
+            vec![b.clone()],
+        )]);
 
         let clauses = vec![clause1, clause2, clause3];
         let mut unprocessed: IndexSet<usize> = (0..3).collect();

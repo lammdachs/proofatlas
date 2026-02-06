@@ -2,22 +2,23 @@
 //!
 //! Records how each clause was derived (inference rule + premises).
 
+use crate::fol::Position;
 use serde::{Deserialize, Serialize};
 
 /// How a clause was derived (for proofs and internal derivation tracking).
 ///
-/// This is a dynamic struct that stores the rule name and premise indices,
+/// This is a dynamic struct that stores the rule name and premise positions,
 /// allowing new rules to be added without modifying this type.
 /// Rules construct Derivation directly:
 /// ```ignore
-/// Derivation { rule_name: "Resolution".into(), premises: vec![p1, p2] }
+/// Derivation { rule_name: "Resolution".into(), premises: vec![Position::clause(p1), Position::clause(p2)] }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Derivation {
     /// Name of the inference rule that produced this clause
     pub rule_name: String,
-    /// Indices of the premise clauses used in the inference
-    pub premises: Vec<usize>,
+    /// Positions of the premise clauses used in the inference
+    pub premises: Vec<Position>,
 }
 
 impl Derivation {
@@ -27,6 +28,11 @@ impl Derivation {
             rule_name: "Input".into(),
             premises: vec![],
         }
+    }
+
+    /// Get the clause indices of all premises (ignoring subterm paths).
+    pub fn clause_indices(&self) -> Vec<usize> {
+        self.premises.iter().map(|p| p.clause).collect()
     }
 }
 
@@ -45,24 +51,24 @@ mod tests {
     fn test_derivation_direct_construction() {
         let res = Derivation {
             rule_name: "Resolution".into(),
-            premises: vec![1, 2],
+            premises: vec![Position::clause(1), Position::clause(2)],
         };
         assert_eq!(res.rule_name, "Resolution");
-        assert_eq!(res.premises, vec![1, 2]);
+        assert_eq!(res.clause_indices(), vec![1, 2]);
 
         let demod = Derivation {
             rule_name: "Demodulation".into(),
-            premises: vec![5, 10],
+            premises: vec![Position::clause(5), Position::clause(10)],
         };
         assert_eq!(demod.rule_name, "Demodulation");
-        assert_eq!(demod.premises, vec![5, 10]);
+        assert_eq!(demod.clause_indices(), vec![5, 10]);
     }
 
     #[test]
     fn test_serialization() {
         let deriv = Derivation {
             rule_name: "Resolution".into(),
-            premises: vec![1, 2],
+            premises: vec![Position::clause(1), Position::clause(2)],
         };
         let json = serde_json::to_string(&deriv).unwrap();
         let parsed: Derivation = serde_json::from_str(&json).unwrap();

@@ -195,18 +195,18 @@ impl GraphBuilder {
         }
 
         // Add predicate node
-        let pred_name = literal.atom.predicate.name(interner);
+        let pred_name = literal.predicate.name(interner);
         let pred_node = self.add_predicate(pred_name, lit_node, depth + 1);
 
         // Update predicate features
         {
             let features = &mut self.features[pred_node];
-            features[FEAT_ARITY] = literal.atom.args.len() as f32;
-            features[FEAT_IS_EQUALITY] = if literal.atom.is_equality(interner) { 1.0 } else { 0.0 };
+            features[FEAT_ARITY] = literal.args.len() as f32;
+            features[FEAT_IS_EQUALITY] = if literal.is_equality(interner) { 1.0 } else { 0.0 };
         }
 
         // Process arguments with their positions
-        for (pos, term) in literal.atom.args.iter().enumerate() {
+        for (pos, term) in literal.args.iter().enumerate() {
             self.add_term(term, pred_node, depth + 2, pos, interner);
         }
 
@@ -320,14 +320,14 @@ impl GraphBuilder {
                 let pred_node = next_id;
                 features.push([
                     NODE_TYPE_PREDICATE as f32,
-                    literal.atom.args.len() as f32,
+                    literal.args.len() as f32,
                     0.0,
                 ]);
                 edges.push((lit_node, pred_node));
                 next_id += 1;
 
                 // Term nodes
-                for (pos, term) in literal.atom.args.iter().enumerate() {
+                for (pos, term) in literal.args.iter().enumerate() {
                     next_id = Self::add_term_batch(
                         term, pred_node, pos, next_id, &mut features, &mut edges,
                     );
@@ -386,7 +386,7 @@ impl GraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
 
     #[test]
     fn test_simple_variable() {
@@ -493,14 +493,10 @@ mod tests {
         let p_id = interner.intern_predicate("P");
 
         let x = Term::Variable(Variable { id: x_id });
-        let atom = Atom {
-            predicate: PredicateSymbol { id: p_id, arity: 1 },
-            args: vec![x],
-        };
-        let literal = Literal {
-            atom,
-            polarity: true,
-        };
+        let literal = Literal::positive(
+            PredicateSymbol { id: p_id, arity: 1 },
+            vec![x],
+        );
         let clause = Clause::new(vec![literal]);
 
         let graph = GraphBuilder::build_from_clause(&clause, &interner);
@@ -531,21 +527,15 @@ mod tests {
         let x = Term::Variable(Variable { id: x_id });
         let a = Term::Constant(Constant { id: a_id });
 
-        let lit1 = Literal {
-            atom: Atom {
-                predicate: PredicateSymbol { id: p_id, arity: 1 },
-                args: vec![x],
-            },
-            polarity: true,
-        };
+        let lit1 = Literal::positive(
+            PredicateSymbol { id: p_id, arity: 1 },
+            vec![x],
+        );
 
-        let lit2 = Literal {
-            atom: Atom {
-                predicate: PredicateSymbol { id: q_id, arity: 1 },
-                args: vec![a],
-            },
-            polarity: false,
-        };
+        let lit2 = Literal::negative(
+            PredicateSymbol { id: q_id, arity: 1 },
+            vec![a],
+        );
 
         let clause = Clause::new(vec![lit1, lit2]);
 
@@ -572,14 +562,10 @@ mod tests {
         let p_id = interner.intern_predicate("P");
 
         let x = Term::Variable(Variable { id: x_id });
-        let atom = Atom {
-            predicate: PredicateSymbol { id: p_id, arity: 1 },
-            args: vec![x],
-        };
-        let literal = Literal {
-            atom,
-            polarity: true,
-        };
+        let literal = Literal::positive(
+            PredicateSymbol { id: p_id, arity: 1 },
+            vec![x],
+        );
 
         // Create clause with specific age and role
         let mut clause = Clause::new(vec![literal]);
@@ -597,13 +583,10 @@ mod tests {
 
         // Test with Axiom role
         let q_id = interner.intern_predicate("Q");
-        let mut axiom_clause = Clause::new(vec![Literal {
-            atom: Atom {
-                predicate: PredicateSymbol { id: q_id, arity: 0 },
-                args: vec![],
-            },
-            polarity: true,
-        }]);
+        let mut axiom_clause = Clause::new(vec![Literal::positive(
+            PredicateSymbol { id: q_id, arity: 0 },
+            vec![],
+        )]);
         axiom_clause.age = 0;
         axiom_clause.role = ClauseRole::Axiom;
 
@@ -636,14 +619,14 @@ mod tests {
             vec![a, b],
         );
 
-        let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: PredicateSymbol { id: p_id, arity: 1 },
-            args: vec![x],
-        })]);
-        let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: PredicateSymbol { id: q_id, arity: 1 },
-            args: vec![f_ab],
-        })]);
+        let clause1 = Clause::new(vec![Literal::positive(
+            PredicateSymbol { id: p_id, arity: 1 },
+            vec![x],
+        )]);
+        let clause2 = Clause::new(vec![Literal::positive(
+            PredicateSymbol { id: q_id, arity: 1 },
+            vec![f_ab],
+        )]);
 
         let clauses: Vec<&Clause> = vec![&clause1, &clause2];
         let batch = GraphBuilder::build_from_clauses(&clauses);

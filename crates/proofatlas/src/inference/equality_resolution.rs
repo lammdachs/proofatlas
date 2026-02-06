@@ -1,7 +1,7 @@
 //! Equality resolution inference rule
 
 use super::common::{collect_literals_except, InferenceResult};
-use crate::fol::{Clause, Interner};
+use crate::fol::{Clause, Interner, Position};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -29,8 +29,8 @@ pub fn equality_resolution(
         let lit = &clause.literals[i];
 
         // Look for negative equality literals
-        if !lit.polarity && lit.atom.is_equality(interner) {
-            if let [ref s, ref t] = lit.atom.args.as_slice() {
+        if !lit.polarity && lit.is_equality(interner) {
+            if let [ref s, ref t] = lit.args.as_slice() {
                 // Try to unify s and t
                 if let Ok(mgu) = unify(s, t) {
                     // The negative equality disappears, leaving the remaining literals
@@ -40,7 +40,7 @@ pub fn equality_resolution(
                     results.push(InferenceResult {
                         derivation: Derivation {
                             rule_name: "EqualityResolution".into(),
-                            premises: vec![idx],
+                            premises: vec![Position::clause(idx)],
                         },
                         conclusion: new_clause,
                     });
@@ -55,7 +55,7 @@ pub fn equality_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -98,10 +98,7 @@ mod tests {
         let eq_pred = ctx.pred("=", 2);
         let a = ctx.const_("a");
 
-        let clause = Clause::new(vec![Literal::negative(Atom {
-            predicate: eq_pred,
-            args: vec![a.clone(), a.clone()],
-        })]);
+        let clause = Clause::new(vec![Literal::negative(eq_pred, vec![a.clone(), a.clone()])]);
 
         let selector = SelectAll;
         let results = equality_resolution(&clause, 0, &selector, &ctx.interner);
@@ -111,7 +108,7 @@ mod tests {
             results[0].derivation,
             Derivation {
                 rule_name: "EqualityResolution".into(),
-                premises: vec![0],
+                premises: vec![Position::clause(0)],
             }
         );
     }

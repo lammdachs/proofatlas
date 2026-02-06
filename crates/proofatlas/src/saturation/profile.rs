@@ -1,7 +1,7 @@
 //! Structured profiling for the saturation loop
 //!
 //! Collects timing and counting data during saturation when enabled via
-//! `SaturationConfig::enable_profiling`. Zero overhead when disabled — all
+//! `ProverConfig::enable_profiling`. Zero overhead when disabled — all
 //! instrumentation is gated on `Option::None`.
 
 use serde::ser::SerializeStruct;

@@ -161,7 +161,12 @@ impl Literal {
     /// Apply a substitution to this literal
     pub fn apply_substitution(&self, subst: &Substitution) -> Literal {
         Literal {
-            atom: self.atom.apply_substitution(subst),
+            predicate: self.predicate,
+            args: self
+                .args
+                .iter()
+                .map(|arg| arg.apply_substitution(subst))
+                .collect(),
             polarity: self.polarity,
         }
     }

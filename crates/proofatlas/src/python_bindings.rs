@@ -273,7 +273,7 @@ impl ProofState {
         // Check properties
         let is_unit = clause.literals.len() == 1;
         let is_horn = clause.literals.iter().filter(|l| l.polarity).count() <= 1;
-        let is_equality = clause.literals.iter().any(|l| l.atom.is_equality(&self.interner));
+        let is_equality = clause.literals.iter().any(|l| l.is_equality(&self.interner));
 
         // Get role as string
         let role = match clause.role {
@@ -550,7 +550,8 @@ impl ProofState {
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
-        use crate::saturation::{SaturationConfig, SaturationResult, SaturationState};
+        use crate::prover::ProofAtlas;
+        use crate::saturation::{ProverConfig, ProofResult};
         use crate::selection::AgeWeightSelector;
         use std::time::Duration;
 
@@ -643,7 +644,7 @@ impl ProofState {
             _ => LiteralSelectionStrategy::Sel0,
         };
 
-        let config = SaturationConfig {
+        let config = ProverConfig {
             max_clauses: 0,
             max_iterations: max_iterations.unwrap_or(0),
             max_clause_size: 100,
@@ -653,15 +654,15 @@ impl ProofState {
             enable_profiling: enable_profiling.unwrap_or(false),
         };
 
-        // Create saturation state from current clauses
+        // Create prover from current clauses
         let initial_clauses: Vec<Clause> = self.clauses.clone();
         let interner = self.interner.clone();
-        let state = SaturationState::new(initial_clauses, config, clause_selector, interner);
+        let prover = ProofAtlas::new(initial_clauses, config, clause_selector, interner);
 
         // Run saturation in a thread with larger stack to handle deep recursion
         let (result, profile, sat_trace, returned_interner) = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
-            .spawn(move || state.saturate())
+            .spawn(move || prover.prove())
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
             .join()
             .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
@@ -677,12 +678,12 @@ impl ProofState {
 
         // Copy back the results
         let (proof_found, status, final_clauses, proof_steps) = match result {
-            SaturationResult::Proof(proof) => {
+            ProofResult::Proof(proof) => {
                 (true, "proof", proof.all_clauses, proof.steps)
             }
-            SaturationResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps),
-            SaturationResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps),
-            SaturationResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps),
+            ProofResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps),
+            ProofResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps),
+            ProofResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps),
         };
 
         // Update our state with the results
@@ -701,7 +702,7 @@ impl ProofState {
             let clause_string = step.conclusion.display(&self.interner).to_string();
             self.proof_trace.push(ProofStep {
                 clause_id: step.clause_idx,
-                parent_ids: step.derivation.premises.clone(),
+                parent_ids: step.derivation.clause_indices(),
                 rule_name: step.derivation.rule_name.clone(),
                 clause_string,
             });
@@ -969,7 +970,7 @@ impl ProofState {
     fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
         let clause_string = rust_result.conclusion.display(&self.interner).to_string();
         let rule_name = rust_result.derivation.rule_name.to_lowercase();
-        let parent_ids = rust_result.derivation.premises.clone();
+        let parent_ids = rust_result.derivation.clause_indices();
 
         InferenceResult {
             clause_string,

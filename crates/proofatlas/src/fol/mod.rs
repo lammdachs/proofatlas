@@ -7,6 +7,7 @@ pub mod clause;
 pub mod interner;
 pub mod literal;
 pub mod ordering;
+pub mod position;
 pub mod substitution;
 pub mod term;
 
@@ -15,5 +16,6 @@ pub use clause::{CNFFormula, Clause, ClauseDisplay, ClauseKey, ClauseRole};
 pub use interner::{ConstantId, FunctionId, Interner, PredicateId, VariableId};
 pub use literal::{Atom, AtomDisplay, Literal, LiteralDisplay, PredicateSymbol};
 pub use ordering::{KBOConfig, Ordering as TermOrdering, KBO};
+pub use position::Position;
 pub use substitution::Substitution;
 pub use term::{Constant, FunctionSymbol, Term, TermDisplay, Variable};

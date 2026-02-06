@@ -795,12 +795,12 @@ fn distinct_object_name(term: &Term, interner: &Interner) -> Option<String> {
 
 /// Check if a literal is trivially true or false due to distinct object semantics
 fn eval_distinct_object_equality(lit: &Literal, interner: &Interner) -> Option<bool> {
-    if !lit.atom.is_equality(interner) || lit.atom.args.len() != 2 {
+    if !lit.is_equality(interner) || lit.args.len() != 2 {
         return None;
     }
 
-    let left = &lit.atom.args[0];
-    let right = &lit.atom.args[1];
+    let left = &lit.args[0];
+    let right = &lit.args[1];
 
     if let (Some(left_name), Some(right_name)) =
         (distinct_object_name(left, interner), distinct_object_name(right, interner))
@@ -826,7 +826,7 @@ fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
 
                 let is_tautology = literals.iter().any(|lit| {
                     if lit.polarity {
-                        let pred_name = interner.resolve_predicate(lit.atom.predicate.id);
+                        let pred_name = interner.resolve_predicate(lit.predicate.id);
                         if pred_name == "$true" {
                             return true;
                         }
@@ -841,7 +841,7 @@ fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
                     .into_iter()
                     .filter(|lit| {
                         if lit.polarity {
-                            let pred_name = interner.resolve_predicate(lit.atom.predicate.id);
+                            let pred_name = interner.resolve_predicate(lit.predicate.id);
                             if pred_name == "$false" {
                                 return false;
                             }
@@ -860,10 +860,7 @@ fn parse_cnf_disjunction(input: &str) -> IResult<&str, Clause> {
                 let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
                 return (
                     remaining,
-                    Clause::new(vec![Literal::positive(Atom {
-                        predicate: pred,
-                        args: vec![],
-                    })]),
+                    Clause::new(vec![Literal::positive(pred, vec![])]),
                 );
             }
 
@@ -878,10 +875,7 @@ fn parse_cnf_true(input: &str) -> IResult<&str, Literal> {
     let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
     Ok((
         input,
-        Literal::positive(Atom {
-            predicate: pred,
-            args: vec![],
-        }),
+        Literal::positive(pred, vec![]),
     ))
 }
 
@@ -891,10 +885,7 @@ fn parse_cnf_false(input: &str) -> IResult<&str, Literal> {
     let pred = with_ctx(|ctx| ctx.intern_predicate("$false", 0));
     Ok((
         input,
-        Literal::positive(Atom {
-            predicate: pred,
-            args: vec![],
-        }),
+        Literal::positive(pred, vec![]),
     ))
 }
 
@@ -906,17 +897,17 @@ fn parse_literal(input: &str) -> IResult<&str, Literal> {
         parse_cnf_false,
         map(
             preceded(tuple((char('~'), multispace0)), parse_cnf_true),
-            |lit| Literal::negative(lit.atom),
+            |lit| lit.complement(),
         ),
         map(
             preceded(tuple((char('~'), multispace0)), parse_cnf_false),
-            |lit| Literal::negative(lit.atom),
+            |lit| lit.complement(),
         ),
         map(preceded(tuple((char('~'), multispace0)), parse_atom), |atom| {
-            Literal::negative(atom)
+            Literal::from_atom(atom, false)
         }),
         parse_negative_equality,
-        map(parse_atom, |atom| Literal::positive(atom)),
+        map(parse_atom, |atom| Literal::from_atom(atom, true)),
     ))(input)
 }
 
@@ -932,10 +923,7 @@ fn parse_negative_equality(input: &str) -> IResult<&str, Literal> {
 
     Ok((
         input,
-        Literal::negative(Atom {
-            predicate: eq_pred,
-            args: vec![left, right],
-        }),
+        Literal::negative(eq_pred, vec![left, right]),
     ))
 }
 
@@ -1247,7 +1235,6 @@ mod tests {
         assert_eq!(result.formula.clauses.len(), 1);
         assert_eq!(result.formula.clauses[0].literals.len(), 1);
         assert!(result.formula.clauses[0].literals[0]
-            .atom
             .is_equality(&result.interner));
     }
 

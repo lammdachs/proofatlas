@@ -1,7 +1,7 @@
 //! Demodulation - rewriting terms using unit equalities
 
 use super::common::InferenceResult;
-use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, Term, TermOrdering, KBO};
+use crate::fol::{Clause, Interner, KBOConfig, Literal, Position, Term, TermOrdering, KBO};
 use super::derivation::Derivation;
 use crate::unification::match_term;
 
@@ -21,12 +21,12 @@ pub fn demodulate(
     }
 
     let unit_lit = &unit_eq.literals[0];
-    if !unit_lit.polarity || !unit_lit.atom.is_equality(interner) {
+    if !unit_lit.polarity || !unit_lit.is_equality(interner) {
         return results;
     }
 
     // Get left and right sides of the equality
-    let (lhs, rhs) = match &unit_lit.atom.args[..] {
+    let (lhs, rhs) = match &unit_lit.args[..] {
         [l, r] => (l, r),
         _ => return results,
     };
@@ -44,7 +44,7 @@ pub fn demodulate(
                 results.push(InferenceResult {
                     derivation: Derivation {
                         rule_name: "Demodulation".into(),
-                        premises: vec![unit_idx, target_idx],
+                        premises: vec![Position::clause(unit_idx), Position::clause(target_idx)],
                     },
                     conclusion: new_clause,
                 });
@@ -58,7 +58,7 @@ pub fn demodulate(
                 results.push(InferenceResult {
                     derivation: Derivation {
                         rule_name: "Demodulation".into(),
-                        premises: vec![unit_idx, target_idx],
+                        premises: vec![Position::clause(unit_idx), Position::clause(target_idx)],
                     },
                     conclusion: new_clause,
                 });
@@ -102,20 +102,13 @@ fn demodulate_clause(clause: &Clause, lhs: &Term, rhs: &Term, kbo: &KBO) -> Opti
 /// Rewrite a literal by replacing occurrences of lhs with rhs
 fn rewrite_literal(lit: &Literal, lhs: &Term, rhs: &Term, kbo: &KBO) -> Literal {
     Literal {
-        polarity: lit.polarity,
-        atom: rewrite_atom(&lit.atom, lhs, rhs, kbo),
-    }
-}
-
-/// Rewrite an atom by replacing occurrences of lhs with rhs
-fn rewrite_atom(atom: &Atom, lhs: &Term, rhs: &Term, kbo: &KBO) -> Atom {
-    Atom {
-        predicate: atom.predicate,
-        args: atom
+        predicate: lit.predicate,
+        args: lit
             .args
             .iter()
             .map(|term| rewrite_term(term, lhs, rhs, kbo))
             .collect(),
+        polarity: lit.polarity,
     }
 }
 
@@ -193,30 +186,20 @@ mod tests {
         let b = ctx.const_("b");
         let fa = ctx.func("f", vec![a.clone()]);
 
-        // Create equality atom manually
+        // Create equality literal manually
         let eq_pred = ctx.pred("=", 2);
-        let eq_atom = Atom {
-            predicate: eq_pred,
-            args: vec![fa.clone(), b.clone()],
-        };
 
-        let unit_eq = Clause::new(vec![Literal::positive(eq_atom)]);
+        let unit_eq = Clause::new(vec![Literal::positive(eq_pred, vec![fa.clone(), b.clone()])]);
 
         // Target clause: P(f(a))
         let p = ctx.pred("P", 1);
-        let target = Clause::new(vec![Literal::positive(Atom {
-            predicate: p,
-            args: vec![fa.clone()],
-        })]);
+        let target = Clause::new(vec![Literal::positive(p, vec![fa.clone()])]);
 
         let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
         assert_eq!(results.len(), 1);
 
         // Should produce P(b)
-        let expected = Clause::new(vec![Literal::positive(Atom {
-            predicate: p,
-            args: vec![b.clone()],
-        })]);
+        let expected = Clause::new(vec![Literal::positive(p, vec![b.clone()])]);
         assert_eq!(results[0].conclusion.literals, expected.literals);
     }
 }

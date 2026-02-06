@@ -4,7 +4,7 @@ use super::common::{
     collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
     InferenceResult,
 };
-use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, Substitution, Term, KBO};
+use crate::fol::{Atom, Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
 use super::derivation::Derivation;
 use crate::selection::LiteralSelector;
 use crate::unification::unify;
@@ -48,8 +48,8 @@ pub fn superposition(
     for &from_idx in &selected_from {
         let from_lit = &renamed_from.literals[from_idx];
 
-        if from_lit.polarity && from_lit.atom.is_equality(interner) {
-            if let [ref left, ref right] = from_lit.atom.args.as_slice() {
+        if from_lit.polarity && from_lit.is_equality(interner) {
+            if let [ref left, ref right] = from_lit.args.as_slice() {
                 // Try superposition in BOTH directions:
                 // 1. Find occurrences of left, replace with right (left → right)
                 // 2. Find occurrences of right, replace with left (right → left)
@@ -66,7 +66,7 @@ pub fn superposition(
                         let into_lit = &renamed_into.literals[into_idx];
 
                         // Find positions where pattern can be unified with some subterm
-                        let positions = find_unifiable_positions(&into_lit.atom, pattern, &kbo);
+                        let positions = find_unifiable_positions(&into_lit.args, pattern, &kbo);
 
                         for pos in positions {
                             // CRITICAL: l' (pos.term) must not be a variable
@@ -89,9 +89,9 @@ pub fn superposition(
 
                                 // Additional check for superposition into equalities
                                 // The side containing l' must not be smaller than the other side
-                                if into_lit.atom.is_equality(interner) && !pos.path.is_empty() {
-                                    let s = &into_lit.atom.args[0];
-                                    let t = &into_lit.atom.args[1];
+                                if into_lit.is_equality(interner) && !pos.path.is_empty() {
+                                    let s = &into_lit.args[0];
+                                    let t = &into_lit.args[1];
 
                                     let s_sigma = s.apply_substitution(&mgu);
                                     let t_sigma = t.apply_substitution(&mgu);
@@ -116,15 +116,13 @@ pub fn superposition(
                                 // Add the modified literal from into_clause
                                 let into_lit_modified = {
                                     let new_atom = replace_at_position(
-                                        &into_lit.atom,
+                                        into_lit.predicate,
+                                        &into_lit.args,
                                         &pos.path,
                                         &replacement_sigma,
                                         &mgu,
                                     );
-                                    Literal {
-                                        atom: new_atom,
-                                        polarity: into_lit.polarity,
-                                    }
+                                    Literal::from_atom(new_atom, into_lit.polarity)
                                 };
                                 new_literals.push(into_lit_modified);
 
@@ -140,7 +138,7 @@ pub fn superposition(
                                 results.push(InferenceResult {
                                     derivation: Derivation {
                                         rule_name: "Superposition".into(),
-                                        premises: vec![idx1, idx2],
+                                        premises: vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
                                     },
                                     conclusion: new_clause,
                                 });
@@ -155,20 +153,20 @@ pub fn superposition(
     results
 }
 
-/// Find all positions in an atom where a term can potentially unify with pattern
-/// This is used to find occurrences of l in the atom that can unify with l
+/// Find all positions in a literal's arguments where a term can potentially unify with pattern
+/// This is used to find occurrences of l in the literal that can unify with l
 ///
 /// For equalities, we search BOTH sides. The ordering constraint (s[l']σ ⪯̸ tσ)
 /// is checked later after computing the MGU, not here during position search.
 /// This is important because the ordering depends on the substitution, which
 /// we don't know until we find a unifier.
-fn find_unifiable_positions(atom: &Atom, pattern: &Term, _kbo: &KBO) -> Vec<Position> {
+fn find_unifiable_positions(args: &[Term], pattern: &Term, _kbo: &KBO) -> Vec<Position> {
     let mut positions = Vec::new();
 
     // Search all arguments for potential unification positions
     // For equalities, this searches both sides; the ordering constraint
     // is checked later in the superposition function after computing the MGU
-    for (i, arg) in atom.args.iter().enumerate() {
+    for (i, arg) in args.iter().enumerate() {
         find_positions_in_term(arg, pattern, vec![i], &mut positions);
     }
 
@@ -212,21 +210,26 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
     }
 }
 
-/// Replace a term at a specific position in an atom
+/// Replace a term at a specific position in a literal's arguments, returning an Atom
 fn replace_at_position(
-    atom: &Atom,
+    predicate: PredicateSymbol,
+    args: &[Term],
     path: &[usize],
     replacement: &Term,
     subst: &Substitution,
 ) -> Atom {
     if path.is_empty() {
         // Can't replace at root of atom
+        let atom = Atom {
+            predicate,
+            args: args.to_vec(),
+        };
         atom.apply_substitution(subst)
     } else {
-        let mut new_args = atom.args.clone();
+        let mut new_args = args.to_vec();
         new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
         Atom {
-            predicate: atom.predicate,
+            predicate,
             args: new_args,
         }
         .apply_substitution(subst)
@@ -312,16 +315,10 @@ mod tests {
         let f_b = ctx.func("f", vec![b.clone()]);
 
         // f(X) = X
-        let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq,
-            args: vec![f_x.clone(), x.clone()],
-        })]);
+        let clause1 = Clause::new(vec![Literal::positive(eq, vec![f_x.clone(), x.clone()])]);
 
         // a = f(b) (note: right side f(b) is larger than left side a)
-        let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq,
-            args: vec![a.clone(), f_b.clone()],
-        })]);
+        let clause2 = Clause::new(vec![Literal::positive(eq, vec![a.clone(), f_b.clone()])]);
 
         let selector = SelectAll;
         let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
@@ -336,8 +333,8 @@ mod tests {
         let found = results.iter().any(|r| {
             r.conclusion.literals.len() == 1
                 && r.conclusion.literals[0].polarity
-                && r.conclusion.literals[0].atom.predicate.name(&ctx.interner) == "="
-                && r.conclusion.literals[0].atom.args.len() == 2
+                && r.conclusion.literals[0].predicate.name(&ctx.interner) == "="
+                && r.conclusion.literals[0].args.len() == 2
         });
 
         assert!(
@@ -369,16 +366,10 @@ mod tests {
         let mult_ec = ctx.func("mult", vec![e.clone(), c.clone()]);
 
         // mult(e,X) = X
-        let clause1 = Clause::new(vec![Literal::positive(Atom {
-            predicate: eq,
-            args: vec![mult_ex.clone(), x.clone()],
-        })]);
+        let clause1 = Clause::new(vec![Literal::positive(eq, vec![mult_ex.clone(), x.clone()])]);
 
         // P(mult(e,c))
-        let clause2 = Clause::new(vec![Literal::positive(Atom {
-            predicate: p,
-            args: vec![mult_ec.clone()],
-        })]);
+        let clause2 = Clause::new(vec![Literal::positive(p, vec![mult_ec.clone()])]);
 
         let selector = SelectAll;
         let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
@@ -389,13 +380,12 @@ mod tests {
         assert!(results[0].conclusion.literals[0].polarity);
         assert_eq!(
             results[0].conclusion.literals[0]
-                .atom
                 .predicate
                 .name(&ctx.interner),
             "P"
         );
-        assert_eq!(results[0].conclusion.literals[0].atom.args.len(), 1);
-        match &results[0].conclusion.literals[0].atom.args[0] {
+        assert_eq!(results[0].conclusion.literals[0].args.len(), 1);
+        match &results[0].conclusion.literals[0].args[0] {
             Term::Constant(constant) => assert_eq!(constant.name(&ctx.interner), "c"),
             _ => panic!("Expected constant c"),
         }

@@ -10,15 +10,15 @@ pub fn orient_clause_equalities(clause: &mut Clause, interner: &Interner) {
     let kbo = KBO::new(KBOConfig::default());
 
     for literal in &mut clause.literals {
-        if literal.atom.is_equality(interner) && literal.atom.args.len() == 2 {
-            let left = &literal.atom.args[0];
-            let right = &literal.atom.args[1];
+        if literal.is_equality(interner) && literal.args.len() == 2 {
+            let left = &literal.args[0];
+            let right = &literal.args[1];
 
             // Compare terms using KBO
             match kbo.compare(left, right) {
                 TermOrdering::Less => {
                     // Right is larger, swap the arguments
-                    literal.atom.args.swap(0, 1);
+                    literal.args.swap(0, 1);
                 }
                 _ => {
                     // Keep as is (Greater, Equal, or Incomparable)
@@ -39,7 +39,7 @@ pub fn orient_all_equalities(clauses: &mut [Clause], interner: &Interner) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, Literal, PredicateSymbol, Term};
+    use crate::fol::{Constant, Literal, PredicateSymbol, Term};
 
     #[test]
     fn test_orient_simple_equality() {
@@ -54,19 +54,13 @@ mod tests {
         let eq_pred = PredicateSymbol::new(eq_id, 2);
 
         // Create clause: a = b
-        let mut clause = Clause::new(vec![Literal {
-            atom: Atom {
-                predicate: eq_pred,
-                args: vec![a.clone(), b.clone()],
-            },
-            polarity: true,
-        }]);
+        let mut clause = Clause::new(vec![Literal::positive(eq_pred, vec![a.clone(), b.clone()])]);
 
         orient_clause_equalities(&mut clause, &interner);
 
         // Should be reoriented to b = a (since b > a alphabetically)
-        assert_eq!(clause.literals[0].atom.args[0], b);
-        assert_eq!(clause.literals[0].atom.args[1], a);
+        assert_eq!(clause.literals[0].args[0], b);
+        assert_eq!(clause.literals[0].args[1], a);
     }
 
     #[test]
@@ -84,18 +78,12 @@ mod tests {
         let eq_pred = PredicateSymbol::new(eq_id, 2);
 
         // Create clause: c = a (already correctly oriented since c > a)
-        let mut clause = Clause::new(vec![Literal {
-            atom: Atom {
-                predicate: eq_pred,
-                args: vec![c.clone(), a.clone()],
-            },
-            polarity: true,
-        }]);
+        let mut clause = Clause::new(vec![Literal::positive(eq_pred, vec![c.clone(), a.clone()])]);
 
         orient_clause_equalities(&mut clause, &interner);
 
         // Should remain c = a (c has higher ID, so c > a in precedence)
-        assert_eq!(clause.literals[0].atom.args[0], c);
-        assert_eq!(clause.literals[0].atom.args[1], a);
+        assert_eq!(clause.literals[0].args[0], c);
+        assert_eq!(clause.literals[0].args[1], a);
     }
 }

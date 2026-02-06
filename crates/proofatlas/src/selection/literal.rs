@@ -25,7 +25,6 @@ pub trait LiteralSelector: Send + Sync {
 /// Calculate the weight of a literal (symbol count)
 fn literal_weight(literal: &Literal) -> usize {
     1 + literal
-        .atom
         .args
         .iter()
         .map(|term| term_symbol_count(term))
@@ -79,12 +78,12 @@ fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
 
     // Equal weight - use lexicographic comparison (cases 2.2 and 2.3)
     // Compare predicates by ID (stable precedence) - case 2.2
-    if lit1.atom.predicate.id != lit2.atom.predicate.id {
-        return lit1.atom.predicate.id > lit2.atom.predicate.id;
+    if lit1.predicate.id != lit2.predicate.id {
+        return lit1.predicate.id > lit2.predicate.id;
     }
 
     // Same predicate - lexicographic comparison of arguments (case 2.3)
-    for (arg1, arg2) in lit1.atom.args.iter().zip(lit2.atom.args.iter()) {
+    for (arg1, arg2) in lit1.args.iter().zip(lit2.args.iter()) {
         match kbo.compare(arg1, arg2) {
             TermOrdering::Greater => return true,
             TermOrdering::Less => return false,
@@ -99,7 +98,7 @@ fn literal_greater(lit1: &Literal, lit2: &Literal, kbo: &KBO) -> bool {
 /// Count occurrences of each variable in a literal
 fn count_literal_variables(lit: &Literal) -> std::collections::HashMap<VariableId, usize> {
     let mut counts = std::collections::HashMap::new();
-    for arg in &lit.atom.args {
+    for arg in &lit.args {
         count_term_variables(arg, &mut counts);
     }
     counts
@@ -351,7 +350,7 @@ pub type SelectLargestNegative = SelectNegMaxWeightOrMaximal;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Clause, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Clause, Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
 
     struct TestContext {
         interner: Interner,
@@ -386,14 +385,10 @@ mod tests {
 
         fn literal(&mut self, pred_name: &str, args: Vec<Term>, positive: bool) -> Literal {
             let pred = self.pred(pred_name, args.len() as u8);
-            let atom = Atom {
-                predicate: pred,
-                args,
-            };
             if positive {
-                Literal::positive(atom)
+                Literal::positive(pred, args)
             } else {
-                Literal::negative(atom)
+                Literal::negative(pred, args)
             }
         }
     }

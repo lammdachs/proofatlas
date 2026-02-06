@@ -67,20 +67,18 @@ def check_ml_available() -> bool:
 
 
 def _convert_trace(trace_json: str, all_clauses: list) -> dict:
-    """Convert the Rust SaturationEventLog JSON into the flat event format for ProofInspector.
+    """Convert the Rust EventLog JSON into the flat event format for ProofInspector.
 
-    The Rust format is a list of ProofStateChange events with types:
-    - New: clause added to N
-    - DeleteN: clause removed from N
+    The Rust format is a list of StateChange events with types:
+    - Add: clause added to N
+    - Delete: clause removed from N, U, or P
     - Transfer: clause moved from N to U
-    - DeleteU: clause removed from U
-    - Select: clause moved from U to P (given clause selection)
-    - DeleteP: clause removed from P
+    - Activate: clause moved from U to P (given clause selection)
 
     The JS inspector expects iterations with {simplification, selection, generation}.
 
     Args:
-        trace_json: JSON string of ProofStateChange events
+        trace_json: JSON string of StateChange events
         all_clauses: List of clause dicts with 'id' and 'clause' keys (formatted strings)
     """
     events = json.loads(trace_json)
@@ -95,7 +93,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     initial_clause_count = 0
 
     for event in events:
-        if event["type"] == "New":
+        if event["type"] == "Add":
             clause = event["clause"]
             derivation = event["derivation"]
             idx = clause.get("id")
@@ -119,7 +117,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     for event in events:
         event_type = event["type"]
 
-        if event_type == "New":
+        if event_type == "Add":
             clause = event["clause"]
             derivation = event["derivation"]
             idx = clause.get("id")
@@ -147,7 +145,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                     "rule": "Demodulation", "premises": premises,
                 })
 
-        elif event_type == "DeleteN":
+        elif event_type == "Delete":
             idx = event["clause_idx"]
             rule_name = event["rule_name"]
             clause_str = clauses.get(idx, "")
@@ -155,7 +153,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                 "Tautology": "TautologyDeletion",
                 "Subsumption": "ForwardSubsumptionDeletion",
                 "Demodulation": "ForwardDemodulation",
-            }.get(rule_name, rule_name)
+            }.get(rule_name, "BackwardSubsumptionDeletion")
             current_simplification.append({
                 "clause_idx": idx, "clause": clause_str,
                 "rule": rule, "premises": [],
@@ -169,16 +167,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                 "rule": "Transfer", "premises": [],
             })
 
-        elif event_type == "DeleteU":
-            idx = event["clause_idx"]
-            rule_name = event["rule_name"]
-            clause_str = clauses.get(idx, "")
-            current_simplification.append({
-                "clause_idx": idx, "clause": clause_str,
-                "rule": "BackwardSubsumptionDeletion", "premises": [],
-            })
-
-        elif event_type == "Select":
+        elif event_type == "Activate":
             # Given clause selection - end of one iteration, start of next
             idx = event["clause_idx"]
             clause_str = clauses.get(idx, "")
@@ -198,14 +187,6 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                 "clause_idx": idx, "clause": clause_str,
                 "rule": "GivenClauseSelection",
             }
-
-        elif event_type == "DeleteP":
-            idx = event["clause_idx"]
-            clause_str = clauses.get(idx, "")
-            current_simplification.append({
-                "clause_idx": idx, "clause": clause_str,
-                "rule": "BackwardSubsumptionDeletion", "premises": [],
-            })
 
     # Flush any remaining events
     if current_simplification or current_generation or current_selection:

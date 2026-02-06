@@ -1,7 +1,7 @@
 //! Common types and utilities for inference rules
 
 use super::derivation::Derivation;
-use crate::fol::{Atom, Clause, Interner, Literal, Substitution, Term, TermOrdering, Variable, KBO};
+use crate::fol::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO};
 use crate::unification::unify;
 use std::collections::HashSet;
 
@@ -19,15 +19,12 @@ pub fn rename_clause_variables(clause: &Clause, suffix: &str, interner: &mut Int
             .literals
             .iter()
             .map(|lit| Literal {
-                atom: Atom {
-                    predicate: lit.atom.predicate,
-                    args: lit
-                        .atom
-                        .args
-                        .iter()
-                        .map(|arg| rename_variables(arg, suffix, interner))
-                        .collect(),
-                },
+                predicate: lit.predicate,
+                args: lit
+                    .args
+                    .iter()
+                    .map(|arg| rename_variables(arg, suffix, interner))
+                    .collect(),
                 polarity: lit.polarity,
             })
             .collect(),
@@ -56,14 +53,22 @@ pub fn rename_variables(term: &Term, suffix: &str, interner: &mut Interner) -> T
     }
 }
 
-/// Unify two atoms
-pub fn unify_atoms(atom1: &Atom, atom2: &Atom) -> Result<Substitution, ()> {
-    if atom1.predicate != atom2.predicate || atom1.args.len() != atom2.args.len() {
+/// Unify the predicate/args of two literals (or atoms).
+///
+/// Returns the most general unifier if the predicates match and all
+/// argument pairs are unifiable, otherwise returns Err.
+pub fn unify_atoms(
+    pred1: PredicateSymbol,
+    args1: &[Term],
+    pred2: PredicateSymbol,
+    args2: &[Term],
+) -> Result<Substitution, ()> {
+    if pred1 != pred2 || args1.len() != args2.len() {
         return Err(());
     }
 
     let mut subst = Substitution::new();
-    for (arg1, arg2) in atom1.args.iter().zip(atom2.args.iter()) {
+    for (arg1, arg2) in args1.iter().zip(args2.iter()) {
         // Apply current substitution before unifying
         let arg1_subst = arg1.apply_substitution(&subst);
         let arg2_subst = arg2.apply_substitution(&subst);
@@ -84,7 +89,7 @@ pub fn remove_duplicate_literals(literals: Vec<Literal>) -> Vec<Literal> {
     let mut result = Vec::new();
 
     for lit in literals {
-        if seen.insert((lit.atom.clone(), lit.polarity)) {
+        if seen.insert(lit.clone()) {
             result.push(lit);
         }
     }

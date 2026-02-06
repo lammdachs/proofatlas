@@ -5,7 +5,7 @@ use super::common::{
     InferenceResult,
 };
 use super::derivation::Derivation;
-use crate::fol::{Clause, Interner};
+use crate::fol::{Clause, Interner, Position};
 use crate::selection::LiteralSelector;
 
 /// Apply binary resolution between two clauses using literal selection
@@ -39,9 +39,9 @@ pub fn resolution(
             let lit2 = &renamed_clause2.literals[j];
 
             // Check if literals have opposite polarity and same predicate
-            if lit1.polarity != lit2.polarity && lit1.atom.predicate == lit2.atom.predicate {
+            if lit1.polarity != lit2.polarity && lit1.predicate == lit2.predicate {
                 // Try to unify the atoms
-                if let Ok(mgu) = unify_atoms(&lit1.atom, &lit2.atom) {
+                if let Ok(mgu) = unify_atoms(lit1.predicate, &lit1.args, lit2.predicate, &lit2.args) {
                     // Collect side literals from both clauses
                     let mut new_literals = collect_literals_except(clause1, &[i], &mgu);
                     new_literals.extend(collect_literals_except(&renamed_clause2, &[j], &mgu));
@@ -55,7 +55,7 @@ pub fn resolution(
                     results.push(InferenceResult {
                         derivation: Derivation {
                             rule_name: "Resolution".into(),
-                            premises: vec![idx1, idx2],
+                            premises: vec![Position::clause(idx1), Position::clause(idx2)],
                         },
                         conclusion: new_clause,
                     });
@@ -70,7 +70,7 @@ pub fn resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Atom, Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::fol::{Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -122,25 +122,13 @@ mod tests {
         let x = ctx.var("X");
 
         let clause1 = Clause::new(vec![
-            Literal::positive(Atom {
-                predicate: p,
-                args: vec![a.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: q,
-                args: vec![x.clone()],
-            }),
+            Literal::positive(p, vec![a.clone()]),
+            Literal::positive(q, vec![x.clone()]),
         ]);
 
         let clause2 = Clause::new(vec![
-            Literal::negative(Atom {
-                predicate: p,
-                args: vec![a.clone()],
-            }),
-            Literal::positive(Atom {
-                predicate: r,
-                args: vec![b.clone()],
-            }),
+            Literal::negative(p, vec![a.clone()]),
+            Literal::positive(r, vec![b.clone()]),
         ]);
 
         let selector = SelectAll;

@@ -2,7 +2,7 @@
 
 use proofatlas::{
     parse_tptp, saturate, AgeWeightSelector, ClauseSelector,
-    SaturationConfig, SaturationResult, SaturationState,
+    ProverConfig, ProofResult, ProofAtlas,
 };
 
 #[test]
@@ -19,27 +19,27 @@ fn test_simple_resolution_proof() {
         println!("  [{}] {}", i, c);
     }
 
-    let config = SaturationConfig::default();
+    let config = ProverConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
 
     let (result, _, _, _) = saturate(parsed.formula, config, selector, parsed.interner);
 
     match &result {
-        SaturationResult::Proof(proof) => {
+        ProofResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
         }
-        SaturationResult::Saturated(_, clauses) => {
+        ProofResult::Saturated(_, clauses) => {
             println!("SATURATED with {} clauses", clauses.len());
             for (i, c) in clauses.iter().enumerate() {
                 println!("  [{}] {}", i, c);
             }
         }
-        SaturationResult::ResourceLimit(_, clauses) | SaturationResult::Timeout(_, clauses) => {
+        ProofResult::ResourceLimit(_, clauses) | ProofResult::Timeout(_, clauses) => {
             println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
         }
     }
 
-    assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof!");
+    assert!(matches!(result, ProofResult::Proof(_)), "Should find proof!");
 }
 
 #[test]
@@ -57,34 +57,34 @@ fn test_with_duplicate_clause() {
         println!("  [{}] {}", i, c);
     }
 
-    let config = SaturationConfig::default();
+    let config = ProverConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
 
     let (result, _, _, _) = saturate(parsed.formula, config, selector, parsed.interner);
 
     match &result {
-        SaturationResult::Proof(proof) => {
+        ProofResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
             for step in &proof.steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises);
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.clause_indices());
             }
         }
-        SaturationResult::Saturated(steps, clauses) => {
+        ProofResult::Saturated(steps, clauses) => {
             println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
             for (i, c) in clauses.iter().enumerate() {
                 println!("  [{}] {}", i, c);
             }
             println!("Steps:");
             for step in steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.premises);
+                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.clause_indices());
             }
         }
-        SaturationResult::ResourceLimit(_, clauses) | SaturationResult::Timeout(_, clauses) => {
+        ProofResult::ResourceLimit(_, clauses) | ProofResult::Timeout(_, clauses) => {
             println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
         }
     }
 
-    assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof even with duplicate!");
+    assert!(matches!(result, ProofResult::Proof(_)), "Should find proof even with duplicate!");
 }
 
 #[test]
@@ -112,17 +112,17 @@ fn test_with_precloned_clauses() {
     let cloned_clauses: Vec<_> = parsed.formula.clauses.clone();
     println!("Cloned {} clauses", cloned_clauses.len());
 
-    let config = SaturationConfig::default();
+    let config = ProverConfig::default();
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
 
-    let state = SaturationState::new(cloned_clauses, config, selector, parsed.interner);
-    let (result, _, _, _) = state.saturate();
+    let prover = ProofAtlas::new(cloned_clauses, config, selector, parsed.interner);
+    let (result, _, _, _) = prover.prove();
 
     match &result {
-        SaturationResult::Proof(proof) => {
+        ProofResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
         }
-        SaturationResult::Saturated(steps, clauses) => {
+        ProofResult::Saturated(steps, clauses) => {
             println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
             for step in steps {
                 println!("  [{:?}] idx={}", step.derivation, step.clause_idx);
@@ -131,5 +131,5 @@ fn test_with_precloned_clauses() {
         _ => {}
     }
 
-    assert!(matches!(result, SaturationResult::Proof(_)), "Should find proof with pre-assigned IDs!");
+    assert!(matches!(result, ProofResult::Proof(_)), "Should find proof with pre-assigned IDs!");
 }
