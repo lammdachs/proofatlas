@@ -64,9 +64,6 @@ impl SubsumptionChecker {
 
         // 3. Unit subsumption (fast and complete)
         for (unit, idx) in &self.units {
-            if !self.active.contains(idx) {
-                continue;
-            }
             if subsumes_unit(unit, clause) {
                 return Some(*idx);
             }
@@ -109,7 +106,7 @@ impl SubsumptionChecker {
     pub fn is_subsumed_by_processed(&self, exclude_idx: usize, clause: &Clause) -> bool {
         // Unit subsumption (excluding self)
         for (unit, idx) in &self.units {
-            if *idx == exclude_idx || !self.active.contains(idx) {
+            if *idx == exclude_idx {
                 continue;
             }
             if subsumes_unit(unit, clause) {
@@ -282,15 +279,17 @@ impl Index for SubsumptionChecker {
         }
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
-        self.active.remove(&idx);
-        self.feature_index.deactivate(idx);
-
-        let clause = &self.clauses[idx];
-        let clause_key = ClauseKey::from_clause(clause);
-        self.clause_keys.remove(&clause_key);
-        self.clause_key_to_idx.remove(&clause_key);
-        // Units are filtered lazily during iteration via active check
+    fn on_clause_removed(&mut self, _idx: usize, _clause: &Clause) {
+        // Intentionally a no-op: deleted clauses remain as passive subsumers.
+        //
+        // When a clause is deleted (e.g., by demodulation rewriting C to C'), the
+        // original form C may still subsume future clauses that C' cannot. Keeping
+        // deleted clauses in the feature index preserves this subsumption power,
+        // which is critical for problems like GRP001-1.
+        //
+        // Backward subsumption is unaffected because find_subsumed_by() intersects
+        // feature index results with the caller-provided candidate_indices (from U∪P),
+        // so deleted clauses are never backward-subsumed.
     }
 
     fn as_any(&self) -> &dyn Any {
