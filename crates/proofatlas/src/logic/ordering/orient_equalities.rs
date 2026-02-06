@@ -3,7 +3,7 @@
 //! Orients equality literals so that the larger term (according to KBO)
 //! is on the left side. This improves superposition performance.
 
-use crate::fol::{Clause, Interner, KBOConfig, TermOrdering, KBO};
+use crate::logic::{Clause, Interner, KBOConfig, TermOrdering, KBO};
 
 /// Orient all equality literals in a clause
 pub fn orient_clause_equalities(clause: &mut Clause, interner: &Interner) {
@@ -39,7 +39,7 @@ pub fn orient_all_equalities(clauses: &mut [Clause], interner: &Interner) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, Literal, PredicateSymbol, Term};
+    use crate::logic::{Constant, Literal, PredicateSymbol, Term};
 
     #[test]
     fn test_orient_simple_equality() {

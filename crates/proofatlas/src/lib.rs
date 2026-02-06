@@ -3,35 +3,56 @@
 //! This library provides a complete implementation of a theorem prover
 //! using the superposition calculus with equality.
 
-pub mod clause_manager;
-pub mod fol;
-pub mod inference;
+pub mod config;
+pub mod generating;
+pub mod index;
+pub mod logic;
+pub mod state;
+pub mod simplifying;
 pub mod json;
 pub mod parser;
 pub mod prover;
-pub mod saturation;
 pub mod selection;
 pub mod time_compat;
-pub mod unification;
+pub mod trace;
+pub mod profile;
+
+// Backward-compatible re-export modules (will be removed in a future release)
+pub mod inference;
+pub mod saturation;
 
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
 // Re-export ClauseManager and ProofAtlas
-pub use clause_manager::ClauseManager;
-pub use prover::ProofAtlas;
+pub use logic::clause_manager::ClauseManager;
+pub use prover::{ProofAtlas, saturate};
 
-// Re-export commonly used types from fol
-pub use fol::{
+// Re-export commonly used types from logic
+pub use logic::{
     Atom, CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal, Position,
     PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO,
 };
 // Note: Atom is re-exported for FOF formula usage in parsers
 
-// Re-export inference types
-pub use inference::{
-    equality_factoring, equality_resolution, factoring, resolution, superposition, Derivation,
-    InferenceResult, Proof, ProofStep,
+// Re-export state types
+pub use state::{
+    Derivation, EventLog, InferenceResult, Proof, ProofResult, ProofStep,
+    SaturationState, StateChange,
+};
+
+// Re-export config types
+pub use config::{LiteralSelectionStrategy, ProverConfig};
+
+// Re-export profile types
+pub use profile::SaturationProfile;
+
+// Re-export trace types
+pub use trace::{extract_proof_from_events, EventLogReplayer};
+
+// Re-export generating inference functions
+pub use generating::{
+    equality_factoring, equality_resolution, factoring, resolution, superposition,
 };
 
 // Re-export selection types
@@ -46,12 +67,6 @@ pub use selection::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]
 pub use selection::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
 
-// Re-export saturation types
-pub use saturation::{
-    saturate, EventLogReplayer, LiteralSelectionStrategy, StateChange, ProverConfig,
-    EventLog, SaturationProfile, ProofResult, SaturationState,
-};
-
-pub use unification::{unify, UnificationError, UnificationResult};
+pub use logic::{unify, UnificationError, UnificationResult};
 
 pub use parser::{fof_to_cnf, parse_tptp, parse_tptp_file, FOFFormula, Quantifier};

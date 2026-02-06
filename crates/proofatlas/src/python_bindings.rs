@@ -8,14 +8,14 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "python")]
 use numpy::{PyArray1, PyArray2, ToPyArray};
 
-use crate::fol::{Clause, Interner};
-use crate::inference::{
+use crate::logic::{Clause, Interner};
+use crate::generating::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
-    InferenceResult as RustInferenceResult,
 };
+use crate::state::InferenceResult as RustInferenceResult;
 use crate::selection::graph::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
-use crate::saturation::LiteralSelectionStrategy;
+use crate::config::LiteralSelectionStrategy;
 use crate::selection::{LiteralSelector, SelectAll, SelectMaximal};
 
 /// Python-accessible proof state
@@ -277,11 +277,11 @@ impl ProofState {
 
         // Get role as string
         let role = match clause.role {
-            crate::fol::ClauseRole::Axiom => "axiom",
-            crate::fol::ClauseRole::Hypothesis => "hypothesis",
-            crate::fol::ClauseRole::Definition => "definition",
-            crate::fol::ClauseRole::NegatedConjecture => "negated_conjecture",
-            crate::fol::ClauseRole::Derived => "derived",
+            crate::logic::ClauseRole::Axiom => "axiom",
+            crate::logic::ClauseRole::Hypothesis => "hypothesis",
+            crate::logic::ClauseRole::Definition => "definition",
+            crate::logic::ClauseRole::NegatedConjecture => "negated_conjecture",
+            crate::logic::ClauseRole::Derived => "derived",
         }
         .to_string();
 
@@ -551,7 +551,8 @@ impl ProofState {
         enable_profiling: Option<bool>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
         use crate::prover::ProofAtlas;
-        use crate::saturation::{ProverConfig, ProofResult};
+        use crate::config::ProverConfig;
+        use crate::state::ProofResult;
         use crate::selection::AgeWeightSelector;
         use std::time::Duration;
 

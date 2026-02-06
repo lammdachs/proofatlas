@@ -1,6 +1,6 @@
 //! Terms in first-order logic
 
-use super::interner::{ConstantId, FunctionId, Interner, VariableId};
+use crate::logic::interner::{ConstantId, FunctionId, Interner, VariableId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -1,7 +1,7 @@
 //! One-way matching for demodulation
 
 use super::UnificationError;
-use crate::fol::{Substitution, Term};
+use crate::logic::{Substitution, Term};
 
 /// One-way match: Find a substitution σ such that pattern σ = term
 /// Only variables in the pattern can be substituted
@@ -30,8 +30,8 @@ fn match_with_subst(
                         // We'll create a new error variant would be cleaner, but for now use the existing structure
                         // Since we can't easily convert Term to ConstantId, we'll need a different approach
                         // For now, return a generic error by using dummy IDs
-                        crate::fol::ConstantId::from_raw(0),
-                        crate::fol::ConstantId::from_raw(1),
+                        crate::logic::ConstantId::from_raw(0),
+                        crate::logic::ConstantId::from_raw(1),
                     ))
                 }
             } else {
@@ -73,14 +73,14 @@ fn match_with_subst(
             // Use a dummy constant ID for the error since we can't match
             Err(UnificationError::ConstantClash(
                 c.id,
-                crate::fol::ConstantId::from_raw(u32::MAX),
+                crate::logic::ConstantId::from_raw(u32::MAX),
             ))
         }
         // Function in pattern cannot match variable in term
         (Term::Function(f, _), Term::Variable(_)) => {
             Err(UnificationError::FunctionConstantClash(
                 f.id,
-                crate::fol::ConstantId::from_raw(u32::MAX),
+                crate::logic::ConstantId::from_raw(u32::MAX),
             ))
         }
     }
@@ -89,7 +89,7 @@ fn match_with_subst(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol, Interner, Variable};
+    use crate::logic::{Constant, FunctionSymbol, Interner, Variable};
 
     /// Test context for building terms with interned symbols
     struct TestContext {

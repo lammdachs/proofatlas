@@ -20,12 +20,14 @@
 //! - Indices are created once and shared across rules that need them
 //! - Lifecycle events are routed atomically to all indices
 
-use crate::fol::{Clause, ClauseKey, Interner, PredicateId};
+pub mod feature_vector;
+
+use crate::logic::{Clause, ClauseKey, Interner, PredicateId};
 use indexmap::IndexSet;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
-use super::subsumption::FeatureIndex;
+pub use feature_vector::{FeatureIndex, FeatureVector, SymbolTable};
 
 
 // =============================================================================
@@ -562,7 +564,7 @@ impl std::fmt::Debug for IndexProvider<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Literal, PredicateSymbol, Term, Variable};
+    use crate::logic::{Literal, PredicateSymbol, Term, Variable};
 
     fn create_test_interner() -> Interner {
         Interner::new()
@@ -584,8 +586,8 @@ mod tests {
         Clause::new(vec![Literal::positive(
             PredicateSymbol::new(eq_id, 2),
             vec![
-                Term::Constant(crate::fol::Constant::new(a_id)),
-                Term::Constant(crate::fol::Constant::new(b_id)),
+                Term::Constant(crate::logic::Constant::new(a_id)),
+                Term::Constant(crate::logic::Constant::new(b_id)),
             ],
         )])
     }

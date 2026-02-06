@@ -2,10 +2,10 @@
 //!
 //! The `ClauseManager` provides a unified interface for operations that require
 //! coordination between the symbol interner, literal selector, and term ordering:
-//! variable renaming, equality orientation, and clause normalization.
+//! equality orientation and clause normalization.
 
-use crate::fol::{Clause, Interner, KBOConfig, Literal, Term, TermOrdering, Variable, KBO};
-use crate::selection::LiteralSelector;
+use super::{Clause, Interner, KBOConfig, TermOrdering, KBO};
+use super::literal_selection::LiteralSelector;
 
 /// Centralized clause management combining the symbol interner, literal
 /// selection strategy, and term ordering.
@@ -26,50 +26,6 @@ impl ClauseManager {
             interner,
             literal_selector,
             term_ordering: KBO::new(KBOConfig::default()),
-        }
-    }
-
-    /// Rename all variables in a clause to avoid capture.
-    ///
-    /// Appends `_suffix` to each variable name and interns the new name.
-    /// Used before combining clauses in inference rules.
-    pub fn rename_variables(&mut self, clause: &Clause, suffix: &str) -> Clause {
-        Clause {
-            literals: clause
-                .literals
-                .iter()
-                .map(|lit| Literal {
-                    predicate: lit.predicate,
-                    args: lit
-                        .args
-                        .iter()
-                        .map(|arg| self.rename_term_variables(arg, suffix))
-                        .collect(),
-                    polarity: lit.polarity,
-                })
-                .collect(),
-            id: clause.id,
-            role: clause.role,
-            age: clause.age,
-        }
-    }
-
-    /// Rename variables in a single term (recursive helper).
-    fn rename_term_variables(&mut self, term: &Term, suffix: &str) -> Term {
-        match term {
-            Term::Variable(v) => {
-                let old_name = self.interner.resolve_variable(v.id);
-                let new_name = format!("{}_{}", old_name, suffix);
-                let new_id = self.interner.intern_variable(&new_name);
-                Term::Variable(Variable::new(new_id))
-            }
-            Term::Constant(c) => Term::Constant(*c),
-            Term::Function(f, args) => Term::Function(
-                *f,
-                args.iter()
-                    .map(|arg| self.rename_term_variables(arg, suffix))
-                    .collect(),
-            ),
         }
     }
 

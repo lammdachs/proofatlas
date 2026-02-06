@@ -4,7 +4,7 @@
 //! It alternates between selecting the oldest clause (FIFO) and the lightest clause
 //! (by symbol count) based on a configurable probability.
 
-use crate::fol::Clause;
+use crate::logic::Clause;
 use indexmap::IndexSet;
 
 use super::ClauseSelector;
@@ -65,11 +65,11 @@ impl AgeWeightSelector {
     }
 
     /// Calculate the weight of a term recursively.
-    fn term_weight(term: &crate::fol::Term) -> usize {
+    fn term_weight(term: &crate::logic::Term) -> usize {
         match term {
-            crate::fol::Term::Variable(_) => 1,
-            crate::fol::Term::Constant(_) => 1,
-            crate::fol::Term::Function(_, args) => 1 + args.iter().map(Self::term_weight).sum::<usize>(),
+            crate::logic::Term::Variable(_) => 1,
+            crate::logic::Term::Constant(_) => 1,
+            crate::logic::Term::Function(_, args) => 1 + args.iter().map(Self::term_weight).sum::<usize>(),
         }
     }
 
@@ -182,7 +182,7 @@ impl ClauseSelector for WeightSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use crate::logic::{Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
 
     struct TestContext {
         interner: Interner,

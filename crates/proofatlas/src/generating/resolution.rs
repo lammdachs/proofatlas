@@ -4,9 +4,10 @@ use super::common::{
     collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
     InferenceResult,
 };
-use super::derivation::Derivation;
+use crate::state::{Derivation, StateChange, GeneratingInference};
 use crate::logic::{Clause, Interner, Position};
 use crate::selection::LiteralSelector;
+use indexmap::IndexSet;
 
 /// Apply binary resolution between two clauses using literal selection
 pub fn resolution(
@@ -67,6 +68,74 @@ pub fn resolution(
     results
 }
 
+/// Resolution inference rule.
+///
+/// Generates resolvents between the given clause and processed clauses.
+pub struct ResolutionRule;
+
+impl ResolutionRule {
+    pub fn new() -> Self {
+        ResolutionRule
+    }
+}
+
+impl Default for ResolutionRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratingInference for ResolutionRule {
+    fn name(&self) -> &str {
+        "Resolution"
+    }
+
+    fn generate(
+        &self,
+        given_idx: usize,
+        given: &Clause,
+        clauses: &[Clause],
+        processed: &IndexSet<usize>,
+        selector: &dyn LiteralSelector,
+        interner: &mut Interner,
+    ) -> Vec<StateChange> {
+        let mut changes = Vec::new();
+
+        // Resolution with processed clauses
+        for &processed_idx in processed.iter() {
+            if processed_idx == given_idx {
+                continue;
+            }
+            if let Some(processed_clause) = clauses.get(processed_idx) {
+                // Given as first clause
+                for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
+                    changes.push(StateChange::Add {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+                // Given as second clause
+                for result in resolution(processed_clause, given, processed_idx, given_idx, selector, interner) {
+                    changes.push(StateChange::Add {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+            }
+        }
+
+        // Self-resolution
+        for result in resolution(given, given, given_idx, given_idx, selector, interner) {
+            changes.push(StateChange::Add {
+                clause: result.conclusion,
+                derivation: result.derivation,
+            });
+        }
+
+        changes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,9 +178,9 @@ mod tests {
     fn test_resolution_with_select_all() {
         let mut ctx = TestContext::new();
 
-        // P(a) ∨ Q(X)
-        // ~P(a) ∨ R(b)
-        // Should resolve to Q(X) ∨ R(b)
+        // P(a) v Q(X)
+        // ~P(a) v R(b)
+        // Should resolve to Q(X) v R(b)
 
         let p = ctx.pred("P", 1);
         let q = ctx.pred("Q", 1);

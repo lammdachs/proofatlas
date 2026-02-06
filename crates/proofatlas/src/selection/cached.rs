@@ -14,7 +14,7 @@
 //! - Embeddings to be reused across multiple scoring calls
 //! - Clear separation between expensive embedding computation and cheap scoring
 
-use crate::fol::Clause;
+use crate::logic::Clause;
 use super::clause::SelectorStats;
 use super::ClauseSelector;
 use indexmap::IndexSet;
@@ -226,7 +226,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Interner, Literal, PredicateSymbol, Term, Constant};
+    use crate::logic::{Interner, Literal, PredicateSymbol, Term, Constant};
 
     /// Simple test embedder that returns clause length as embedding
     struct TestEmbedder;

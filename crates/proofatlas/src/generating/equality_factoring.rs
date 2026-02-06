@@ -2,14 +2,15 @@
 
 use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
 use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
-use super::derivation::Derivation;
+use crate::state::{Derivation, StateChange, GeneratingInference};
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use indexmap::IndexSet;
 
 /// Apply equality factoring rule
-/// From l ≈ r ∨ s ≈ t ∨ C where σ = mgu(l, s), l ≈ r is selected
-/// Constraints: lσ ⪯̸ rσ, lσ ⪯̸ tσ, rσ ⪯̸ tσ
-/// Derive (l ≈ r ∨ r ≉ t ∨ C)σ
+/// From l = r v s = t v C where sigma = mgu(l, s), l = r is selected
+/// Constraints: l*sigma not smaller than r*sigma, l*sigma not smaller than t*sigma, r*sigma not smaller than t*sigma
+/// Derive (l = r v r != t v C)*sigma
 pub fn equality_factoring(
     clause: &Clause,
     idx: usize,
@@ -56,22 +57,22 @@ pub fn equality_factoring(
                 let _s_sigma = s2.apply_substitution(&sigma);
                 let t_sigma = t2.apply_substitution(&sigma);
 
-                // Check ordering constraints: lσ ⪯̸ rσ, lσ ⪯̸ tσ, rσ ⪯̸ tσ
-                // ⪯̸ means "not smaller", i.e., Greater or Incomparable
+                // Check ordering constraints: l*sigma not smaller than r*sigma, l*sigma not smaller than t*sigma, r*sigma not smaller than t*sigma
+                // "not smaller" means Greater or Incomparable
                 let l_not_smaller_r = is_ordered_greater(&l_sigma, &r_sigma, &kbo);
                 let l_not_smaller_t = is_ordered_greater(&l_sigma, &t_sigma, &kbo);
                 let r_not_smaller_t = is_ordered_greater(&r_sigma, &t_sigma, &kbo);
 
                 if l_not_smaller_r && l_not_smaller_t && r_not_smaller_t {
-                    // Build the conclusion: (l ≈ r ∨ r ≉ t ∨ C)σ
+                    // Build the conclusion: (l = r v r != t v C)*sigma
                     let mut new_literals = Vec::new();
 
-                    // Add r ≉ t
+                    // Add r != t
                     let eq_symbol = PredicateSymbol::new(interner.intern_predicate("="), 2);
                     let neq_literal = Literal::negative(eq_symbol, vec![r_sigma.clone(), t_sigma.clone()]);
                     new_literals.push(neq_literal);
 
-                    // Add l ≈ r (the first equality literal)
+                    // Add l = r (the first equality literal)
                     let eq_literal = Literal::positive(eq_symbol, vec![l_sigma, r_sigma]);
                     new_literals.push(eq_literal);
 
@@ -101,5 +102,46 @@ fn get_equality_terms(lit: &Literal) -> Option<(&crate::logic::Term, &crate::log
         Some((&lit.args[0], &lit.args[1]))
     } else {
         None
+    }
+}
+
+/// Equality factoring inference rule.
+///
+/// Factors positive equalities.
+pub struct EqualityFactoringRule;
+
+impl EqualityFactoringRule {
+    pub fn new() -> Self {
+        EqualityFactoringRule
+    }
+}
+
+impl Default for EqualityFactoringRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratingInference for EqualityFactoringRule {
+    fn name(&self) -> &str {
+        "EqualityFactoring"
+    }
+
+    fn generate(
+        &self,
+        given_idx: usize,
+        given: &Clause,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
+        selector: &dyn LiteralSelector,
+        interner: &mut Interner,
+    ) -> Vec<StateChange> {
+        equality_factoring(given, given_idx, selector, interner)
+            .into_iter()
+            .map(|result| StateChange::Add {
+                clause: result.conclusion,
+                derivation: result.derivation,
+            })
+            .collect()
     }
 }

@@ -1,7 +1,7 @@
 //! Event log replay utilities for proof extraction and state reconstruction.
 
-use super::rule::{StateChange, EventLog};
-use crate::fol::Clause;
+use crate::state::{StateChange, EventLog};
+use crate::logic::Clause;
 use std::collections::HashSet;
 
 /// Replay event log to extract proof (backward traversal from empty clause)

@@ -1,6 +1,6 @@
 //! Most General Unifier (MGU) computation
 
-use crate::fol::{ConstantId, FunctionId, Interner, Substitution, Term, Variable, VariableId};
+use crate::logic::{ConstantId, FunctionId, Substitution, Term, Variable, VariableId};
 use std::collections::HashSet;
 
 /// Result of a unification attempt
@@ -89,25 +89,6 @@ fn occurs_check(var: &Variable, term: &Term) -> bool {
     }
 }
 
-/// Rename variables in a term to avoid conflicts
-pub fn rename_variables(term: &Term, suffix: &str, interner: &mut Interner) -> Term {
-    match term {
-        Term::Variable(v) => {
-            let old_name = interner.resolve_variable(v.id);
-            let new_name = format!("{}_{}", old_name, suffix);
-            let new_id = interner.intern_variable(&new_name);
-            Term::Variable(Variable::new(new_id))
-        }
-        Term::Constant(c) => Term::Constant(*c),
-        Term::Function(f, args) => Term::Function(
-            *f,
-            args.iter()
-                .map(|arg| rename_variables(arg, suffix, interner))
-                .collect(),
-        ),
-    }
-}
-
 /// Get all variables in a term
 pub fn variables_in_term(term: &Term) -> HashSet<Variable> {
     match term {
@@ -137,7 +118,7 @@ pub fn variable_ids_in_term(term: &Term) -> HashSet<VariableId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol};
+    use crate::logic::{Constant, FunctionSymbol, Interner};
 
     /// Test context for building terms with interned symbols
     struct TestContext {
@@ -221,6 +202,8 @@ mod tests {
 
     #[test]
     fn test_rename_variables() {
+        use crate::generating::common::rename_variables;
+
         let mut ctx = TestContext::new();
         let x = ctx.var("X");
         let a = ctx.const_("a");

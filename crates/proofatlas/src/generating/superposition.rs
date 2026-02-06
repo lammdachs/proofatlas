@@ -5,9 +5,10 @@ use super::common::{
     InferenceResult,
 };
 use crate::logic::{Atom, Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
-use super::derivation::Derivation;
+use crate::state::{Derivation, StateChange, GeneratingInference};
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use indexmap::IndexSet;
 
 /// Position in a term/atom where unification can occur
 struct Position {
@@ -17,9 +18,9 @@ struct Position {
 
 /// Apply superposition rule using literal selection
 ///
-/// Superposition: l ≈ r ∨ C₁    L[l'] ∨ C₂  =>  (L[r] ∨ C₁ ∨ C₂)σ
-///   where σ = mgu(l, l'), lσ ⪯̸ rσ, l' is not a variable.
-///   If L[l'] is an equality s[l'] ⊕ t, additionally s[l']σ ⪯̸ tσ.
+/// Superposition: l = r v C1    L[l'] v C2  =>  (L[r] v C1 v C2)sigma
+///   where sigma = mgu(l, l'), l*sigma not smaller than r*sigma, l' is not a variable.
+///   If L[l'] is an equality s[l'] +/- t, additionally s[l']*sigma not smaller than t*sigma.
 pub fn superposition(
     from_clause: &Clause,
     into_clause: &Clause,
@@ -51,13 +52,13 @@ pub fn superposition(
         if from_lit.polarity && from_lit.is_equality(interner) {
             if let [ref left, ref right] = from_lit.args.as_slice() {
                 // Try superposition in BOTH directions:
-                // 1. Find occurrences of left, replace with right (left → right)
-                // 2. Find occurrences of right, replace with left (right → left)
+                // 1. Find occurrences of left, replace with right (left -> right)
+                // 2. Find occurrences of right, replace with left (right -> left)
                 // The ordering constraint is checked AFTER computing the MGU
 
                 let directions: [(_, _, &str); 2] = [
-                    (left, right, "l→r"),
-                    (right, left, "r→l"),
+                    (left, right, "l->r"),
+                    (right, left, "r->l"),
                 ];
 
                 for (pattern, replacement, _dir) in directions {
@@ -80,7 +81,7 @@ pub fn superposition(
                                 let pattern_sigma = pattern.apply_substitution(&mgu);
                                 let replacement_sigma = replacement.apply_substitution(&mgu);
 
-                                // Check ordering constraint: pattern_sigma ⪯̸ replacement_sigma
+                                // Check ordering constraint: pattern_sigma not smaller than replacement_sigma
                                 // i.e., pattern_sigma must NOT be smaller than replacement_sigma
                                 // This ensures we're rewriting larger to smaller (simplifying)
                                 if !is_ordered_greater(&pattern_sigma, &replacement_sigma, &kbo) {
@@ -97,12 +98,12 @@ pub fn superposition(
                                     let t_sigma = t.apply_substitution(&mgu);
 
                                     if pos.path[0] == 0 {
-                                        // l' is in s (left side): need sσ ⪯̸ tσ
+                                        // l' is in s (left side): need s*sigma not smaller than t*sigma
                                         if !is_ordered_greater(&s_sigma, &t_sigma, &kbo) {
                                             continue;
                                         }
                                     } else if pos.path[0] == 1 {
-                                        // l' is in t (right side): need tσ ⪯̸ sσ
+                                        // l' is in t (right side): need t*sigma not smaller than s*sigma
                                         if !is_ordered_greater(&t_sigma, &s_sigma, &kbo) {
                                             continue;
                                         }
@@ -156,7 +157,7 @@ pub fn superposition(
 /// Find all positions in a literal's arguments where a term can potentially unify with pattern
 /// This is used to find occurrences of l in the literal that can unify with l
 ///
-/// For equalities, we search BOTH sides. The ordering constraint (s[l']σ ⪯̸ tσ)
+/// For equalities, we search BOTH sides. The ordering constraint (s[l']*sigma not smaller than t*sigma)
 /// is checked later after computing the MGU, not here during position search.
 /// This is important because the ordering depends on the substitution, which
 /// we don't know until we find a unifier.
@@ -252,6 +253,76 @@ fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
     }
 }
 
+/// Superposition inference rule.
+///
+/// Generates superposition inferences between the given clause and processed clauses.
+pub struct SuperpositionRule;
+
+impl SuperpositionRule {
+    pub fn new() -> Self {
+        SuperpositionRule
+    }
+}
+
+impl Default for SuperpositionRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratingInference for SuperpositionRule {
+    fn name(&self) -> &str {
+        "Superposition"
+    }
+
+    fn generate(
+        &self,
+        given_idx: usize,
+        given: &Clause,
+        clauses: &[Clause],
+        processed: &IndexSet<usize>,
+        selector: &dyn LiteralSelector,
+        interner: &mut Interner,
+    ) -> Vec<StateChange> {
+        let mut changes = Vec::new();
+
+        // Superposition with processed clauses
+        for &processed_idx in processed.iter() {
+            if processed_idx == given_idx {
+                continue;
+            }
+            if let Some(processed_clause) = clauses.get(processed_idx) {
+                // Given as first clause (rewriter)
+                for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
+                {
+                    changes.push(StateChange::Add {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+                // Given as second clause (target)
+                for result in superposition(processed_clause, given, processed_idx, given_idx, selector, interner)
+                {
+                    changes.push(StateChange::Add {
+                        clause: result.conclusion,
+                        derivation: result.derivation,
+                    });
+                }
+            }
+        }
+
+        // Self-superposition
+        for result in superposition(given, given, given_idx, given_idx, selector, interner) {
+            changes.push(StateChange::Add {
+                clause: result.conclusion,
+                derivation: result.derivation,
+            });
+        }
+
+        changes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,7 +363,7 @@ mod tests {
 
     /// Test superposition into the RIGHT side of an equality
     /// This verifies that we search both sides of equalities for superposition positions.
-    /// The ordering constraint s[l']σ ⪯̸ tσ must be satisfied (the side containing l'
+    /// The ordering constraint s[l']*sigma not smaller than t*sigma must be satisfied (the side containing l'
     /// must not be smaller than the other side).
     #[test]
     fn test_superposition_into_right_side_of_equality() {
@@ -303,7 +374,7 @@ mod tests {
         //
         // The pattern f(X) should unify with f(b) in the RIGHT side of the into clause.
         // s[l'] = f(b), t = a
-        // Constraint: s[l']σ ⪯̸ tσ means f(b) ⪯̸ a, which is satisfied since f(b) > a
+        // Constraint: s[l']*sigma not smaller than t*sigma means f(b) not smaller than a, which is satisfied since f(b) > a
         // After superposition: a = b
 
         let eq = ctx.pred("=", 2);

@@ -28,13 +28,12 @@ pub mod clause;
 #[cfg(feature = "ml")]
 pub mod gcn;
 pub mod graph;
-pub mod literal;
 pub mod proof_trace;
 #[cfg(feature = "ml")]
 pub mod sentence;
 
-// Literal selection re-exports
-pub use literal::{
+// Literal selection re-exports (from logic module)
+pub use crate::logic::literal_selection::{
     LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight, SelectMaximal,
     SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal,
 };

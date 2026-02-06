@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use super::fof::{FOFFormula, Quantifier};
-use crate::fol::{
+use crate::logic::{
     Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
     PredicateSymbol, Term, Variable,
 };

@@ -5,7 +5,7 @@
 //! - `GcnSelector` - GCN-based ML selector (requires `torch` feature)
 //! - `SentenceSelector` - Sentence transformer selector (requires `torch` + `sentence` features)
 
-use crate::fol::Clause;
+use crate::logic::Clause;
 use indexmap::IndexSet;
 use std::time::Duration;
 

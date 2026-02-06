@@ -19,7 +19,7 @@
 //! - Node type/role → one-hot or learned embeddings
 //! - Arity/position/depth/age → sinusoidal encoding
 
-use crate::fol::{Clause, Interner, Literal, Term};
+use crate::logic::{Clause, Interner, Literal, Term};
 
 /// Node type constants
 pub const NODE_TYPE_CLAUSE: u8 = 0;
@@ -386,7 +386,7 @@ impl GraphBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
+    use crate::logic::{Constant, FunctionSymbol, Literal, PredicateSymbol, Variable};
 
     #[test]
     fn test_simple_variable() {
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_clause_age_and_role_features() {
-        use crate::fol::ClauseRole;
+        use crate::logic::ClauseRole;
 
         let mut interner = Interner::new();
 

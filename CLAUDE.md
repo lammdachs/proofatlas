@@ -14,15 +14,26 @@ proofatlas/
 ├── crates/
 │   ├── proofatlas/             # Core theorem prover (Rust)
 │   │   └── src/
-│   │       ├── fol/            # FOL types: terms, literals, clauses, substitutions, KBO, interner, Position
-│   │       ├── inference/      # Inference rules, derivation tracking, proof types
-│   │       ├── selection/      # Selection strategies, graph building, proof trace (tch-rs ML)
-│   │       ├── saturation/     # State container, rules, trace, subsumption, profiling
+│   │       ├── logic/          # FOL types and manipulation
+│   │       │   ├── core/       # term.rs, literal.rs, clause.rs, position.rs
+│   │       │   ├── ordering/   # kbo.rs, orient_equalities.rs
+│   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs
+│   │       │   ├── interner.rs # Symbol interning
+│   │       │   ├── literal_selection.rs  # LiteralSelector trait + impls
+│   │       │   └── clause_manager.rs     # ClauseManager: interner + selector + KBO
+│   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
+│   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
+│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, etc.
+│   │       ├── selection/      # Clause selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
-│   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── clause_manager.rs  # ClauseManager: interner + literal selector + KBO
-│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()
-│   │       └── json.rs         # JSON serialization types
+│   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
+│   │       ├── state.rs        # SaturationState, StateChange, EventLog, Derivation, traits
+│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()/saturate()
+│   │       ├── trace.rs        # EventLogReplayer, extract_proof_from_events
+│   │       ├── profile.rs      # SaturationProfile
+│   │       ├── json.rs         # JSON serialization types
+│   │       ├── inference/      # (backward-compat re-exports → generating/simplifying)
+│   │       └── saturation/     # (backward-compat re-exports → state/config/etc.)
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
@@ -201,27 +212,27 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 - `ProofAtlas::prove()` runs the saturation loop to completion
 - `ProofAtlas::step()` executes a single iteration (useful for debugging/visualization)
 
-**ClauseManager** (`clause_manager.rs`): Centralizes clause-level operations:
+**ClauseManager** (`logic/clause_manager.rs`): Centralizes clause-level operations:
 - Symbol interning (`Interner`)
 - Literal selection (`LiteralSelector` trait)
 - Term ordering (`KBO`)
 - Methods: `rename_variables()`, `orient_equalities()`, `normalize_clause()`
 
-**SaturationState** (`saturation/state.rs`): Lean data container holding:
+**SaturationState** (`state.rs`): Lean data container holding:
 - `clauses: Vec<Clause>` (append-only storage)
 - `new`, `unprocessed`, `processed` clause sets (N/U/P)
 - `event_log: Vec<StateChange>` (all modifications)
 
 ### Polymorphic Rule Architecture
 
-**SimplifyingInference trait** (`saturation/rule.rs`):
+**SimplifyingInference trait** (`state.rs`):
 - `simplify_forward()`: Simplify/delete clause in N using U∪P
 - `simplify_backward()`: Simplify clauses in U∪P using new clause
-- Implementations: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
+- Implementations in `simplifying/`: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
 
-**GeneratingInference trait** (`saturation/rule.rs`):
+**GeneratingInference trait** (`state.rs`):
 - `generate()`: Generate inferences with given clause and clauses in P
-- Implementations: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
+- Implementations in `generating/`: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
 
 All rules return `Vec<StateChange>` for atomic state modifications:
 - `Add { clause, derivation }`: Add new clause to N
@@ -254,7 +265,7 @@ The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying
 Literals have a flat structure with `predicate`, `args`, and `polarity` directly on the `Literal` struct (no intermediate `Atom` wrapper). `Atom` still exists for FOF formula representation in the parser but is not used in clause-level operations.
 
 ### Position
-`Position` (`fol/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `Derivation` premises and throughout the system to reference inference sites.
+`Position` (`logic/core/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `Derivation` premises and throughout the system to reference inference sites.
 
 ### Profiling
 `ProverConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `prove()` returns `(ProofResult, Option<SaturationProfile>, EventLog, Interner)` with timing and counting data for every phase:

@@ -2,8 +2,10 @@
 
 use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms, InferenceResult};
 use crate::logic::{Clause, Position};
-use super::derivation::Derivation;
+use crate::state::{Derivation, StateChange, GeneratingInference};
 use crate::selection::LiteralSelector;
+use indexmap::IndexSet;
+use crate::logic::Interner;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -58,6 +60,47 @@ pub fn factoring(
     results
 }
 
+/// Factoring inference rule.
+///
+/// Generates factors of the given clause.
+pub struct FactoringRule;
+
+impl FactoringRule {
+    pub fn new() -> Self {
+        FactoringRule
+    }
+}
+
+impl Default for FactoringRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratingInference for FactoringRule {
+    fn name(&self) -> &str {
+        "Factoring"
+    }
+
+    fn generate(
+        &self,
+        given_idx: usize,
+        given: &Clause,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
+        selector: &dyn LiteralSelector,
+        _interner: &mut Interner,
+    ) -> Vec<StateChange> {
+        factoring(given, given_idx, selector)
+            .into_iter()
+            .map(|result| StateChange::Add {
+                clause: result.conclusion,
+                derivation: result.derivation,
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +143,7 @@ mod tests {
     fn test_factoring_with_select_all() {
         let mut ctx = TestContext::new();
 
-        // P(X) ∨ P(Y) ∨ Q(Z)
+        // P(X) v P(Y) v Q(Z)
         let p = ctx.pred("P", 1);
         let q = ctx.pred("Q", 1);
 
@@ -119,32 +162,9 @@ mod tests {
 
         // With SelectAll, both P literals are selected
         // P(X) factors with P(Y), and P(Y) factors with P(X)
-        // Both produce the same clause: P(X) ∨ Q(Z) (with appropriate substitution)
+        // Both produce the same clause: P(X) v Q(Z) (with appropriate substitution)
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].conclusion.literals.len(), 2);
         assert_eq!(results[1].conclusion.literals.len(), 2);
     }
-
-    // #[test]
-    // fn test_factoring_with_select_first_negative() {
-    //     // ~P(X) ∨ P(Y) ∨ ~P(Z)
-    //     let p = PredicateSymbol { name: "P".to_string(), arity: 1 };
-    //
-    //     let x = Term::Variable(Variable { name: "X".to_string() });
-    //     let y = Term::Variable(Variable { name: "Y".to_string() });
-    //     let z = Term::Variable(Variable { name: "Z".to_string() });
-    //
-    //     let clause = Clause::new(vec![
-    //         Literal::negative(Atom { predicate: p.clone(), args: vec![x.clone()] }),
-    //         Literal::positive(Atom { predicate: p.clone(), args: vec![y.clone()] }),
-    //         Literal::negative(Atom { predicate: p.clone(), args: vec![z.clone()] }),
-    //     ]);
-    //
-    //     let selector = SelectFirstNegative;
-    //     let results = factoring(&clause, 0, &selector);
-    //
-    //     // Only ~P(X) is selected, it can factor with ~P(Z) but not P(Y)
-    //     assert_eq!(results.len(), 1);
-    //     assert_eq!(results[0].conclusion.literals.len(), 2);
-    // }
 }

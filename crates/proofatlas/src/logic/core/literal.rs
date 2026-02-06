@@ -1,7 +1,7 @@
 //! Atoms and literals in first-order logic
 
-use super::interner::{Interner, PredicateId};
-use super::term::Term;
+use crate::logic::interner::{Interner, PredicateId};
+use super::term::{Term, Variable};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -42,7 +42,7 @@ impl Atom {
 
     /// Estimate the heap memory usage of this atom in bytes
     pub fn memory_bytes(&self) -> usize {
-        let vec_bytes = self.args.capacity() * std::mem::size_of::<super::Term>();
+        let vec_bytes = self.args.capacity() * std::mem::size_of::<Term>();
         let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
         vec_bytes + args_bytes
     }
@@ -107,7 +107,7 @@ impl Literal {
     }
 
     /// Collect all variables in this literal
-    pub fn collect_variables(&self, vars: &mut std::collections::HashSet<super::Variable>) {
+    pub fn collect_variables(&self, vars: &mut std::collections::HashSet<Variable>) {
         for term in &self.args {
             term.collect_variables(vars);
         }
@@ -115,7 +115,7 @@ impl Literal {
 
     /// Estimate the heap memory usage of this literal in bytes
     pub fn memory_bytes(&self) -> usize {
-        let vec_bytes = self.args.capacity() * std::mem::size_of::<super::Term>();
+        let vec_bytes = self.args.capacity() * std::mem::size_of::<Term>();
         let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
         vec_bytes + args_bytes
     }

@@ -1,4 +1,5 @@
-//! Inference rules for first-order logic theorem proving
+//! Re-exports for backward compatibility.
+//! Canonical locations: crate::state, crate::generating, crate::simplifying
 
 pub mod common;
 pub mod demodulation;
@@ -10,14 +11,12 @@ pub mod proof;
 pub mod resolution;
 pub mod superposition;
 
-// Re-export the main inference function and types
-pub use common::InferenceResult;
-pub use derivation::Derivation;
-pub use proof::{Proof, ProofStep};
+// Re-export types from canonical locations
+pub use crate::state::{InferenceResult, Derivation, Proof, ProofStep};
 
-pub use demodulation::demodulate;
-pub use equality_factoring::equality_factoring;
-pub use equality_resolution::equality_resolution;
-pub use factoring::factoring;
-pub use resolution::resolution;
-pub use superposition::superposition;
+pub use crate::simplifying::demodulation::demodulate;
+pub use crate::generating::equality_factoring::equality_factoring;
+pub use crate::generating::equality_resolution::equality_resolution;
+pub use crate::generating::factoring::factoring;
+pub use crate::generating::resolution::resolution;
+pub use crate::generating::superposition::superposition;

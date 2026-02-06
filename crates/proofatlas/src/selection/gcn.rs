@@ -11,7 +11,7 @@
 use std::path::Path;
 
 #[cfg(feature = "ml")]
-use crate::fol::Clause;
+use crate::logic::Clause;
 #[cfg(feature = "ml")]
 use super::graph::GraphBuilder;
 
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_gcn_selector_caching() {
-        use crate::fol::{Interner, Literal, PredicateSymbol, Term, Constant};
+        use crate::logic::{Interner, Literal, PredicateSymbol, Term, Constant};
         use crate::selection::ClauseSelector;
         use indexmap::IndexSet;
 

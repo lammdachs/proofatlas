@@ -2,9 +2,10 @@
 
 use super::common::{collect_literals_except, InferenceResult};
 use crate::logic::{Clause, Interner, Position};
-use super::derivation::Derivation;
+use crate::state::{Derivation, StateChange, GeneratingInference};
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use indexmap::IndexSet;
 
 /// Apply equality resolution rule using literal selection
 /// From ~s = t, if we can unify s and t, derive the remaining clause
@@ -50,6 +51,47 @@ pub fn equality_resolution(
     }
 
     results
+}
+
+/// Equality resolution inference rule.
+///
+/// Resolves negative equalities of the form s!=s.
+pub struct EqualityResolutionRule;
+
+impl EqualityResolutionRule {
+    pub fn new() -> Self {
+        EqualityResolutionRule
+    }
+}
+
+impl Default for EqualityResolutionRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GeneratingInference for EqualityResolutionRule {
+    fn name(&self) -> &str {
+        "EqualityResolution"
+    }
+
+    fn generate(
+        &self,
+        given_idx: usize,
+        given: &Clause,
+        _clauses: &[Clause],
+        _processed: &IndexSet<usize>,
+        selector: &dyn LiteralSelector,
+        interner: &mut Interner,
+    ) -> Vec<StateChange> {
+        equality_resolution(given, given_idx, selector, &*interner)
+            .into_iter()
+            .map(|result| StateChange::Add {
+                clause: result.conclusion,
+                derivation: result.derivation,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

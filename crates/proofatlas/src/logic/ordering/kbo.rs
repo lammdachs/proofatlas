@@ -1,7 +1,7 @@
 //! Term ordering implementation (Knuth-Bendix Ordering)
 
-use super::interner::{ConstantId, FunctionId, Interner, VariableId};
-use super::Term;
+use crate::logic::interner::{ConstantId, FunctionId, Interner, VariableId};
+use crate::logic::Term;
 use std::collections::HashMap;
 
 /// Configuration for Knuth-Bendix Ordering
@@ -281,7 +281,7 @@ impl KBO {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, FunctionSymbol, Interner, Variable};
+    use crate::logic::{Constant, FunctionSymbol, Interner, Variable};
 
     #[test]
     fn test_term_weight() {

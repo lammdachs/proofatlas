@@ -1,7 +1,8 @@
 //! Extract training data from completed proofs
 
-use crate::inference::Proof;
-use crate::saturation::{extract_proof_from_events, StateChange, EventLog};
+use crate::state::Proof;
+use crate::state::{StateChange, EventLog};
+use crate::trace::extract_proof_from_events;
 use std::collections::HashSet;
 
 /// Training example: a clause with its label
@@ -202,8 +203,8 @@ pub fn extract_clause_labels_from_events(events: &EventLog) -> Vec<TrainingExamp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Clause, Position};
-    use crate::inference::{Derivation, ProofStep};
+    use crate::logic::{Clause, Position};
+    use crate::state::{Derivation, ProofStep};
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
         let positions: Vec<Position> = premises.iter().map(|&p| Position::clause(p)).collect();

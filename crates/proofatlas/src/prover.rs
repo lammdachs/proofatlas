@@ -5,18 +5,21 @@
 //!
 //! Use `prove()` to run to completion, or `step()` for incremental execution.
 
-use crate::clause_manager::ClauseManager;
-use crate::fol::{Clause, ClauseKey, Interner};
-use crate::inference::{Derivation, InferenceResult, Proof, ProofStep};
-use crate::saturation::index::{IndexKind, IndexRegistry};
-use crate::saturation::profile::SaturationProfile;
-use crate::saturation::rule::{
-    ClauseNotification, ClauseSet, DemodulationRule, EqualityFactoringRule,
-    EqualityResolutionRule, FactoringRule, GeneratingInference, StateChange,
-    ResolutionRule, EventLog, SimplifyingInference, SubsumptionRule, SuperpositionRule,
-    TautologyRule,
+use crate::logic::clause_manager::ClauseManager;
+use crate::logic::{CNFFormula, Clause, ClauseKey, Interner};
+use crate::state::{
+    ClauseNotification, ClauseSet, Derivation, EventLog, GeneratingInference,
+    InferenceResult, Proof, ProofResult, ProofStep, SaturationState, SimplifyingInference,
+    StateChange,
 };
-use crate::saturation::state::{LiteralSelectionStrategy, ProverConfig, ProofResult, SaturationState};
+use crate::config::{LiteralSelectionStrategy, ProverConfig};
+use crate::profile::SaturationProfile;
+use crate::index::{IndexKind, IndexRegistry};
+use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
+use crate::generating::{
+    ResolutionRule, SuperpositionRule, FactoringRule,
+    EqualityResolutionRule, EqualityFactoringRule,
+};
 use crate::selection::{
     ClauseSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
     SelectUniqueMaximalOrNegOrMaximal,
@@ -430,7 +433,7 @@ impl ProofAtlas {
                 let mut clause_with_id = clause.clone();
                 clause_with_id.id = Some(new_idx);
                 clause_with_id.age = self.state.current_iteration;
-                clause_with_id.role = crate::fol::ClauseRole::Derived;
+                clause_with_id.role = crate::logic::ClauseRole::Derived;
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
@@ -623,4 +626,15 @@ impl ProofAtlas {
             })
             .collect()
     }
+}
+
+/// Run saturation on a CNF formula
+pub fn saturate(
+    formula: CNFFormula,
+    config: ProverConfig,
+    clause_selector: Box<dyn ClauseSelector>,
+    interner: Interner,
+) -> (ProofResult, Option<SaturationProfile>, EventLog, Interner) {
+    let prover = ProofAtlas::new(formula.clauses, config, clause_selector, interner);
+    prover.prove()
 }

@@ -1,44 +1,10 @@
-//! Clause derivation tracking.
-//!
-//! Records how each clause was derived (inference rule + premises).
-
-use crate::fol::Position;
-use serde::{Deserialize, Serialize};
-
-/// How a clause was derived (for proofs and internal derivation tracking).
-///
-/// This is a dynamic struct that stores the rule name and premise positions,
-/// allowing new rules to be added without modifying this type.
-/// Rules construct Derivation directly:
-/// ```ignore
-/// Derivation { rule_name: "Resolution".into(), premises: vec![Position::clause(p1), Position::clause(p2)] }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Derivation {
-    /// Name of the inference rule that produced this clause
-    pub rule_name: String,
-    /// Positions of the premise clauses used in the inference
-    pub premises: Vec<Position>,
-}
-
-impl Derivation {
-    /// Create an Input derivation (no premises)
-    pub fn input() -> Self {
-        Derivation {
-            rule_name: "Input".into(),
-            premises: vec![],
-        }
-    }
-
-    /// Get the clause indices of all premises (ignoring subterm paths).
-    pub fn clause_indices(&self) -> Vec<usize> {
-        self.premises.iter().map(|p| p.clause).collect()
-    }
-}
+//! Re-export from crate::state for backward compatibility
+pub use crate::state::Derivation;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logic::Position;
 
     #[test]
     fn test_derivation_input() {

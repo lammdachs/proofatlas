@@ -1,7 +1,7 @@
 //! JSON serialization types for proof data
 
-use crate::fol::{Clause, Interner, Literal, Term};
-use crate::inference::proof::{Proof, ProofStep};
+use crate::logic::{Clause, Interner, Literal, Term};
+use crate::state::{Proof, ProofStep};
 use serde::{Deserialize, Serialize};
 
 /// JSON representation of a term
@@ -103,11 +103,11 @@ impl TrainingClauseJson {
     /// Create from a Clause with a label and optional derivation info
     pub fn from_clause(clause: &Clause, interner: &Interner, label: bool, parents: Vec<usize>, rule: String) -> Self {
         let role = match clause.role {
-            crate::fol::ClauseRole::Axiom => "axiom",
-            crate::fol::ClauseRole::Hypothesis => "hypothesis",
-            crate::fol::ClauseRole::Definition => "definition",
-            crate::fol::ClauseRole::NegatedConjecture => "negated_conjecture",
-            crate::fol::ClauseRole::Derived => "derived",
+            crate::logic::ClauseRole::Axiom => "axiom",
+            crate::logic::ClauseRole::Hypothesis => "hypothesis",
+            crate::logic::ClauseRole::Definition => "definition",
+            crate::logic::ClauseRole::NegatedConjecture => "negated_conjecture",
+            crate::logic::ClauseRole::Derived => "derived",
         };
         TrainingClauseJson {
             literals: clause.literals.iter().map(|l| LiteralJson::from_literal(l, interner)).collect(),

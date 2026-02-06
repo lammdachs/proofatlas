@@ -1,9 +1,9 @@
 //! Variable substitutions
 
-use super::clause::Clause;
-use super::interner::VariableId;
-use super::literal::{Atom, Literal};
-use super::term::{Term, Variable};
+use crate::logic::core::clause::Clause;
+use crate::logic::interner::VariableId;
+use crate::logic::core::literal::{Atom, Literal};
+use crate::logic::core::term::{Term, Variable};
 use std::collections::HashMap;
 
 /// A substitution mapping variable IDs to terms.
@@ -191,7 +191,7 @@ impl Clause {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fol::{Constant, Interner};
+    use crate::logic::{Constant, Interner};
 
     #[test]
     fn test_term_substitution() {

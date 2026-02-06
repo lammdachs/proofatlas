@@ -2,8 +2,8 @@
 
 use super::cnf_conversion::fof_to_cnf_with_role;
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
-use super::orient_equalities::orient_all_equalities;
-use crate::fol::{
+use crate::logic::ordering::orient_equalities::orient_all_equalities;
+use crate::logic::{
     Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
     PredicateSymbol, Term, Variable,
 };
@@ -1269,7 +1269,7 @@ mod tests {
 
     #[test]
     fn test_clause_role_parsing() {
-        use crate::fol::ClauseRole;
+        use crate::logic::ClauseRole;
 
         let result = parse_tptp("cnf(c1, axiom, p(a)).", &[], None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::Axiom);
@@ -1283,7 +1283,7 @@ mod tests {
 
     #[test]
     fn test_fof_role_propagation() {
-        use crate::fol::ClauseRole;
+        use crate::logic::ClauseRole;
 
         let result = parse_tptp("fof(ax1, axiom, p(a) & q(b)).", &[], None).unwrap();
         for clause in &result.formula.clauses {

@@ -1,6 +1,6 @@
 //! Clauses and CNF formulas
 
-use super::interner::Interner;
+use crate::logic::interner::Interner;
 use super::literal::Literal;
 use super::term::Term;
 use serde::{Deserialize, Serialize};
@@ -149,11 +149,11 @@ impl Clause {
             .sum()
     }
 
-    fn term_symbol_count(term: &super::Term) -> usize {
+    fn term_symbol_count(term: &Term) -> usize {
         match term {
-            super::Term::Variable(_) => 1,
-            super::Term::Constant(_) => 1,
-            super::Term::Function(_, args) => {
+            Term::Variable(_) => 1,
+            Term::Constant(_) => 1,
+            Term::Function(_, args) => {
                 1 + args
                     .iter()
                     .map(Self::term_symbol_count)
@@ -165,7 +165,7 @@ impl Clause {
     /// Estimate the heap memory usage of this clause in bytes
     pub fn memory_bytes(&self) -> usize {
         // Vec overhead: capacity * size_of::<Literal>
-        let vec_bytes = self.literals.capacity() * std::mem::size_of::<super::Literal>();
+        let vec_bytes = self.literals.capacity() * std::mem::size_of::<Literal>();
         // Literal memory
         let lits_bytes: usize = self.literals.iter().map(|l| l.memory_bytes()).sum();
         vec_bytes + lits_bytes
