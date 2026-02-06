@@ -358,15 +358,8 @@ impl FeatureIndex {
     }
 
     /// Mark a clause as inactive
-    #[allow(dead_code)]
     pub fn deactivate(&mut self, idx: usize) {
         self.active.remove(&idx);
-    }
-
-    /// Check if a clause is active
-    #[allow(dead_code)]
-    pub fn is_active(&self, idx: usize) -> bool {
-        self.active.contains(&idx)
     }
 
     /// Find potential subsumers for a clause (forward query).
@@ -474,7 +467,6 @@ impl FeatureIndex {
     }
 
     /// Get the feature vector for a clause
-    #[allow(dead_code)]
     pub fn get_features(&self, idx: usize) -> Option<&FeatureVector> {
         self.clause_features.get(idx)
     }

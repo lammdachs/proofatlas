@@ -13,9 +13,6 @@ crate-type = ["cdylib", "rlib"]
 # Parser
 nom = "7"
 
-# Error handling
-thiserror = "1.0"
-
 # Ordered sets with O(1) removal
 indexmap = "2"
 

@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
-      rust_ml: ${{ steps.filter.outputs.rust_ml }}
       rust_wasm: ${{ steps.filter.outputs.rust_wasm }}
       python_ml: ${{ steps.filter.outputs.python_ml }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
@@ -27,17 +26,21 @@ jobs:
         with:
           filters: |
             rust_core:
-              - 'crates/proofatlas/src/fol/**'
-              - 'crates/proofatlas/src/inference/**'
-              - 'crates/proofatlas/src/saturation/**'
+              - 'crates/proofatlas/src/logic/**'
+              - 'crates/proofatlas/src/generating/**'
+              - 'crates/proofatlas/src/simplifying/**'
+              - 'crates/proofatlas/src/index/**'
               - 'crates/proofatlas/src/parser/**'
-              - 'crates/proofatlas/src/unification/**'
               - 'crates/proofatlas/src/selection/**'
+              - 'crates/proofatlas/src/state.rs'
+              - 'crates/proofatlas/src/prover.rs'
+              - 'crates/proofatlas/src/config.rs'
+              - 'crates/proofatlas/src/trace.rs'
+              - 'crates/proofatlas/src/profile.rs'
               - 'crates/proofatlas/src/json.rs'
+              - 'crates/proofatlas/src/lib.rs'
               - 'crates/proofatlas/Cargo.toml'
               - 'Cargo.toml'
-            rust_ml:
-              - 'crates/proofatlas/src/ml/**'
             rust_wasm:
               - 'crates/proofatlas-wasm/**'
               - 'web/**'
@@ -120,35 +123,6 @@ jobs:
           cargo test -p proofatlas --lib
           cargo test -p proofatlas --test '*'
 
-  rust-ml-tests:
-    needs: [detect-changes, critical-tests]
-    if: needs.detect-changes.outputs.rust_ml == 'true' || github.event_name == 'schedule'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo
-            target
-          key: ${{ runner.os }}-cargo-ml-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-ml-
-
-      - name: Install torch
-        run: |
-          uv venv
-          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Run ML tests
-        run: |
-          source .venv/bin/activate
-          export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
-          cargo test -p proofatlas --features ml "ml::"
-
   rust-wasm-tests:
     needs: [detect-changes, critical-tests]
     if: needs.detect-changes.outputs.rust_wasm == 'true' || github.event_name == 'schedule'
@@ -197,7 +171,6 @@ jobs:
     if: |
       needs.detect-changes.outputs.docs_only == 'true' &&
       needs.detect-changes.outputs.rust_core == 'false' &&
-      needs.detect-changes.outputs.rust_ml == 'false' &&
       needs.detect-changes.outputs.rust_wasm == 'false' &&
       needs.detect-changes.outputs.python_ml == 'false'
     runs-on: ubuntu-24.04

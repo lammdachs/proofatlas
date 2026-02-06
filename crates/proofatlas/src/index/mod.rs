@@ -611,12 +611,11 @@ mod tests {
     #[test]
     fn test_unit_equalities_index() {
         let mut interner = create_test_interner();
-        let mut index = UnitEqualitiesIndex::new(&interner);
         let eq_clause = create_unit_equality(&mut interner);
         let non_eq = create_unit_clause(&mut interner);
 
-        // Recreate index with updated interner
-        index = UnitEqualitiesIndex::new(&interner);
+        // Create index after interning all symbols
+        let mut index = UnitEqualitiesIndex::new(&interner);
 
         index.on_clause_activated(0, &eq_clause);
         index.on_clause_activated(1, &non_eq);

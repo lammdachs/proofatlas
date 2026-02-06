@@ -49,8 +49,4 @@ impl ClauseManager {
         }
     }
 
-    /// Normalize a clause: orient equalities and apply any future normalizations.
-    pub fn normalize_clause(&self, clause: &mut Clause) {
-        self.orient_equalities(clause);
-    }
 }

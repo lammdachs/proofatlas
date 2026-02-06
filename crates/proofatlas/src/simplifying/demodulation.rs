@@ -320,7 +320,7 @@ impl SimplifyingInference for DemodulationRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+    use crate::logic::{Constant, FunctionSymbol, PredicateSymbol};
 
     struct TestContext {
         interner: Interner,
@@ -331,11 +331,6 @@ mod tests {
             TestContext {
                 interner: Interner::new(),
             }
-        }
-
-        fn var(&mut self, name: &str) -> Term {
-            let id = self.interner.intern_variable(name);
-            Term::Variable(Variable::new(id))
         }
 
         fn const_(&mut self, name: &str) -> Term {

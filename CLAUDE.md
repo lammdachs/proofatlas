@@ -31,9 +31,7 @@ proofatlas/
 │   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()/saturate()
 │   │       ├── trace.rs        # EventLogReplayer, extract_proof_from_events
 │   │       ├── profile.rs      # SaturationProfile
-│   │       ├── json.rs         # JSON serialization types
-│   │       ├── inference/      # (backward-compat re-exports → generating/simplifying)
-│   │       └── saturation/     # (backward-compat re-exports → state/config/etc.)
+│   │       └── json.rs         # JSON serialization types
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
@@ -216,7 +214,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 - Symbol interning (`Interner`)
 - Literal selection (`LiteralSelector` trait)
 - Term ordering (`KBO`)
-- Methods: `rename_variables()`, `orient_equalities()`, `normalize_clause()`
+- Methods: `orient_equalities()`
 
 **SaturationState** (`state.rs`): Lean data container holding:
 - `clauses: Vec<Clause>` (append-only storage)

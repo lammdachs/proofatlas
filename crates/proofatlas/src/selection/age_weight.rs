@@ -182,7 +182,7 @@ impl ClauseSelector for WeightSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use crate::logic::{FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
 
     struct TestContext {
         interner: Interner,
@@ -198,11 +198,6 @@ mod tests {
         fn var(&mut self, name: &str) -> Term {
             let id = self.interner.intern_variable(name);
             Term::Variable(Variable::new(id))
-        }
-
-        fn const_(&mut self, name: &str) -> Term {
-            let id = self.interner.intern_constant(name);
-            Term::Constant(Constant::new(id))
         }
 
         fn func(&mut self, name: &str, args: Vec<Term>) -> Term {

@@ -179,7 +179,6 @@ mod tests {
         let mut ctx = TestContext::new();
         let x = ctx.var("X");
         let y = ctx.var("Y");
-        let a = ctx.const_("a");
         let t1 = ctx.func("f", vec![x, y]);
         let a2 = ctx.const_("a");
         let a3 = ctx.const_("a");

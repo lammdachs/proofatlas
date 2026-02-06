@@ -139,7 +139,7 @@ impl GeneratingInference for ResolutionRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, FunctionSymbol, Literal, PredicateSymbol, Term, Variable};
+    use crate::logic::{Constant, Literal, PredicateSymbol, Term, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -161,11 +161,6 @@ mod tests {
         fn const_(&mut self, name: &str) -> Term {
             let id = self.interner.intern_constant(name);
             Term::Constant(Constant::new(id))
-        }
-
-        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
-            let id = self.interner.intern_function(name);
-            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
         }
 
         fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
