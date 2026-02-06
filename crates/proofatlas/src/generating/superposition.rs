@@ -5,10 +5,11 @@ use super::common::{
     InferenceResult,
 };
 use crate::logic::{Atom, Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
-use crate::state::{Derivation, StateChange, GeneratingInference};
+use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
-use indexmap::IndexSet;
 
 /// Position in a term/atom where unification can occur
 struct Position {
@@ -278,20 +279,21 @@ impl GeneratingInference for SuperpositionRule {
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        clauses: &[Clause],
-        processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let given = &state.clauses[given_idx];
+        let selector = cm.literal_selector.as_ref();
+        let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
         // Superposition with processed clauses
-        for &processed_idx in processed.iter() {
+        for &processed_idx in state.processed.iter() {
             if processed_idx == given_idx {
                 continue;
             }
-            if let Some(processed_clause) = clauses.get(processed_idx) {
+            if let Some(processed_clause) = state.clauses.get(processed_idx) {
                 // Given as first clause (rewriter)
                 for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
                 {

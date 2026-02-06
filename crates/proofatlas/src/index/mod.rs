@@ -21,6 +21,7 @@
 //! - Lifecycle events are routed atomically to all indices
 
 pub mod feature_vector;
+pub mod subsumption;
 
 use crate::logic::{Clause, ClauseKey, Interner, PredicateId};
 use indexmap::IndexSet;
@@ -28,6 +29,7 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
 pub use feature_vector::{FeatureIndex, FeatureVector, SymbolTable};
+pub use subsumption::SubsumptionChecker;
 
 
 // =============================================================================
@@ -45,6 +47,8 @@ pub enum IndexKind {
     FeatureVectors,
     /// Structural hashing for duplicate detection
     ClauseKeys,
+    /// Subsumption checker for forward/backward subsumption
+    Subsumption,
 }
 
 // =============================================================================
@@ -418,6 +422,7 @@ impl IndexRegistry {
                 IndexKind::UnitEqualities => Box::new(UnitEqualitiesIndex::new(interner)),
                 IndexKind::FeatureVectors => Box::new(FeatureVectorIndex::new()),
                 IndexKind::ClauseKeys => Box::new(ClauseKeysIndex::new()),
+                IndexKind::Subsumption => Box::new(SubsumptionChecker::new()),
             };
             indices.insert(kind, index);
         }
@@ -480,6 +485,13 @@ impl IndexRegistry {
     pub fn clause_keys(&self) -> Option<&ClauseKeysIndex> {
         self.indices
             .get(&IndexKind::ClauseKeys)
+            .and_then(|idx| idx.as_any().downcast_ref())
+    }
+
+    /// Get the SubsumptionChecker if it was created
+    pub fn subsumption_checker(&self) -> Option<&SubsumptionChecker> {
+        self.indices
+            .get(&IndexKind::Subsumption)
             .and_then(|idx| idx.as_any().downcast_ref())
     }
 

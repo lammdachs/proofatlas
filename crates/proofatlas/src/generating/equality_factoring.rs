@@ -2,10 +2,11 @@
 
 use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
 use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
-use crate::state::{Derivation, StateChange, GeneratingInference};
+use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
-use indexmap::IndexSet;
 
 /// Apply equality factoring rule
 /// From l = r v s = t v C where sigma = mgu(l, s), l = r is selected
@@ -130,12 +131,13 @@ impl GeneratingInference for EqualityFactoringRule {
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        _clauses: &[Clause],
-        _processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let given = &state.clauses[given_idx];
+        let selector = cm.literal_selector.as_ref();
+        let interner = &mut cm.interner;
         equality_factoring(given, given_idx, selector, interner)
             .into_iter()
             .map(|result| StateChange::Add {

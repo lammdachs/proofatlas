@@ -2,10 +2,11 @@
 
 use super::common::{collect_literals_except, InferenceResult};
 use crate::logic::{Clause, Interner, Position};
-use crate::state::{Derivation, StateChange, GeneratingInference};
+use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
-use indexmap::IndexSet;
 
 /// Apply equality resolution rule using literal selection
 /// From ~s = t, if we can unify s and t, derive the remaining clause
@@ -78,13 +79,14 @@ impl GeneratingInference for EqualityResolutionRule {
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        _clauses: &[Clause],
-        _processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
-        equality_resolution(given, given_idx, selector, &*interner)
+        let given = &state.clauses[given_idx];
+        let selector = cm.literal_selector.as_ref();
+        let interner = &cm.interner;
+        equality_resolution(given, given_idx, selector, interner)
             .into_iter()
             .map(|result| StateChange::Add {
                 clause: result.conclusion,

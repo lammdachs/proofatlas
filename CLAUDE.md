@@ -23,7 +23,7 @@ proofatlas/
 │   │       │   └── clause_manager.rs     # ClauseManager: interner + selector + KBO
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
-│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, etc.
+│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, SubsumptionChecker
 │   │       ├── selection/      # Clause selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -223,14 +223,21 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 
 ### Polymorphic Rule Architecture
 
+Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events (pending, activated, removed).
+
 **SimplifyingInference trait** (`state.rs`):
-- `simplify_forward()`: Simplify/delete clause in N using U∪P
-- `simplify_backward()`: Simplify clauses in U∪P using new clause
+- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify/delete clause in N using U∪P
+- `simplify_backward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify clauses in U∪P using new clause
 - Implementations in `simplifying/`: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
 
 **GeneratingInference trait** (`state.rs`):
-- `generate()`: Generate inferences with given clause and clauses in P
+- `generate(given_idx, &SaturationState, &mut ClauseManager, &IndexRegistry)`: Generate inferences with given clause and clauses in P
 - Implementations in `generating/`: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
+
+**IndexRegistry** (`index/mod.rs`): Central registry owning all indices, routes clause lifecycle events:
+- `SubsumptionChecker` (`index/subsumption.rs`): Feature vector index + clause keys + unit tracking for subsumption
+- `UnitEqualitiesIndex`: Tracks unit positive equalities for demodulation
+- `FeatureVectorIndex`: Feature vectors for subsumption candidate filtering
 
 All rules return `Vec<StateChange>` for atomic state modifications:
 - `Add { clause, derivation }`: Add new clause to N

@@ -4,7 +4,9 @@
 //! reflexive equalities like t=t).
 
 use crate::logic::{Clause, Interner, PredicateId};
-use crate::state::{SimplifyingInference, StateChange};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
+use crate::state::{SaturationState, SimplifyingInference, StateChange};
 
 /// Tautology deletion rule.
 pub struct TautologyRule {
@@ -36,10 +38,11 @@ impl SimplifyingInference for TautologyRule {
     fn simplify_forward(
         &self,
         clause_idx: usize,
-        clause: &Clause,
-        _clauses: &[Clause],
-        _interner: &Interner,
+        state: &SaturationState,
+        _cm: &ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let clause = &state.clauses[clause_idx];
         if self.is_tautology(clause) {
             vec![StateChange::Delete { clause_idx, rule_name: self.name().into() }]
         } else {

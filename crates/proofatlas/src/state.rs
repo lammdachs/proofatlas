@@ -4,8 +4,9 @@
 //! proof representation, inference traits, and derivation tracking.
 
 use crate::logic::{Clause, Interner, Position};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::json::{ProofJson, ProofResultJson, ClauseJson};
-use crate::logic::literal_selection::LiteralSelector;
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -107,90 +108,53 @@ pub enum StateChange {
 pub type EventLog = Vec<StateChange>;
 
 // =============================================================================
-// ClauseSet & ClauseNotification
-// =============================================================================
-
-/// Which clause set a notification refers to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClauseSet {
-    /// Unprocessed set (U)
-    Unprocessed,
-    /// Processed set (P)
-    Processed,
-}
-
-/// Notifications sent to rules when clauses are added/removed from U or P.
-///
-/// Rules can maintain internal indices by listening to these notifications.
-#[derive(Debug, Clone)]
-pub enum ClauseNotification<'a> {
-    /// Clause was added to a set
-    Added { clause_idx: usize, clause: &'a Clause },
-    /// Clause was removed from a set
-    Removed { clause_idx: usize, clause: &'a Clause },
-}
-
-// =============================================================================
 // Inference traits
 // =============================================================================
 
 /// Trait for simplification rules (tautology, subsumption, demodulation).
+///
+/// Rules receive the full saturation state, clause manager, and index registry
+/// at call time. They do not maintain internal state tracking clause lifecycle.
 pub trait SimplifyingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
-
-    /// Initialize the rule with input clauses.
-    fn initialize(&mut self, _clauses: &[Clause]) {}
-
-    /// Called when a clause is added to N (pending, not yet active).
-    fn on_clause_pending(&mut self, _clause_idx: usize, _clause: &Clause) {}
-
-    /// Called when a clause is activated (transferred from N to U).
-    fn on_clause_activated(&mut self, _clause_idx: usize, _clause: &Clause) {}
-
-    /// Notified when a clause is added to or removed from U or P.
-    fn notify(&mut self, _set: ClauseSet, _notif: ClauseNotification) {}
 
     /// Forward simplification: try to simplify/delete a clause in N using U∪P.
     fn simplify_forward(
         &self,
         clause_idx: usize,
-        clause: &Clause,
-        clauses: &[Clause],
-        interner: &Interner,
+        state: &SaturationState,
+        cm: &ClauseManager,
+        indices: &IndexRegistry,
     ) -> Vec<StateChange>;
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
     fn simplify_backward(
         &self,
         _clause_idx: usize,
-        _clause: &Clause,
-        _clauses: &[Clause],
-        _unprocessed: &IndexSet<usize>,
-        _processed: &IndexSet<usize>,
-        _interner: &Interner,
+        _state: &SaturationState,
+        _cm: &ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         vec![]
     }
 }
 
 /// Trait for generating inference rules (resolution, superposition, factoring, etc.).
+///
+/// Rules receive the full saturation state, clause manager, and index registry
+/// at call time. They do not maintain internal state tracking clause lifecycle.
 pub trait GeneratingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
-
-    /// Notified when a clause is added to or removed from P (processed)
-    fn notify(&mut self, _notif: ClauseNotification) {}
 
     /// Generate inferences with the given clause.
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        clauses: &[Clause],
-        processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        indices: &IndexRegistry,
     ) -> Vec<StateChange>;
 }
 

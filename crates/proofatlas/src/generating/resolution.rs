@@ -4,10 +4,11 @@ use super::common::{
     collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
     InferenceResult,
 };
-use crate::state::{Derivation, StateChange, GeneratingInference};
+use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
 use crate::logic::{Clause, Interner, Position};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
-use indexmap::IndexSet;
 
 /// Apply binary resolution between two clauses using literal selection
 pub fn resolution(
@@ -93,20 +94,21 @@ impl GeneratingInference for ResolutionRule {
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        clauses: &[Clause],
-        processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let given = &state.clauses[given_idx];
+        let selector = cm.literal_selector.as_ref();
+        let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
         // Resolution with processed clauses
-        for &processed_idx in processed.iter() {
+        for &processed_idx in state.processed.iter() {
             if processed_idx == given_idx {
                 continue;
             }
-            if let Some(processed_clause) = clauses.get(processed_idx) {
+            if let Some(processed_clause) = state.clauses.get(processed_idx) {
                 // Given as first clause
                 for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
                     changes.push(StateChange::Add {

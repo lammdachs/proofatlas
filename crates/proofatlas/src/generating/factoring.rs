@@ -2,10 +2,10 @@
 
 use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms, InferenceResult};
 use crate::logic::{Clause, Position};
-use crate::state::{Derivation, StateChange, GeneratingInference};
+use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::logic::clause_manager::ClauseManager;
+use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
-use indexmap::IndexSet;
-use crate::logic::Interner;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -85,12 +85,12 @@ impl GeneratingInference for FactoringRule {
     fn generate(
         &self,
         given_idx: usize,
-        given: &Clause,
-        _clauses: &[Clause],
-        _processed: &IndexSet<usize>,
-        selector: &dyn LiteralSelector,
-        _interner: &mut Interner,
+        state: &SaturationState,
+        cm: &mut ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let given = &state.clauses[given_idx];
+        let selector = cm.literal_selector.as_ref();
         factoring(given, given_idx, selector)
             .into_iter()
             .map(|result| StateChange::Add {

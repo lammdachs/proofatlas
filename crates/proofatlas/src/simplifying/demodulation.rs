@@ -5,10 +5,10 @@
 
 use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateId, Term, TermOrdering, KBO};
 use crate::logic::match_term;
+use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
-use crate::state::{Derivation, InferenceResult, SimplifyingInference, StateChange, ClauseSet, ClauseNotification};
-use indexmap::IndexSet;
-use std::collections::HashSet;
+use crate::index::IndexRegistry;
+use crate::state::{Derivation, InferenceResult, SaturationState, SimplifyingInference, StateChange};
 
 // =============================================================================
 // Demodulation Algorithm
@@ -155,19 +155,16 @@ fn rewrite_term(term: &Term, lhs: &Term, rhs: &Term, kbo: &KBO) -> Term {
 
 /// Demodulation rule (rewriting with unit equalities).
 ///
-/// Rewrites terms in clauses using oriented unit equalities.
+/// Stateless rule that queries the UnitEqualitiesIndex from the IndexRegistry.
 pub struct DemodulationRule {
     /// Predicate ID for equality (cached for performance, None if "=" not interned)
     equality_pred_id: Option<PredicateId>,
-    /// Unit equality clause indices in U∪P
-    unit_equalities: HashSet<usize>,
 }
 
 impl DemodulationRule {
     pub fn new(interner: &Interner) -> Self {
         DemodulationRule {
             equality_pred_id: interner.get_predicate("="),
-            unit_equalities: HashSet::new(),
         }
     }
 
@@ -183,28 +180,12 @@ impl DemodulationRule {
             false
         }
     }
-
-    /// Add a unit equality to the index
-    pub fn add_unit_equality(&mut self, clause_idx: usize) {
-        self.unit_equalities.insert(clause_idx);
-    }
-
-    /// Remove a unit equality from the index
-    pub fn remove_unit_equality(&mut self, clause_idx: usize) {
-        self.unit_equalities.remove(&clause_idx);
-    }
-
-    /// Get all unit equality indices
-    pub fn unit_equalities(&self) -> &HashSet<usize> {
-        &self.unit_equalities
-    }
 }
 
 impl Default for DemodulationRule {
     fn default() -> Self {
         DemodulationRule {
             equality_pred_id: None,
-            unit_equalities: HashSet::new(),
         }
     }
 }
@@ -214,36 +195,25 @@ impl SimplifyingInference for DemodulationRule {
         "Demodulation"
     }
 
-    fn on_clause_activated(&mut self, clause_idx: usize, clause: &Clause) {
-        if self.is_unit_equality(clause) {
-            self.unit_equalities.insert(clause_idx);
-        }
-    }
-
-    fn notify(&mut self, _set: ClauseSet, notif: ClauseNotification) {
-        // Track unit equalities in both U and P
-        match notif {
-            ClauseNotification::Added { clause_idx, clause } => {
-                if self.is_unit_equality(clause) {
-                    self.unit_equalities.insert(clause_idx);
-                }
-            }
-            ClauseNotification::Removed { clause_idx, .. } => {
-                self.unit_equalities.remove(&clause_idx);
-            }
-        }
-    }
-
     fn simplify_forward(
         &self,
         clause_idx: usize,
-        clause: &Clause,
-        clauses: &[Clause],
-        interner: &Interner,
+        state: &SaturationState,
+        cm: &ClauseManager,
+        indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let clause = &state.clauses[clause_idx];
+        let interner = &cm.interner;
+
+        // Query unit equalities from IndexRegistry
+        let unit_eq_index = match indices.unit_equalities() {
+            Some(idx) => idx,
+            None => return vec![],
+        };
+
         // Try to demodulate using each unit equality
-        for &unit_idx in &self.unit_equalities {
-            if let Some(unit_clause) = clauses.get(unit_idx) {
+        for &unit_idx in unit_eq_index.iter() {
+            if let Some(unit_clause) = state.clauses.get(unit_idx) {
                 let results = demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
                 if !results.is_empty() {
                     let mut simplified_clause = results[0].conclusion.clone();
@@ -268,12 +238,13 @@ impl SimplifyingInference for DemodulationRule {
     fn simplify_backward(
         &self,
         clause_idx: usize,
-        clause: &Clause,
-        clauses: &[Clause],
-        unprocessed: &IndexSet<usize>,
-        processed: &IndexSet<usize>,
-        interner: &Interner,
+        state: &SaturationState,
+        cm: &ClauseManager,
+        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
+        let clause = &state.clauses[clause_idx];
+        let interner = &cm.interner;
+
         // Only unit equalities can backward-demodulate
         if !self.is_unit_equality(clause) {
             return vec![];
@@ -283,23 +254,18 @@ impl SimplifyingInference for DemodulationRule {
         let rule_name: String = self.name().into();
 
         // Try to demodulate each clause in U∪P
-        for &target_idx in unprocessed.iter().chain(processed.iter()) {
+        for &target_idx in state.unprocessed.iter().chain(state.processed.iter()) {
             if target_idx == clause_idx {
                 continue;
             }
 
-            if let Some(target_clause) = clauses.get(target_idx) {
+            if let Some(target_clause) = state.clauses.get(target_idx) {
                 let results = demodulate(clause, target_clause, clause_idx, target_idx, interner);
                 if !results.is_empty() {
                     let mut simplified_clause = results[0].conclusion.clone();
                     orient_clause_equalities(&mut simplified_clause, interner);
 
-                    // Determine which set to remove from
-                    if processed.contains(&target_idx) {
-                        changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
-                    } else {
-                        changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
-                    }
+                    changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
 
                     // Add the simplified clause to N
                     changes.push(StateChange::Add {

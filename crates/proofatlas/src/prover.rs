@@ -8,7 +8,7 @@
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::{CNFFormula, Clause, ClauseKey, Interner};
 use crate::state::{
-    ClauseNotification, ClauseSet, Derivation, EventLog, GeneratingInference,
+    Derivation, EventLog, GeneratingInference,
     InferenceResult, Proof, ProofResult, ProofStep, SaturationState, SimplifyingInference,
     StateChange,
 };
@@ -68,20 +68,18 @@ impl ProofAtlas {
     ) -> Self {
         let initial_clause_count = initial_clauses.len();
 
-        // Initialize simplification rules
-        let mut simplifying_inferences: Vec<Box<dyn SimplifyingInference>> = vec![
+        // Initialize simplification rules (stateless — no lifecycle methods)
+        let simplifying_inferences: Vec<Box<dyn SimplifyingInference>> = vec![
             Box::new(TautologyRule::new(&interner)),
             Box::new(DemodulationRule::new(&interner)),
             Box::new(SubsumptionRule::new(&interner)),
         ];
 
-        // Initialize all simplification rules with input clauses
-        for rule in &mut simplifying_inferences {
-            rule.initialize(&initial_clauses);
-        }
-
-        // Create IndexRegistry
-        let required_indices: HashSet<IndexKind> = HashSet::new();
+        // Create IndexRegistry with all required indices
+        let required_indices: HashSet<IndexKind> = [
+            IndexKind::UnitEqualities,
+            IndexKind::Subsumption,
+        ].into_iter().collect();
         let mut index_registry = IndexRegistry::new(&required_indices, &interner);
         index_registry.initialize(&initial_clauses);
 
@@ -115,10 +113,7 @@ impl ProofAtlas {
             // Track clause memory
             clause_memory_bytes += clause.memory_bytes();
 
-            // Notify rules about pending clause
-            for rule in &mut simplifying_inferences {
-                rule.on_clause_pending(clause_idx, &oriented);
-            }
+            // Notify indices about pending clause
             index_registry.on_clause_pending(clause_idx, &oriented);
 
             clauses.push(clause);
@@ -228,7 +223,6 @@ impl ProofAtlas {
             }
 
             // 1b: Apply forward simplification rules
-            let clause = &self.state.clauses[clause_idx];
             let mut forward_deleted = false;
             let mut collected_changes: Vec<StateChange> = Vec::new();
 
@@ -238,9 +232,9 @@ impl ProofAtlas {
 
                 let changes = rule.simplify_forward(
                     clause_idx,
-                    clause,
-                    &self.state.clauses,
-                    &self.clause_manager.interner,
+                    &self.state,
+                    &self.clause_manager,
+                    &self.index_registry,
                 );
 
                 let success = !changes.is_empty();
@@ -265,47 +259,38 @@ impl ProofAtlas {
                 continue;
             }
 
-            // 1c: Clause survives - activate it
-            for rule in &mut self.simplifying_inferences {
-                rule.on_clause_activated(clause_idx, &self.state.clauses[clause_idx]);
-            }
+            // 1c: Clause survives - activate it (IndexRegistry handles lifecycle)
             self.index_registry
                 .on_clause_activated(clause_idx, &self.state.clauses[clause_idx]);
 
             // 1d: Apply backward simplification rules
             let mut all_backward_changes: Vec<StateChange> = Vec::new();
 
-            {
-                let clause = &self.state.clauses[clause_idx];
+            for rule in self.simplifying_inferences.iter() {
+                let rule_name = rule.name();
+                let t_rule = self.profile.as_ref().map(|_| Instant::now());
 
-                for rule in self.simplifying_inferences.iter() {
-                    let rule_name = rule.name();
-                    let t_rule = self.profile.as_ref().map(|_| Instant::now());
+                let changes = rule.simplify_backward(
+                    clause_idx,
+                    &self.state,
+                    &self.clause_manager,
+                    &self.index_registry,
+                );
 
-                    let changes = rule.simplify_backward(
-                        clause_idx,
-                        clause,
-                        &self.state.clauses,
-                        &self.state.unprocessed,
-                        &self.state.processed,
-                        &self.clause_manager.interner,
-                    );
+                let count = changes
+                    .iter()
+                    .filter(|c| {
+                        matches!(c, StateChange::Delete { .. } | StateChange::Add { .. })
+                    })
+                    .count();
 
-                    let count = changes
-                        .iter()
-                        .filter(|c| {
-                            matches!(c, StateChange::Delete { .. } | StateChange::Add { .. })
-                        })
-                        .count();
+                if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
+                    p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
+                    p.backward_simplify_time += t.elapsed();
+                }
 
-                    if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
-                        p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
-                        p.backward_simplify_time += t.elapsed();
-                    }
-
-                    if !changes.is_empty() {
-                        all_backward_changes.extend(changes);
-                    }
+                if !changes.is_empty() {
+                    all_backward_changes.extend(changes);
                 }
             }
 
@@ -315,7 +300,6 @@ impl ProofAtlas {
 
             // Transfer: move to unprocessed (U)
             self.state.unprocessed.insert(clause_idx);
-            self.notify_rules(ClauseSet::Unprocessed, clause_idx, true);
             self.state
                 .event_log
                 .push(StateChange::Transfer { clause_idx });
@@ -363,9 +347,7 @@ impl ProofAtlas {
         }
 
         // === Step 4: Activate given clause (transfer from U to P) ===
-        self.notify_rules(ClauseSet::Unprocessed, given_idx, false);
         self.state.processed.insert(given_idx);
-        self.notify_rules(ClauseSet::Processed, given_idx, true);
         self.state
             .event_log
             .push(StateChange::Activate { clause_idx: given_idx });
@@ -403,24 +385,6 @@ impl ProofAtlas {
     // Private helper methods
     // =========================================================================
 
-    /// Notify all rules about a clause being added to or removed from a set
-    fn notify_rules(&mut self, set: ClauseSet, clause_idx: usize, is_add: bool) {
-        let clause = &self.state.clauses[clause_idx];
-        let notif = if is_add {
-            ClauseNotification::Added { clause_idx, clause }
-        } else {
-            ClauseNotification::Removed { clause_idx, clause }
-        };
-        for rule in &mut self.simplifying_inferences {
-            rule.notify(set, notif.clone());
-        }
-        if set == ClauseSet::Processed {
-            for rule in &mut self.generating_inferences {
-                rule.notify(notif.clone());
-            }
-        }
-    }
-
     /// Apply a single StateChange, update internal state, and record to event log
     fn apply_change(&mut self, change: StateChange) {
         match &change {
@@ -437,9 +401,6 @@ impl ProofAtlas {
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
-                for rule in &mut self.simplifying_inferences {
-                    rule.on_clause_pending(new_idx, &oriented);
-                }
                 self.index_registry.on_clause_pending(new_idx, &oriented);
 
                 self.state.clause_memory_bytes += clause_with_id.memory_bytes();
@@ -462,11 +423,9 @@ impl ProofAtlas {
                 if self.state.new.contains(clause_idx) {
                     // Clause is in N - just record event
                 } else if self.state.unprocessed.shift_remove(clause_idx) {
-                    self.notify_rules(ClauseSet::Unprocessed, *clause_idx, false);
                     let clause = &self.state.clauses[*clause_idx];
                     self.index_registry.on_clause_removed(*clause_idx, clause);
                 } else if self.state.processed.shift_remove(clause_idx) {
-                    self.notify_rules(ClauseSet::Processed, *clause_idx, false);
                     let clause = &self.state.clauses[*clause_idx];
                     self.index_registry.on_clause_removed(*clause_idx, clause);
                 }
@@ -474,12 +433,10 @@ impl ProofAtlas {
             }
             StateChange::Transfer { clause_idx } => {
                 self.state.unprocessed.insert(*clause_idx);
-                self.notify_rules(ClauseSet::Unprocessed, *clause_idx, true);
                 self.state.event_log.push(change);
             }
             StateChange::Activate { clause_idx } => {
                 self.state.processed.insert(*clause_idx);
-                self.notify_rules(ClauseSet::Processed, *clause_idx, true);
                 self.state.event_log.push(change);
             }
         }
@@ -527,21 +484,21 @@ impl ProofAtlas {
     /// Generate all inferences with the given clause
     fn generate_inferences(&mut self, given_idx: usize) -> Vec<InferenceResult> {
         let mut results = Vec::new();
-        let given_clause = &self.state.clauses[given_idx];
-        let selector = self.clause_manager.literal_selector.as_ref();
 
-        for rule in &self.generating_inferences {
+        // Take generating_inferences out of self to avoid borrow conflict
+        // (we need &self.state and &mut self.clause_manager simultaneously)
+        let generating_inferences = std::mem::take(&mut self.generating_inferences);
+
+        for rule in &generating_inferences {
             let rule_name = rule.name();
             let t0 = self.profile.as_ref().map(|_| Instant::now());
             let before = results.len();
 
             let changes = rule.generate(
                 given_idx,
-                given_clause,
-                &self.state.clauses,
-                &self.state.processed,
-                selector,
-                &mut self.clause_manager.interner,
+                &self.state,
+                &mut self.clause_manager,
+                &self.index_registry,
             );
 
             for change in changes {
@@ -558,6 +515,9 @@ impl ProofAtlas {
                 p.record_generating_rule(rule_name, count, t.elapsed());
             }
         }
+
+        // Put generating_inferences back
+        self.generating_inferences = generating_inferences;
 
         results
     }
