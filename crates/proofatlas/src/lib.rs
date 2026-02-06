@@ -17,10 +17,6 @@ pub mod time_compat;
 pub mod trace;
 pub mod profile;
 
-// Backward-compatible re-export modules (will be removed in a future release)
-pub mod inference;
-pub mod saturation;
-
 #[cfg(feature = "python")]
 pub mod python_bindings;
 

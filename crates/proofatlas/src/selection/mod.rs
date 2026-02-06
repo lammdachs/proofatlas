@@ -34,7 +34,7 @@ pub mod sentence;
 
 // Literal selection re-exports (from logic module)
 pub use crate::logic::literal_selection::{
-    LiteralSelector, SelectAll, SelectLargestNegative, SelectMaxWeight, SelectMaximal,
+    LiteralSelector, SelectAll, SelectMaximal,
     SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal,
 };
 

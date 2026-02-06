@@ -9,11 +9,9 @@ This directory contains **integration tests** for the ProofAtlas Rust crate. The
 ## Test Organization
 
 - **Unit Tests**: Located in `src/` files, testing implementation details
-  - Example: `src/algorithms/rules_tests.rs` contains tests for inference rules
   - Run with: `cargo test --lib`
 
 - **Integration Tests** (this directory): Testing the public API
-  - Example: `integration_test.rs` tests multiple rules working together
   - Run with: `cargo test --test '*'`
 
 ## Running Tests
@@ -29,17 +27,14 @@ cargo test --lib
 cargo test --test '*'
 
 # Run a specific integration test file
-cargo test --test integration_test
+cargo test --test basic_test
 ```
-
-## Purpose of Integration Tests
-
-Integration tests in this directory:
-- Can only access the public API (no private items)
-- Test cross-module functionality
-- Verify the crate works as external users would use it
-- Each file is compiled as a separate crate
 
 ## Current Tests
 
-- `integration_test.rs`: Tests array-based theorem prover with saturation loop and inference rules
+- `basic_test.rs`: Basic theorem prover functionality
+- `test_calculus_compliance.rs`: Superposition calculus correctness
+- `test_group_theory.rs`: Group theory problem solving
+- `test_krs065_bug.rs`: Regression test for KRS065 bug
+- `test_literal_selection.rs`: Literal selection strategies
+- `test_selection_behavior.rs`: Clause selection behavior

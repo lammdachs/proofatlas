@@ -337,16 +337,6 @@ impl LiteralSelector for SelectUniqueMaximalOrNegOrMaximal {
     }
 }
 
-// ============================================================================
-// Legacy aliases for backwards compatibility
-// ============================================================================
-
-/// Alias for SelectAll (legacy name)
-pub type SelectMaxWeight = SelectMaximal;
-
-/// Alias for SelectNegMaxWeightOrMaximal (legacy name)
-pub type SelectLargestNegative = SelectNegMaxWeightOrMaximal;
-
 #[cfg(test)]
 mod tests {
     use super::*;
