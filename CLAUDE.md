@@ -27,7 +27,7 @@ proofatlas/
 │   │       ├── selection/      # Clause selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
-│   │       ├── state.rs        # SaturationState, StateChange, EventLog, Derivation, traits
+│   │       ├── state.rs        # SaturationState, StateChange, EventLog, traits
 │   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()/saturate()
 │   │       ├── trace.rs        # EventLogReplayer, extract_proof_from_events
 │   │       ├── profile.rs      # SaturationProfile
@@ -240,26 +240,18 @@ Rules are **stateless** — they receive the full context at call time and do no
 - `FeatureVectorIndex`: Feature vectors for subsumption candidate filtering
 
 All rules return `Vec<StateChange>` for atomic state modifications:
-- `Add { clause, derivation }`: Add new clause to N
-- `Delete { clause_idx, rule_name }`: Delete from any set (simplification)
-- `Transfer { clause_idx }`: Move clause N→U
-- `Activate { clause_idx }`: Move clause U→P
+- `Add(clause, rule_name, premises)`: Add new clause to N
+- `Delete(clause_idx, rule_name, justification)`: Delete from any set (simplification)
+- `Transfer(clause_idx)`: Move clause N→U
+- `Activate(clause_idx)`: Move clause U→P
 
 This architecture enables adding new rules without modifying the main loop.
 
 ### Derivation Tracking
-The `Derivation` struct tracks how each clause was derived:
-```rust
-pub struct Derivation {
-    pub rule_name: String,
-    pub premises: Vec<Position>,  // Position = clause index + path into clause
-}
-```
-
-Rules construct derivations with `Position::clause(idx)` for premises. `Derivation::clause_indices()` extracts just the clause indices for proof extraction.
+Derivation information (rule name and premises) is stored directly in `StateChange::Add` and `StateChange::Delete` tuple variants—there is no separate `Derivation` struct. The standalone `clause_indices(premises: &[Position]) -> Vec<usize>` helper extracts clause indices from premise positions for proof extraction.
 
 ### Event Log
-The saturation state maintains an event log (`Vec<StateChange>`) as the single source of truth for derivations. All clause additions (`Add`) include the derivation info. This enables:
+The saturation state maintains an event log (`Vec<StateChange>`) as the single source of truth for derivations. All clause additions (`Add(clause, rule_name, premises)`) include the derivation info inline. This enables:
 - **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
 - **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
 - **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection
@@ -270,7 +262,7 @@ The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying
 Literals have a flat structure with `predicate`, `args`, and `polarity` directly on the `Literal` struct (no intermediate `Atom` wrapper). `Atom` still exists for FOF formula representation in the parser but is not used in clause-level operations.
 
 ### Position
-`Position` (`logic/core/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `Derivation` premises and throughout the system to reference inference sites.
+`Position` (`logic/core/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `StateChange` premises and throughout the system to reference inference sites.
 
 ### Profiling
 `ProverConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `prove()` returns `(ProofResult, Option<SaturationProfile>, EventLog, Interner)` with timing and counting data for every phase:

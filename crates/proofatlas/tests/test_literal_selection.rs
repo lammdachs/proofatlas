@@ -83,7 +83,11 @@ fn test_resolution_tries_all_literals() {
 
     // Each resolvent should have 4 literals (2 from each parent minus the resolved pair)
     for result in &results {
-        assert_eq!(result.conclusion.literals.len(), 4);
+        if let proofatlas::StateChange::Add(clause, _, _) = result {
+            assert_eq!(clause.literals.len(), 4);
+        } else {
+            panic!("Expected StateChange::Add");
+        }
     }
 }
 
@@ -122,6 +126,10 @@ fn test_factoring_tries_all_pairs() {
 
     // Each factor should have 2 literals (after factoring one pair)
     for result in &results {
-        assert_eq!(result.conclusion.literals.len(), 2);
+        if let proofatlas::StateChange::Add(clause, _, _) = result {
+            assert_eq!(clause.literals.len(), 2);
+        } else {
+            panic!("Expected StateChange::Add");
+        }
     }
 }

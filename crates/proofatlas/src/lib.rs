@@ -33,7 +33,7 @@ pub use logic::{
 
 // Re-export state types
 pub use state::{
-    Derivation, EventLog, InferenceResult, Proof, ProofResult, ProofStep,
+    clause_indices, EventLog, Proof, ProofResult, ProofStep,
     SaturationState, StateChange,
 };
 

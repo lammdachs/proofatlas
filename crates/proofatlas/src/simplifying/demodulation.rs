@@ -8,7 +8,7 @@ use crate::logic::match_term;
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
-use crate::state::{Derivation, InferenceResult, SaturationState, SimplifyingInference, StateChange};
+use crate::state::{SaturationState, SimplifyingInference, StateChange};
 
 // =============================================================================
 // Demodulation Algorithm
@@ -21,7 +21,7 @@ pub fn demodulate(
     unit_idx: usize,
     target_idx: usize,
     interner: &Interner,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
 
     // Unit equality must have exactly one positive equality literal
@@ -50,13 +50,11 @@ pub fn demodulate(
             if let Some(new_clause) = demodulate_clause(target, lhs, rhs, &kbo) {
                 let mut new_clause = new_clause;
                 new_clause.id = None;
-                results.push(InferenceResult {
-                    derivation: Derivation {
-                        rule_name: "Demodulation".into(),
-                        premises: vec![Position::clause(unit_idx), Position::clause(target_idx)],
-                    },
-                    conclusion: new_clause,
-                });
+                results.push(StateChange::Add(
+                    new_clause,
+                    "Demodulation".into(),
+                    vec![Position::clause(unit_idx), Position::clause(target_idx)],
+                ));
             }
         }
         TermOrdering::Less => {
@@ -64,13 +62,11 @@ pub fn demodulate(
             if let Some(new_clause) = demodulate_clause(target, rhs, lhs, &kbo) {
                 let mut new_clause = new_clause;
                 new_clause.id = None;
-                results.push(InferenceResult {
-                    derivation: Derivation {
-                        rule_name: "Demodulation".into(),
-                        premises: vec![Position::clause(unit_idx), Position::clause(target_idx)],
-                    },
-                    conclusion: new_clause,
-                });
+                results.push(StateChange::Add(
+                    new_clause,
+                    "Demodulation".into(),
+                    vec![Position::clause(unit_idx), Position::clause(target_idx)],
+                ));
             }
         }
         _ => {
@@ -216,19 +212,19 @@ impl SimplifyingInference for DemodulationRule {
             if let Some(unit_clause) = state.clauses.get(unit_idx) {
                 let results = demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
                 if !results.is_empty() {
-                    let mut simplified_clause = results[0].conclusion.clone();
-                    orient_clause_equalities(&mut simplified_clause, interner);
+                    if let StateChange::Add(ref conclusion, _, _) = results[0] {
+                        let mut simplified_clause = conclusion.clone();
+                        orient_clause_equalities(&mut simplified_clause, interner);
 
-                    return vec![
-                        StateChange::Delete { clause_idx, rule_name: self.name().into() },
-                        StateChange::Add {
-                            clause: simplified_clause,
-                            derivation: Derivation {
-                                rule_name: "Demodulation".into(),
-                                premises: vec![Position::clause(unit_idx), Position::clause(clause_idx)],
-                            },
-                        },
-                    ];
+                        return vec![
+                            StateChange::Delete(clause_idx, self.name().into(), vec![Position::clause(unit_idx)]),
+                            StateChange::Add(
+                                simplified_clause,
+                                "Demodulation".into(),
+                                vec![Position::clause(unit_idx), Position::clause(clause_idx)],
+                            ),
+                        ];
+                    }
                 }
             }
         }
@@ -262,19 +258,19 @@ impl SimplifyingInference for DemodulationRule {
             if let Some(target_clause) = state.clauses.get(target_idx) {
                 let results = demodulate(clause, target_clause, clause_idx, target_idx, interner);
                 if !results.is_empty() {
-                    let mut simplified_clause = results[0].conclusion.clone();
-                    orient_clause_equalities(&mut simplified_clause, interner);
+                    if let StateChange::Add(ref conclusion, _, _) = results[0] {
+                        let mut simplified_clause = conclusion.clone();
+                        orient_clause_equalities(&mut simplified_clause, interner);
 
-                    changes.push(StateChange::Delete { clause_idx: target_idx, rule_name: rule_name.clone() });
+                        changes.push(StateChange::Delete(target_idx, rule_name.clone(), vec![Position::clause(clause_idx)]));
 
-                    // Add the simplified clause to N
-                    changes.push(StateChange::Add {
-                        clause: simplified_clause,
-                        derivation: Derivation {
-                            rule_name: "Demodulation".into(),
-                            premises: vec![Position::clause(clause_idx), Position::clause(target_idx)],
-                        },
-                    });
+                        // Add the simplified clause to N
+                        changes.push(StateChange::Add(
+                            simplified_clause,
+                            "Demodulation".into(),
+                            vec![Position::clause(clause_idx), Position::clause(target_idx)],
+                        ));
+                    }
                 }
             }
         }
@@ -338,6 +334,10 @@ mod tests {
 
         // Should produce P(b)
         let expected = Clause::new(vec![Literal::positive(p, vec![b.clone()])]);
-        assert_eq!(results[0].conclusion.literals, expected.literals);
+        if let StateChange::Add(clause, _, _) = &results[0] {
+            assert_eq!(clause.literals, expected.literals);
+        } else {
+            panic!("Expected StateChange::Add");
+        }
     }
 }

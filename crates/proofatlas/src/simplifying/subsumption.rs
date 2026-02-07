@@ -40,6 +40,7 @@
 use crate::logic::{Clause, Literal, Substitution, Term, VariableId, Interner};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
+use crate::logic::Position;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
 use std::collections::{HashMap, HashSet};
 
@@ -79,8 +80,8 @@ impl SimplifyingInference for SubsumptionRule {
     ) -> Vec<StateChange> {
         let clause = &state.clauses[clause_idx];
         if let Some(checker) = indices.subsumption_checker() {
-            if checker.find_subsumer(clause).is_some() {
-                return vec![StateChange::Delete { clause_idx, rule_name: self.name().into() }];
+            if let Some(subsumer_idx) = checker.find_subsumer(clause) {
+                return vec![StateChange::Delete(clause_idx, self.name().into(), vec![Position::clause(subsumer_idx)])];
             }
         }
         vec![]
@@ -112,7 +113,7 @@ impl SimplifyingInference for SubsumptionRule {
         subsumed
             .into_iter()
             .filter(|&idx| state.processed.contains(&idx) || state.unprocessed.contains(&idx))
-            .map(|idx| StateChange::Delete { clause_idx: idx, rule_name: rule_name.clone() })
+            .map(|idx| StateChange::Delete(idx, rule_name.clone(), vec![Position::clause(clause_idx)]))
             .collect()
     }
 }

@@ -1,7 +1,5 @@
 //! Common types and utilities for inference rules
 
-pub use crate::state::InferenceResult;
-
 use crate::logic::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO};
 use crate::logic::unify;
 use std::collections::HashSet;

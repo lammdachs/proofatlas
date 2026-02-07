@@ -8,8 +8,8 @@
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::{CNFFormula, Clause, ClauseKey, Interner};
 use crate::state::{
-    Derivation, EventLog, GeneratingInference,
-    InferenceResult, Proof, ProofResult, ProofStep, SaturationState, SimplifyingInference,
+    EventLog, GeneratingInference,
+    ProofResult, SaturationState, SimplifyingInference,
     StateChange,
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
@@ -137,10 +137,11 @@ impl ProofAtlas {
         // Build initial event log with input clauses
         let mut event_log = Vec::new();
         for idx in 0..clause_idx {
-            event_log.push(StateChange::Add {
-                clause: clauses[idx].clone(),
-                derivation: Derivation::input(),
-            });
+            event_log.push(StateChange::Add(
+                clauses[idx].clone(),
+                "Input".into(),
+                vec![],
+            ));
         }
 
         let profile = if config.enable_profiling {
@@ -215,10 +216,10 @@ impl ProofAtlas {
         let start_time = *self.start_time.get_or_insert_with(Instant::now);
 
         // === Step 1: Process new clauses ===
-        while let Some(clause_idx) = self.state.new.pop_front() {
+        while let Some(&clause_idx) = self.state.new.front() {
             // 1a: Check empty clause immediately
             if self.state.clauses[clause_idx].is_empty() {
-                let proof = self.extract_proof(clause_idx);
+                let proof = self.state.extract_proof(clause_idx);
                 return Some(ProofResult::Proof(proof));
             }
 
@@ -259,7 +260,7 @@ impl ProofAtlas {
                 continue;
             }
 
-            // 1c: Clause survives - activate it (IndexRegistry handles lifecycle)
+            // 1c: Clause survives - activate it in indices
             self.index_registry
                 .on_clause_activated(clause_idx, &self.state.clauses[clause_idx]);
 
@@ -280,7 +281,7 @@ impl ProofAtlas {
                 let count = changes
                     .iter()
                     .filter(|c| {
-                        matches!(c, StateChange::Delete { .. } | StateChange::Add { .. })
+                        matches!(c, StateChange::Delete(..) | StateChange::Add(..))
                     })
                     .count();
 
@@ -298,16 +299,13 @@ impl ProofAtlas {
                 self.apply_change(change);
             }
 
-            // Transfer: move to unprocessed (U)
-            self.state.unprocessed.insert(clause_idx);
-            self.state
-                .event_log
-                .push(StateChange::Transfer { clause_idx });
+            // 1e: Transfer N → U
+            self.apply_change(StateChange::Transfer(clause_idx));
         }
 
         // === Step 2: Check saturation ===
         if self.state.unprocessed.is_empty() {
-            let steps = self.build_proof_steps();
+            let steps = self.state.build_proof_steps();
             let clauses = self.state.clauses.clone();
             return Some(ProofResult::Saturated(steps, clauses));
         }
@@ -337,7 +335,7 @@ impl ProofAtlas {
         let given_idx = match self.select_given_clause() {
             Some(idx) => idx,
             None => {
-                let steps = self.build_proof_steps();
+                let steps = self.state.build_proof_steps();
                 let clauses = self.state.clauses.clone();
                 return Some(ProofResult::Saturated(steps, clauses));
             }
@@ -347,31 +345,27 @@ impl ProofAtlas {
         }
 
         // === Step 4: Activate given clause (transfer from U to P) ===
-        self.state.processed.insert(given_idx);
-        self.state
-            .event_log
-            .push(StateChange::Activate { clause_idx: given_idx });
+        self.apply_change(StateChange::Activate(given_idx));
 
         // === Step 5: Generate inferences ===
         let t0 = self.profile.as_ref().map(|_| Instant::now());
-        let new_inferences = self.generate_inferences(given_idx);
+        let new_changes = self.generate_inferences(given_idx);
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
             p.generate_inferences_time += t.elapsed();
-            p.clauses_generated += new_inferences.len();
+            p.clauses_generated += new_changes.len();
         }
 
         // Add new inferences (deduplicate within the batch first)
         let t0 = self.profile.as_ref().map(|_| Instant::now());
         let mut seen_in_batch: HashSet<ClauseKey> = HashSet::new();
-        for inference in new_inferences {
-            let mut oriented = inference.conclusion.clone();
-            self.clause_manager.orient_equalities(&mut oriented);
-            let clause_key = ClauseKey::from_clause(&oriented);
-            if seen_in_batch.insert(clause_key) {
-                self.apply_change(StateChange::Add {
-                    clause: oriented,
-                    derivation: inference.derivation,
-                });
+        for change in new_changes {
+            if let StateChange::Add(clause, rule_name, premises) = change {
+                let mut oriented = clause.clone();
+                self.clause_manager.orient_equalities(&mut oriented);
+                let clause_key = ClauseKey::from_clause(&oriented);
+                if seen_in_batch.insert(clause_key) {
+                    self.apply_change(StateChange::Add(oriented, rule_name, premises));
+                }
             }
         }
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
@@ -388,7 +382,7 @@ impl ProofAtlas {
     /// Apply a single StateChange, update internal state, and record to event log
     fn apply_change(&mut self, change: StateChange) {
         match &change {
-            StateChange::Add { clause, derivation } => {
+            StateChange::Add(clause, _rule_name, _premises) => {
                 if clause.literals.len() > self.config.max_clause_size {
                     return;
                 }
@@ -407,36 +401,47 @@ impl ProofAtlas {
                 self.state.clauses.push(clause_with_id.clone());
                 self.state.new.push_back(new_idx);
 
-                self.state.event_log.push(StateChange::Add {
-                    clause: clause_with_id,
-                    derivation: derivation.clone(),
-                });
+                // Re-construct with updated clause (includes id)
+                if let StateChange::Add(_, rule_name, premises) = change {
+                    self.state.event_log.push(StateChange::Add(
+                        clause_with_id,
+                        rule_name,
+                        premises,
+                    ));
+                }
 
                 if let Some(p) = self.profile.as_mut() {
                     p.clauses_added += 1;
                 }
             }
-            StateChange::Delete {
-                clause_idx,
-                rule_name: _,
-            } => {
-                if self.state.new.contains(clause_idx) {
-                    // Clause is in N - just record event
-                } else if self.state.unprocessed.shift_remove(clause_idx) {
-                    let clause = &self.state.clauses[*clause_idx];
-                    self.index_registry.on_clause_removed(*clause_idx, clause);
-                } else if self.state.processed.shift_remove(clause_idx) {
-                    let clause = &self.state.clauses[*clause_idx];
-                    self.index_registry.on_clause_removed(*clause_idx, clause);
+            StateChange::Delete(clause_idx, _rule_name, _justification) => {
+                let clause_idx = *clause_idx;
+                // Remove from whichever set contains the clause
+                if self.state.new.front() == Some(&clause_idx) {
+                    self.state.new.pop_front();
+                } else if self.state.unprocessed.shift_remove(&clause_idx) {
+                    let clause = &self.state.clauses[clause_idx];
+                    self.index_registry.on_clause_removed(clause_idx, clause);
+                } else if self.state.processed.shift_remove(&clause_idx) {
+                    let clause = &self.state.clauses[clause_idx];
+                    self.index_registry.on_clause_removed(clause_idx, clause);
                 }
                 self.state.event_log.push(change);
             }
-            StateChange::Transfer { clause_idx } => {
-                self.state.unprocessed.insert(*clause_idx);
+            StateChange::Transfer(clause_idx) => {
+                let clause_idx = *clause_idx;
+                // N → U
+                if self.state.new.front() == Some(&clause_idx) {
+                    self.state.new.pop_front();
+                }
+                self.state.unprocessed.insert(clause_idx);
                 self.state.event_log.push(change);
             }
-            StateChange::Activate { clause_idx } => {
-                self.state.processed.insert(*clause_idx);
+            StateChange::Activate(clause_idx) => {
+                let clause_idx = *clause_idx;
+                // U → P (selector already removed from U)
+                self.state.unprocessed.shift_remove(&clause_idx);
+                self.state.processed.insert(clause_idx);
                 self.state.event_log.push(change);
             }
         }
@@ -447,7 +452,7 @@ impl ProofAtlas {
         if let Some(limit_mb) = self.config.max_clause_memory_mb {
             if self.state.clause_memory_bytes >= limit_mb * 1024 * 1024 {
                 return Some(ProofResult::ResourceLimit(
-                    self.build_proof_steps(),
+                    self.state.build_proof_steps(),
                     self.state.clauses.clone(),
                 ));
             }
@@ -456,19 +461,19 @@ impl ProofAtlas {
             && self.state.current_iteration >= self.config.max_iterations
         {
             return Some(ProofResult::ResourceLimit(
-                self.build_proof_steps(),
+                self.state.build_proof_steps(),
                 self.state.clauses.clone(),
             ));
         }
         if self.config.max_clauses > 0 && self.state.clauses.len() >= self.config.max_clauses {
             return Some(ProofResult::ResourceLimit(
-                self.build_proof_steps(),
+                self.state.build_proof_steps(),
                 self.state.clauses.clone(),
             ));
         }
         if start_time.elapsed() > self.config.timeout {
             return Some(ProofResult::Timeout(
-                self.build_proof_steps(),
+                self.state.build_proof_steps(),
                 self.state.clauses.clone(),
             ));
         }
@@ -482,7 +487,7 @@ impl ProofAtlas {
     }
 
     /// Generate all inferences with the given clause
-    fn generate_inferences(&mut self, given_idx: usize) -> Vec<InferenceResult> {
+    fn generate_inferences(&mut self, given_idx: usize) -> Vec<StateChange> {
         let mut results = Vec::new();
 
         // Take generating_inferences out of self to avoid borrow conflict
@@ -501,14 +506,7 @@ impl ProofAtlas {
                 &self.index_registry,
             );
 
-            for change in changes {
-                if let StateChange::Add { clause, derivation } = change {
-                    results.push(InferenceResult {
-                        conclusion: clause,
-                        derivation,
-                    });
-                }
-            }
+            results.extend(changes);
 
             if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
                 let count = results.len() - before;
@@ -520,71 +518,6 @@ impl ProofAtlas {
         self.generating_inferences = generating_inferences;
 
         results
-    }
-
-    /// Extract a proof by backward traversal from the empty clause.
-    fn extract_proof(&self, empty_clause_idx: usize) -> Proof {
-        let mut derivation_map = std::collections::HashMap::new();
-        for event in &self.state.event_log {
-            if let StateChange::Add { clause, derivation } = event {
-                if let Some(idx) = clause.id {
-                    derivation_map.insert(idx, derivation.clone());
-                }
-            }
-        }
-
-        let mut proof_clause_indices = Vec::new();
-        let mut visited = HashSet::new();
-        let mut to_visit = vec![empty_clause_idx];
-
-        while let Some(idx) = to_visit.pop() {
-            if !visited.insert(idx) {
-                continue;
-            }
-            proof_clause_indices.push(idx);
-            if let Some(derivation) = derivation_map.get(&idx) {
-                to_visit.extend(derivation.clause_indices());
-            }
-        }
-
-        proof_clause_indices.sort();
-
-        let steps = proof_clause_indices
-            .iter()
-            .map(|&idx| ProofStep {
-                clause_idx: idx,
-                derivation: derivation_map
-                    .get(&idx)
-                    .cloned()
-                    .unwrap_or_else(Derivation::input),
-                conclusion: self.state.clauses[idx].clone(),
-            })
-            .collect();
-
-        Proof {
-            steps,
-            empty_clause_idx,
-            all_clauses: self.state.clauses.clone(),
-        }
-    }
-
-    /// Build proof steps from event log.
-    fn build_proof_steps(&self) -> Vec<ProofStep> {
-        self.state
-            .event_log
-            .iter()
-            .filter_map(|event| {
-                if let StateChange::Add { clause, derivation } = event {
-                    clause.id.map(|idx| ProofStep {
-                        clause_idx: idx,
-                        derivation: derivation.clone(),
-                        conclusion: clause.clone(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 }
 

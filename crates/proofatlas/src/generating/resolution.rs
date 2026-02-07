@@ -2,9 +2,8 @@
 
 use super::common::{
     collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
-    InferenceResult,
 };
-use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::{Clause, Interner, Position};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
@@ -18,7 +17,7 @@ pub fn resolution(
     idx2: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
 
     // Get selected literals from both clauses
@@ -54,13 +53,11 @@ pub fn resolution(
                     let new_clause = Clause::new(new_literals);
 
                     // Tautology check delegated to TautologyRule during forward simplification
-                    results.push(InferenceResult {
-                        derivation: Derivation {
-                            rule_name: "Resolution".into(),
-                            premises: vec![Position::clause(idx1), Position::clause(idx2)],
-                        },
-                        conclusion: new_clause,
-                    });
+                    results.push(StateChange::Add(
+                        new_clause,
+                        "Resolution".into(),
+                        vec![Position::clause(idx1), Position::clause(idx2)],
+                    ));
                 }
             }
         }
@@ -110,29 +107,14 @@ impl GeneratingInference for ResolutionRule {
             }
             if let Some(processed_clause) = state.clauses.get(processed_idx) {
                 // Given as first clause
-                for result in resolution(given, processed_clause, given_idx, processed_idx, selector, interner) {
-                    changes.push(StateChange::Add {
-                        clause: result.conclusion,
-                        derivation: result.derivation,
-                    });
-                }
+                changes.extend(resolution(given, processed_clause, given_idx, processed_idx, selector, interner));
                 // Given as second clause
-                for result in resolution(processed_clause, given, processed_idx, given_idx, selector, interner) {
-                    changes.push(StateChange::Add {
-                        clause: result.conclusion,
-                        derivation: result.derivation,
-                    });
-                }
+                changes.extend(resolution(processed_clause, given, processed_idx, given_idx, selector, interner));
             }
         }
 
         // Self-resolution
-        for result in resolution(given, given, given_idx, given_idx, selector, interner) {
-            changes.push(StateChange::Add {
-                clause: result.conclusion,
-                derivation: result.derivation,
-            });
-        }
+        changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
 
         changes
     }
@@ -200,6 +182,11 @@ mod tests {
         let selector = SelectAll;
         let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].conclusion.literals.len(), 2);
+        if let StateChange::Add(clause, rule, _) = &results[0] {
+            assert_eq!(clause.literals.len(), 2);
+            assert_eq!(rule, "Resolution");
+        } else {
+            panic!("Expected StateChange::Add");
+        }
     }
 }

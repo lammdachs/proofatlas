@@ -1,7 +1,7 @@
 //! JSON serialization types for proof data
 
 use crate::logic::{Clause, Interner, Literal, Term};
-use crate::state::{Proof, ProofStep};
+use crate::state::{clause_indices, Proof, ProofStep};
 use serde::{Deserialize, Serialize};
 
 /// JSON representation of a term
@@ -151,8 +151,8 @@ impl From<&ProofStep> for ProofStepJson {
         ProofStepJson {
             clause_idx: step.clause_idx,
             inference: InferenceJson {
-                rule: step.derivation.rule_name.clone(),
-                premises: step.derivation.clause_indices(),
+                rule: step.rule_name.clone(),
+                premises: clause_indices(&step.premises),
             },
         }
     }

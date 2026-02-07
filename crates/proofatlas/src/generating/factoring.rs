@@ -1,8 +1,8 @@
 //! Factoring inference rule
 
-use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms, InferenceResult};
+use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms};
 use crate::logic::{Clause, Position};
-use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
@@ -12,7 +12,7 @@ pub fn factoring(
     clause: &Clause,
     idx: usize,
     selector: &dyn LiteralSelector,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
 
     // Get selected literals
@@ -44,13 +44,11 @@ pub fn factoring(
                         let new_clause = Clause::new(new_literals);
 
                         // Tautology check delegated to TautologyRule during forward simplification
-                        results.push(InferenceResult {
-                            derivation: Derivation {
-                                rule_name: "Factoring".into(),
-                                premises: vec![Position::clause(idx)],
-                            },
-                            conclusion: new_clause,
-                        });
+                        results.push(StateChange::Add(
+                            new_clause,
+                            "Factoring".into(),
+                            vec![Position::clause(idx)],
+                        ));
                     }
                 }
             }
@@ -92,12 +90,6 @@ impl GeneratingInference for FactoringRule {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
         factoring(given, given_idx, selector)
-            .into_iter()
-            .map(|result| StateChange::Add {
-                clause: result.conclusion,
-                derivation: result.derivation,
-            })
-            .collect()
     }
 }
 
@@ -154,7 +146,12 @@ mod tests {
         // P(X) factors with P(Y), and P(Y) factors with P(X)
         // Both produce the same clause: P(X) v Q(Z) (with appropriate substitution)
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].conclusion.literals.len(), 2);
-        assert_eq!(results[1].conclusion.literals.len(), 2);
+        for r in &results {
+            if let StateChange::Add(clause, _, _) = r {
+                assert_eq!(clause.literals.len(), 2);
+            } else {
+                panic!("Expected StateChange::Add");
+            }
+        }
     }
 }

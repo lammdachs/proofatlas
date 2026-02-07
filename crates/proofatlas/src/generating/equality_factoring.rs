@@ -1,8 +1,8 @@
 //! Equality factoring inference rule
 
-use super::common::{collect_literals_except, is_ordered_greater, InferenceResult};
+use super::common::{collect_literals_except, is_ordered_greater};
 use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
-use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
@@ -17,7 +17,7 @@ pub fn equality_factoring(
     idx: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
     let selected = selector.select(clause);
     let kbo = KBO::new(KBOConfig::default());
@@ -82,13 +82,11 @@ pub fn equality_factoring(
 
                     let conclusion = Clause::new(new_literals);
 
-                    results.push(InferenceResult {
-                        derivation: Derivation {
-                            rule_name: "EqualityFactoring".into(),
-                            premises: vec![Position::clause(idx)],
-                        },
+                    results.push(StateChange::Add(
                         conclusion,
-                    });
+                        "EqualityFactoring".into(),
+                        vec![Position::clause(idx)],
+                    ));
                 }
             }
         }
@@ -139,11 +137,5 @@ impl GeneratingInference for EqualityFactoringRule {
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         equality_factoring(given, given_idx, selector, interner)
-            .into_iter()
-            .map(|result| StateChange::Add {
-                clause: result.conclusion,
-                derivation: result.derivation,
-            })
-            .collect()
     }
 }

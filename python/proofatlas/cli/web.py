@@ -93,13 +93,12 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     initial_clause_count = 0
 
     for event in events:
-        if event["type"] == "Add":
-            clause = event["clause"]
-            derivation = event["derivation"]
+        if "Add" in event:
+            clause, rule, premises = event["Add"]
             idx = clause.get("id")
             if idx is not None:
-                derivations[idx] = (derivation["rule_name"], derivation.get("premises", []))
-                if derivation["rule_name"] == "Input":
+                derivations[idx] = (rule, premises)
+                if rule == "Input":
                     initial_clause_count = max(initial_clause_count, idx + 1)
 
     # Build initial_clauses array
@@ -115,17 +114,11 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     current_selection = None
 
     for event in events:
-        event_type = event["type"]
-
-        if event_type == "Add":
-            clause = event["clause"]
-            derivation = event["derivation"]
+        if "Add" in event:
+            clause, rule, premises = event["Add"]
             idx = clause.get("id")
             if idx is None:
                 continue
-
-            rule = derivation["rule_name"]
-            premises = derivation.get("premises", [])
 
             # Skip initial input clauses
             if rule == "Input":
@@ -145,9 +138,8 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                     "rule": "Demodulation", "premises": premises,
                 })
 
-        elif event_type == "Delete":
-            idx = event["clause_idx"]
-            rule_name = event["rule_name"]
+        elif "Delete" in event:
+            idx, rule_name, justification = event["Delete"]
             clause_str = clauses.get(idx, "")
             rule = {
                 "Tautology": "TautologyDeletion",
@@ -156,20 +148,20 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
             }.get(rule_name, "BackwardSubsumptionDeletion")
             current_simplification.append({
                 "clause_idx": idx, "clause": clause_str,
-                "rule": rule, "premises": [],
+                "rule": rule, "premises": justification,
             })
 
-        elif event_type == "Transfer":
-            idx = event["clause_idx"]
+        elif "Transfer" in event:
+            idx = event["Transfer"]
             clause_str = clauses.get(idx, "")
             current_simplification.append({
                 "clause_idx": idx, "clause": clause_str,
                 "rule": "Transfer", "premises": [],
             })
 
-        elif event_type == "Activate":
+        elif "Activate" in event:
             # Given clause selection - end of one iteration, start of next
-            idx = event["clause_idx"]
+            idx = event["Activate"]
             clause_str = clauses.get(idx, "")
 
             # If we have accumulated events, save the current iteration first

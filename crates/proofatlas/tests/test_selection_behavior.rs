@@ -50,7 +50,9 @@ fn test_factoring_with_select_all_detailed() {
 
     println!("Number of factors: {}", results.len());
     for (i, result) in results.iter().enumerate() {
-        println!("Factor {}: {}", i + 1, result.conclusion);
+        if let proofatlas::StateChange::Add(clause, _, _) = result {
+            println!("Factor {}: {}", i + 1, clause);
+        }
     }
 
     // With SelectAll, all literals are selected

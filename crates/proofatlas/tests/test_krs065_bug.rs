@@ -66,7 +66,7 @@ fn test_with_duplicate_clause() {
         ProofResult::Proof(proof) => {
             println!("PROOF FOUND! {} steps", proof.steps.len());
             for step in &proof.steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.clause_indices());
+                println!("  [{:?}] {} <- {:?}", step.rule_name, step.conclusion, proofatlas::clause_indices(&step.premises));
             }
         }
         ProofResult::Saturated(steps, clauses) => {
@@ -76,7 +76,7 @@ fn test_with_duplicate_clause() {
             }
             println!("Steps:");
             for step in steps {
-                println!("  [{:?}] {} <- {:?}", step.derivation, step.conclusion, step.derivation.clause_indices());
+                println!("  [{:?}] {} <- {:?}", step.rule_name, step.conclusion, proofatlas::clause_indices(&step.premises));
             }
         }
         ProofResult::ResourceLimit(_, clauses) | ProofResult::Timeout(_, clauses) => {
@@ -125,7 +125,7 @@ fn test_with_precloned_clauses() {
         ProofResult::Saturated(steps, clauses) => {
             println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
             for step in steps {
-                println!("  [{:?}] idx={}", step.derivation, step.clause_idx);
+                println!("  [{}] idx={}", step.rule_name, step.clause_idx);
             }
         }
         _ => {}

@@ -2,10 +2,9 @@
 
 use super::common::{
     collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
-    InferenceResult,
 };
 use crate::logic::{Atom, Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
-use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
@@ -29,7 +28,7 @@ pub fn superposition(
     idx2: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
     let kbo = KBO::new(KBOConfig::default());
 
@@ -137,13 +136,11 @@ pub fn superposition(
                                 let new_clause = Clause::new(new_literals);
 
                                 // Tautology check delegated to TautologyRule during forward simplification
-                                results.push(InferenceResult {
-                                    derivation: Derivation {
-                                        rule_name: "Superposition".into(),
-                                        premises: vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
-                                    },
-                                    conclusion: new_clause,
-                                });
+                                results.push(StateChange::Add(
+                                    new_clause,
+                                    "Superposition".into(),
+                                    vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
+                                ));
                             }
                         }
                     }
@@ -295,31 +292,14 @@ impl GeneratingInference for SuperpositionRule {
             }
             if let Some(processed_clause) = state.clauses.get(processed_idx) {
                 // Given as first clause (rewriter)
-                for result in superposition(given, processed_clause, given_idx, processed_idx, selector, interner)
-                {
-                    changes.push(StateChange::Add {
-                        clause: result.conclusion,
-                        derivation: result.derivation,
-                    });
-                }
+                changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
                 // Given as second clause (target)
-                for result in superposition(processed_clause, given, processed_idx, given_idx, selector, interner)
-                {
-                    changes.push(StateChange::Add {
-                        clause: result.conclusion,
-                        derivation: result.derivation,
-                    });
-                }
+                changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
             }
         }
 
         // Self-superposition
-        for result in superposition(given, given, given_idx, given_idx, selector, interner) {
-            changes.push(StateChange::Add {
-                clause: result.conclusion,
-                derivation: result.derivation,
-            });
-        }
+        changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
 
         changes
     }
@@ -404,10 +384,14 @@ mod tests {
 
         // Find the expected result: a = b
         let found = results.iter().any(|r| {
-            r.conclusion.literals.len() == 1
-                && r.conclusion.literals[0].polarity
-                && r.conclusion.literals[0].predicate.name(&ctx.interner) == "="
-                && r.conclusion.literals[0].args.len() == 2
+            if let StateChange::Add(clause, _, _) = r {
+                clause.literals.len() == 1
+                    && clause.literals[0].polarity
+                    && clause.literals[0].predicate.name(&ctx.interner) == "="
+                    && clause.literals[0].args.len() == 2
+            } else {
+                false
+            }
         });
 
         assert!(
@@ -415,7 +399,7 @@ mod tests {
             "Expected to derive a = b, got: {:?}",
             results
                 .iter()
-                .map(|r| r.conclusion.display(&ctx.interner).to_string())
+                .filter_map(|r| if let StateChange::Add(clause, _, _) = r { Some(clause.display(&ctx.interner).to_string()) } else { None })
                 .collect::<Vec<_>>()
         );
     }
@@ -449,18 +433,21 @@ mod tests {
 
         // Should derive P(c)
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].conclusion.literals.len(), 1);
-        assert!(results[0].conclusion.literals[0].polarity);
-        assert_eq!(
-            results[0].conclusion.literals[0]
-                .predicate
-                .name(&ctx.interner),
-            "P"
-        );
-        assert_eq!(results[0].conclusion.literals[0].args.len(), 1);
-        match &results[0].conclusion.literals[0].args[0] {
-            Term::Constant(constant) => assert_eq!(constant.name(&ctx.interner), "c"),
-            _ => panic!("Expected constant c"),
+        if let StateChange::Add(clause, rule, _) = &results[0] {
+            assert_eq!(rule, "Superposition");
+            assert_eq!(clause.literals.len(), 1);
+            assert!(clause.literals[0].polarity);
+            assert_eq!(
+                clause.literals[0].predicate.name(&ctx.interner),
+                "P"
+            );
+            assert_eq!(clause.literals[0].args.len(), 1);
+            match &clause.literals[0].args[0] {
+                Term::Constant(constant) => assert_eq!(constant.name(&ctx.interner), "c"),
+                _ => panic!("Expected constant c"),
+            }
+        } else {
+            panic!("Expected StateChange::Add");
         }
     }
 }

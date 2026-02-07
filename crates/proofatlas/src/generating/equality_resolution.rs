@@ -1,8 +1,8 @@
 //! Equality resolution inference rule
 
-use super::common::{collect_literals_except, InferenceResult};
+use super::common::collect_literals_except;
 use crate::logic::{Clause, Interner, Position};
-use crate::state::{Derivation, SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
@@ -15,7 +15,7 @@ pub fn equality_resolution(
     idx: usize,
     selector: &dyn LiteralSelector,
     interner: &Interner,
-) -> Vec<InferenceResult> {
+) -> Vec<StateChange> {
     let mut results = Vec::new();
 
     // Get selected literals
@@ -39,13 +39,11 @@ pub fn equality_resolution(
                     let new_literals = collect_literals_except(clause, &[i], &mgu);
                     let new_clause = Clause::new(new_literals);
 
-                    results.push(InferenceResult {
-                        derivation: Derivation {
-                            rule_name: "EqualityResolution".into(),
-                            premises: vec![Position::clause(idx)],
-                        },
-                        conclusion: new_clause,
-                    });
+                    results.push(StateChange::Add(
+                        new_clause,
+                        "EqualityResolution".into(),
+                        vec![Position::clause(idx)],
+                    ));
                 }
             }
         }
@@ -87,12 +85,6 @@ impl GeneratingInference for EqualityResolutionRule {
         let selector = cm.literal_selector.as_ref();
         let interner = &cm.interner;
         equality_resolution(given, given_idx, selector, interner)
-            .into_iter()
-            .map(|result| StateChange::Add {
-                clause: result.conclusion,
-                derivation: result.derivation,
-            })
-            .collect()
     }
 }
 
@@ -137,13 +129,12 @@ mod tests {
         let selector = SelectAll;
         let results = equality_resolution(&clause, 0, &selector, &ctx.interner);
         assert_eq!(results.len(), 1);
-        assert!(results[0].conclusion.is_empty());
-        assert_eq!(
-            results[0].derivation,
-            Derivation {
-                rule_name: "EqualityResolution".into(),
-                premises: vec![Position::clause(0)],
-            }
-        );
+        if let StateChange::Add(clause, rule, premises) = &results[0] {
+            assert!(clause.is_empty());
+            assert_eq!(rule, "EqualityResolution");
+            assert_eq!(premises, &vec![Position::clause(0)]);
+        } else {
+            panic!("Expected StateChange::Add");
+        }
     }
 }

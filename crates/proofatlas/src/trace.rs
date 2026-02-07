@@ -1,6 +1,6 @@
 //! Event log replay utilities for proof extraction and state reconstruction.
 
-use crate::state::{StateChange, EventLog};
+use crate::state::{clause_indices, StateChange, EventLog};
 use crate::logic::Clause;
 use std::collections::HashSet;
 
@@ -8,7 +8,7 @@ use std::collections::HashSet;
 pub fn extract_proof_from_events(events: &EventLog) -> Option<Vec<usize>> {
     // Find the empty clause
     let empty_clause_idx = events.iter().find_map(|e| {
-        if let StateChange::Add { clause, derivation: _ } = e {
+        if let StateChange::Add(clause, _, _) = e {
             if clause.is_empty() {
                 clause.id
             } else {
@@ -19,13 +19,13 @@ pub fn extract_proof_from_events(events: &EventLog) -> Option<Vec<usize>> {
         }
     })?;
 
-    // Build derivation map: clause_idx -> (rule_name, premises)
+    // Build derivation map: clause_idx -> (rule_name, premise_indices)
     let mut derivation_map: std::collections::HashMap<usize, (String, Vec<usize>)> =
         std::collections::HashMap::new();
     for event in events {
-        if let StateChange::Add { clause, derivation } = event {
+        if let StateChange::Add(clause, rule_name, premises) = event {
             if let Some(idx) = clause.id {
-                derivation_map.insert(idx, (derivation.rule_name.clone(), derivation.clause_indices()));
+                derivation_map.insert(idx, (rule_name.clone(), clause_indices(premises)));
             }
         }
     }
@@ -89,7 +89,7 @@ impl<'a> EventLogReplayer<'a> {
         self.position += 1;
 
         match event {
-            StateChange::Add { clause, derivation: _ } => {
+            StateChange::Add(clause, _, _) => {
                 let idx = clause.id.unwrap_or(self.clauses.len());
                 if idx >= self.clauses.len() {
                     self.clauses.resize(idx + 1, Clause::new(vec![]));
@@ -97,7 +97,7 @@ impl<'a> EventLogReplayer<'a> {
                 self.clauses[idx] = clause.clone();
                 self.n.insert(idx);
             }
-            StateChange::Delete { clause_idx, rule_name: _ } => {
+            StateChange::Delete(clause_idx, _, _) => {
                 // Remove from whichever set contains it
                 if !self.n.remove(clause_idx) {
                     if !self.u.remove(clause_idx) {
@@ -105,12 +105,12 @@ impl<'a> EventLogReplayer<'a> {
                     }
                 }
             }
-            StateChange::Transfer { clause_idx } => {
+            StateChange::Transfer(clause_idx) => {
                 // Implicit: removed from N, added to U
                 self.n.remove(clause_idx);
                 self.u.insert(*clause_idx);
             }
-            StateChange::Activate { clause_idx } => {
+            StateChange::Activate(clause_idx) => {
                 // Implicit: removed from U, added to P
                 self.u.remove(clause_idx);
                 self.p.insert(*clause_idx);

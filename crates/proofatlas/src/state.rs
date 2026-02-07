@@ -8,50 +8,8 @@ use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::json::{ProofJson, ProofResultJson, ClauseJson};
 use indexmap::IndexSet;
-use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-
-// =============================================================================
-// Derivation
-// =============================================================================
-
-/// How a clause was derived (for proofs and internal derivation tracking).
-///
-/// This is a dynamic struct that stores the rule name and premise positions,
-/// allowing new rules to be added without modifying this type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Derivation {
-    /// Name of the inference rule that produced this clause
-    pub rule_name: String,
-    /// Positions of the premise clauses used in the inference
-    pub premises: Vec<Position>,
-}
-
-impl Derivation {
-    /// Create an Input derivation (no premises)
-    pub fn input() -> Self {
-        Derivation {
-            rule_name: "Input".into(),
-            premises: vec![],
-        }
-    }
-
-    /// Get the clause indices of all premises (ignoring subterm paths).
-    pub fn clause_indices(&self) -> Vec<usize> {
-        self.premises.iter().map(|p| p.clause).collect()
-    }
-}
-
-// =============================================================================
-// InferenceResult
-// =============================================================================
-
-/// Result of an inference rule application
-#[derive(Debug, Clone)]
-pub struct InferenceResult {
-    pub derivation: Derivation,
-    pub conclusion: Clause,
-}
+use serde::Serialize;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // =============================================================================
 // Proof
@@ -61,7 +19,8 @@ pub struct InferenceResult {
 #[derive(Debug, Clone)]
 pub struct ProofStep {
     pub clause_idx: usize,
-    pub derivation: Derivation,
+    pub rule_name: String,
+    pub premises: Vec<Position>,
     pub conclusion: Clause,
 }
 
@@ -91,17 +50,21 @@ impl Proof {
 /// - N (new): Fresh clauses awaiting simplification
 /// - U (unprocessed): Simplified clauses awaiting selection
 /// - P (processed): Selected clauses used for inferences
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, Serialize)]
 pub enum StateChange {
-    /// New clause added to N (from inference or input)
-    Add { clause: Clause, derivation: Derivation },
-    /// Clause deleted from its current set (simplification)
-    Delete { clause_idx: usize, rule_name: String },
+    /// New clause added to N (from inference or input): (clause, rule_name, premises)
+    Add(Clause, String, Vec<Position>),
+    /// Clause deleted from its current set: (clause_idx, rule_name, justification)
+    Delete(usize, String, Vec<Position>),
     /// Clause transferred from N to U (survived forward simplification)
-    Transfer { clause_idx: usize },
+    Transfer(usize),
     /// Clause selected and transferred from U to P
-    Activate { clause_idx: usize },
+    Activate(usize),
+}
+
+/// Extract clause indices from a list of positions (ignoring subterm paths).
+pub fn clause_indices(premises: &[Position]) -> Vec<usize> {
+    premises.iter().map(|p| p.clause).collect()
 }
 
 /// Type alias for the event log (replaces semantic SaturationTrace)
@@ -230,4 +193,75 @@ pub struct SaturationState {
     pub current_iteration: usize,
     /// Number of initial input clauses
     pub initial_clause_count: usize,
+}
+
+impl SaturationState {
+    /// Extract a proof by backward traversal from the empty clause.
+    pub fn extract_proof(&self, empty_clause_idx: usize) -> Proof {
+        let mut derivation_map: HashMap<usize, (String, Vec<Position>)> = HashMap::new();
+        for event in &self.event_log {
+            if let StateChange::Add(clause, rule_name, premises) = event {
+                if let Some(idx) = clause.id {
+                    derivation_map.insert(idx, (rule_name.clone(), premises.clone()));
+                }
+            }
+        }
+
+        let mut proof_clause_indices = Vec::new();
+        let mut visited = HashSet::new();
+        let mut to_visit = vec![empty_clause_idx];
+
+        while let Some(idx) = to_visit.pop() {
+            if !visited.insert(idx) {
+                continue;
+            }
+            proof_clause_indices.push(idx);
+            if let Some((_, premises)) = derivation_map.get(&idx) {
+                to_visit.extend(clause_indices(premises));
+            }
+        }
+
+        proof_clause_indices.sort();
+
+        let steps = proof_clause_indices
+            .iter()
+            .map(|&idx| {
+                let (rule_name, premises) = derivation_map
+                    .get(&idx)
+                    .cloned()
+                    .unwrap_or_else(|| ("Input".into(), vec![]));
+                ProofStep {
+                    clause_idx: idx,
+                    rule_name,
+                    premises,
+                    conclusion: self.clauses[idx].clone(),
+                }
+            })
+            .collect();
+
+        Proof {
+            steps,
+            empty_clause_idx,
+            all_clauses: self.clauses.clone(),
+        }
+    }
+
+    /// Build proof steps from event log.
+    pub fn build_proof_steps(&self) -> Vec<ProofStep> {
+        self.event_log
+            .iter()
+            .filter_map(|event| {
+                if let StateChange::Add(clause, rule_name, premises) = event {
+                    clause.id.map(|idx| ProofStep {
+                        clause_idx: idx,
+                        rule_name: rule_name.clone(),
+                        premises: premises.clone(),
+                        conclusion: clause.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }

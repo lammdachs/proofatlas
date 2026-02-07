@@ -1,7 +1,7 @@
 //! Extract training data from completed proofs
 
 use crate::state::Proof;
-use crate::state::{StateChange, EventLog};
+use crate::state::{clause_indices, StateChange, EventLog};
 use crate::trace::extract_proof_from_events;
 use std::collections::HashSet;
 
@@ -50,7 +50,7 @@ fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
         // Find the step that derived this clause
         if let Some(step) = proof.steps.iter().find(|s| s.clause_idx == clause_idx) {
             // Add premises (parent clauses) to the search
-            to_visit.extend(step.derivation.clause_indices());
+            to_visit.extend(clause_indices(&step.premises));
         }
     }
 
@@ -113,23 +113,23 @@ pub fn extract_training_from_events(events: &EventLog) -> Vec<SelectionTrainingE
 
     for event in events {
         match event {
-            StateChange::Add { clause, derivation: _ } => {
+            StateChange::Add(clause, _, _) => {
                 if let Some(idx) = clause.id {
                     n.insert(idx);
                 }
             }
-            StateChange::Delete { clause_idx, rule_name: _ } => {
+            StateChange::Delete(clause_idx, _, _) => {
                 // Remove from whichever set contains it
                 if !n.remove(clause_idx) {
                     u.remove(clause_idx);
                 }
                 // Note: P removals are also handled implicitly
             }
-            StateChange::Transfer { clause_idx } => {
+            StateChange::Transfer(clause_idx) => {
                 n.remove(clause_idx);
                 u.insert(*clause_idx);
             }
-            StateChange::Activate { clause_idx } => {
+            StateChange::Activate(clause_idx) => {
                 // This is the given clause selection - N should be empty at this point
                 if n.is_empty() {
                     let candidates: Vec<usize> = u.iter().copied().collect();
@@ -179,7 +179,7 @@ pub fn extract_clause_labels_from_events(events: &EventLog) -> Vec<TrainingExamp
     // Get all clauses that were ever added
     let mut all_clauses = HashSet::new();
     for event in events {
-        if let StateChange::Add { clause, derivation: _ } = event {
+        if let StateChange::Add(clause, _, _) = event {
             if let Some(idx) = clause.id {
                 all_clauses.insert(idx);
             }
@@ -204,20 +204,21 @@ pub fn extract_clause_labels_from_events(events: &EventLog) -> Vec<TrainingExamp
 mod tests {
     use super::*;
     use crate::logic::{Clause, Position};
-    use crate::state::{Derivation, ProofStep};
+    use crate::state::ProofStep;
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
         let positions: Vec<Position> = premises.iter().map(|&p| Position::clause(p)).collect();
-        let derivation = if premises.is_empty() {
-            Derivation::input()
+        let rule_name = if premises.is_empty() {
+            "Input".into()
         } else if premises.len() == 1 {
-            Derivation { rule_name: "Factoring".into(), premises: positions }
+            "Factoring".into()
         } else {
-            Derivation { rule_name: "Resolution".into(), premises: positions }
+            "Resolution".into()
         };
         ProofStep {
             clause_idx,
-            derivation,
+            rule_name,
+            premises: positions,
             conclusion: Clause::new(vec![]), // Empty for simplicity
         }
     }

@@ -140,8 +140,8 @@ impl ProofAtlasWasm {
                 ProofStep {
                     id: step.clause_idx,
                     clause: format_clause(&step.conclusion),
-                    rule: step.derivation.rule_name.clone(),
-                    parents: step.derivation.clause_indices(),
+                    rule: step.rule_name.clone(),
+                    parents: proofatlas::clause_indices(&step.premises),
                 }
             }).collect()
         };
@@ -277,11 +277,11 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
     let mut initial_clause_count = 0;
 
     for event in events {
-        if let StateChange::Add { clause, derivation } = event {
+        if let StateChange::Add(clause, rule_name, premises) = event {
             if let Some(idx) = clause.id {
                 clauses.insert(idx, format_clause(clause));
-                derivations.insert(idx, (derivation.rule_name.clone(), derivation.clause_indices()));
-                if derivation.rule_name == "Input" {
+                derivations.insert(idx, (rule_name.clone(), proofatlas::clause_indices(premises)));
+                if rule_name == "Input" {
                     initial_clause_count = initial_clause_count.max(idx + 1);
                 }
             }
@@ -305,11 +305,11 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
 
     for event in events {
         match event {
-            StateChange::Add { clause, derivation } => {
+            StateChange::Add(clause, rule_name, premises) => {
                 if let Some(idx) = clause.id {
                     let clause_str = format_clause(clause);
-                    let rule = &derivation.rule_name;
-                    let premises = derivation.clause_indices();
+                    let rule = rule_name;
+                    let premise_indices = proofatlas::clause_indices(premises);
 
                     // Skip initial input clauses for iteration events
                     if rule == "Input" {
@@ -327,7 +327,7 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
                             "clause_idx": idx,
                             "clause": clause_str,
                             "rule": rule,
-                            "premises": premises,
+                            "premises": premise_indices,
                         }));
                     } else if rule == "Demodulation" {
                         // Demodulation is a simplification
@@ -335,12 +335,12 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
                             "clause_idx": idx,
                             "clause": clause_str,
                             "rule": "Demodulation",
-                            "premises": premises,
+                            "premises": premise_indices,
                         }));
                     }
                 }
             }
-            StateChange::Delete { clause_idx, rule_name } => {
+            StateChange::Delete(clause_idx, rule_name, _justification) => {
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 let rule = match rule_name.as_str() {
                     "Tautology" => "TautologyDeletion",
@@ -355,7 +355,7 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            StateChange::Transfer { clause_idx } => {
+            StateChange::Transfer(clause_idx) => {
                 // Clause transferred from N to U
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_simplification.push(json!({
@@ -365,7 +365,7 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
                     "premises": [],
                 }));
             }
-            StateChange::Activate { clause_idx } => {
+            StateChange::Activate(clause_idx) => {
                 // Given clause selection and end of iteration
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_selection = Some(json!({

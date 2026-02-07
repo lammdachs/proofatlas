@@ -12,7 +12,7 @@ use crate::logic::{Clause, Interner};
 use crate::generating::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
 };
-use crate::state::InferenceResult as RustInferenceResult;
+use crate::state::{clause_indices, StateChange as RustStateChange};
 use crate::selection::graph::{ClauseGraph, GraphBuilder};
 use crate::parser::parse_tptp;
 use crate::config::LiteralSelectionStrategy;
@@ -377,15 +377,15 @@ impl ProofState {
 
         // Self-inferences on given clause
         for rust_result in factoring(&given_clause, given_id, selector) {
-            results.push(self.convert_inference_result(rust_result));
+            results.push(self.convert_state_change(rust_result).unwrap());
         }
 
         for rust_result in equality_resolution(&given_clause, given_id, selector, &self.interner) {
-            results.push(self.convert_inference_result(rust_result));
+            results.push(self.convert_state_change(rust_result).unwrap());
         }
 
         for rust_result in equality_factoring(&given_clause, given_id, selector, &mut self.interner) {
-            results.push(self.convert_inference_result(rust_result));
+            results.push(self.convert_state_change(rust_result).unwrap());
         }
 
         // Binary inferences with processed clauses
@@ -402,7 +402,7 @@ impl ProofState {
                 selector,
                 &mut self.interner,
             ) {
-                results.push(self.convert_inference_result(rust_result));
+                results.push(self.convert_state_change(rust_result).unwrap());
             }
             for rust_result in resolution(
                 &processed_clause,
@@ -412,7 +412,7 @@ impl ProofState {
                 selector,
                 &mut self.interner,
             ) {
-                results.push(self.convert_inference_result(rust_result));
+                results.push(self.convert_state_change(rust_result).unwrap());
             }
 
             // Superposition
@@ -424,7 +424,7 @@ impl ProofState {
                 selector,
                 &mut self.interner,
             ) {
-                results.push(self.convert_inference_result(rust_result));
+                results.push(self.convert_state_change(rust_result).unwrap());
             }
             for rust_result in superposition(
                 &processed_clause,
@@ -434,7 +434,7 @@ impl ProofState {
                 selector,
                 &mut self.interner,
             ) {
-                results.push(self.convert_inference_result(rust_result));
+                results.push(self.convert_state_change(rust_result).unwrap());
             }
         }
 
@@ -703,8 +703,8 @@ impl ProofState {
             let clause_string = step.conclusion.display(&self.interner).to_string();
             self.proof_trace.push(ProofStep {
                 clause_id: step.clause_idx,
-                parent_ids: step.derivation.clause_indices(),
-                rule_name: step.derivation.rule_name.clone(),
+                parent_ids: clause_indices(&step.premises),
+                rule_name: step.rule_name.clone(),
                 clause_string,
             });
         }
@@ -967,17 +967,19 @@ impl ProofState {
 }
 
 impl ProofState {
-    /// Convert Rust inference result to Python inference result
-    fn convert_inference_result(&self, rust_result: RustInferenceResult) -> InferenceResult {
-        let clause_string = rust_result.conclusion.display(&self.interner).to_string();
-        let rule_name = rust_result.derivation.rule_name.to_lowercase();
-        let parent_ids = rust_result.derivation.clause_indices();
-
-        InferenceResult {
-            clause_string,
-            parent_ids,
-            rule_name,
-            clause: rust_result.conclusion,
+    /// Convert Rust StateChange::Add to Python inference result
+    fn convert_state_change(&self, change: RustStateChange) -> Option<InferenceResult> {
+        if let RustStateChange::Add(clause, rule_name, premises) = change {
+            let clause_string = clause.display(&self.interner).to_string();
+            let parent_ids = clause_indices(&premises);
+            Some(InferenceResult {
+                clause_string,
+                parent_ids,
+                rule_name: rule_name.to_lowercase(),
+                clause,
+            })
+        } else {
+            None
         }
     }
 }
