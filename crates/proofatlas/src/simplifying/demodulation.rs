@@ -53,7 +53,7 @@ pub fn demodulate(
                 results.push(StateChange::Add(
                     new_clause,
                     "Demodulation".into(),
-                    vec![Position::clause(unit_idx), Position::clause(target_idx)],
+                    vec![Position::clause(target_idx), Position::clause(unit_idx)],
                 ));
             }
         }
@@ -65,7 +65,7 @@ pub fn demodulate(
                 results.push(StateChange::Add(
                     new_clause,
                     "Demodulation".into(),
-                    vec![Position::clause(unit_idx), Position::clause(target_idx)],
+                    vec![Position::clause(target_idx), Position::clause(unit_idx)],
                 ));
             }
         }
@@ -221,7 +221,7 @@ impl SimplifyingInference for DemodulationRule {
                             StateChange::Add(
                                 simplified_clause,
                                 "Demodulation".into(),
-                                vec![Position::clause(unit_idx), Position::clause(clause_idx)],
+                                vec![Position::clause(clause_idx), Position::clause(unit_idx)],
                             ),
                         ];
                     }
@@ -268,7 +268,7 @@ impl SimplifyingInference for DemodulationRule {
                         changes.push(StateChange::Add(
                             simplified_clause,
                             "Demodulation".into(),
-                            vec![Position::clause(clause_idx), Position::clause(target_idx)],
+                            vec![Position::clause(target_idx), Position::clause(clause_idx)],
                         ));
                     }
                 }

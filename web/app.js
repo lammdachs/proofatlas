@@ -336,6 +336,7 @@ class ProofInspector {
         this.trace = trace;
         this.allClauses = allClauses;
         this.currentStep = 0;
+        this.currentEventIdx = -1; // -1 = pre-iteration state
 
         // Three clause sets matching the paper
         this.newClauses = new Set();
@@ -379,16 +380,152 @@ class ProofInspector {
     }
 
     setupEventHandlers() {
-        document.getElementById('step-first').addEventListener('click', () => this.goToStep(0));
-        document.getElementById('step-prev').addEventListener('click', () => this.goToStep(this.currentStep - 1));
-        document.getElementById('step-next').addEventListener('click', () => this.goToStep(this.currentStep + 1));
+        // Abort previous listeners if this inspector replaces another
+        if (ProofInspector._abortController) {
+            ProofInspector._abortController.abort();
+        }
+        const ac = new AbortController();
+        ProofInspector._abortController = ac;
+        const opts = { signal: ac.signal };
+
+        document.getElementById('step-first').addEventListener('click', () => this.goToStep(0, 0), opts);
+        document.getElementById('step-prev').addEventListener('click', () => this.stepBackward(), opts);
+        document.getElementById('step-next').addEventListener('click', () => this.stepForward(), opts);
         document.getElementById('step-last').addEventListener('click', () => {
-            const maxStep = this.trace && this.trace.iterations ? this.trace.iterations.length - 1 : 0;
-            this.goToStep(maxStep);
-        });
+            const iters = this.trace && this.trace.iterations ? this.trace.iterations : [];
+            if (iters.length === 0) return;
+            const maxStep = iters.length - 1;
+            const lastIdx = this.flattenEvents(iters[maxStep]).length - 1;
+            this.goToStep(maxStep, Math.max(0, lastIdx));
+        }, opts);
+
+        // Mouse back/forward buttons (buttons 3 & 4) step through events
+        document.addEventListener('mouseup', (e) => {
+            // Only when inspector view is visible
+            const inspector = document.getElementById('proof-inspector');
+            if (!inspector || inspector.classList.contains('hidden')) return;
+
+            if (e.button === 3) { // back
+                e.preventDefault();
+                this.stepBackward();
+            } else if (e.button === 4) { // forward
+                e.preventDefault();
+                this.stepForward();
+            }
+        }, opts);
+
+        // Prevent default browser back/forward navigation for these buttons
+        document.addEventListener('mousedown', (e) => {
+            if (e.button === 3 || e.button === 4) {
+                const inspector = document.getElementById('proof-inspector');
+                if (inspector && !inspector.classList.contains('hidden')) {
+                    e.preventDefault();
+                }
+            }
+        }, opts);
+
+        // Keyboard arrow keys step through events
+        document.addEventListener('keydown', (e) => {
+            const inspector = document.getElementById('proof-inspector');
+            if (!inspector || inspector.classList.contains('hidden')) return;
+            // Don't capture when typing in an input/textarea
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                this.stepBackward();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                this.stepForward();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (this.currentStep > 0) {
+                    this.goToStep(this.currentStep - 1, 0);
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const maxStep = this.trace.iterations.length - 1;
+                if (this.currentStep < maxStep) {
+                    this.goToStep(this.currentStep + 1, 0);
+                }
+            }
+        }, opts);
     }
 
-    goToStep(iterNum) {
+    /** Step forward one event, wrapping to next iteration. */
+    stepForward() {
+        if (!this.trace || !this.trace.iterations) return;
+        const iter = this.trace.iterations[this.currentStep];
+        const lastIdx = this.flattenEvents(iter).length - 1;
+
+        if (this.currentEventIdx < lastIdx) {
+            this.goToStep(this.currentStep, this.currentEventIdx + 1);
+        } else if (this.currentStep < this.trace.iterations.length - 1) {
+            this.goToStep(this.currentStep + 1, 0);
+        }
+    }
+
+    /** Step backward one event, wrapping to previous iteration's last event. */
+    stepBackward() {
+        if (!this.trace || !this.trace.iterations) return;
+
+        if (this.currentEventIdx > 0) {
+            this.goToStep(this.currentStep, this.currentEventIdx - 1);
+        } else if (this.currentStep > 0) {
+            const prevIter = this.trace.iterations[this.currentStep - 1];
+            const lastIdx = this.flattenEvents(prevIter).length - 1;
+            this.goToStep(this.currentStep - 1, lastIdx);
+        }
+    }
+
+    /** Flatten an iteration's events into a single ordered list. */
+    flattenEvents(iter) {
+        const events = [];
+        for (const ev of iter.simplification) events.push(ev);
+        if (iter.selection) events.push(iter.selection);
+        for (const ev of iter.generation) events.push(ev);
+        return events;
+    }
+
+    /** Replay a single event onto the clause sets. */
+    replayEvent(ev) {
+        switch (ev.rule) {
+            case 'TautologyDeletion':
+            case 'SubsumptionDeletion':
+            case 'DemodulationDeletion':
+            case 'ForwardSubsumptionDeletion':
+            case 'BackwardSubsumptionDeletion':
+            case 'ForwardDemodulation':
+                this.newClauses.delete(ev.clause_idx);
+                this.unprocessedClauses.delete(ev.clause_idx);
+                this.processedClauses.delete(ev.clause_idx);
+                break;
+            case 'Transfer':
+                this.newClauses.delete(ev.clause_idx);
+                this.unprocessedClauses.add(ev.clause_idx);
+                break;
+            case 'Demodulation':
+                this.newClauses.add(ev.clause_idx);
+                break;
+            case 'GivenClauseSelection':
+                this.unprocessedClauses.delete(ev.clause_idx);
+                this.processedClauses.add(ev.clause_idx);
+                break;
+            default:
+                // Generation rules add to N
+                this.newClauses.add(ev.clause_idx);
+                break;
+        }
+    }
+
+    /** Replay all events in an iteration. */
+    replayIteration(iter) {
+        for (const ev of this.flattenEvents(iter)) {
+            this.replayEvent(ev);
+        }
+    }
+
+    goToStep(iterNum, eventIdx = 0) {
         if (!this.trace || !this.trace.iterations) return;
 
         const maxStep = this.trace.iterations.length - 1;
@@ -404,50 +541,24 @@ class ProofInspector {
             this.trace.initial_clauses.forEach(c => this.newClauses.add(c.id));
         }
 
-        // Replay all iterations up to and including the target
-        for (let i = 0; i <= iterNum; i++) {
-            const iter = this.trace.iterations[i];
-            this.replayIteration(iter);
+        // Replay all iterations before the target fully
+        for (let i = 0; i < iterNum; i++) {
+            this.replayIteration(this.trace.iterations[i]);
         }
 
-        this.currentStep = iterNum;
-        this.render();
-    }
-
-    replayIteration(iter) {
-        // Step 1: Simplification
-        for (const ev of iter.simplification) {
-            switch (ev.rule) {
-                case 'TautologyDeletion':
-                case 'ForwardSubsumptionDeletion':
-                    this.newClauses.delete(ev.clause_idx);
-                    break;
-                case 'BackwardSubsumptionDeletion':
-                    this.unprocessedClauses.delete(ev.clause_idx);
-                    this.processedClauses.delete(ev.clause_idx);
-                    break;
-                case 'Transfer':
-                    this.newClauses.delete(ev.clause_idx);
-                    this.unprocessedClauses.add(ev.clause_idx);
-                    break;
-                case 'Demodulation':
-                    // Demodulation creates a new clause in N
-                    this.newClauses.add(ev.clause_idx);
-                    break;
+        // Replay current iteration up to (but not including) eventIdx,
+        // so clause sets show the state BEFORE the selected event.
+        // eventIdx -1 = pre-iteration state (nothing replayed).
+        if (eventIdx > 0) {
+            const events = this.flattenEvents(this.trace.iterations[iterNum]);
+            for (let i = 0; i < eventIdx && i < events.length; i++) {
+                this.replayEvent(events[i]);
             }
         }
 
-        // Step 3: Selection
-        if (iter.selection) {
-            const givenId = iter.selection.clause_idx;
-            this.unprocessedClauses.delete(givenId);
-            this.processedClauses.add(givenId);
-        }
-
-        // Step 4: Generation
-        for (const ev of iter.generation) {
-            this.newClauses.add(ev.clause_idx);
-        }
+        this.currentStep = iterNum;
+        this.currentEventIdx = eventIdx;
+        this.render();
     }
 
     render() {
@@ -461,19 +572,16 @@ class ProofInspector {
         document.getElementById('step-counter').textContent = `Iteration ${this.currentStep + 1} / ${maxStep + 1}`;
 
         // Update buttons
-        document.getElementById('step-first').disabled = this.currentStep <= 0;
-        document.getElementById('step-prev').disabled = this.currentStep <= 0;
-        document.getElementById('step-next').disabled = this.currentStep >= maxStep;
-        document.getElementById('step-last').disabled = this.currentStep >= maxStep;
+        const isAtStart = this.currentStep <= 0 && this.currentEventIdx <= 0;
+        const lastIterEvents = this.flattenEvents(iterations[maxStep]);
+        const isAtEnd = this.currentStep >= maxStep && this.currentEventIdx >= lastIterEvents.length - 1;
+        document.getElementById('step-first').disabled = isAtStart;
+        document.getElementById('step-prev').disabled = isAtStart;
+        document.getElementById('step-next').disabled = isAtEnd;
+        document.getElementById('step-last').disabled = isAtEnd;
 
-        // Update given clause
-        const givenDiv = document.getElementById('given-clause');
-        if (currentIter.selection) {
-            const sel = currentIter.selection;
-            givenDiv.innerHTML = `<strong>[${sel.clause_idx}]</strong> ${escapeHtml(sel.clause)}`;
-        } else {
-            givenDiv.textContent = '(no selection — saturated)';
-        }
+        // Update current event detail
+        this.renderCurrentEvent(currentIter);
 
         // Update phase events
         this.renderPhaseEvents(currentIter);
@@ -484,49 +592,148 @@ class ProofInspector {
         this.renderClauseList('processed-clauses', 'processed-count', this.processedClauses);
     }
 
-    renderPhaseEvents(iter) {
-        const container = document.getElementById('phase-events');
+    /** Format a clause reference: [id] clause_text */
+    formatClauseRef(id) {
+        const c = this.clauseMap.get(id);
+        const text = c ? escapeHtml(c.clause) : '?';
+        return `<span class="clause-ref">[${id}]</span> ${text}`;
+    }
+
+    renderCurrentEvent(iter) {
+        const container = document.getElementById('current-event-detail');
+        if (this.currentEventIdx === -1) {
+            container.innerHTML = '';
+            container.classList.add('hidden');
+            return;
+        }
+
+        const flatEvents = this.flattenEvents(iter);
+        const ev = flatEvents[this.currentEventIdx];
+        if (!ev) {
+            container.innerHTML = '';
+            container.classList.add('hidden');
+            return;
+        }
+
+        container.classList.remove('hidden');
         let html = '';
 
-        // Simplification phase
+        const rule = ev.rule;
+        const isDeletion = ['TautologyDeletion', 'SubsumptionDeletion', 'DemodulationDeletion',
+            'ForwardSubsumptionDeletion', 'BackwardSubsumptionDeletion', 'ForwardDemodulation'].includes(rule);
+        const isTransfer = rule === 'Transfer';
+        const isSelection = rule === 'GivenClauseSelection';
+        const isDemodAdd = rule === 'Demodulation';
+
+        // Rule label
+        let ruleLabel = rule;
+        if (isDeletion) ruleLabel = rule.replace('Deletion', '').replace('Forward', '').replace('Backward', '');
+        if (isSelection) ruleLabel = 'Selection';
+
+        html += `<div class="event-detail-rule">${escapeHtml(ruleLabel)}</div>`;
+        html += '<table class="event-detail-table"><tbody>';
+
+        if (isDeletion) {
+            html += `<tr><td class="event-detail-label">Deleted</td><td>${this.formatClauseRef(ev.clause_idx)}</td></tr>`;
+            if (ev.premises && ev.premises.length > 0) {
+                html += `<tr><td class="event-detail-label">By</td><td>${ev.premises.map(id => this.formatClauseRef(id)).join('<br>')}</td></tr>`;
+            }
+        } else if (isTransfer) {
+            html += `<tr><td class="event-detail-label">Clause</td><td>${this.formatClauseRef(ev.clause_idx)}</td></tr>`;
+            html += `<tr><td class="event-detail-label">Move</td><td>N → U</td></tr>`;
+        } else if (isSelection) {
+            html += `<tr><td class="event-detail-label">Given</td><td>${this.formatClauseRef(ev.clause_idx)}</td></tr>`;
+            html += `<tr><td class="event-detail-label">Move</td><td>U → P</td></tr>`;
+        } else if (isDemodAdd) {
+            // premises[0] = affected clause, premises[1] = unit equality
+            if (ev.premises && ev.premises.length >= 2) {
+                html += `<tr><td class="event-detail-label">Rewritten</td><td>${this.formatClauseRef(ev.premises[0])}</td></tr>`;
+                html += `<tr><td class="event-detail-label">Using</td><td>${this.formatClauseRef(ev.premises[1])}</td></tr>`;
+            }
+            html += `<tr><td class="event-detail-label">Result</td><td>${this.formatClauseRef(ev.clause_idx)}</td></tr>`;
+        } else {
+            // Generation (Resolution, Superposition, Factoring, etc.)
+            if (ev.premises && ev.premises.length > 0) {
+                html += `<tr><td class="event-detail-label">Premises</td><td>${ev.premises.map(id => this.formatClauseRef(id)).join('<br>')}</td></tr>`;
+            }
+            html += `<tr><td class="event-detail-label">Result</td><td>${this.formatClauseRef(ev.clause_idx)}</td></tr>`;
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    renderPhaseEvents(iter) {
+        const container = document.getElementById('phase-events');
+        const summary = document.getElementById('events-summary');
+        const flatEvents = this.flattenEvents(iter);
+
+        summary.textContent = `Events (${flatEvents.length})`;
+
+        let html = '';
+        let globalIdx = 0;
+
+        // Simplification events
         if (iter.simplification.length > 0) {
-            html += '<div class="phase-group"><h5>Step 1 — Simplification</h5>';
+            html += '<h5 class="event-phase-label">Simplification</h5>';
             for (const ev of iter.simplification) {
+                const active = this.currentEventIdx === globalIdx ? ' active' : '';
                 const cssClass = this.getEventCssClass(ev.rule);
-                html += `<div class="phase-event ${cssClass}">${this.describeEvent(ev)}</div>`;
+                html += `<div class="event-item${active} ${cssClass}" data-event-idx="${globalIdx}">${this.describeEvent(ev)}</div>`;
+                globalIdx++;
             }
-            html += '</div>';
         }
 
-        // Generation phase
+        // Selection
+        if (iter.selection) {
+            html += '<h5 class="event-phase-label">Selection</h5>';
+            const sel = iter.selection;
+            const active = this.currentEventIdx === globalIdx ? ' active' : '';
+            html += `<div class="event-item${active} selection" data-event-idx="${globalIdx}">Given clause [${sel.clause_idx}]</div>`;
+            globalIdx++;
+        }
+
+        // Generation events
         if (iter.generation.length > 0) {
-            html += '<div class="phase-group"><h5>Step 4 — Generation</h5>';
+            html += '<h5 class="event-phase-label">Generation</h5>';
             for (const ev of iter.generation) {
-                const parents = ev.premises.length > 0 ? ` from [${ev.premises.join(', ')}]` : '';
-                html += `<div class="phase-event generation">${ev.rule}${parents} → [${ev.clause_idx}] ${escapeHtml(ev.clause)}</div>`;
+                const active = this.currentEventIdx === globalIdx ? ' active' : '';
+                const parents = ev.premises.length > 0 ? `([${ev.premises.join(', ')}])` : '';
+                html += `<div class="event-item${active} generation" data-event-idx="${globalIdx}">${ev.rule}${parents} → [${ev.clause_idx}]</div>`;
+                globalIdx++;
             }
-            html += '</div>';
         }
 
-        if (!html) {
-            html = '<em>No events in this iteration</em>';
+        if (flatEvents.length === 0) {
+            html += '<em>No events in this iteration</em>';
         }
 
         container.innerHTML = html;
+
+        // Attach click handlers to event items
+        container.querySelectorAll('.event-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.dataset.eventIdx, 10);
+                this.goToStep(this.currentStep, idx);
+            });
+        });
     }
 
     describeEvent(ev) {
         switch (ev.rule) {
             case 'TautologyDeletion':
-                return `Clause [${ev.clause_idx}] deleted (tautology)`;
+                return `Delete [${ev.clause_idx}] (tautology)`;
+            case 'SubsumptionDeletion':
             case 'ForwardSubsumptionDeletion':
-                return `Clause [${ev.clause_idx}] deleted (subsumed by [${ev.premises.join(', ')}])`;
             case 'BackwardSubsumptionDeletion':
-                return `Clause [${ev.clause_idx}] deleted (backward subsumed by [${ev.premises.join(', ')}])`;
+                return `Delete [${ev.clause_idx}] (subsumed)`;
+            case 'DemodulationDeletion':
+            case 'ForwardDemodulation':
+                return `Delete [${ev.clause_idx}] (demodulated)`;
             case 'Transfer':
-                return `Clause [${ev.clause_idx}] transferred to P`;
+                return `Transfer [${ev.clause_idx}] N → U`;
             case 'Demodulation':
-                return `Clause [${ev.premises[1] || '?'}] simplified by [${ev.premises[0] || '?'}] → [${ev.clause_idx}] ${escapeHtml(ev.clause)}`;
+                return `Demodulate [${ev.premises[0] || '?'}] by [${ev.premises[1] || '?'}] → [${ev.clause_idx}]`;
             default:
                 return `${ev.rule} → [${ev.clause_idx}]`;
         }
@@ -535,8 +742,11 @@ class ProofInspector {
     getEventCssClass(rule) {
         switch (rule) {
             case 'TautologyDeletion':
+            case 'SubsumptionDeletion':
+            case 'DemodulationDeletion':
             case 'ForwardSubsumptionDeletion':
             case 'BackwardSubsumptionDeletion':
+            case 'ForwardDemodulation':
                 return 'deletion';
             case 'Transfer':
                 return 'transfer';
@@ -553,10 +763,13 @@ class ProofInspector {
 
         count.textContent = clauseIds.size;
 
+        const parent = div.closest('.clause-set');
         if (clauseIds.size === 0) {
-            div.innerHTML = '<div class="clause-item">(empty)</div>';
+            div.innerHTML = '';
+            if (parent) parent.classList.add('hidden');
             return;
         }
+        if (parent) parent.classList.remove('hidden');
 
         const clauseArray = Array.from(clauseIds).sort((a, b) => a - b);
         div.innerHTML = clauseArray.map(id => {
@@ -780,6 +993,8 @@ function handleClauseViewChange(e) {
         if (proofInspector) {
             proofInspector.render();
         }
+        // Blur radio so arrow keys go to document-level handler
+        e.target.blur();
     }
 }
 

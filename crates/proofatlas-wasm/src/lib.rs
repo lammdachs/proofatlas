@@ -299,29 +299,50 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
         }))
         .collect();
 
-    // Second pass: build iterations by replaying events
-    // An iteration ends when we see AddP (given clause selected)
+    // Second pass: build iterations using a phase-aware state machine.
+    //
+    // The prover emits events per iteration in this order:
+    //   1. Simplification (Delete/Add "Demodulation" on N, backward Delete on U/P)
+    //   2. Transfer (N → U)
+    //   3. Activate (U → P) — given clause selection
+    //   4. Generation (Add "Resolution", "Superposition", etc.)
+    //
+    // We track two phases: SIMPLIFICATION (before Activate) and GENERATION (after).
+    // A non-generating event during GENERATION means the next iteration has started.
     let mut iterations: Vec<serde_json::Value> = Vec::new();
     let mut current_simplification = Vec::new();
     let mut current_generation = Vec::new();
     let mut current_selection: Option<serde_json::Value> = None;
+    let mut in_generation_phase = false;
+
+    // Helper: flush the current iteration
+    let flush = |iterations: &mut Vec<serde_json::Value>,
+                 simplification: &mut Vec<serde_json::Value>,
+                 selection: &mut Option<serde_json::Value>,
+                 generation: &mut Vec<serde_json::Value>| {
+        if selection.is_some() || !simplification.is_empty() || !generation.is_empty() {
+            iterations.push(json!({
+                "simplification": std::mem::take(simplification),
+                "selection": selection.take(),
+                "generation": std::mem::take(generation),
+            }));
+        }
+    };
 
     for event in events {
         match event {
             StateChange::Add(clause, rule_name, premises) => {
                 if let Some(idx) = clause.id {
                     let clause_str = format_clause(clause, interner);
-                    let rule = rule_name;
                     let premise_indices = proofatlas::clause_indices(premises);
 
-                    // Skip initial input clauses for iteration events
-                    if rule == "Input" {
+                    // Skip initial input clauses
+                    if rule_name == "Input" {
                         continue;
                     }
 
-                    // Generating inferences produce new clauses
                     let is_generating = matches!(
-                        rule.as_str(),
+                        rule_name.as_str(),
                         "Resolution" | "Factoring" | "Superposition" | "EqualityResolution" | "EqualityFactoring"
                     );
 
@@ -329,11 +350,16 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                         current_generation.push(json!({
                             "clause_idx": idx,
                             "clause": clause_str,
-                            "rule": rule,
+                            "rule": rule_name,
                             "premises": premise_indices,
                         }));
-                    } else if rule == "Demodulation" {
-                        // Demodulation is a simplification
+                    } else if rule_name == "Demodulation" {
+                        // Demodulation Add is simplification — if we're in generation phase,
+                        // this belongs to the next iteration
+                        if in_generation_phase {
+                            flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
+                            in_generation_phase = false;
+                        }
                         current_simplification.push(json!({
                             "clause_idx": idx,
                             "clause": clause_str,
@@ -344,12 +370,17 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                 }
             }
             StateChange::Delete(clause_idx, rule_name, _justification) => {
+                // If we're in generation phase, a Delete means next iteration started
+                if in_generation_phase {
+                    flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
+                    in_generation_phase = false;
+                }
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 let rule = match rule_name.as_str() {
                     "Tautology" => "TautologyDeletion",
-                    "Subsumption" => "ForwardSubsumptionDeletion",
-                    "Demodulation" => "ForwardDemodulation",
-                    _ => "BackwardSubsumptionDeletion",
+                    "Subsumption" => "SubsumptionDeletion",
+                    "Demodulation" => "DemodulationDeletion",
+                    _ => "SubsumptionDeletion",
                 };
                 current_simplification.push(json!({
                     "clause_idx": *clause_idx,
@@ -359,7 +390,11 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                 }));
             }
             StateChange::Transfer(clause_idx) => {
-                // Clause transferred from N to U
+                // Transfer is simplification phase — if in generation, flush first
+                if in_generation_phase {
+                    flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
+                    in_generation_phase = false;
+                }
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_simplification.push(json!({
                     "clause_idx": *clause_idx,
@@ -369,26 +404,23 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                 }));
             }
             StateChange::Activate(clause_idx) => {
-                // Given clause selection and end of iteration
+                // Activate marks selection — if we're already in generation phase,
+                // flush the previous iteration first
+                if in_generation_phase {
+                    flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
+                }
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
                 current_selection = Some(json!({
                     "clause_idx": *clause_idx,
                     "clause": clause_str,
                     "rule": "GivenClauseSelection",
                 }));
-                // Flush current state
-                if current_selection.is_some() || !current_simplification.is_empty() || !current_generation.is_empty() {
-                    iterations.push(json!({
-                        "simplification": std::mem::take(&mut current_simplification),
-                        "selection": current_selection.take(),
-                        "generation": std::mem::take(&mut current_generation),
-                    }));
-                }
+                in_generation_phase = true;
             }
         }
     }
 
-    // Flush any remaining events (e.g., final iteration before proof found)
+    // Flush any remaining events
     if !current_simplification.is_empty() || !current_generation.is_empty() || current_selection.is_some() {
         iterations.push(json!({
             "simplification": current_simplification,

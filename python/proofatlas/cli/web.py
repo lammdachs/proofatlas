@@ -107,11 +107,39 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
         for i in range(initial_clause_count)
     ]
 
-    # Second pass: build iterations by replaying events
+    # Second pass: build iterations using a phase-aware state machine.
+    #
+    # The prover emits events per iteration in this order:
+    #   1. Simplification (Delete/Add "Demodulation" on N, backward Delete on U/P)
+    #   2. Transfer (N → U)
+    #   3. Activate (U → P) — given clause selection
+    #   4. Generation (Add "Resolution", "Superposition", etc.)
+    #
+    # We track two phases: SIMPLIFICATION (before Activate) and GENERATION (after).
+    # A non-generating event during GENERATION means the next iteration has started.
+    GENERATING_RULES = {"Resolution", "Factoring", "Superposition", "EqualityResolution", "EqualityFactoring"}
+
+    def _clause_indices(positions):
+        """Extract clause indices from a list of Position objects (dicts with 'clause' key)."""
+        return [p["clause"] if isinstance(p, dict) else p for p in positions]
+
     iterations = []
     current_simplification = []
     current_generation = []
     current_selection = None
+    in_generation_phase = False
+
+    def flush():
+        nonlocal current_simplification, current_generation, current_selection
+        if current_selection or current_simplification or current_generation:
+            iterations.append({
+                "simplification": current_simplification,
+                "selection": current_selection,
+                "generation": current_generation,
+            })
+            current_simplification = []
+            current_generation = []
+            current_selection = None
 
     for event in events:
         if "Add" in event:
@@ -126,32 +154,45 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
 
             clause_str = clauses.get(idx, "")
 
-            # Generating inferences produce new clauses
-            if rule in ("Resolution", "Factoring", "Superposition", "EqualityResolution", "EqualityFactoring"):
+            premise_indices = _clause_indices(premises)
+
+            if rule in GENERATING_RULES:
                 current_generation.append({
                     "clause_idx": idx, "clause": clause_str,
-                    "rule": rule, "premises": premises,
+                    "rule": rule, "premises": premise_indices,
                 })
             elif rule == "Demodulation":
+                # Demodulation Add is simplification — if in generation phase, flush first
+                if in_generation_phase:
+                    flush()
+                    in_generation_phase = False
                 current_simplification.append({
                     "clause_idx": idx, "clause": clause_str,
-                    "rule": "Demodulation", "premises": premises,
+                    "rule": "Demodulation", "premises": premise_indices,
                 })
 
         elif "Delete" in event:
+            # If in generation phase, a Delete means next iteration started
+            if in_generation_phase:
+                flush()
+                in_generation_phase = False
             idx, rule_name, justification = event["Delete"]
             clause_str = clauses.get(idx, "")
             rule = {
                 "Tautology": "TautologyDeletion",
-                "Subsumption": "ForwardSubsumptionDeletion",
-                "Demodulation": "ForwardDemodulation",
-            }.get(rule_name, "BackwardSubsumptionDeletion")
+                "Subsumption": "SubsumptionDeletion",
+                "Demodulation": "DemodulationDeletion",
+            }.get(rule_name, "SubsumptionDeletion")
             current_simplification.append({
                 "clause_idx": idx, "clause": clause_str,
-                "rule": rule, "premises": justification,
+                "rule": rule, "premises": _clause_indices(justification),
             })
 
         elif "Transfer" in event:
+            # Transfer is simplification phase — if in generation, flush first
+            if in_generation_phase:
+                flush()
+                in_generation_phase = False
             idx = event["Transfer"]
             clause_str = clauses.get(idx, "")
             current_simplification.append({
@@ -160,25 +201,16 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
             })
 
         elif "Activate" in event:
-            # Given clause selection - end of one iteration, start of next
+            # Activate marks selection — if already in generation phase, flush first
+            if in_generation_phase:
+                flush()
             idx = event["Activate"]
             clause_str = clauses.get(idx, "")
-
-            # If we have accumulated events, save the current iteration first
-            if current_selection or current_simplification or current_generation:
-                iterations.append({
-                    "simplification": current_simplification,
-                    "selection": current_selection,
-                    "generation": current_generation,
-                })
-                current_simplification = []
-                current_generation = []
-
-            # Start new iteration with this selection
             current_selection = {
                 "clause_idx": idx, "clause": clause_str,
                 "rule": "GivenClauseSelection",
             }
+            in_generation_phase = True
 
     # Flush any remaining events
     if current_simplification or current_generation or current_selection:

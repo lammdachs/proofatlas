@@ -88,12 +88,9 @@ fof(goal, conjecture, p => r).</textarea>
                             <button id="step-next">Next</button>
                             <button id="step-last">Last</button>
                         </div>
+                        <div class="key-hints">Use arrow keys: Left/Right = step through events, Up/Down = jump iterations</div>
                         <div class="stepper-content">
-                            <div class="given-clause-section">
-                                <h4>Selected Given Clause</h4>
-                                <div id="given-clause" class="given-clause"></div>
-                            </div>
-                            <div id="phase-events" class="phase-events"></div>
+                            <div id="current-event-detail" class="current-event-detail"></div>
                             <div class="clause-sets">
                                 <div class="clause-set clause-set-new">
                                     <h4>New / N (<span id="new-count">0</span>)</h4>
@@ -108,6 +105,10 @@ fof(goal, conjecture, p => r).</textarea>
                                     <div id="processed-clauses" class="clause-list"></div>
                                 </div>
                             </div>
+                            <details id="events-details" class="events-details">
+                                <summary id="events-summary">Events</summary>
+                                <div id="phase-events" class="phase-events"></div>
+                            </details>
                         </div>
                     </div>
                 </div>

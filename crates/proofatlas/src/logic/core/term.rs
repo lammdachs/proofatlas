@@ -153,14 +153,18 @@ impl<'a> fmt::Display for TermDisplay<'a> {
             Term::Variable(v) => write!(f, "{}", self.interner.resolve_variable(v.id)),
             Term::Constant(c) => write!(f, "{}", self.interner.resolve_constant(c.id)),
             Term::Function(func, args) => {
-                write!(f, "{}(", self.interner.resolve_function(func.id))?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ",")?;
+                write!(f, "{}", self.interner.resolve_function(func.id))?;
+                if !args.is_empty() {
+                    write!(f, "(")?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ",")?;
+                        }
+                        write!(f, "{}", arg.display(self.interner))?;
                     }
-                    write!(f, "{}", arg.display(self.interner))?;
+                    write!(f, ")")?;
                 }
-                write!(f, ")")
+                Ok(())
             }
         }
     }

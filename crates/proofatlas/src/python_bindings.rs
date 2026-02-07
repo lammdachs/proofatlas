@@ -702,16 +702,22 @@ impl ProofState {
             self.processed.insert(step.clause_idx);
         }
 
-        // Rebuild proof trace
+        // Rebuild proof trace from the full event log so get_all_steps() returns
+        // ALL clauses (not just proof-relevant ones). This is needed because the
+        // web trace converter uses all_clauses for clause text lookup.
         self.proof_trace.clear();
-        for step in proof_steps {
-            let clause_string = step.conclusion.display(&self.interner).to_string();
-            self.proof_trace.push(ProofStep {
-                clause_id: step.clause_idx,
-                parent_ids: clause_indices(&step.premises),
-                rule_name: step.rule_name.clone(),
-                clause_string,
-            });
+        for event in &sat_trace {
+            if let RustStateChange::Add(clause, rule_name, premises) = event {
+                if let Some(idx) = clause.id {
+                    let clause_string = clause.display(&self.interner).to_string();
+                    self.proof_trace.push(ProofStep {
+                        clause_id: idx,
+                        parent_ids: clause_indices(premises),
+                        rule_name: rule_name.clone(),
+                        clause_string,
+                    });
+                }
+            }
         }
 
         // Serialize trace to JSON
