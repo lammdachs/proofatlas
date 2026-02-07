@@ -447,7 +447,7 @@ impl ProofAtlas {
 
     /// Check resource limits and return termination result if exceeded
     fn check_limits(&self, start_time: Instant) -> Option<ProofResult> {
-        if let Some(limit_mb) = self.config.memory_limit_mb {
+        if let Some(limit_mb) = self.config.memory_limit {
             if let Some(rss) = crate::config::process_memory_mb() {
                 if rss >= limit_mb {
                     return Some(ProofResult::ResourceLimit(

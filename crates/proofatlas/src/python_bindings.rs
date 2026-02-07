@@ -187,14 +187,14 @@ impl ProofState {
     ///     content: TPTP file content as string
     ///     include_dir: Optional directory to search for included files (e.g., TPTP root)
     ///     timeout: Optional timeout in seconds for CNF conversion (prevents hangs on complex formulas)
-    ///     memory_limit_mb: Optional memory limit in MB (checked via process RSS during CNF conversion)
-    #[pyo3(signature = (content, include_dir=None, timeout=None, memory_limit_mb=None))]
+    ///     memory_limit: Optional memory limit in MB (checked via process RSS during CNF conversion)
+    #[pyo3(signature = (content, include_dir=None, timeout=None, memory_limit=None))]
     pub fn add_clauses_from_tptp(
         &mut self,
         content: &str,
         include_dir: Option<&str>,
         timeout: Option<f64>,
-        memory_limit_mb: Option<usize>,
+        memory_limit: Option<usize>,
     ) -> PyResult<Vec<usize>> {
         let timeout_instant = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
         let include_dirs: Vec<String> = include_dir.into_iter().map(|s| s.to_string()).collect();
@@ -206,7 +206,7 @@ impl ProofState {
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || {
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
-                parse_tptp(&content_owned, &include_refs, timeout_instant, memory_limit_mb)
+                parse_tptp(&content_owned, &include_refs, timeout_instant, memory_limit)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?
             .join()
@@ -538,13 +538,13 @@ impl ProofState {
     ///     encoder: Encoder name: None (default, uses age_weight), "gcn", "gat", "graphsage", or "sentence"
     ///     scorer: Name of the scorer. Model file is "{encoder}_{scorer}.pt" (e.g., "gcn_mlp").
     ///     weights_path: Path to model weights directory
-    ///     memory_limit_mb: Memory limit for clause storage in MB
+    ///     memory_limit: Memory limit for clause storage in MB
     ///     enable_profiling: Enable structured profiling (default: false).
     ///                       When enabled, the third element of the return tuple is a JSON string.
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str], trace_json: Optional[str])
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit_mb=None, use_cuda=None, enable_profiling=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None))]
     pub fn run_saturation(
         &mut self,
         timeout: Option<f64>,
@@ -554,7 +554,7 @@ impl ProofState {
         encoder: Option<String>,
         scorer: Option<String>,
         weights_path: Option<String>,
-        memory_limit_mb: Option<usize>,
+        memory_limit: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
@@ -659,7 +659,7 @@ impl ProofState {
             max_clause_size: 100,
             timeout: timeout_dur,
             literal_selection: lit_sel,
-            memory_limit_mb,
+            memory_limit,
             enable_profiling: enable_profiling.unwrap_or(false),
         };
 

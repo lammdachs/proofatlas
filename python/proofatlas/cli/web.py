@@ -243,7 +243,8 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
 
     start = time.time()
     state = ProofState()
-    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root, memory_limit_mb=options.get("memory_limit_mb"))
+    memory_limit = options.get("memory_limit")
+    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root, memory_limit=memory_limit)
     initial_count = state.get_statistics()["total"]
 
     # Build saturation kwargs — pass config keys directly,
@@ -251,9 +252,12 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
     kwargs = {"enable_profiling": True}
 
     for key in ("timeout", "max_iterations", "literal_selection",
-                "age_weight_ratio", "encoder", "scorer", "memory_limit_mb"):
+                "age_weight_ratio", "encoder", "scorer"):
         if key in options:
             kwargs[key] = options[key]
+
+    if memory_limit is not None:
+        kwargs["memory_limit"] = memory_limit
 
     proof_found, status, profile_json, trace_json = state.run_saturation(**kwargs)
     elapsed_ms = int((time.time() - start) * 1000)

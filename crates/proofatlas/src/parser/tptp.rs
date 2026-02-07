@@ -97,12 +97,12 @@ where
 ///   - file_path: Path to the TPTP file
 ///   - include_dirs: Directories to search for included files
 ///   - timeout: Optional timeout instant for CNF conversion
-///   - memory_limit_mb: Optional memory limit in MB (checked via process RSS)
+///   - memory_limit: Optional memory limit in MB (checked via process RSS)
 pub fn parse_tptp_file(
     file_path: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
-    memory_limit_mb: Option<usize>,
+    memory_limit: Option<usize>,
 ) -> Result<ParsedProblem, String> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
@@ -111,7 +111,7 @@ pub fn parse_tptp_file(
 
     let mut visited = HashSet::new();
     let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)?;
-    let formula = convert_to_cnf(result, timeout, memory_limit_mb)?;
+    let formula = convert_to_cnf(result, timeout, memory_limit)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
@@ -125,12 +125,12 @@ pub fn parse_tptp_file(
 ///   - input: TPTP content as string
 ///   - include_dirs: Directories to search for included files
 ///   - timeout: Optional timeout instant for CNF conversion
-///   - memory_limit_mb: Optional memory limit in MB (checked via process RSS)
+///   - memory_limit: Optional memory limit in MB (checked via process RSS)
 pub fn parse_tptp(
     input: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
-    memory_limit_mb: Option<usize>,
+    memory_limit: Option<usize>,
 ) -> Result<ParsedProblem, String> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
@@ -139,7 +139,7 @@ pub fn parse_tptp(
 
     let mut visited = HashSet::new();
     let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)?;
-    let formula = convert_to_cnf(result, timeout, memory_limit_mb)?;
+    let formula = convert_to_cnf(result, timeout, memory_limit)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
@@ -148,7 +148,7 @@ pub fn parse_tptp(
 }
 
 /// Convert parsed FOF formulas to CNF
-fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, memory_limit_mb: Option<usize>) -> Result<CNFFormula, String> {
+fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, memory_limit: Option<usize>) -> Result<CNFFormula, String> {
     let mut all_clauses = result.cnf_formulas;
 
     // Separate conjectures from other formulas
@@ -168,7 +168,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, memory_limit_mb
         let cnf = PARSE_CTX.with(|ctx| {
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
-            fof_to_cnf_with_role(formula, clause_role, timeout, memory_limit_mb, parse_ctx.interner.get_mut())
+            fof_to_cnf_with_role(formula, clause_role, timeout, memory_limit, parse_ctx.interner.get_mut())
         }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
@@ -195,7 +195,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, memory_limit_mb
         let cnf = PARSE_CTX.with(|ctx| {
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
-            fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, memory_limit_mb, parse_ctx.interner.get_mut())
+            fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, memory_limit, parse_ctx.interner.get_mut())
         }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }

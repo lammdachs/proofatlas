@@ -91,7 +91,7 @@ def main():
         choices=[0, 20, 21, 22],
         help="Literal selection: 0=all, 20=maximal, 21=unique/neg/max, 22=neg/max",
     )
-    parser.add_argument("--memory-limit", type=int, dest="memory_limit_mb", help="Memory limit for clause storage in MB")
+    parser.add_argument("--memory-limit", type=int, dest="memory_limit", help="Memory limit in MB")
     parser.add_argument("--include", action="append", dest="include_dirs", help="Add include directory")
     parser.add_argument("--json", dest="json_output", help="Export proof attempt to JSON file")
     parser.add_argument("--profile", action="store_true", help="Enable profiling (included in --json output)")
@@ -139,7 +139,7 @@ def main():
     )
     age_weight_ratio = preset.get("age_weight_ratio", 0.5)
     max_iterations = preset.get("max_iterations", 0)
-    memory_limit_mb = args.memory_limit_mb if args.memory_limit_mb is not None else preset.get("memory_limit_mb")
+    memory_limit = args.memory_limit if args.memory_limit is not None else preset.get("memory_limit")
 
     # Check for ML selector in preset
     encoder = preset.get("encoder")
@@ -181,7 +181,7 @@ def main():
 
     start = time.time()
     try:
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit_mb=memory_limit_mb)
+        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
     except Exception as e:
         if "memory limit" in str(e).lower():
             elapsed = time.time() - start
@@ -224,7 +224,7 @@ def main():
             encoder=encoder,
             scorer=scorer,
             weights_path=str(weights_path) if weights_path else None,
-            memory_limit_mb=memory_limit_mb,
+            memory_limit=memory_limit,
             enable_profiling=args.profile,
         )
     except Exception as e:

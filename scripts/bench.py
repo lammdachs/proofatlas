@@ -410,7 +410,7 @@ def print_job_status(base_dir: Path):
 @dataclass
 class BenchResult:
     problem: str
-    status: str  # "proof", "saturated", "timeout", "error"
+    status: str  # "proof", "saturated", "resource_limit", "error"
     time_s: float
 
 
@@ -607,14 +607,12 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     state = ProofState()
     try:
         # Pass timeout and memory limit to parsing to prevent CNF conversion hangs/OOM
-        memory_limit_mb = preset.get("memory_limit_mb")  # None means no limit
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit_mb=memory_limit_mb)
+        memory_limit = preset.get("memory_limit")  # None means no limit
+        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
     except Exception as e:
         elapsed = time.time() - start
-        # Check if this was a timeout or memory limit during CNF conversion
-        if "timed out" in str(e).lower():
-            return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
-        if "memory limit" in str(e).lower():
+        # Timeout or memory limit during CNF conversion
+        if "timed out" in str(e).lower() or "memory limit" in str(e).lower():
             return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
         return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
@@ -650,7 +648,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             encoder=encoder,
             scorer=scorer,
             weights_path=weights_path,
-            memory_limit_mb=memory_limit_mb,
+            memory_limit=memory_limit,
             use_cuda=use_cuda,
         )
     except Exception as e:
@@ -658,9 +656,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     elapsed = time.time() - start
 
-    # Map status to benchmark format (resource_limit -> timeout for compatibility)
-    if status == "resource_limit":
-        status = "timeout"
+    # resource_limit stays as-is (already the canonical status for all limits)
 
     # Collect trace for training
     if collect_trace and proof_found and trace_preset:
@@ -957,7 +953,7 @@ def export_benchmark_progress(base_dir: Path, prover: str, preset_name: str,
         "stats": {
             "proof": stats.get("proof", 0),
             "saturated": stats.get("saturated", 0),
-            "timeout": stats.get("timeout", 0),
+            "resource_limit": stats.get("resource_limit", 0),
             "error": stats.get("error", 0),
         },
         "proof_rate": 100 * stats.get("proof", 0) / completed if completed else 0,
@@ -1040,7 +1036,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    rerun: bool = False, n_jobs: int = 1,
                    use_cuda: bool = False):
     """Run evaluation on problems with the specified prover."""
-    stats = {"proof": 0, "saturated": 0, "timeout": 0, "error": 0, "skip": 0}
+    stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
 
     if prover == "proofatlas":
         ml = _get_ml()
@@ -1093,17 +1089,19 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                 completed += 1
                 try:
                     status, result = future.result()
+                    if result.status == "timeout":
+                        result.status = "resource_limit"
                     if status == "skip":
                         stats[result.status] = stats.get(result.status, 0) + 1
                         stats["skip"] += 1
-                        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                        symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
                         print(f"[{completed}/{len(problems)}] S{symbol} {result.problem} (cached)")
                     else:
                         stats[result.status] = stats.get(result.status, 0) + 1
-                        symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                        symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
                         print(f"[{completed}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
 
-                    log_file.write(f"PROGRESS:{completed}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
+                    log_file.write(f"PROGRESS:{completed}:{len(problems)}:{stats['proof']}:{stats['resource_limit']}\n")
                     log_file.flush()
                     sys.stdout.flush()
                     export_benchmark_progress(base_dir, prover, preset_name, stats, completed, len(problems))
@@ -1120,17 +1118,19 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
             try:
                 status, result = _run_single_problem(item)
+                if result.status == "timeout":
+                    result.status = "resource_limit"
                 if status == "skip":
                     stats[result.status] = stats.get(result.status, 0) + 1
                     stats["skip"] += 1
-                    symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                    symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
                     print(f"[{i}/{len(problems)}] S{symbol} {result.problem} (cached)")
                 else:
                     stats[result.status] = stats.get(result.status, 0) + 1
-                    symbol = {"proof": "+", "saturated": "~", "timeout": "T", "error": "!"}[result.status]
+                    symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
                     print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
 
-                log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['timeout']}\n")
+                log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['resource_limit']}\n")
                 log_file.flush()
                 sys.stdout.flush()
                 export_benchmark_progress(base_dir, prover, preset_name, stats, i, len(problems))
@@ -1148,7 +1148,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
     print(f"\n{'='*60}")
     skip_str = f" S{stats['skip']}" if stats["skip"] else ""
-    print(f"Results: +{stats['proof']} ~{stats['saturated']} T{stats['timeout']}{skip_str} ({proof_rate:.1f}% proofs)")
+    print(f"Results: +{stats['proof']} ~{stats['saturated']} R{stats['resource_limit']}{skip_str} ({proof_rate:.1f}% proofs)")
 
     return stats
 

@@ -67,10 +67,10 @@ pub fn fof_to_cnf_with_role(
     formula: FOFFormula,
     role: ClauseRole,
     timeout: Option<Instant>,
-    memory_limit_mb: Option<usize>,
+    memory_limit: Option<usize>,
     interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    let mut converter = CNFConverter::new(role, timeout, memory_limit_mb, interner);
+    let mut converter = CNFConverter::new(role, timeout, memory_limit, interner);
     converter.convert(formula)
 }
 
@@ -80,19 +80,19 @@ struct CNFConverter<'a> {
     universal_vars: Vec<Variable>,
     role: ClauseRole,
     timeout: Option<Instant>,
-    memory_limit_mb: Option<usize>,
+    memory_limit: Option<usize>,
     interner: &'a mut Interner,
 }
 
 impl<'a> CNFConverter<'a> {
-    fn new(role: ClauseRole, timeout: Option<Instant>, memory_limit_mb: Option<usize>, interner: &'a mut Interner) -> Self {
+    fn new(role: ClauseRole, timeout: Option<Instant>, memory_limit: Option<usize>, interner: &'a mut Interner) -> Self {
         CNFConverter {
             skolem_counter: 0,
             def_counter: 0,
             universal_vars: Vec::new(),
             role,
             timeout,
-            memory_limit_mb,
+            memory_limit,
             interner,
         }
     }
@@ -107,7 +107,7 @@ impl<'a> CNFConverter<'a> {
     }
 
     fn check_memory(&self) -> Result<(), CNFConversionError> {
-        if let Some(limit) = self.memory_limit_mb {
+        if let Some(limit) = self.memory_limit {
             if let Some(rss) = crate::config::process_memory_mb() {
                 if rss >= limit {
                     return Err(CNFConversionError::MemoryLimit);

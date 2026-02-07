@@ -100,7 +100,7 @@ impl ProofAtlasWasm {
             max_clause_size: 100,
             timeout: Duration::from_millis(options.timeout_ms.unwrap_or(60000) as u64),
             literal_selection,
-            memory_limit_mb: None,
+            memory_limit: None,
             enable_profiling: true,
         };
 
