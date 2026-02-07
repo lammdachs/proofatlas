@@ -12,7 +12,7 @@ fn create_selector() -> Box<dyn ClauseSelector> {
 
 /// Run a group theory problem and return the result
 fn run_group_problem(problem_file: &str, timeout_secs: u64) -> ProofResult {
-    let parsed = parse_tptp_file(problem_file, &[], None).expect("Failed to parse TPTP file");
+    let parsed = parse_tptp_file(problem_file, &[], None, None).expect("Failed to parse TPTP file");
 
     let config = ProverConfig {
         max_clauses: 10000,

@@ -116,22 +116,6 @@ impl Term {
         }
     }
 
-    /// Estimate the heap memory usage of this term in bytes
-    pub fn memory_bytes(&self) -> usize {
-        match self {
-            // Variable and Constant now use Copy types, no heap allocation
-            Term::Variable(_) => 0,
-            Term::Constant(_) => 0,
-            Term::Function(_, args) => {
-                // Vec overhead: capacity * size_of::<Term>
-                let vec_bytes = args.capacity() * std::mem::size_of::<Term>();
-                // Recursive term memory
-                let args_bytes: usize = args.iter().map(|t| t.memory_bytes()).sum();
-                vec_bytes + args_bytes
-            }
-        }
-    }
-
     /// Format this term with an interner for name resolution
     pub fn display<'a>(&'a self, interner: &'a Interner) -> TermDisplay<'a> {
         TermDisplay {

@@ -606,19 +606,21 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
     state = ProofState()
     try:
-        # Pass timeout to parsing to prevent CNF conversion hangs
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout)
+        # Pass timeout and memory limit to parsing to prevent CNF conversion hangs/OOM
+        memory_limit_mb = preset.get("memory_limit_mb")  # None means no limit
+        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit_mb=memory_limit_mb)
     except Exception as e:
         elapsed = time.time() - start
-        # Check if this was a timeout during CNF conversion
+        # Check if this was a timeout or memory limit during CNF conversion
         if "timed out" in str(e).lower():
             return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
+        if "memory limit" in str(e).lower():
+            return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
         return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
     literal_selection = preset.get("literal_selection", 21)
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
-    memory_limit_mb = preset.get("memory_limit_mb")  # None means no limit
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)

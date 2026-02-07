@@ -15,6 +15,7 @@ use crate::logic::{
 #[derive(Debug, Clone)]
 pub enum CNFConversionError {
     Timeout,
+    MemoryLimit,
 }
 
 /// Polarity context for definitional CNF transformation
@@ -48,6 +49,7 @@ impl std::fmt::Display for CNFConversionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CNFConversionError::Timeout => write!(f, "CNF conversion timed out"),
+            CNFConversionError::MemoryLimit => write!(f, "CNF conversion exceeded memory limit"),
         }
     }
 }
@@ -57,17 +59,18 @@ pub fn fof_to_cnf(
     formula: FOFFormula,
     interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None, interner)
+    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None, None, interner)
 }
 
-/// Convert a FOF formula to CNF with a specific role and optional timeout
+/// Convert a FOF formula to CNF with a specific role and optional timeout/memory limit
 pub fn fof_to_cnf_with_role(
     formula: FOFFormula,
     role: ClauseRole,
     timeout: Option<Instant>,
+    memory_limit_mb: Option<usize>,
     interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    let mut converter = CNFConverter::new(role, timeout, interner);
+    let mut converter = CNFConverter::new(role, timeout, memory_limit_mb, interner);
     converter.convert(formula)
 }
 
@@ -77,17 +80,19 @@ struct CNFConverter<'a> {
     universal_vars: Vec<Variable>,
     role: ClauseRole,
     timeout: Option<Instant>,
+    memory_limit_mb: Option<usize>,
     interner: &'a mut Interner,
 }
 
 impl<'a> CNFConverter<'a> {
-    fn new(role: ClauseRole, timeout: Option<Instant>, interner: &'a mut Interner) -> Self {
+    fn new(role: ClauseRole, timeout: Option<Instant>, memory_limit_mb: Option<usize>, interner: &'a mut Interner) -> Self {
         CNFConverter {
             skolem_counter: 0,
             def_counter: 0,
             universal_vars: Vec::new(),
             role,
             timeout,
+            memory_limit_mb,
             interner,
         }
     }
@@ -96,6 +101,17 @@ impl<'a> CNFConverter<'a> {
         if let Some(timeout) = self.timeout {
             if Instant::now() >= timeout {
                 return Err(CNFConversionError::Timeout);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_memory(&self) -> Result<(), CNFConversionError> {
+        if let Some(limit) = self.memory_limit_mb {
+            if let Some(rss) = crate::config::process_memory_mb() {
+                if rss >= limit {
+                    return Err(CNFConversionError::MemoryLimit);
+                }
             }
         }
         Ok(())
@@ -909,6 +925,7 @@ impl<'a> CNFConverter<'a> {
 
         while let Some(item) = stack.pop() {
             self.check_timeout()?;
+            self.check_memory()?;
 
             match item {
                 WorkItem::Process(f) => {

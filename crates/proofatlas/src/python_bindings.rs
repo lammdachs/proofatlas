@@ -187,12 +187,14 @@ impl ProofState {
     ///     content: TPTP file content as string
     ///     include_dir: Optional directory to search for included files (e.g., TPTP root)
     ///     timeout: Optional timeout in seconds for CNF conversion (prevents hangs on complex formulas)
-    #[pyo3(signature = (content, include_dir=None, timeout=None))]
+    ///     memory_limit_mb: Optional memory limit in MB (checked via process RSS during CNF conversion)
+    #[pyo3(signature = (content, include_dir=None, timeout=None, memory_limit_mb=None))]
     pub fn add_clauses_from_tptp(
         &mut self,
         content: &str,
         include_dir: Option<&str>,
         timeout: Option<f64>,
+        memory_limit_mb: Option<usize>,
     ) -> PyResult<Vec<usize>> {
         let timeout_instant = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
         let include_dirs: Vec<String> = include_dir.into_iter().map(|s| s.to_string()).collect();
@@ -204,7 +206,7 @@ impl ProofState {
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || {
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
-                parse_tptp(&content_owned, &include_refs, timeout_instant)
+                parse_tptp(&content_owned, &include_refs, timeout_instant, memory_limit_mb)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?
             .join()

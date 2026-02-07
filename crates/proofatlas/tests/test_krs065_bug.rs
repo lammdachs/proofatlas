@@ -13,7 +13,7 @@ fn test_simple_resolution_proof() {
         cnf(c2, axiom, cowlNothing(sk0)).
     ";
 
-    let parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+    let parsed = parse_tptp(tptp, &[], None, None).expect("parse failed");
     println!("Parsed {} clauses", parsed.formula.clauses.len());
     for (i, c) in parsed.formula.clauses.iter().enumerate() {
         println!("  [{}] {}", i, c);
@@ -51,7 +51,7 @@ fn test_with_duplicate_clause() {
         cnf(c7, axiom, cowlNothing(sk0)).
     ";
 
-    let parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+    let parsed = parse_tptp(tptp, &[], None, None).expect("parse failed");
     println!("Parsed {} clauses", parsed.formula.clauses.len());
     for (i, c) in parsed.formula.clauses.iter().enumerate() {
         println!("  [{}] {}", i, c);
@@ -96,7 +96,7 @@ fn test_with_precloned_clauses() {
         cnf(c7, axiom, cowlNothing(sk0)).
     ";
 
-    let mut parsed = parse_tptp(tptp, &[], None).expect("parse failed");
+    let mut parsed = parse_tptp(tptp, &[], None, None).expect("parse failed");
 
     // Assign IDs like Python's add_clauses_from_tptp does
     for (i, clause) in parsed.formula.clauses.iter_mut().enumerate() {

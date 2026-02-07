@@ -181,8 +181,13 @@ def main():
 
     start = time.time()
     try:
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout)
+        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit_mb=memory_limit_mb)
     except Exception as e:
+        if "memory limit" in str(e).lower():
+            elapsed = time.time() - start
+            print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
+            print(f"  CNF conversion exceeded memory limit")
+            sys.exit(1)
         if "timed out" in str(e).lower():
             elapsed = time.time() - start
             print(f"✗ TIMEOUT in {elapsed:.3f}s")

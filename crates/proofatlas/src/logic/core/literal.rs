@@ -40,13 +40,6 @@ impl Atom {
         interner.resolve_predicate(self.predicate.id) == "=" && self.predicate.arity == 2
     }
 
-    /// Estimate the heap memory usage of this atom in bytes
-    pub fn memory_bytes(&self) -> usize {
-        let vec_bytes = self.args.capacity() * std::mem::size_of::<Term>();
-        let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
-        vec_bytes + args_bytes
-    }
-
     /// Format this atom with an interner for name resolution
     pub fn display<'a>(&'a self, interner: &'a Interner) -> AtomDisplay<'a> {
         AtomDisplay {
@@ -111,13 +104,6 @@ impl Literal {
         for term in &self.args {
             term.collect_variables(vars);
         }
-    }
-
-    /// Estimate the heap memory usage of this literal in bytes
-    pub fn memory_bytes(&self) -> usize {
-        let vec_bytes = self.args.capacity() * std::mem::size_of::<Term>();
-        let args_bytes: usize = self.args.iter().map(|t| t.memory_bytes()).sum();
-        vec_bytes + args_bytes
     }
 
     /// Format this literal with an interner for name resolution

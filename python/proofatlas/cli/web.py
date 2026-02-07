@@ -243,7 +243,7 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
 
     start = time.time()
     state = ProofState()
-    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root)
+    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root, memory_limit_mb=options.get("memory_limit_mb"))
     initial_count = state.get_statistics()["total"]
 
     # Build saturation kwargs — pass config keys directly,

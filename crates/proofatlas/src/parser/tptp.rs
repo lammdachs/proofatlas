@@ -97,10 +97,12 @@ where
 ///   - file_path: Path to the TPTP file
 ///   - include_dirs: Directories to search for included files
 ///   - timeout: Optional timeout instant for CNF conversion
+///   - memory_limit_mb: Optional memory limit in MB (checked via process RSS)
 pub fn parse_tptp_file(
     file_path: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
+    memory_limit_mb: Option<usize>,
 ) -> Result<ParsedProblem, String> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
@@ -109,7 +111,7 @@ pub fn parse_tptp_file(
 
     let mut visited = HashSet::new();
     let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)?;
-    let formula = convert_to_cnf(result, timeout)?;
+    let formula = convert_to_cnf(result, timeout, memory_limit_mb)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
@@ -123,10 +125,12 @@ pub fn parse_tptp_file(
 ///   - input: TPTP content as string
 ///   - include_dirs: Directories to search for included files
 ///   - timeout: Optional timeout instant for CNF conversion
+///   - memory_limit_mb: Optional memory limit in MB (checked via process RSS)
 pub fn parse_tptp(
     input: &str,
     include_dirs: &[&str],
     timeout: Option<Instant>,
+    memory_limit_mb: Option<usize>,
 ) -> Result<ParsedProblem, String> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
@@ -135,7 +139,7 @@ pub fn parse_tptp(
 
     let mut visited = HashSet::new();
     let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)?;
-    let formula = convert_to_cnf(result, timeout)?;
+    let formula = convert_to_cnf(result, timeout, memory_limit_mb)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
@@ -144,7 +148,7 @@ pub fn parse_tptp(
 }
 
 /// Convert parsed FOF formulas to CNF
-fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFormula, String> {
+fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, memory_limit_mb: Option<usize>) -> Result<CNFFormula, String> {
     let mut all_clauses = result.cnf_formulas;
 
     // Separate conjectures from other formulas
@@ -164,7 +168,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFo
         let cnf = PARSE_CTX.with(|ctx| {
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
-            fof_to_cnf_with_role(formula, clause_role, timeout, parse_ctx.interner.get_mut())
+            fof_to_cnf_with_role(formula, clause_role, timeout, memory_limit_mb, parse_ctx.interner.get_mut())
         }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
@@ -191,7 +195,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>) -> Result<CNFFo
         let cnf = PARSE_CTX.with(|ctx| {
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
-            fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, parse_ctx.interner.get_mut())
+            fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, memory_limit_mb, parse_ctx.interner.get_mut())
         }).map_err(|e| e.to_string())?;
         all_clauses.extend(cnf.clauses);
     }
@@ -1224,14 +1228,14 @@ mod tests {
 
     #[test]
     fn test_parse_simple_clause() {
-        let result = parse_tptp("cnf(test, axiom, p(a)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(test, axiom, p(a)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses.len(), 1);
         assert_eq!(result.formula.clauses[0].literals.len(), 1);
     }
 
     #[test]
     fn test_parse_equality() {
-        let result = parse_tptp("cnf(test, axiom, X = f(a)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(test, axiom, X = f(a)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses.len(), 1);
         assert_eq!(result.formula.clauses[0].literals.len(), 1);
         assert!(result.formula.clauses[0].literals[0]
@@ -1240,7 +1244,7 @@ mod tests {
 
     #[test]
     fn test_parse_negation() {
-        let result = parse_tptp("cnf(test, axiom, ~p(X) | q(X)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(test, axiom, ~p(X) | q(X)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses.len(), 1);
         assert_eq!(result.formula.clauses[0].literals.len(), 2);
         assert!(!result.formula.clauses[0].literals[0].polarity);
@@ -1249,13 +1253,13 @@ mod tests {
 
     #[test]
     fn test_parse_fof_conjunction() {
-        let result = parse_tptp("fof(test, axiom, p(a) & q(b)).", &[], None).unwrap();
+        let result = parse_tptp("fof(test, axiom, p(a) & q(b)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses.len(), 2);
     }
 
     #[test]
     fn test_parse_fof_quantified() {
-        let result = parse_tptp("fof(test, axiom, ![X]: p(X)).", &[], None).unwrap();
+        let result = parse_tptp("fof(test, axiom, ![X]: p(X)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses.len(), 1);
     }
 
@@ -1271,13 +1275,13 @@ mod tests {
     fn test_clause_role_parsing() {
         use crate::logic::ClauseRole;
 
-        let result = parse_tptp("cnf(c1, axiom, p(a)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(c1, axiom, p(a)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::Axiom);
 
-        let result = parse_tptp("cnf(c2, negated_conjecture, ~p(a)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(c2, negated_conjecture, ~p(a)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::NegatedConjecture);
 
-        let result = parse_tptp("cnf(c3, hypothesis, q(X)).", &[], None).unwrap();
+        let result = parse_tptp("cnf(c3, hypothesis, q(X)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::Hypothesis);
     }
 
@@ -1285,21 +1289,21 @@ mod tests {
     fn test_fof_role_propagation() {
         use crate::logic::ClauseRole;
 
-        let result = parse_tptp("fof(ax1, axiom, p(a) & q(b)).", &[], None).unwrap();
+        let result = parse_tptp("fof(ax1, axiom, p(a) & q(b)).", &[], None, None).unwrap();
         for clause in &result.formula.clauses {
             assert_eq!(clause.role, ClauseRole::Axiom);
         }
 
-        let result = parse_tptp("fof(conj, conjecture, p(a)).", &[], None).unwrap();
+        let result = parse_tptp("fof(conj, conjecture, p(a)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::NegatedConjecture);
 
-        let result = parse_tptp("fof(hyp1, hypothesis, r(X)).", &[], None).unwrap();
+        let result = parse_tptp("fof(hyp1, hypothesis, r(X)).", &[], None, None).unwrap();
         assert_eq!(result.formula.clauses[0].role, ClauseRole::Hypothesis);
     }
 
     #[test]
     fn test_interner_populated() {
-        let result = parse_tptp("cnf(test, axiom, p(X, f(a))).", &[], None).unwrap();
+        let result = parse_tptp("cnf(test, axiom, p(X, f(a))).", &[], None, None).unwrap();
 
         // Check that interner has correct symbols
         assert!(result.interner.get_variable("X").is_some());

@@ -106,7 +106,6 @@ impl ProofAtlas {
         // Build clause storage and N set
         let mut clauses = Vec::new();
         let mut new = Vec::new();
-        let mut clause_memory_bytes = 0usize;
 
         let mut clause_idx = 0;
         for mut clause in initial_clauses.into_iter() {
@@ -115,9 +114,6 @@ impl ProofAtlas {
             clause_manager.orient_equalities(&mut oriented);
 
             clause.id = Some(clause_idx);
-
-            // Track clause memory
-            clause_memory_bytes += clause.memory_bytes();
 
             // Notify indices about pending clause
             index_registry.on_clause_pending(clause_idx, &oriented);
@@ -162,7 +158,6 @@ impl ProofAtlas {
             unprocessed: indexmap::IndexSet::new(),
             new,
             event_log,
-            clause_memory_bytes,
             current_iteration: 0,
             initial_clause_count,
         };
@@ -400,7 +395,6 @@ impl ProofAtlas {
                 self.clause_manager.orient_equalities(&mut oriented);
                 self.index_registry.on_clause_pending(new_idx, &oriented);
 
-                self.state.clause_memory_bytes += clause_with_id.memory_bytes();
                 self.state.clauses.push(clause_with_id.clone());
                 self.state.new.push(new_idx);
 
@@ -454,11 +448,13 @@ impl ProofAtlas {
     /// Check resource limits and return termination result if exceeded
     fn check_limits(&self, start_time: Instant) -> Option<ProofResult> {
         if let Some(limit_mb) = self.config.memory_limit_mb {
-            if self.state.clause_memory_bytes >= limit_mb * 1024 * 1024 {
-                return Some(ProofResult::ResourceLimit(
-                    self.state.build_proof_steps(),
-                    self.state.clauses.clone(),
-                ));
+            if let Some(rss) = crate::config::process_memory_mb() {
+                if rss >= limit_mb {
+                    return Some(ProofResult::ResourceLimit(
+                        self.state.build_proof_steps(),
+                        self.state.clauses.clone(),
+                    ));
+                }
             }
         }
         if self.config.max_iterations > 0

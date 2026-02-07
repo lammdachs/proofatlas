@@ -48,3 +48,18 @@ impl Default for ProverConfig {
         }
     }
 }
+
+/// Get current process RSS in MB. Returns None if unavailable (e.g. WASM).
+pub fn process_memory_mb() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+        let rss_pages: usize = statm.split_whitespace().nth(1)?.parse().ok()?;
+        let page_size = 4096usize; // standard on Linux
+        Some(rss_pages * page_size / (1024 * 1024))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}

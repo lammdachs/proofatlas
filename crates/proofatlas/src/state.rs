@@ -187,8 +187,6 @@ pub struct SaturationState {
     pub new: Vec<usize>,
     /// Raw event log capturing all state changes
     pub event_log: Vec<StateChange>,
-    /// Tracked clause memory usage in bytes
-    pub clause_memory_bytes: usize,
     /// Current iteration (used for clause age)
     pub current_iteration: usize,
     /// Number of initial input clauses
