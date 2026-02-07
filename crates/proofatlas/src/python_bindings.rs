@@ -533,13 +533,13 @@ impl ProofState {
     ///     encoder: Encoder name: None (default, uses age_weight), "gcn", "gat", "graphsage", or "sentence"
     ///     scorer: Name of the scorer. Model file is "{encoder}_{scorer}.pt" (e.g., "gcn_mlp").
     ///     weights_path: Path to model weights directory
-    ///     max_clause_memory_mb: Clause memory limit in MB (directly comparable across provers)
+    ///     memory_limit_mb: Memory limit for clause storage in MB
     ///     enable_profiling: Enable structured profiling (default: false).
     ///                       When enabled, the third element of the return tuple is a JSON string.
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str], trace_json: Optional[str])
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, max_clause_memory_mb=None, use_cuda=None, enable_profiling=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit_mb=None, use_cuda=None, enable_profiling=None))]
     pub fn run_saturation(
         &mut self,
         timeout: Option<f64>,
@@ -549,7 +549,7 @@ impl ProofState {
         encoder: Option<String>,
         scorer: Option<String>,
         weights_path: Option<String>,
-        max_clause_memory_mb: Option<usize>,
+        memory_limit_mb: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
@@ -654,7 +654,7 @@ impl ProofState {
             max_clause_size: 100,
             timeout: timeout_dur,
             literal_selection: lit_sel,
-            max_clause_memory_mb,
+            memory_limit_mb,
             enable_profiling: enable_profiling.unwrap_or(false),
         };
 

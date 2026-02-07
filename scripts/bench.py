@@ -618,7 +618,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     literal_selection = preset.get("literal_selection", 21)
 
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
-    max_clause_memory_mb = preset.get("max_clause_memory_mb")  # None means no limit
+    memory_limit_mb = preset.get("memory_limit_mb")  # None means no limit
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.167)
@@ -648,7 +648,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             encoder=encoder,
             scorer=scorer,
             weights_path=weights_path,
-            max_clause_memory_mb=max_clause_memory_mb,
+            memory_limit_mb=memory_limit_mb,
             use_cuda=use_cuda,
         )
     except Exception as e:

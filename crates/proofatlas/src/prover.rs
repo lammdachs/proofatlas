@@ -452,7 +452,7 @@ impl ProofAtlas {
 
     /// Check resource limits and return termination result if exceeded
     fn check_limits(&self, start_time: Instant) -> Option<ProofResult> {
-        if let Some(limit_mb) = self.config.max_clause_memory_mb {
+        if let Some(limit_mb) = self.config.memory_limit_mb {
             if self.state.clause_memory_bytes >= limit_mb * 1024 * 1024 {
                 return Some(ProofResult::ResourceLimit(
                     self.state.build_proof_steps(),

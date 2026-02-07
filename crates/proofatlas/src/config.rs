@@ -10,8 +10,8 @@ pub struct ProverConfig {
     pub max_clause_size: usize,
     pub timeout: Duration,
     pub literal_selection: LiteralSelectionStrategy,
-    /// Memory limit for clause storage in MB (directly comparable across provers)
-    pub max_clause_memory_mb: Option<usize>,
+    /// Memory limit for clause storage in MB
+    pub memory_limit_mb: Option<usize>,
     /// Enable structured profiling (zero overhead when false)
     pub enable_profiling: bool,
 }
@@ -43,7 +43,7 @@ impl Default for ProverConfig {
             max_clause_size: 100,
             timeout: Duration::from_secs(60),
             literal_selection: LiteralSelectionStrategy::Sel21,
-            max_clause_memory_mb: None,
+            memory_limit_mb: None,
             enable_profiling: false,
         }
     }

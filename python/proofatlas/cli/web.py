@@ -251,7 +251,7 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
     kwargs = {"enable_profiling": True}
 
     for key in ("timeout", "max_iterations", "literal_selection",
-                "age_weight_ratio", "encoder", "scorer"):
+                "age_weight_ratio", "encoder", "scorer", "memory_limit_mb"):
         if key in options:
             kwargs[key] = options[key]
 
