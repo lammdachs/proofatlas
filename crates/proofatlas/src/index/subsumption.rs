@@ -17,9 +17,6 @@ use std::collections::{HashMap, HashSet};
 /// Maintains internal indices (feature vectors, clause keys, unit clauses) and
 /// tracks the clause lifecycle via the `Index` trait.
 pub struct SubsumptionChecker {
-    /// All clauses indexed by their structural key for duplicate detection
-    clause_keys: HashSet<ClauseKey>,
-
     /// Map from clause key to clause index (for active clauses, used by find_subsumer)
     clause_key_to_idx: HashMap<ClauseKey, usize>,
 
@@ -39,7 +36,6 @@ pub struct SubsumptionChecker {
 impl SubsumptionChecker {
     pub fn new() -> Self {
         SubsumptionChecker {
-            clause_keys: HashSet::new(),
             clause_key_to_idx: HashMap::new(),
             units: Vec::new(),
             clauses: Vec::new(),
@@ -270,7 +266,6 @@ impl Index for SubsumptionChecker {
 
         // Add to key index
         let clause_key = ClauseKey::from_clause(clause);
-        self.clause_keys.insert(clause_key.clone());
         self.clause_key_to_idx.insert(clause_key, idx);
 
         // Add to unit index if applicable
@@ -279,17 +274,19 @@ impl Index for SubsumptionChecker {
         }
     }
 
-    fn on_clause_removed(&mut self, _idx: usize, _clause: &Clause) {
-        // Intentionally a no-op: deleted clauses remain as passive subsumers.
-        //
-        // When a clause is deleted (e.g., by demodulation rewriting C to C'), the
-        // original form C may still subsume future clauses that C' cannot. Keeping
-        // deleted clauses in the feature index preserves this subsumption power,
-        // which is critical for problems like GRP001-1.
-        //
-        // Backward subsumption is unaffected because find_subsumed_by() intersects
-        // feature index results with the caller-provided candidate_indices (from U∪P),
-        // so deleted clauses are never backward-subsumed.
+    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+        self.active.remove(&idx);
+        self.feature_index.deactivate(idx);
+
+        // Remove from clause_key_to_idx
+        let clause = &self.clauses[idx];
+        let clause_key = ClauseKey::from_clause(clause);
+        if self.clause_key_to_idx.get(&clause_key) == Some(&idx) {
+            self.clause_key_to_idx.remove(&clause_key);
+        }
+
+        // Remove from units
+        self.units.retain(|(_, unit_idx)| *unit_idx != idx);
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -11,7 +11,6 @@
 //! - `UnitClauses`: Single-literal clauses for unit subsumption
 //! - `UnitEqualities`: Unit positive equalities for demodulation
 //! - `FeatureVectors`: Feature vector trie for subsumption filtering
-//! - `ClauseKeys`: Structural hashing for duplicate detection
 //!
 //! ## Design
 //!
@@ -23,7 +22,7 @@
 pub mod feature_vector;
 pub mod subsumption;
 
-use crate::logic::{Clause, ClauseKey, Interner, PredicateId};
+use crate::logic::{Clause, Interner, PredicateId};
 use indexmap::IndexSet;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -45,8 +44,6 @@ pub enum IndexKind {
     UnitEqualities,
     /// Feature vector trie for subsumption filtering
     FeatureVectors,
-    /// Structural hashing for duplicate detection
-    ClauseKeys,
     /// Subsumption checker for forward/backward subsumption
     Subsumption,
 }
@@ -323,78 +320,6 @@ impl Index for FeatureVectorIndex {
 }
 
 // =============================================================================
-// ClauseKeysIndex
-// =============================================================================
-
-/// Index using structural hashing for duplicate detection.
-///
-/// Uses ClauseKey for efficient exact duplicate detection.
-#[derive(Debug)]
-pub struct ClauseKeysIndex {
-    /// Set of all clause keys (for duplicate checking)
-    keys: HashSet<ClauseKey>,
-    /// Map from clause key to clause index (for active clauses)
-    key_to_idx: HashMap<ClauseKey, usize>,
-}
-
-impl ClauseKeysIndex {
-    pub fn new() -> Self {
-        ClauseKeysIndex {
-            keys: HashSet::new(),
-            key_to_idx: HashMap::new(),
-        }
-    }
-
-    /// Check if a clause with this key exists
-    pub fn contains(&self, key: &ClauseKey) -> bool {
-        self.keys.contains(key)
-    }
-
-    /// Find the index of a clause with this exact key, if any
-    pub fn find_exact(&self, clause: &Clause) -> Option<usize> {
-        let key = ClauseKey::from_clause(clause);
-        self.key_to_idx.get(&key).copied()
-    }
-
-    /// Get the index for a given key
-    pub fn get(&self, key: &ClauseKey) -> Option<usize> {
-        self.key_to_idx.get(key).copied()
-    }
-}
-
-impl Default for ClauseKeysIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Index for ClauseKeysIndex {
-    fn kind(&self) -> IndexKind {
-        IndexKind::ClauseKeys
-    }
-
-    fn on_clause_pending(&mut self, _idx: usize, _clause: &Clause) {
-        // Keys are only tracked when activated
-    }
-
-    fn on_clause_activated(&mut self, idx: usize, clause: &Clause) {
-        let key = ClauseKey::from_clause(clause);
-        self.keys.insert(key.clone());
-        self.key_to_idx.insert(key, idx);
-    }
-
-    fn on_clause_removed(&mut self, _idx: usize, clause: &Clause) {
-        let key = ClauseKey::from_clause(clause);
-        self.keys.remove(&key);
-        self.key_to_idx.remove(&key);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// =============================================================================
 // IndexRegistry
 // =============================================================================
 
@@ -421,7 +346,6 @@ impl IndexRegistry {
                 IndexKind::UnitClauses => Box::new(UnitClausesIndex::new()),
                 IndexKind::UnitEqualities => Box::new(UnitEqualitiesIndex::new(interner)),
                 IndexKind::FeatureVectors => Box::new(FeatureVectorIndex::new()),
-                IndexKind::ClauseKeys => Box::new(ClauseKeysIndex::new()),
                 IndexKind::Subsumption => Box::new(SubsumptionChecker::new()),
             };
             indices.insert(kind, index);
@@ -478,13 +402,6 @@ impl IndexRegistry {
     pub fn feature_vectors(&self) -> Option<&FeatureVectorIndex> {
         self.indices
             .get(&IndexKind::FeatureVectors)
-            .and_then(|idx| idx.as_any().downcast_ref())
-    }
-
-    /// Get the ClauseKeysIndex if it was created
-    pub fn clause_keys(&self) -> Option<&ClauseKeysIndex> {
-        self.indices
-            .get(&IndexKind::ClauseKeys)
             .and_then(|idx| idx.as_any().downcast_ref())
     }
 
@@ -555,14 +472,6 @@ impl<'a> IndexProvider<'a> {
         }
     }
 
-    /// Get the ClauseKeysIndex if the rule declared it as a requirement
-    pub fn clause_keys(&self) -> Option<&ClauseKeysIndex> {
-        if self.allowed.contains(&IndexKind::ClauseKeys) {
-            self.registry.clause_keys()
-        } else {
-            None
-        }
-    }
 }
 
 impl std::fmt::Debug for IndexProvider<'_> {
@@ -649,7 +558,7 @@ mod tests {
         assert!(registry.has(IndexKind::UnitClauses));
         assert!(registry.has(IndexKind::UnitEqualities));
         assert!(!registry.has(IndexKind::FeatureVectors));
-        assert!(!registry.has(IndexKind::ClauseKeys));
+        assert!(!registry.has(IndexKind::FeatureVectors));
     }
 
     #[test]

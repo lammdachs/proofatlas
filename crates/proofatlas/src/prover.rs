@@ -6,7 +6,7 @@
 //! Use `prove()` to run to completion, or `step()` for incremental execution.
 
 use crate::logic::clause_manager::ClauseManager;
-use crate::logic::{CNFFormula, Clause, ClauseKey, Interner};
+use crate::logic::{CNFFormula, Clause, Interner};
 use crate::state::{
     EventLog, GeneratingInference,
     ProofResult, SaturationState, SimplifyingInference,
@@ -355,17 +355,13 @@ impl ProofAtlas {
             p.clauses_generated += new_changes.len();
         }
 
-        // Add new inferences (deduplicate within the batch first)
+        // Add new inferences
         let t0 = self.profile.as_ref().map(|_| Instant::now());
-        let mut seen_in_batch: HashSet<ClauseKey> = HashSet::new();
         for change in new_changes {
             if let StateChange::Add(clause, rule_name, premises) = change {
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
-                let clause_key = ClauseKey::from_clause(&oriented);
-                if seen_in_batch.insert(clause_key) {
-                    self.apply_change(StateChange::Add(oriented, rule_name, premises));
-                }
+                self.apply_change(StateChange::Add(oriented, rule_name, premises));
             }
         }
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
