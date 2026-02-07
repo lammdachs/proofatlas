@@ -14,8 +14,9 @@ use crate::state::{
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
 use crate::profile::SaturationProfile;
-use crate::index::{IndexKind, IndexRegistry};
+use crate::index::{IndexKind, IndexRegistry, SelectedLiteralIndex};
 use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
+use std::sync::Arc;
 use crate::generating::{
     ResolutionRule, SuperpositionRule, FactoringRule,
     EqualityResolutionRule, EqualityFactoringRule,
@@ -84,15 +85,20 @@ impl ProofAtlas {
         index_registry.initialize(&initial_clauses);
 
         // Create literal selector based on configuration
-        let literal_selector: Box<dyn crate::selection::LiteralSelector> =
+        let literal_selector: Arc<dyn crate::selection::LiteralSelector> =
             match config.literal_selection {
-                LiteralSelectionStrategy::Sel0 => Box::new(SelectAll),
-                LiteralSelectionStrategy::Sel20 => Box::new(SelectMaximal::new()),
+                LiteralSelectionStrategy::Sel0 => Arc::new(SelectAll),
+                LiteralSelectionStrategy::Sel20 => Arc::new(SelectMaximal::new()),
                 LiteralSelectionStrategy::Sel21 => {
-                    Box::new(SelectUniqueMaximalOrNegOrMaximal::new())
+                    Arc::new(SelectUniqueMaximalOrNegOrMaximal::new())
                 }
-                LiteralSelectionStrategy::Sel22 => Box::new(SelectNegMaxWeightOrMaximal::new()),
+                LiteralSelectionStrategy::Sel22 => Arc::new(SelectNegMaxWeightOrMaximal::new()),
             };
+
+        // Register SelectedLiteralIndex
+        let eq_pred_id = interner.get_predicate("=");
+        let sl_index = SelectedLiteralIndex::new(literal_selector.clone(), eq_pred_id);
+        index_registry.add_index(Box::new(sl_index));
 
         // Create clause manager
         let clause_manager = ClauseManager::new(interner, literal_selector);
@@ -438,6 +444,7 @@ impl ProofAtlas {
                 // U → P (selector already removed from U)
                 self.state.unprocessed.shift_remove(&clause_idx);
                 self.state.processed.insert(clause_idx);
+                self.index_registry.on_clause_processed(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(change);
             }
         }

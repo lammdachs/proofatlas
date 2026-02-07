@@ -20,6 +20,7 @@
 //! - Lifecycle events are routed atomically to all indices
 
 pub mod feature_vector;
+pub mod selected_literals;
 pub mod subsumption;
 
 use crate::logic::{Clause, Interner, PredicateId};
@@ -28,6 +29,7 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
 pub use feature_vector::{FeatureIndex, FeatureVector, SymbolTable};
+pub use selected_literals::SelectedLiteralIndex;
 pub use subsumption::SubsumptionChecker;
 
 
@@ -46,6 +48,8 @@ pub enum IndexKind {
     FeatureVectors,
     /// Subsumption checker for forward/backward subsumption
     Subsumption,
+    /// Selected literal index for generating inference candidate filtering
+    SelectedLiterals,
 }
 
 // =============================================================================
@@ -73,6 +77,10 @@ pub trait Index: Send + Sync {
     /// Called when a clause is removed from U or P.
     /// Indices should stop tracking the clause.
     fn on_clause_removed(&mut self, idx: usize, clause: &Clause);
+
+    /// Called when a clause is moved from U to P (processed).
+    /// Used by SelectedLiteralIndex to index clauses by their selected literals.
+    fn on_clause_processed(&mut self, _idx: usize, _clause: &Clause) {}
 
     /// Initialize the index with all input clauses (for pre-computing symbol tables, etc.)
     fn initialize(&mut self, _clauses: &[Clause]) {}
@@ -347,6 +355,7 @@ impl IndexRegistry {
                 IndexKind::UnitEqualities => Box::new(UnitEqualitiesIndex::new(interner)),
                 IndexKind::FeatureVectors => Box::new(FeatureVectorIndex::new()),
                 IndexKind::Subsumption => Box::new(SubsumptionChecker::new()),
+                IndexKind::SelectedLiterals => continue, // Created externally via add_index()
             };
             indices.insert(kind, index);
         }
@@ -382,6 +391,18 @@ impl IndexRegistry {
         }
     }
 
+    /// Route a clause processed event (U → P) to all indices.
+    pub fn on_clause_processed(&mut self, idx: usize, clause: &Clause) {
+        for index in self.indices.values_mut() {
+            index.on_clause_processed(idx, clause);
+        }
+    }
+
+    /// Add an externally-created index to the registry.
+    pub fn add_index(&mut self, index: Box<dyn Index>) {
+        self.indices.insert(index.kind(), index);
+    }
+
     // Type-safe accessors
 
     /// Get the UnitClausesIndex if it was created
@@ -409,6 +430,13 @@ impl IndexRegistry {
     pub fn subsumption_checker(&self) -> Option<&SubsumptionChecker> {
         self.indices
             .get(&IndexKind::Subsumption)
+            .and_then(|idx| idx.as_any().downcast_ref())
+    }
+
+    /// Get the SelectedLiteralIndex if it was created
+    pub fn selected_literals(&self) -> Option<&SelectedLiteralIndex> {
+        self.indices
+            .get(&IndexKind::SelectedLiterals)
             .and_then(|idx| idx.as_any().downcast_ref())
     }
 

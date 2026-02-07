@@ -278,28 +278,51 @@ impl GeneratingInference for SuperpositionRule {
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        _indices: &IndexRegistry,
+        indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
-        // Superposition with processed clauses
-        for &processed_idx in state.processed.iter() {
-            if processed_idx == given_idx {
-                continue;
-            }
-            if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                // Given as first clause (rewriter)
-                changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
-                // Given as second clause (target)
-                changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
-            }
-        }
+        if let Some(sli) = indices.selected_literals() {
+            let eq_clauses = sli.equality_clauses();
+            let given_has_eq = eq_clauses.contains(&given_idx);
 
-        // Self-superposition
-        changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+            // Order-preserving: iterate processed in original order, skip using index
+            for &processed_idx in state.processed.iter() {
+                if processed_idx == given_idx {
+                    continue;
+                }
+                if let Some(processed_clause) = state.clauses.get(processed_idx) {
+                    // Given as rewriter: only if given has a selected positive equality
+                    if given_has_eq {
+                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
+                    }
+                    // Processed as rewriter: only if processed has a selected positive equality
+                    if eq_clauses.contains(&processed_idx) {
+                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                    }
+                }
+            }
+
+            // Self-superposition: only if given has a selected positive equality
+            if given_has_eq {
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+            }
+        } else {
+            // Fallback: iterate all processed clauses
+            for &processed_idx in state.processed.iter() {
+                if processed_idx == given_idx {
+                    continue;
+                }
+                if let Some(processed_clause) = state.clauses.get(processed_idx) {
+                    changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
+                    changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                }
+            }
+            changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+        }
 
         changes
     }

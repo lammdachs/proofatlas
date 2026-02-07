@@ -8,6 +8,7 @@ use crate::logic::{Clause, Interner, Position};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
+use std::collections::BTreeSet;
 
 /// Apply binary resolution between two clauses using literal selection
 pub fn resolution(
@@ -93,28 +94,51 @@ impl GeneratingInference for ResolutionRule {
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        _indices: &IndexRegistry,
+        indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
-        // Resolution with processed clauses
-        for &processed_idx in state.processed.iter() {
-            if processed_idx == given_idx {
-                continue;
+        if let Some(sli) = indices.selected_literals() {
+            // Collect unique candidate clause indices from index
+            let given_selected = selector.select(given);
+            let mut candidate_set: BTreeSet<usize> = BTreeSet::new();
+            for &lit_idx in &given_selected {
+                let lit = &given.literals[lit_idx];
+                // Look for clauses with complementary polarity
+                for &(clause_idx, _) in sli.candidates_by_predicate(lit.predicate.id, !lit.polarity) {
+                    candidate_set.insert(clause_idx);
+                }
             }
-            if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                // Given as first clause
-                changes.extend(resolution(given, processed_clause, given_idx, processed_idx, selector, interner));
-                // Given as second clause
-                changes.extend(resolution(processed_clause, given, processed_idx, given_idx, selector, interner));
-            }
-        }
 
-        // Self-resolution
-        changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+            for &partner_idx in &candidate_set {
+                if let Some(partner) = state.clauses.get(partner_idx) {
+                    changes.extend(resolution(given, partner, given_idx, partner_idx, selector, interner));
+                    if partner_idx != given_idx {
+                        changes.extend(resolution(partner, given, partner_idx, given_idx, selector, interner));
+                    }
+                }
+            }
+
+            // Self-resolution if given wasn't already a candidate
+            if !candidate_set.contains(&given_idx) {
+                changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+            }
+        } else {
+            // Fallback: iterate all processed clauses
+            for &processed_idx in state.processed.iter() {
+                if processed_idx == given_idx {
+                    continue;
+                }
+                if let Some(processed_clause) = state.clauses.get(processed_idx) {
+                    changes.extend(resolution(given, processed_clause, given_idx, processed_idx, selector, interner));
+                    changes.extend(resolution(processed_clause, given, processed_idx, given_idx, selector, interner));
+                }
+            }
+            changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+        }
 
         changes
     }

@@ -6,6 +6,7 @@
 
 use super::{Clause, Interner, KBOConfig, TermOrdering, KBO};
 use super::literal_selection::LiteralSelector;
+use std::sync::Arc;
 
 /// Centralized clause management combining the symbol interner, literal
 /// selection strategy, and term ordering.
@@ -13,7 +14,7 @@ pub struct ClauseManager {
     /// Symbol interner for resolving and creating symbol names
     pub interner: Interner,
     /// Literal selection strategy for inference rules
-    pub literal_selector: Box<dyn LiteralSelector>,
+    pub literal_selector: Arc<dyn LiteralSelector>,
     /// Term ordering (KBO) for equality orientation and ordering constraints
     pub term_ordering: KBO,
 }
@@ -21,7 +22,7 @@ pub struct ClauseManager {
 impl ClauseManager {
     /// Create a new ClauseManager with the given interner and literal selector.
     /// Uses default KBO configuration for term ordering.
-    pub fn new(interner: Interner, literal_selector: Box<dyn LiteralSelector>) -> Self {
+    pub fn new(interner: Interner, literal_selector: Arc<dyn LiteralSelector>) -> Self {
         ClauseManager {
             interner,
             literal_selector,

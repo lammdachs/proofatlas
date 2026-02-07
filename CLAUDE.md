@@ -23,7 +23,7 @@ proofatlas/
 │   │       │   └── clause_manager.rs     # ClauseManager: interner + selector + KBO
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
-│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, SubsumptionChecker
+│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, SubsumptionChecker, SelectedLiteralIndex
 │   │       ├── selection/      # Clause selection strategies, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -223,7 +223,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 
 ### Polymorphic Rule Architecture
 
-Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events (pending, activated, removed).
+Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events (pending, activated, removed, processed).
 
 **SimplifyingInference trait** (`state.rs`):
 - `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify/delete clause in N using U∪P
@@ -238,6 +238,7 @@ Rules are **stateless** — they receive the full context at call time and do no
 - `SubsumptionChecker` (`index/subsumption.rs`): Feature vector index + clause keys + unit tracking for subsumption
 - `UnitEqualitiesIndex`: Tracks unit positive equalities for demodulation
 - `FeatureVectorIndex`: Feature vectors for subsumption candidate filtering
+- `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `Vec<StateChange>` for atomic state modifications:
 - `Add(clause, rule_name, premises)`: Add new clause to N

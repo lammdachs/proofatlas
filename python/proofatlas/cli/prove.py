@@ -134,7 +134,7 @@ def main():
     # Get values from preset, then override with command line args
     timeout = args.timeout if args.timeout is not None else preset.get("timeout", 60)
     literal_selection = (
-        args.literal_selection if args.literal_selection is not None else preset.get("literal_selection", 0)
+        args.literal_selection if args.literal_selection is not None else preset.get("literal_selection", 21)
     )
     age_weight_ratio = preset.get("age_weight_ratio", 0.5)
     max_iterations = preset.get("max_iterations", 0)
