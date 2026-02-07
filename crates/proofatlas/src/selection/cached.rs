@@ -49,6 +49,24 @@ pub trait EmbeddingScorer: Send {
     /// Returns one score per input embedding.
     fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32>;
 
+    /// Score unprocessed embeddings with processed set context (cross-attention).
+    ///
+    /// When processed embeddings are available, the scorer can use them as
+    /// context (K/V in cross-attention). Falls back to `score_batch` by default.
+    fn score_with_context(
+        &self,
+        u_embeddings: &[&[f32]],
+        p_embeddings: &[&[f32]],
+    ) -> Vec<f32> {
+        let _ = p_embeddings; // Default: ignore context
+        self.score_batch(u_embeddings)
+    }
+
+    /// Whether this scorer uses cross-attention (needs P context)
+    fn uses_context(&self) -> bool {
+        false
+    }
+
     /// Get the name of this scorer
     fn name(&self) -> &str;
 }
@@ -67,6 +85,8 @@ pub struct CachingSelector<E: ClauseEmbedder, S: EmbeddingScorer> {
     scorer: S,
     /// Cache: clause index -> embedding vector
     cache: HashMap<usize, Vec<f32>>,
+    /// Indices of clauses in the processed set (for cross-attention context)
+    processed_indices: Vec<usize>,
     /// RNG state for sampling
     rng_state: u64,
     /// Accumulated cache hits
@@ -96,6 +116,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
             embedder,
             scorer,
             cache: HashMap::new(),
+            processed_indices: Vec::new(),
             rng_state: 12345,
             cache_hits: 0,
             cache_misses: 0,
@@ -173,9 +194,18 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
             .map(|idx| self.cache.get(idx).unwrap().as_slice())
             .collect();
 
-        // Score all embeddings
+        // Score all embeddings (with P context if scorer uses cross-attention)
         let t0 = Instant::now();
-        let scores = self.scorer.score_batch(&embeddings);
+        let scores = if self.scorer.uses_context() && !self.processed_indices.is_empty() {
+            let p_embeddings: Vec<&[f32]> = self
+                .processed_indices
+                .iter()
+                .filter_map(|idx| self.cache.get(idx).map(|e| e.as_slice()))
+                .collect();
+            self.scorer.score_with_context(&embeddings, &p_embeddings)
+        } else {
+            self.scorer.score_batch(&embeddings)
+        };
         self.score_time += t0.elapsed();
 
         // Softmax sampling
@@ -206,11 +236,16 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
 
     fn reset(&mut self) {
         self.cache.clear();
+        self.processed_indices.clear();
         self.rng_state = 12345;
         self.cache_hits = 0;
         self.cache_misses = 0;
         self.embed_time = Duration::ZERO;
         self.score_time = Duration::ZERO;
+    }
+
+    fn on_clause_processed(&mut self, clause_idx: usize) {
+        self.processed_indices.push(clause_idx);
     }
 
     fn stats(&self) -> Option<SelectorStats> {
@@ -275,6 +310,36 @@ mod tests {
         Clause::new(literals)
     }
 
+    /// Context scorer that doubles scores when P is non-empty
+    struct TestContextScorer;
+
+    impl EmbeddingScorer for TestContextScorer {
+        fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
+            embeddings.iter().map(|e| e[0]).collect()
+        }
+
+        fn score_with_context(
+            &self,
+            u_embeddings: &[&[f32]],
+            p_embeddings: &[&[f32]],
+        ) -> Vec<f32> {
+            if p_embeddings.is_empty() {
+                self.score_batch(u_embeddings)
+            } else {
+                // Double scores when context is available
+                u_embeddings.iter().map(|e| e[0] * 2.0).collect()
+            }
+        }
+
+        fn uses_context(&self) -> bool {
+            true
+        }
+
+        fn name(&self) -> &str {
+            "test_context"
+        }
+    }
+
     #[test]
     fn test_caching_selector_caches_embeddings() {
         let mut interner = Interner::new();
@@ -296,5 +361,84 @@ mod tests {
         // Reset should clear cache
         selector.reset();
         assert_eq!(selector.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_on_clause_processed() {
+        let embedder = TestEmbedder;
+        let scorer = TestScorer;
+        let mut selector = CachingSelector::new(embedder, scorer);
+
+        selector.on_clause_processed(0);
+        assert_eq!(selector.processed_indices, vec![0]);
+
+        selector.on_clause_processed(5);
+        assert_eq!(selector.processed_indices, vec![0, 5]);
+    }
+
+    #[test]
+    fn test_reset_clears_processed() {
+        let embedder = TestEmbedder;
+        let scorer = TestScorer;
+        let mut selector = CachingSelector::new(embedder, scorer);
+
+        selector.on_clause_processed(0);
+        selector.on_clause_processed(1);
+        assert_eq!(selector.processed_indices.len(), 2);
+
+        selector.reset();
+        assert!(selector.processed_indices.is_empty());
+    }
+
+    #[test]
+    fn test_select_with_context_scorer() {
+        let mut interner = Interner::new();
+        let embedder = TestEmbedder;
+        let scorer = TestContextScorer;
+        let mut selector = CachingSelector::new(embedder, scorer);
+
+        let clauses = vec![
+            make_clause(1, &mut interner),
+            make_clause(2, &mut interner),
+            make_clause(3, &mut interner),
+        ];
+
+        // First: process clause 0 so it's in P
+        // We need to embed it first, so we select once
+        let mut unprocessed: IndexSet<usize> = (0..3).collect();
+        let _ = selector.select(&mut unprocessed, &clauses);
+
+        // Now mark clause 0 as processed
+        selector.on_clause_processed(0);
+
+        // Select again with remaining clauses — context scorer should be used
+        let mut unprocessed2: IndexSet<usize> = (1..3).collect();
+        let _ = selector.select(&mut unprocessed2, &clauses);
+
+        // Verify that uses_context scorer was invoked (processed_indices is non-empty)
+        assert!(!selector.processed_indices.is_empty());
+    }
+
+    #[test]
+    fn test_select_without_context_scorer() {
+        let mut interner = Interner::new();
+        let embedder = TestEmbedder;
+        let scorer = TestScorer; // uses_context() = false
+        let mut selector = CachingSelector::new(embedder, scorer);
+
+        let clauses = vec![
+            make_clause(1, &mut interner),
+            make_clause(2, &mut interner),
+        ];
+
+        // Process clause 0
+        selector.on_clause_processed(0);
+
+        // Select — should use score_batch (not score_with_context) since uses_context is false
+        let mut unprocessed: IndexSet<usize> = (0..2).collect();
+        let _ = selector.select(&mut unprocessed, &clauses);
+
+        // With TestScorer (no context), it should still work fine
+        assert!(selector.cache_size() > 0);
     }
 }

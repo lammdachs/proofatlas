@@ -1,13 +1,17 @@
 """
 Scoring heads for clause selection.
 
-Given clause embeddings [num_clauses, hidden_dim], compute scores [num_clauses].
+Given clause embeddings, compute scores [num_clauses].
+
+All scorers accept forward(u_emb, p_emb=None):
+    u_emb: [num_unprocessed, hidden_dim] — clauses to score
+    p_emb: [num_processed, hidden_dim] — context (processed set), optional
 
 Available scorers:
-- MLPScorer: Independent MLP per clause (baseline)
-- AttentionScorer: Single self-attention layer with pre-norm (clauses attend to each other)
-- TransformerScorer: Multi-layer transformer with pre-norm (deeper cross-clause reasoning)
-- CrossAttentionScorer: Learnable query attends to clauses
+- MLPScorer: Independent MLP per clause (ignores p_emb)
+- AttentionScorer: Cross-attention (U queries, [s_0; P] keys/values). Falls back to self-attention when p_emb is None.
+- TransformerScorer: Multi-layer cross-attention stack. Falls back to self-attention when p_emb is None.
+- CrossAttentionScorer: Learnable query attends to clauses (legacy, kept for reference)
 """
 
 import math
@@ -21,6 +25,7 @@ class MLPScorer(nn.Module):
     MLP scoring head - scores each clause independently.
 
     Architecture: Linear → GELU → Linear → score
+    Ignores p_emb (no cross-clause reasoning).
     """
 
     def __init__(self, hidden_dim: int):
@@ -28,29 +33,31 @@ class MLPScorer(nn.Module):
         self.linear1 = nn.Linear(hidden_dim, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, u_emb: torch.Tensor, p_emb: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x: Clause embeddings [num_clauses, hidden_dim]
+            u_emb: Clause embeddings [num_clauses, hidden_dim]
+            p_emb: Ignored
 
         Returns:
             Scores [num_clauses]
         """
-        x = self.linear1(x)
+        x = self.linear1(u_emb)
         x = F.gelu(x)
         return self.linear2(x).view(-1)
 
 
 class AttentionScorer(nn.Module):
     """
-    Attention-based scoring - clauses attend to each other before scoring.
+    Cross-attention scoring — U clauses attend to the processed set P.
 
-    Uses pre-norm architecture (modern transformer style):
-        1. LayerNorm → Self-attention → Add (residual)
-        2. Linear projection to score
+    When p_emb is provided:
+        Q from u_emb, K/V from [s_0; p_emb]
+        s_0 is a learnable sentinel (ensures well-defined attention when P is empty)
+        Multi-head cross-attention → residual → score
 
-    This allows the model to consider the relative importance of clauses
-    in the context of all available clauses.
+    When p_emb is None (backward compatible):
+        Self-attention over u_emb (Q/K/V all from u_emb)
     """
 
     def __init__(
@@ -66,50 +73,62 @@ class AttentionScorer(nn.Module):
 
         assert hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
 
-        # Pre-norm
-        self.norm = nn.LayerNorm(hidden_dim)
+        # Learnable sentinel s_0 — prepended to P keys/values
+        self.sentinel = nn.Parameter(torch.randn(1, hidden_dim) * 0.02)
 
-        # Multi-head attention projections (QKV combined for efficiency)
-        self.qkv_proj = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
+        # Pre-norms
+        self.norm_q = nn.LayerNorm(hidden_dim)
+        self.norm_kv = nn.LayerNorm(hidden_dim)
+
+        # Separate Q and KV projections for cross-attention
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.k_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.v_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
 
         # Scoring head
         self.scorer = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, u_emb: torch.Tensor, p_emb: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x: Clause embeddings [num_clauses, hidden_dim]
+            u_emb: Unprocessed clause embeddings [num_u, hidden_dim]
+            p_emb: Processed clause embeddings [num_p, hidden_dim] or None
 
         Returns:
-            Scores [num_clauses]
+            Scores [num_u]
         """
-        num_clauses = x.size(0)
+        num_u = u_emb.size(0)
 
-        # Pre-norm
-        normed = self.norm(x)
+        # Determine Q source and KV source
+        q_input = self.norm_q(u_emb)
 
-        # Compute Q, K, V
-        qkv = self.qkv_proj(normed)
-        qkv = qkv.view(num_clauses, 3, self.num_heads, self.head_dim)
-        q, k, v = qkv[:, 0], qkv[:, 1], qkv[:, 2]
+        if p_emb is not None:
+            # Cross-attention: Q from U, K/V from [s_0; P]
+            kv_source = torch.cat([self.sentinel, p_emb], dim=0)
+        else:
+            # Self-attention fallback: Q/K/V all from U
+            kv_source = q_input
 
-        # Transpose for attention: [num_heads, num_clauses, head_dim]
-        q = q.transpose(0, 1)
-        k = k.transpose(0, 1)
-        v = v.transpose(0, 1)
+        kv_input = self.norm_kv(kv_source)
+        num_kv = kv_input.size(0)
+
+        # Project
+        q = self.q_proj(q_input).view(num_u, self.num_heads, self.head_dim).transpose(0, 1)
+        k = self.k_proj(kv_input).view(num_kv, self.num_heads, self.head_dim).transpose(0, 1)
+        v = self.v_proj(kv_input).view(num_kv, self.num_heads, self.head_dim).transpose(0, 1)
 
         # Attention
         attn = torch.bmm(q, k.transpose(1, 2)) * self.scale
         attn = F.softmax(attn, dim=-1)
 
         # Apply attention to values
-        out = torch.bmm(attn, v)  # [num_heads, num_clauses, head_dim]
-        out = out.transpose(0, 1).contiguous().view(num_clauses, self.hidden_dim)
+        out = torch.bmm(attn, v)  # [num_heads, num_u, head_dim]
+        out = out.transpose(0, 1).contiguous().view(num_u, self.hidden_dim)
         out = self.out_proj(out)
 
         # Residual connection
-        x = x + out
+        x = u_emb + out
 
         # Score
         return self.scorer(x).view(-1)
@@ -117,15 +136,14 @@ class AttentionScorer(nn.Module):
 
 class TransformerScorer(nn.Module):
     """
-    Transformer-based scoring - multi-layer self-attention for deeper reasoning.
+    Multi-layer cross-attention scoring.
 
-    Uses pre-norm architecture (norm_first=True):
-        1. Multiple transformer encoder layers
-        2. Each layer: Norm → Self-Attention → Add → Norm → FFN → Add
-        3. Final linear projection to score
+    When p_emb is provided:
+        Each layer: cross-attention (Q from U, K/V from [s_0; P]) + FFN
+        Multiple layers enable deeper reasoning about U-P relationships.
 
-    This allows for more complex reasoning about clause relationships
-    through multiple layers of attention.
+    When p_emb is None:
+        Falls back to self-attention transformer layers.
     """
 
     def __init__(
@@ -137,44 +155,79 @@ class TransformerScorer(nn.Module):
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.scale = 1.0 / math.sqrt(self.head_dim)
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 4
 
-        # Transformer encoder layers with pre-norm (norm_first=True)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=num_heads,
-            dim_feedforward=ffn_dim,
-            dropout=0.0,
-            activation='gelu',
-            batch_first=True,
-            norm_first=True,
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # Learnable sentinel s_0
+        self.sentinel = nn.Parameter(torch.randn(1, hidden_dim) * 0.02)
 
-        # Final norm (for pre-norm architecture)
+        # Per-layer cross-attention + FFN blocks
+        self.q_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.kv_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.q_projs = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(num_layers)])
+        self.k_projs = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(num_layers)])
+        self.v_projs = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(num_layers)])
+        self.out_projs = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(num_layers)])
+
+        # FFN blocks
+        self.ffn_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.ffn_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, ffn_dim),
+                nn.GELU(),
+                nn.Linear(ffn_dim, hidden_dim),
+            )
+            for _ in range(num_layers)
+        ])
+
+        # Final norm and scorer
         self.final_norm = nn.LayerNorm(hidden_dim)
-
-        # Scoring head
         self.scorer = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, u_emb: torch.Tensor, p_emb: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x: Clause embeddings [num_clauses, hidden_dim]
+            u_emb: Unprocessed clause embeddings [num_u, hidden_dim]
+            p_emb: Processed clause embeddings [num_p, hidden_dim] or None
 
         Returns:
-            Scores [num_clauses]
+            Scores [num_u]
         """
-        # Add batch dimension for transformer
-        x = x.unsqueeze(0)  # [1, num_clauses, hidden_dim]
+        x = u_emb
 
-        # Apply transformer layers
-        x = self.transformer(x)  # [1, num_clauses, hidden_dim]
+        for i in range(self.num_layers):
+            num_u = x.size(0)
 
-        # Remove batch dimension
-        x = x.squeeze(0)  # [num_clauses, hidden_dim]
+            # Attention block
+            q_input = self.q_norms[i](x)
+
+            if p_emb is not None:
+                kv_source = torch.cat([self.sentinel, p_emb], dim=0)
+            else:
+                kv_source = q_input
+
+            kv_input = self.kv_norms[i](kv_source)
+            num_kv = kv_input.size(0)
+
+            q = self.q_projs[i](q_input).view(num_u, self.num_heads, self.head_dim).transpose(0, 1)
+            k = self.k_projs[i](kv_input).view(num_kv, self.num_heads, self.head_dim).transpose(0, 1)
+            v = self.v_projs[i](kv_input).view(num_kv, self.num_heads, self.head_dim).transpose(0, 1)
+
+            attn = torch.bmm(q, k.transpose(1, 2)) * self.scale
+            attn = F.softmax(attn, dim=-1)
+            out = torch.bmm(attn, v)
+            out = out.transpose(0, 1).contiguous().view(num_u, self.hidden_dim)
+            out = self.out_projs[i](out)
+            x = x + out
+
+            # FFN block
+            ffn_input = self.ffn_norms[i](x)
+            x = x + self.ffn_layers[i](ffn_input)
 
         # Final norm and score
         x = self.final_norm(x)
@@ -183,7 +236,7 @@ class TransformerScorer(nn.Module):
 
 class CrossAttentionScorer(nn.Module):
     """
-    Cross-attention scoring with a learnable query.
+    Cross-attention scoring with a learnable query (legacy).
 
     Architecture:
         1. Norm → Learnable query attends to all clause embeddings
@@ -220,18 +273,19 @@ class CrossAttentionScorer(nn.Module):
     def _init_weights(self):
         nn.init.normal_(self.query, std=0.02)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, u_emb: torch.Tensor, p_emb: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x: Clause embeddings [num_clauses, hidden_dim]
+            u_emb: Clause embeddings [num_clauses, hidden_dim]
+            p_emb: Ignored (legacy scorer, kept for interface compatibility)
 
         Returns:
             Scores [num_clauses]
         """
-        num_clauses = x.size(0)
+        num_clauses = u_emb.size(0)
 
         # Pre-norm
-        x_normed = self.norm(x)
+        x_normed = self.norm(u_emb)
 
         # Project query, keys, values
         q = self.q_proj(self.query)  # [1, hidden_dim]
@@ -252,7 +306,7 @@ class CrossAttentionScorer(nn.Module):
         context = context.transpose(0, 1).contiguous().view(1, self.hidden_dim)  # [1, hidden_dim]
 
         # Clause scores via dot product with context
-        scores = torch.mm(x, context.t())  # [num_clauses, 1]
+        scores = torch.mm(u_emb, context.t())  # [num_clauses, 1]
 
         return scores.view(-1)
 

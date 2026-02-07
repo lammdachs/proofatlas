@@ -35,6 +35,8 @@ pub struct ProofState {
     proof_trace: Vec<ProofStep>,
     /// Index of the empty clause that completed the proof (if any)
     empty_clause_idx: Option<usize>,
+    /// Full event log from last saturation (for selection state extraction)
+    event_log: Vec<RustStateChange>,
 }
 
 /// Information about a clause (lightweight)
@@ -175,6 +177,7 @@ impl ProofState {
             literal_selector: Box::new(SelectAll) as Box<dyn LiteralSelector + Send>,
             proof_trace: Vec::new(),
             empty_clause_idx: None,
+            event_log: Vec::new(),
         }
     }
 
@@ -720,6 +723,9 @@ impl ProofState {
             }
         }
 
+        // Store event log for later extraction (selection states, etc.)
+        self.event_log = sat_trace.clone();
+
         // Serialize trace to JSON
         let trace_json = serde_json::to_string(&sat_trace)
             .map_err(|e| PyValueError::new_err(format!("Trace serialization failed: {}", e)))?;
@@ -959,15 +965,19 @@ impl ProofState {
                 let (parents, rule) = derivation_info
                     .get(&idx)
                     .cloned()
-                    .unwrap_or_else(|| (vec![], String::new()));
+                    .unwrap_or_else(|| (vec![], "input".to_string()));
                 TrainingClauseJson::from_clause(clause, &self.interner, in_proof, parents, rule)
             })
             .collect();
+
+        // Replay event log to build selection state snapshots
+        let selection_states = self.build_selection_states();
 
         let trace = TraceJson {
             proof_found: self.contains_empty_clause(),
             time_seconds,
             clauses,
+            selection_states,
         };
 
         serde_json::to_string(&trace)
@@ -976,6 +986,47 @@ impl ProofState {
 }
 
 impl ProofState {
+    /// Replay event log to build selection state snapshots (U/P at each Activate)
+    fn build_selection_states(&self) -> Vec<crate::json::SelectionStateJson> {
+        use std::collections::BTreeSet;
+
+        let mut n: BTreeSet<usize> = BTreeSet::new();
+        let mut u: BTreeSet<usize> = BTreeSet::new();
+        let mut p: BTreeSet<usize> = BTreeSet::new();
+        let mut states = Vec::new();
+
+        for event in &self.event_log {
+            match event {
+                RustStateChange::Add(clause, _, _) => {
+                    if let Some(idx) = clause.id {
+                        n.insert(idx);
+                    }
+                }
+                RustStateChange::Delete(clause_idx, _, _) => {
+                    n.remove(clause_idx);
+                    u.remove(clause_idx);
+                    p.remove(clause_idx);
+                }
+                RustStateChange::Transfer(clause_idx) => {
+                    n.remove(clause_idx);
+                    u.insert(*clause_idx);
+                }
+                RustStateChange::Activate(clause_idx) => {
+                    // Snapshot U and P before moving the selected clause
+                    states.push(crate::json::SelectionStateJson {
+                        selected: *clause_idx,
+                        unprocessed: u.iter().copied().collect(),
+                        processed: p.iter().copied().collect(),
+                    });
+                    u.remove(clause_idx);
+                    p.insert(*clause_idx);
+                }
+            }
+        }
+
+        states
+    }
+
     /// Convert Rust StateChange::Add to Python inference result
     fn convert_state_change(&self, change: RustStateChange) -> Option<InferenceResult> {
         if let RustStateChange::Add(clause, rule_name, premises) = change {

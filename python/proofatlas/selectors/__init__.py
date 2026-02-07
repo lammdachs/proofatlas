@@ -4,12 +4,12 @@ Clause selector models for theorem proving.
 This module provides modular components for clause selection:
 
 Modular design (recommended):
-    - Encoders: GCNEncoder, GATEncoder, GraphSAGEEncoder
+    - Encoders: GCNEncoder
     - Scorers: MLPScorer, AttentionScorer, TransformerScorer, CrossAttentionScorer
     - ClauseSelector: Combines encoder + projection + scorer
 
 Legacy models (convenience wrappers):
-    - ClauseGCN, ClauseGAT, ClauseGraphSAGE
+    - ClauseGCN
     - ClauseTransformer, ClauseGNNTransformer
 
 Example:
@@ -23,11 +23,7 @@ Example:
 
 from .gnn import (
     ClauseGCN,
-    ClauseGAT,
-    ClauseGraphSAGE,
     GCNLayer,
-    GATLayer,
-    GraphSAGELayer,
     NodeFeatureEmbedding,
     ClauseFeatureEmbedding,
 )
@@ -35,8 +31,6 @@ from .encoders import (
     ClauseEncoder,
     ClauseSelector,
     GCNEncoder,
-    GATEncoder,
-    GraphSAGEEncoder,
     create_encoder,
 )
 from .scorers import (
@@ -56,8 +50,6 @@ __all__ = [
     "ClauseEncoder",
     "ClauseSelector",
     "GCNEncoder",
-    "GATEncoder",
-    "GraphSAGEEncoder",
     "create_encoder",
     # Scorers
     "MLPScorer",
@@ -65,14 +57,10 @@ __all__ = [
     "TransformerScorer",
     "CrossAttentionScorer",
     "create_scorer",
-    # Legacy GNN models
+    # GNN models
     "ClauseGCN",
-    "ClauseGAT",
-    "ClauseGraphSAGE",
     # GNN layers
     "GCNLayer",
-    "GATLayer",
-    "GraphSAGELayer",
     # Feature embeddings
     "NodeFeatureEmbedding",
     "ClauseFeatureEmbedding",

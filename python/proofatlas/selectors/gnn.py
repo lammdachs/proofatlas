@@ -163,6 +163,203 @@ class ClauseFeatureEmbedding(nn.Module):
         return torch.cat([age_enc, role_onehot, size_enc], dim=-1)
 
 
+class SymbolEmbedding(nn.Module):
+    """
+    Precompute symbol embeddings from names using a frozen MiniLM encoder.
+
+    For each unique symbol name in a batch, tokenizes with WordPiece,
+    forwards through frozen MiniLM, and mean-pools to get a 384D embedding.
+    Sentinel tokens (VAR, CLAUSE, LIT) get learned embeddings.
+
+    Results are cached per batch for efficiency.
+    """
+
+    SENTINEL_TOKENS = ["VAR", "CLAUSE", "LIT"]
+    MINILM_DIM = 384
+
+    def __init__(self):
+        super().__init__()
+        # Learned embeddings for sentinel tokens
+        self.sentinel_embeddings = nn.Embedding(len(self.SENTINEL_TOKENS), self.MINILM_DIM)
+        self._sentinel_map = {name: i for i, name in enumerate(self.SENTINEL_TOKENS)}
+
+        # Lazy-loaded MiniLM (avoids loading at import time)
+        self._tokenizer = None
+        self._encoder = None
+
+    def _ensure_encoder(self, device):
+        """Lazy-load MiniLM encoder on first use."""
+        if self._encoder is None:
+            from transformers import AutoTokenizer, AutoModel
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                "sentence-transformers/all-MiniLM-L6-v2"
+            )
+            self._encoder = AutoModel.from_pretrained(
+                "sentence-transformers/all-MiniLM-L6-v2"
+            ).to(device)
+            # Freeze encoder
+            for param in self._encoder.parameters():
+                param.requires_grad = False
+            self._encoder.eval()
+
+    @torch.no_grad()
+    def precompute(self, symbol_names: list, device) -> torch.Tensor:
+        """
+        Compute embeddings for a list of symbol names.
+
+        Args:
+            symbol_names: List of symbol name strings (including sentinels)
+            device: Target device
+
+        Returns:
+            [len(symbol_names), 384] embedding tensor
+        """
+        self._ensure_encoder(device)
+
+        # Separate sentinels from real symbols
+        sentinel_indices = []
+        sentinel_ids = []
+        real_indices = []
+        real_names = []
+
+        for i, name in enumerate(symbol_names):
+            if name in self._sentinel_map:
+                sentinel_indices.append(i)
+                sentinel_ids.append(self._sentinel_map[name])
+            else:
+                real_indices.append(i)
+                real_names.append(name)
+
+        result = torch.zeros(len(symbol_names), self.MINILM_DIM, device=device)
+
+        # Sentinel embeddings (these are learned, not frozen)
+        if sentinel_indices:
+            ids_tensor = torch.tensor(sentinel_ids, device=device)
+            result[sentinel_indices] = self.sentinel_embeddings(ids_tensor)
+
+        # Real symbol embeddings via MiniLM
+        if real_names:
+            inputs = self._tokenizer(
+                real_names, padding=True, truncation=True, return_tensors="pt"
+            )
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            outputs = self._encoder(**inputs)
+            # Mean pool over tokens
+            mask = inputs["attention_mask"].unsqueeze(-1).float()
+            embeddings = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+            result[real_indices] = embeddings
+
+        return result
+
+
+class NodeInputProjection(nn.Module):
+    """
+    Projects node inputs to a common dimension based on the chosen mode.
+
+    Modes:
+        "features": Use structural features only (NodeFeatureEmbedding output)
+        "names": Use symbol name embeddings only (SymbolEmbedding output, 384D)
+        "both": Concatenate structural features and symbol embeddings, project
+    """
+
+    def __init__(self, hidden_dim: int, sin_dim: int = 8, mode: str = "features"):
+        super().__init__()
+        self.mode = mode
+
+        if mode in ("features", "both"):
+            self.feature_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
+            feat_dim = self.feature_embedding.output_dim
+        else:
+            feat_dim = 0
+
+        if mode in ("names", "both"):
+            name_dim = SymbolEmbedding.MINILM_DIM
+        else:
+            name_dim = 0
+
+        input_dim = feat_dim + name_dim
+        self.output_dim = hidden_dim
+        self.proj = nn.Linear(input_dim, hidden_dim)
+
+    def forward(
+        self,
+        node_features: torch.Tensor,
+        symbol_embeddings: torch.Tensor = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            node_features: [N, 3] raw structural features
+            symbol_embeddings: [N, 384] precomputed symbol embeddings (required for names/both)
+
+        Returns:
+            [N, hidden_dim] projected node representations
+        """
+        parts = []
+        if self.mode in ("features", "both"):
+            parts.append(self.feature_embedding(node_features))
+        if self.mode in ("names", "both"):
+            assert symbol_embeddings is not None, "symbol_embeddings required for mode='names' or 'both'"
+            parts.append(symbol_embeddings)
+
+        x = torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
+        return self.proj(x)
+
+
+class GraphNorm(nn.Module):
+    """
+    Graph Normalization (Cai et al., 2021).
+
+    Normalizes node features per graph with a learnable shift parameter alpha:
+        x_out = (x - alpha * mean_graph) / std_graph * gamma + beta
+
+    Unlike LayerNorm which normalizes per-node, GraphNorm computes statistics
+    across all nodes belonging to the same graph in a batch.
+
+    Args:
+        hidden_dim: Feature dimension
+        eps: Numerical stability constant
+    """
+
+    def __init__(self, hidden_dim: int, eps: float = 1e-5):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.eps = eps
+        self.alpha = nn.Parameter(torch.ones(1) * 0.5)
+        self.gamma = nn.Parameter(torch.ones(hidden_dim))
+        self.beta = nn.Parameter(torch.zeros(hidden_dim))
+
+    def forward(self, x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: [num_nodes, hidden_dim] node features
+            batch: [num_nodes] graph index for each node
+
+        Returns:
+            [num_nodes, hidden_dim] normalized features
+        """
+        # Compute per-graph mean
+        num_graphs = batch.max().item() + 1
+        # Sum per graph, then divide by count
+        count = torch.bincount(batch, minlength=num_graphs).float().clamp(min=1)
+        # Scatter sum
+        sum_x = torch.zeros(num_graphs, self.hidden_dim, device=x.device, dtype=x.dtype)
+        sum_x.scatter_add_(0, batch.unsqueeze(1).expand_as(x), x)
+        mean = sum_x / count.unsqueeze(1)
+
+        # Subtract learnable fraction of mean
+        x = x - self.alpha * mean[batch]
+
+        # Compute per-graph variance of shifted features
+        sum_sq = torch.zeros(num_graphs, self.hidden_dim, device=x.device, dtype=x.dtype)
+        sum_sq.scatter_add_(0, batch.unsqueeze(1).expand_as(x), x * x)
+        var = sum_sq / count.unsqueeze(1)
+        std = (var + self.eps).sqrt()
+
+        # Normalize and apply affine
+        x = x / std[batch]
+        return x * self.gamma + self.beta
+
+
 class GCNLayer(nn.Module):
     """
     Graph Convolutional Network layer (Kipf & Welling, 2017).
@@ -209,99 +406,23 @@ class ScorerHead(nn.Module):
         return self.linear2(x)
 
 
-class GATLayer(nn.Module):
+def _batch_from_pool(pool_matrix: torch.Tensor) -> torch.Tensor:
+    """Derive node→graph assignment from sparse pool matrix.
+
+    Args:
+        pool_matrix: [num_clauses, num_nodes] sparse or dense
+
+    Returns:
+        [num_nodes] long tensor of graph indices
     """
-    Graph Attention Network layer (Velickovic et al., 2018).
-
-    Computes attention coefficients between connected nodes.
-    """
-
-    def __init__(
-        self,
-        in_dim: int,
-        out_dim: int,
-        num_heads: int = 1,
-        concat: bool = True,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.num_heads = num_heads
-        self.out_dim = out_dim
-        self.concat = concat
-        self.dropout = dropout
-
-        self.W = nn.Linear(in_dim, out_dim * num_heads, bias=False)
-        self.a_src = nn.Parameter(torch.zeros(num_heads, out_dim))
-        self.a_dst = nn.Parameter(torch.zeros(num_heads, out_dim))
-        self.leaky_relu = nn.LeakyReLU(0.2)
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.W.weight)
-        nn.init.xavier_uniform_(self.a_src.unsqueeze(0))
-        nn.init.xavier_uniform_(self.a_dst.unsqueeze(0))
-
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Node features [num_nodes, in_dim]
-            adj: Adjacency matrix [num_nodes, num_nodes] (binary, with self-loops)
-
-        Returns:
-            Updated features [num_nodes, out_dim * num_heads] if concat
-                          or [num_nodes, out_dim] if not concat
-        """
-        num_nodes = x.size(0)
-
-        h = self.W(x).view(num_nodes, self.num_heads, self.out_dim)
-
-        attn_src = (h * self.a_src).sum(dim=-1)
-        attn_dst = (h * self.a_dst).sum(dim=-1)
-
-        attn = attn_src.unsqueeze(1) + attn_dst.unsqueeze(0)
-        attn = self.leaky_relu(attn)
-
-        mask = (adj == 0).unsqueeze(-1)
-        attn = attn.masked_fill(mask, float('-inf'))
-
-        attn = F.softmax(attn, dim=1)
-        attn = F.dropout(attn, p=self.dropout, training=self.training)
-
-        h = h.transpose(0, 1)
-        attn = attn.permute(2, 0, 1)
-        out = torch.bmm(attn, h)
-        out = out.permute(1, 0, 2)
-
-        if self.concat:
-            return out.reshape(num_nodes, -1)
-        else:
-            return out.mean(dim=1)
-
-
-class GraphSAGELayer(nn.Module):
-    """
-    GraphSAGE layer (Hamilton et al., 2017).
-
-    h_i' = σ(W · concat(h_i, mean({h_j : j ∈ N(i)})))
-    """
-
-    def __init__(self, in_dim: int, out_dim: int, bias: bool = True):
-        super().__init__()
-        self.linear = nn.Linear(in_dim * 2, out_dim, bias=bias)
-
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Node features [num_nodes, in_dim]
-            adj: Adjacency matrix [num_nodes, num_nodes] (sparse or dense, normalized)
-
-        Returns:
-            Updated features [num_nodes, out_dim]
-        """
-        neighbor_agg = sparse_mm(adj, x)
-        h = torch.cat([x, neighbor_agg], dim=-1)
-        return self.linear(h)
+    if pool_matrix.is_sparse:
+        indices = pool_matrix.coalesce().indices()
+        num_nodes = pool_matrix.size(1)
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=pool_matrix.device)
+        batch[indices[1]] = indices[0]
+        return batch
+    else:
+        return pool_matrix.argmax(dim=0)
 
 
 class ClauseGCN(nn.Module):
@@ -328,15 +449,27 @@ class ClauseGCN(nn.Module):
         scorer_num_layers: int = 2,
         sin_dim: int = 8,
         use_clause_features: bool = True,
+        node_info: str = "features",
     ):
         super().__init__()
         self.num_layers = num_layers
         self.dropout = dropout
         self.use_clause_features = use_clause_features
+        self.node_info = node_info
 
-        # Node feature embedding: raw 3-dim → richer representation
-        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.node_embedding.output_dim
+        # Node input projection: determines how node features are computed
+        if node_info == "features":
+            # Default: structural features only (backward compatible)
+            self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
+            embed_dim = self.node_embedding.output_dim
+            self.node_projection = None
+            self.symbol_embedding = None
+        else:
+            # "names" or "both": use NodeInputProjection
+            self.node_projection = NodeInputProjection(hidden_dim, sin_dim=sin_dim, mode=node_info)
+            embed_dim = hidden_dim
+            self.symbol_embedding = SymbolEmbedding()
+            self.node_embedding = None
 
         # GCN layers
         self.convs = nn.ModuleList()
@@ -344,7 +477,7 @@ class ClauseGCN(nn.Module):
         for _ in range(num_layers - 1):
             self.convs.append(GCNLayer(hidden_dim, hidden_dim))
 
-        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.norms = nn.ModuleList([GraphNorm(hidden_dim) for _ in range(num_layers)])
 
         # Clause feature embedding (optional)
         if use_clause_features:
@@ -374,6 +507,7 @@ class ClauseGCN(nn.Module):
         adj: torch.Tensor,
         pool_matrix: torch.Tensor,
         clause_features: torch.Tensor = None,
+        node_names: list = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -382,17 +516,28 @@ class ClauseGCN(nn.Module):
             pool_matrix: [num_clauses, total_nodes] for pooling nodes to clauses
             clause_features: [num_clauses, 3] raw clause features (age, role, size)
                             Optional for backwards compatibility
+            node_names: List of symbol name strings for each node.
+                       Required when node_info is "names" or "both".
 
         Returns:
             Scores [num_clauses]
         """
-        # Embed node features
-        x = self.node_embedding(node_features)
+        # Derive batch tensor (node → graph mapping) from pool matrix
+        batch = _batch_from_pool(pool_matrix)
+
+        # Embed node features based on node_info mode
+        if self.node_info == "features":
+            x = self.node_embedding(node_features)
+        else:
+            sym_emb = None
+            if node_names is not None:
+                sym_emb = self.symbol_embedding.precompute(node_names, node_features.device)
+            x = self.node_projection(node_features, sym_emb)
 
         # GCN message passing
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
             x = conv(x, adj)
-            x = norm(x)
+            x = norm(x, batch)
             x = F.relu(x)
             if i < self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
@@ -415,6 +560,53 @@ class ClauseGCN(nn.Module):
             clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
         return self.scorer(clause_emb).view(-1)
+
+    def encode(
+        self,
+        node_features: torch.Tensor,
+        adj: torch.Tensor,
+        pool_matrix: torch.Tensor,
+        clause_features: torch.Tensor = None,
+        node_names: list = None,
+    ) -> torch.Tensor:
+        """
+        Encode clauses to embeddings without scoring.
+
+        Same as forward() but returns clause embeddings [num_clauses, hidden_dim]
+        instead of scores. Used for cross-attention scoring where U and P
+        are encoded separately.
+        """
+        batch = _batch_from_pool(pool_matrix)
+
+        if self.node_info == "features":
+            x = self.node_embedding(node_features)
+        else:
+            sym_emb = None
+            if node_names is not None:
+                sym_emb = self.symbol_embedding.precompute(node_names, node_features.device)
+            x = self.node_projection(node_features, sym_emb)
+
+        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
+            x = conv(x, adj)
+            x = norm(x, batch)
+            x = F.relu(x)
+            if i < self.num_layers - 1:
+                x = F.dropout(x, p=self.dropout, training=self.training)
+
+        clause_emb = sparse_mm(pool_matrix, x)
+
+        if self.use_clause_features and self.clause_embedding is not None:
+            if clause_features is not None:
+                clause_feat_emb = self.clause_embedding(clause_features)
+            else:
+                num_clauses = pool_matrix.size(0)
+                clause_feat_emb = torch.zeros(
+                    num_clauses, self.clause_embedding.output_dim,
+                    device=clause_emb.device, dtype=clause_emb.dtype
+                )
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
+
+        return clause_emb
 
     def export_torchscript(self, path: str):
         """
@@ -465,209 +657,3 @@ class ClauseGCN(nn.Module):
             print(f"Verification: max diff = {diff:.6e}")
 
 
-class ClauseGAT(nn.Module):
-    """
-    Graph Attention Network for clause scoring.
-
-    New architecture (IJCAR26 plan):
-        Node features (3d) → node_embedding → GAT layers → pool to clauses
-        Clause features (3d) → clause_embedding
-        Concatenate(pooled, clause_emb) → scorer → scores
-    """
-
-    def __init__(
-        self,
-        node_feature_dim: int = 3,
-        hidden_dim: int = 64,
-        num_layers: int = 2,
-        num_heads: int = 4,
-        dropout: float = 0.1,
-        scorer_type: str = "mlp",
-        scorer_num_heads: int = 4,
-        scorer_num_layers: int = 2,
-        sin_dim: int = 8,
-        use_clause_features: bool = True,
-    ):
-        super().__init__()
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.use_clause_features = use_clause_features
-
-        # Node feature embedding
-        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.node_embedding.output_dim
-
-        self.convs = nn.ModuleList()
-        self.convs.append(GATLayer(embed_dim, hidden_dim, num_heads=num_heads, concat=True, dropout=dropout))
-        for _ in range(num_layers - 2):
-            self.convs.append(GATLayer(hidden_dim * num_heads, hidden_dim, num_heads=num_heads, concat=True, dropout=dropout))
-        if num_layers > 1:
-            self.convs.append(GATLayer(hidden_dim * num_heads, hidden_dim, num_heads=num_heads, concat=False, dropout=dropout))
-
-        self.norms = nn.ModuleList()
-        for i in range(num_layers - 1):
-            self.norms.append(nn.LayerNorm(hidden_dim * num_heads))
-        self.norms.append(nn.LayerNorm(hidden_dim))
-
-        # Clause feature embedding (optional)
-        if use_clause_features:
-            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
-            concat_dim = hidden_dim + self.clause_embedding.output_dim
-            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
-        else:
-            self.clause_embedding = None
-            self.clause_proj = None
-
-        self.scorer = create_scorer(
-            scorer_type,
-            hidden_dim,
-            num_heads=scorer_num_heads,
-            num_layers=scorer_num_layers,
-            dropout=dropout,
-        )
-
-        # Legacy alias
-        self.feature_embedding = self.node_embedding
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        adj: torch.Tensor,
-        pool_matrix: torch.Tensor,
-        clause_features: torch.Tensor = None,
-    ) -> torch.Tensor:
-        """
-        Args:
-            node_features: [total_nodes, 3] raw node features
-            adj: Binary adjacency matrix [total_nodes, total_nodes] (with self-loops)
-            pool_matrix: [num_clauses, total_nodes]
-            clause_features: [num_clauses, 3] raw clause features (optional)
-
-        Returns:
-            Scores [num_clauses]
-        """
-        x = self.node_embedding(node_features)
-
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            x = conv(x, adj)
-            x = norm(x)
-            x = F.elu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-
-        clause_emb = sparse_mm(pool_matrix, x)
-
-        # Add clause features if available and model expects them
-        if self.use_clause_features and self.clause_embedding is not None:
-            if clause_features is not None:
-                clause_feat_emb = self.clause_embedding(clause_features)
-            else:
-                num_clauses = pool_matrix.size(0)
-                clause_feat_emb = torch.zeros(
-                    num_clauses, self.clause_embedding.output_dim,
-                    device=clause_emb.device, dtype=clause_emb.dtype
-                )
-            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
-
-        return self.scorer(clause_emb)
-
-
-class ClauseGraphSAGE(nn.Module):
-    """
-    GraphSAGE for clause scoring.
-
-    New architecture (IJCAR26 plan):
-        Node features (3d) → node_embedding → GraphSAGE layers → pool to clauses
-        Clause features (3d) → clause_embedding
-        Concatenate(pooled, clause_emb) → scorer → scores
-    """
-
-    def __init__(
-        self,
-        node_feature_dim: int = 3,
-        hidden_dim: int = 64,
-        num_layers: int = 3,
-        dropout: float = 0.1,
-        scorer_type: str = "mlp",
-        scorer_num_heads: int = 4,
-        scorer_num_layers: int = 2,
-        sin_dim: int = 8,
-        use_clause_features: bool = True,
-    ):
-        super().__init__()
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.use_clause_features = use_clause_features
-
-        # Node feature embedding
-        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.node_embedding.output_dim
-
-        self.convs = nn.ModuleList()
-        self.convs.append(GraphSAGELayer(embed_dim, hidden_dim))
-        for _ in range(num_layers - 1):
-            self.convs.append(GraphSAGELayer(hidden_dim, hidden_dim))
-
-        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
-
-        # Clause feature embedding (optional)
-        if use_clause_features:
-            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
-            concat_dim = hidden_dim + self.clause_embedding.output_dim
-            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
-        else:
-            self.clause_embedding = None
-            self.clause_proj = None
-
-        self.scorer = create_scorer(
-            scorer_type,
-            hidden_dim,
-            num_heads=scorer_num_heads,
-            num_layers=scorer_num_layers,
-            dropout=dropout,
-        )
-
-        # Legacy alias
-        self.feature_embedding = self.node_embedding
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        adj: torch.Tensor,
-        pool_matrix: torch.Tensor,
-        clause_features: torch.Tensor = None,
-    ) -> torch.Tensor:
-        """
-        Args:
-            node_features: [total_nodes, 3] raw node features
-            adj: Normalized adjacency matrix [total_nodes, total_nodes]
-            pool_matrix: [num_clauses, total_nodes]
-            clause_features: [num_clauses, 3] raw clause features (optional)
-
-        Returns:
-            Scores [num_clauses]
-        """
-        x = self.node_embedding(node_features)
-
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            x = conv(x, adj)
-            x = norm(x)
-            x = F.relu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-
-        clause_emb = sparse_mm(pool_matrix, x)
-
-        # Add clause features if available and model expects them
-        if self.use_clause_features and self.clause_embedding is not None:
-            if clause_features is not None:
-                clause_feat_emb = self.clause_embedding(clause_features)
-            else:
-                num_clauses = pool_matrix.size(0)
-                clause_feat_emb = torch.zeros(
-                    num_clauses, self.clause_embedding.output_dim,
-                    device=clause_emb.device, dtype=clause_emb.dtype
-                )
-            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
-
-        return self.scorer(clause_emb).view(-1)

@@ -7,8 +7,6 @@ from proofatlas.selectors.encoders import (
     ClauseEncoder,
     ClauseSelector,
     GCNEncoder,
-    GATEncoder,
-    GraphSAGEEncoder,
     create_encoder,
 )
 
@@ -79,62 +77,12 @@ class TestGCNEncoder:
         assert node_features.grad is not None
 
 
-class TestGATEncoder:
-    """Tests for GATEncoder."""
-
-    def test_output_shape(self, valid_inputs):
-        encoder = GATEncoder(hidden_dim=64, num_layers=2, num_heads=4)
-        node_features, adj, pool_matrix, clause_features = valid_inputs
-
-        out = encoder(node_features, adj, pool_matrix, clause_features)
-        assert out.shape == (5, encoder.output_dim)
-        assert not torch.isnan(out).any()
-
-    def test_gradient_flow(self, valid_inputs):
-        encoder = GATEncoder(hidden_dim=32, num_layers=2, num_heads=2)
-        node_features, adj, pool_matrix, clause_features = valid_inputs
-        node_features.requires_grad_(True)
-
-        out = encoder(node_features, adj, pool_matrix, clause_features)
-        out.sum().backward()
-        assert node_features.grad is not None
-
-
-class TestGraphSAGEEncoder:
-    """Tests for GraphSAGEEncoder."""
-
-    def test_output_shape(self, valid_inputs):
-        encoder = GraphSAGEEncoder(hidden_dim=64, num_layers=3)
-        node_features, adj, pool_matrix, clause_features = valid_inputs
-
-        out = encoder(node_features, adj, pool_matrix, clause_features)
-        assert out.shape == (5, encoder.output_dim)
-        assert not torch.isnan(out).any()
-
-    def test_gradient_flow(self, valid_inputs):
-        encoder = GraphSAGEEncoder(hidden_dim=32, num_layers=2)
-        node_features, adj, pool_matrix, clause_features = valid_inputs
-        node_features.requires_grad_(True)
-
-        out = encoder(node_features, adj, pool_matrix, clause_features)
-        out.sum().backward()
-        assert node_features.grad is not None
-
-
 class TestCreateEncoder:
     """Tests for create_encoder factory."""
 
     def test_gcn(self):
         encoder = create_encoder("gcn", hidden_dim=64, num_layers=3)
         assert isinstance(encoder, GCNEncoder)
-
-    def test_gat(self):
-        encoder = create_encoder("gat", hidden_dim=64, num_layers=2)
-        assert isinstance(encoder, GATEncoder)
-
-    def test_graphsage(self):
-        encoder = create_encoder("graphsage", hidden_dim=64, num_layers=3)
-        assert isinstance(encoder, GraphSAGEEncoder)
 
     def test_invalid_type(self):
         with pytest.raises(ValueError, match="Unknown encoder type"):
@@ -154,11 +102,10 @@ class TestClauseSelector:
         assert scores.shape == (5,)
         assert not torch.isnan(scores).any()
 
-    @pytest.mark.parametrize("encoder_type", ["gcn", "gat", "graphsage"])
     @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer", "cross_attention"])
-    def test_all_combinations(self, valid_inputs, encoder_type, scorer_type):
-        """Test that any encoder works with any scorer."""
-        encoder = create_encoder(encoder_type, hidden_dim=64, num_layers=2)
+    def test_all_scorer_combinations(self, valid_inputs, scorer_type):
+        """Test that GCN encoder works with any scorer."""
+        encoder = create_encoder("gcn", hidden_dim=64, num_layers=2)
         selector = ClauseSelector(encoder, scorer_type=scorer_type, scorer_dim=64)
 
         node_features, adj, pool_matrix, clause_features = valid_inputs

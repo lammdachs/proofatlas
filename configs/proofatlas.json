@@ -16,7 +16,8 @@
       "timeout": 600,
       "max_iterations": 512,
       "literal_selection": 21,
-      "age_weight_ratio": 0.5
+      "age_weight_ratio": 0.5,
+      "memory_limit_mb": 512
     },
 
     "gcn_mlp": {

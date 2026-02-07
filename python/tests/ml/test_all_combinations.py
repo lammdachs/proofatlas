@@ -1,7 +1,7 @@
 """Tests for all embedding+scorer combinations.
 
-Tests all 16 combinations:
-- Graph embeddings (gcn, gat, graphsage) x 4 scorers = 12 combinations
+Tests all combinations:
+- Graph embedding (gcn) x 4 scorers = 4 combinations
 - String embedding (sentence) x 4 scorers = 4 combinations
 """
 
@@ -11,8 +11,6 @@ import torch
 from proofatlas.selectors.encoders import (
     ClauseSelector,
     GCNEncoder,
-    GATEncoder,
-    GraphSAGEEncoder,
     create_encoder,
 )
 from proofatlas.selectors.scorers import create_scorer
@@ -77,10 +75,10 @@ def clause_strings():
 
 
 # =============================================================================
-# Graph Embedding Tests (12 combinations)
+# Graph Embedding Tests
 # =============================================================================
 
-GRAPH_EMBEDDINGS = ["gcn", "gat", "graphsage"]
+GRAPH_EMBEDDINGS = ["gcn"]
 SCORERS = ["mlp", "attention", "transformer", "cross_attention"]
 
 
@@ -157,7 +155,7 @@ class TestGraphEmbeddings:
 
 
 # =============================================================================
-# String Embedding Tests (4 combinations)
+# String Embedding Tests
 # =============================================================================
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
@@ -232,13 +230,11 @@ class TestModelNaming:
         ("gcn", "mlp"),
         ("gcn", "attention"),
         ("gcn", "transformer"),
-        ("gat", "mlp"),
-        ("graphsage", "cross_attention"),
+        ("gcn", "cross_attention"),
     ])
     def test_model_name_format(self, embedding, scorer):
         """Test that model names follow {embedding}_{scorer} convention."""
         expected_name = f"{embedding}_{scorer}"
-        # This is just a naming convention test
         assert "_" in expected_name
         assert embedding in expected_name
         assert scorer in expected_name

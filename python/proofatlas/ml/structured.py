@@ -168,6 +168,7 @@ class _GraphBuilder:
         # Store as flat lists for efficiency (avoid numpy array per node)
         self.node_features: List[Tuple[float, float, float]] = []
         self.node_types: List[int] = []
+        self.node_names: List[str] = []
         self.edge_src: List[int] = []
         self.edge_dst: List[int] = []
 
@@ -176,7 +177,7 @@ class _GraphBuilder:
         literals = clause.get("literals", [])
 
         # Create clause node
-        clause_idx = self._add_node(TYPE_CLAUSE, len(literals), 0)
+        clause_idx = self._add_node(TYPE_CLAUSE, len(literals), 0, name="CLAUSE")
 
         # Add literals
         for lit_pos, lit in enumerate(literals):
@@ -192,13 +193,14 @@ class _GraphBuilder:
         args = atom.get("args", [])
 
         # Create literal node (arity=1: one child which is the predicate)
-        lit_idx = self._add_node(TYPE_LITERAL, 1, arg_pos)
+        lit_idx = self._add_node(TYPE_LITERAL, 1, arg_pos, name="LIT")
 
         # Create predicate node
         pred_idx = self._add_node(
             node_type=TYPE_PREDICATE,
             arity=len(args),
             arg_pos=0,
+            name=atom["predicate"],
         )
         self.edge_src.append(lit_idx)
         self.edge_dst.append(pred_idx)
@@ -216,12 +218,12 @@ class _GraphBuilder:
         term_type = term["type"]
 
         if term_type == "Variable":
-            return self._add_node(TYPE_VARIABLE, 0, arg_pos)
+            return self._add_node(TYPE_VARIABLE, 0, arg_pos, name="VAR")
         elif term_type == "Constant":
-            return self._add_node(TYPE_CONSTANT, 0, arg_pos)
+            return self._add_node(TYPE_CONSTANT, 0, arg_pos, name=term["name"])
         elif term_type == "Function":
             args = term.get("args", [])
-            func_idx = self._add_node(TYPE_FUNCTION, len(args), arg_pos)
+            func_idx = self._add_node(TYPE_FUNCTION, len(args), arg_pos, name=term["name"])
 
             for child_pos, child in enumerate(args):
                 child_idx = self._build_term(child, arg_pos=child_pos)
@@ -231,13 +233,14 @@ class _GraphBuilder:
             return func_idx
         else:
             # Unknown term type, treat as constant
-            return self._add_node(TYPE_CONSTANT, 0, arg_pos)
+            return self._add_node(TYPE_CONSTANT, 0, arg_pos, name=term.get("name", "?"))
 
-    def _add_node(self, node_type: int, arity: int = 0, arg_pos: int = 0) -> int:
-        """Add a node with 3-dim feature vector (type, arity, arg_pos)."""
+    def _add_node(self, node_type: int, arity: int = 0, arg_pos: int = 0, name: str = "") -> int:
+        """Add a node with 3-dim feature vector (type, arity, arg_pos) and symbol name."""
         idx = len(self.node_features)
         self.node_features.append((float(node_type), float(arity), float(arg_pos)))
         self.node_types.append(node_type)
+        self.node_names.append(name)
         return idx
 
     def to_numpy(self, clause: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,6 +287,7 @@ class _GraphBuilder:
             'edge_index': edge_index,
             'x': x,
             'node_types': node_types,
+            'node_names': self.node_names,
             'num_nodes': num_nodes,
             'num_edges': num_edges,
             'clause_features': clause_features,
@@ -408,7 +412,7 @@ def batch_graphs(
     counts = torch.bincount(batch, minlength=num_clauses).float()
     node_indices = torch.arange(num_nodes, device=device)
     pool_indices = torch.stack([batch, node_indices])
-    pool_values = 1.0 / counts[batch]
+    pool_values = 1.0 / counts[batch].sqrt()
     pool_matrix = torch.sparse_coo_tensor(pool_indices, pool_values, (num_clauses, num_nodes)).coalesce()
 
     result = {

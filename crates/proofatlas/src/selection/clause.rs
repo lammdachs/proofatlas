@@ -37,4 +37,8 @@ pub trait ClauseSelector: Send {
     fn stats(&self) -> Option<SelectorStats> {
         None
     }
+
+    /// Notify the selector that a clause has been moved to the processed set (U→P).
+    /// Used by cross-attention selectors to track the P set for context.
+    fn on_clause_processed(&mut self, _clause_idx: usize) {}
 }

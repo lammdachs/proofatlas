@@ -24,6 +24,7 @@ except ImportError:
     HAS_TRANSFORMERS = False
 
 from .scorers import create_scorer
+from .gnn import ClauseFeatureEmbedding
 
 
 class SentenceEncoder(nn.Module):
@@ -50,6 +51,8 @@ class SentenceEncoder(nn.Module):
         scorer_type: str = "mlp",
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
+        use_clause_features: bool = False,
+        sin_dim: int = 8,
     ):
         """
         Args:
@@ -59,6 +62,8 @@ class SentenceEncoder(nn.Module):
             scorer_type: Type of scorer head
             scorer_num_heads: Attention heads for scorer
             scorer_num_layers: Layers for transformer scorer
+            use_clause_features: Concatenate clause-level features (age, role, size)
+            sin_dim: Sinusoidal encoding dimension for clause features
         """
         super().__init__()
 
@@ -71,6 +76,7 @@ class SentenceEncoder(nn.Module):
         self.model_name = model_name
         self.hidden_dim = hidden_dim
         self.freeze_encoder = freeze_encoder
+        self.use_clause_features = use_clause_features
 
         # Load pretrained model and tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -83,6 +89,15 @@ class SentenceEncoder(nn.Module):
 
         # Projection to hidden_dim
         self.projection = nn.Linear(self.encoder_dim, hidden_dim)
+
+        # Clause feature embedding (optional, matching GCN pattern)
+        if use_clause_features:
+            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
+            concat_dim = hidden_dim + self.clause_embedding.output_dim
+            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
+        else:
+            self.clause_embedding = None
+            self.clause_proj = None
 
         # Scorer
         self.scorer = create_scorer(
@@ -127,12 +142,18 @@ class SentenceEncoder(nn.Module):
 
         return embeddings
 
-    def forward(self, clause_strings: List[str]) -> torch.Tensor:
+    def forward(
+        self,
+        clause_strings: List[str],
+        clause_features: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
         Encode clauses and compute scores.
 
         Args:
             clause_strings: List of clause string representations
+            clause_features: [num_clauses, 3] raw clause features (age, role, size).
+                            Used when use_clause_features=True.
 
         Returns:
             Scores [num_clauses]
@@ -146,6 +167,18 @@ class SentenceEncoder(nn.Module):
 
         # Project to hidden_dim
         clause_emb = self.projection(embeddings)
+
+        # Add clause features if configured
+        if self.use_clause_features and self.clause_embedding is not None:
+            if clause_features is not None:
+                clause_feat_emb = self.clause_embedding(clause_features)
+            else:
+                num_clauses = len(clause_strings)
+                clause_feat_emb = torch.zeros(
+                    num_clauses, self.clause_embedding.output_dim,
+                    device=clause_emb.device, dtype=clause_emb.dtype
+                )
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
         # Score
         return self.scorer(clause_emb)

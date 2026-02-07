@@ -21,8 +21,6 @@ from .gnn import (
     NodeFeatureEmbedding,
     ClauseFeatureEmbedding,
     GCNLayer,
-    GATLayer,
-    GraphSAGELayer,
 )
 from .scorers import create_scorer
 
@@ -126,168 +124,6 @@ class GCNEncoder(ClauseEncoder):
         clause_emb = torch.mm(pool_matrix, x)
 
         # Add clause features if available
-        if self.use_clause_features and self.clause_embedding is not None:
-            if clause_features is not None:
-                clause_feat_emb = self.clause_embedding(clause_features)
-            else:
-                num_clauses = pool_matrix.size(0)
-                clause_feat_emb = torch.zeros(
-                    num_clauses, self.clause_embedding.output_dim,
-                    device=clause_emb.device, dtype=clause_emb.dtype
-                )
-            clause_emb = torch.cat([clause_emb, clause_feat_emb], dim=-1)
-
-        return clause_emb
-
-
-class GATEncoder(ClauseEncoder):
-    """
-    GAT-based clause encoder.
-
-    Encodes clause graphs to embeddings using Graph Attention Networks.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        num_layers: int = 2,
-        num_heads: int = 4,
-        dropout: float = 0.1,
-        sin_dim: int = 8,
-        use_clause_features: bool = True,
-    ):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.use_clause_features = use_clause_features
-
-        # Node feature embedding
-        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.node_embedding.output_dim
-
-        # GAT layers
-        self.convs = nn.ModuleList()
-        self.convs.append(GATLayer(embed_dim, hidden_dim, num_heads=num_heads, concat=True, dropout=dropout))
-        for _ in range(num_layers - 2):
-            self.convs.append(GATLayer(hidden_dim * num_heads, hidden_dim, num_heads=num_heads, concat=True, dropout=dropout))
-        if num_layers > 1:
-            self.convs.append(GATLayer(hidden_dim * num_heads, hidden_dim, num_heads=num_heads, concat=False, dropout=dropout))
-
-        self.norms = nn.ModuleList()
-        for i in range(num_layers - 1):
-            self.norms.append(nn.LayerNorm(hidden_dim * num_heads))
-        self.norms.append(nn.LayerNorm(hidden_dim))
-
-        # Clause feature embedding (optional)
-        if use_clause_features:
-            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
-            self._output_dim = hidden_dim + self.clause_embedding.output_dim
-        else:
-            self.clause_embedding = None
-            self._output_dim = hidden_dim
-
-    @property
-    def output_dim(self) -> int:
-        return self._output_dim
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        adj: torch.Tensor,
-        pool_matrix: torch.Tensor,
-        clause_features: torch.Tensor = None,
-    ) -> torch.Tensor:
-        """Encode clauses to embeddings."""
-        x = self.node_embedding(node_features)
-
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            x = conv(x, adj)
-            x = norm(x)
-            x = F.elu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-
-        clause_emb = torch.mm(pool_matrix, x)
-
-        if self.use_clause_features and self.clause_embedding is not None:
-            if clause_features is not None:
-                clause_feat_emb = self.clause_embedding(clause_features)
-            else:
-                num_clauses = pool_matrix.size(0)
-                clause_feat_emb = torch.zeros(
-                    num_clauses, self.clause_embedding.output_dim,
-                    device=clause_emb.device, dtype=clause_emb.dtype
-                )
-            clause_emb = torch.cat([clause_emb, clause_feat_emb], dim=-1)
-
-        return clause_emb
-
-
-class GraphSAGEEncoder(ClauseEncoder):
-    """
-    GraphSAGE-based clause encoder.
-
-    Encodes clause graphs to embeddings using GraphSAGE.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        num_layers: int = 3,
-        dropout: float = 0.1,
-        sin_dim: int = 8,
-        use_clause_features: bool = True,
-    ):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.use_clause_features = use_clause_features
-
-        # Node feature embedding
-        self.node_embedding = NodeFeatureEmbedding(sin_dim=sin_dim)
-        embed_dim = self.node_embedding.output_dim
-
-        # GraphSAGE layers
-        self.convs = nn.ModuleList()
-        self.convs.append(GraphSAGELayer(embed_dim, hidden_dim))
-        for _ in range(num_layers - 1):
-            self.convs.append(GraphSAGELayer(hidden_dim, hidden_dim))
-
-        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
-
-        # Clause feature embedding (optional)
-        if use_clause_features:
-            self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
-            self._output_dim = hidden_dim + self.clause_embedding.output_dim
-        else:
-            self.clause_embedding = None
-            self._output_dim = hidden_dim
-
-    @property
-    def output_dim(self) -> int:
-        return self._output_dim
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        adj: torch.Tensor,
-        pool_matrix: torch.Tensor,
-        clause_features: torch.Tensor = None,
-    ) -> torch.Tensor:
-        """Encode clauses to embeddings."""
-        x = self.node_embedding(node_features)
-
-        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-            x = conv(x, adj)
-            x = norm(x)
-            x = F.relu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
-
-        clause_emb = torch.mm(pool_matrix, x)
-
         if self.use_clause_features and self.clause_embedding is not None:
             if clause_features is not None:
                 clause_feat_emb = self.clause_embedding(clause_features)
@@ -409,7 +245,7 @@ def create_encoder(
     Factory function to create an encoder.
 
     Args:
-        encoder_type: One of "gcn", "gat", "graphsage"
+        encoder_type: "gcn"
         hidden_dim: Hidden dimension
         num_layers: Number of layers
         **kwargs: Additional encoder-specific arguments
@@ -419,9 +255,5 @@ def create_encoder(
     """
     if encoder_type == "gcn":
         return GCNEncoder(hidden_dim=hidden_dim, num_layers=num_layers, **kwargs)
-    elif encoder_type == "gat":
-        return GATEncoder(hidden_dim=hidden_dim, num_layers=num_layers, **kwargs)
-    elif encoder_type == "graphsage":
-        return GraphSAGEEncoder(hidden_dim=hidden_dim, num_layers=num_layers, **kwargs)
     else:
-        raise ValueError(f"Unknown encoder type: {encoder_type}. Available: gcn, gat, graphsage")
+        raise ValueError(f"Unknown encoder type: {encoder_type}. Available: gcn")

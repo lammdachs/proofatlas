@@ -5,10 +5,11 @@ Factory functions for creating and exporting clause selector models.
 import torch
 import torch.nn as nn
 
-from .gnn import ClauseGCN, ClauseGAT, ClauseGraphSAGE
+from .gnn import ClauseGCN
 from .transformer import ClauseTransformer, ClauseGNNTransformer
 from .baseline import NodeMLP, AgeWeightHeuristic
 from .sentence import SentenceEncoder, HAS_TRANSFORMERS
+from .features import ClauseFeatures
 
 
 def create_model(
@@ -71,27 +72,7 @@ def create_model(
             dropout=kwargs.get('dropout', 0.1),
             use_clause_features=use_clause_features,
             sin_dim=sin_dim,
-            **scorer_kwargs,
-        )
-    elif model_type == "gat":
-        return ClauseGAT(
-            node_feature_dim=node_feature_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            num_heads=kwargs.get('num_heads', 4),
-            dropout=kwargs.get('dropout', 0.1),
-            use_clause_features=use_clause_features,
-            sin_dim=sin_dim,
-            **scorer_kwargs,
-        )
-    elif model_type == "graphsage":
-        return ClauseGraphSAGE(
-            node_feature_dim=node_feature_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            dropout=kwargs.get('dropout', 0.1),
-            use_clause_features=use_clause_features,
-            sin_dim=sin_dim,
+            node_info=kwargs.get('node_info', 'features'),
             **scorer_kwargs,
         )
     elif model_type == "transformer":
@@ -122,6 +103,12 @@ def create_model(
         return AgeWeightHeuristic(
             age_probability=kwargs.get('age_probability', 0.5),
         )
+    elif model_type == "features":
+        return ClauseFeatures(
+            hidden_dim=hidden_dim,
+            sin_dim=sin_dim,
+            **scorer_kwargs,
+        )
     elif model_type == "sentence":
         if not HAS_TRANSFORMERS:
             raise ImportError(
@@ -132,6 +119,8 @@ def create_model(
             model_name=kwargs.get('sentence_model', 'sentence-transformers/all-MiniLM-L6-v2'),
             hidden_dim=hidden_dim,
             freeze_encoder=kwargs.get('freeze_encoder', False),
+            use_clause_features=use_clause_features,
+            sin_dim=sin_dim,
             **scorer_kwargs,
         )
     else:

@@ -351,6 +351,7 @@ impl ProofAtlas {
         }
 
         // === Step 4: Activate given clause (transfer from U to P) ===
+        self.clause_selector.on_clause_processed(given_idx);
         self.apply_change(StateChange::Activate(given_idx));
 
         // === Step 5: Generate inferences ===

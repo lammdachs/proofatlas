@@ -178,7 +178,7 @@ impl GcnEmbedder {
         for (clause_idx, &(start, end)) in clause_boundaries.iter().enumerate() {
             let clause_size = end - start;
             if clause_size > 0 {
-                let weight = 1.0 / clause_size as f32;
+                let weight = 1.0 / (clause_size as f32).sqrt();
                 for node_idx in start..end {
                     if node_idx < num_nodes {
                         rows.push(clause_idx as i64);
@@ -278,6 +278,341 @@ pub fn load_gcn_selector<P: AsRef<Path>>(
     let embedder = GcnEmbedder::new(model_path, use_cuda)?;
     let scorer = GcnScorer;
     Ok(CachingSelector::new(embedder, scorer))
+}
+
+/// GCN encoder that returns real embeddings (not scores)
+///
+/// Loads an encoder-only TorchScript model (exported from model.encode()).
+/// Returns [num_clauses, hidden_dim] embeddings for caching.
+/// Used with `TorchScriptScorer` for separated encoder/scorer architecture.
+#[cfg(feature = "ml")]
+pub struct GcnEncoder {
+    model: tch::CModule,
+    device: tch::Device,
+    max_age: usize,
+    hidden_dim: usize,
+}
+
+#[cfg(feature = "ml")]
+impl GcnEncoder {
+    /// Create a new GCN encoder from a TorchScript encoder model
+    pub fn new<P: AsRef<Path>>(model_path: P, hidden_dim: usize, use_cuda: bool) -> Result<Self, String> {
+        let device = if use_cuda && tch::Cuda::is_available() {
+            tch::Device::Cuda(0)
+        } else {
+            tch::Device::Cpu
+        };
+
+        let model = tch::CModule::load_on_device(model_path.as_ref(), device)
+            .map_err(|e| format!("Failed to load TorchScript encoder: {}", e))?;
+
+        Ok(Self {
+            model,
+            device,
+            max_age: 10000,
+            hidden_dim,
+        })
+    }
+
+    /// Build batch tensors (reuses GcnEmbedder's logic)
+    fn build_batch_tensors(
+        &self,
+        clauses: &[&Clause],
+    ) -> (tch::Tensor, tch::Tensor, tch::Tensor, tch::Tensor) {
+        let num_clauses = clauses.len();
+        let graph = GraphBuilder::build_from_clauses(clauses);
+        let num_nodes = graph.num_nodes;
+
+        if num_nodes == 0 {
+            let node_features = tch::Tensor::zeros([1, 3], (tch::Kind::Float, self.device));
+            let empty_idx = tch::Tensor::zeros([2, 0], (tch::Kind::Int64, self.device));
+            let empty_vals = tch::Tensor::zeros([0], (tch::Kind::Float, self.device));
+            let adj = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals, [1, 1], (tch::Kind::Float, self.device), true,
+            );
+            let pool_matrix = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals,
+                [num_clauses as i64, 1], (tch::Kind::Float, self.device), true,
+            );
+            let clause_features =
+                tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
+            return (node_features, adj, pool_matrix, clause_features);
+        }
+
+        // Build node features tensor [num_nodes, 3]
+        let node_feat_flat: Vec<f32> = graph.node_features.iter().flat_map(|f| *f).collect();
+        let node_features = tch::Tensor::from_slice(&node_feat_flat)
+            .view([num_nodes as i64, 3])
+            .to_device(self.device);
+
+        // Build normalized adjacency matrix (same as GcnEmbedder)
+        let adj = self.build_adjacency(&graph.edge_indices, num_nodes);
+        let pool_matrix =
+            self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
+
+        // Build clause features [num_clauses, 3]
+        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
+        for clause in clauses {
+            let age_normalized = clause.age as f32 / self.max_age as f32;
+            let role = clause.role.to_feature_value();
+            let size = clause.literals.len() as f32;
+            clause_feat_flat.extend_from_slice(&[age_normalized.min(1.0), role, size]);
+        }
+        let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
+            .view([num_clauses as i64, 3])
+            .to_device(self.device);
+
+        (node_features, adj, pool_matrix, clause_features)
+    }
+
+    fn build_adjacency(&self, edges: &[(usize, usize)], num_nodes: usize) -> tch::Tensor {
+        use std::collections::HashSet;
+
+        let mut edge_set = HashSet::new();
+        for &(src, dst) in edges {
+            if src < num_nodes && dst < num_nodes {
+                edge_set.insert((src, dst));
+                edge_set.insert((dst, src));
+            }
+        }
+        for i in 0..num_nodes {
+            edge_set.insert((i, i));
+        }
+
+        let mut degrees = vec![0.0f32; num_nodes];
+        for &(src, _) in &edge_set {
+            degrees[src] += 1.0;
+        }
+
+        let nnz = edge_set.len();
+        let mut rows = Vec::with_capacity(nnz);
+        let mut cols = Vec::with_capacity(nnz);
+        let mut values = Vec::with_capacity(nnz);
+
+        for &(src, dst) in &edge_set {
+            rows.push(src as i64);
+            cols.push(dst as i64);
+            values.push(1.0 / (degrees[src] * degrees[dst]).sqrt());
+        }
+
+        let indices = tch::Tensor::from_slice2(&[&rows, &cols]).to_device(self.device);
+        let vals = tch::Tensor::from_slice(&values).to_device(self.device);
+        let n = num_nodes as i64;
+
+        tch::Tensor::sparse_coo_tensor_indices_size(
+            &indices,
+            &vals,
+            [n, n],
+            (tch::Kind::Float, self.device),
+            false,
+        ).coalesce()
+    }
+
+    fn build_pool_matrix(
+        &self,
+        clause_boundaries: &[(usize, usize)],
+        num_clauses: usize,
+        num_nodes: usize,
+    ) -> tch::Tensor {
+        let mut rows = Vec::with_capacity(num_nodes);
+        let mut cols = Vec::with_capacity(num_nodes);
+        let mut values = Vec::with_capacity(num_nodes);
+
+        for (clause_idx, &(start, end)) in clause_boundaries.iter().enumerate() {
+            let clause_size = end - start;
+            if clause_size > 0 {
+                let weight = 1.0 / (clause_size as f32).sqrt();
+                for node_idx in start..end {
+                    if node_idx < num_nodes {
+                        rows.push(clause_idx as i64);
+                        cols.push(node_idx as i64);
+                        values.push(weight);
+                    }
+                }
+            }
+        }
+
+        let indices = tch::Tensor::from_slice2(&[&rows, &cols]).to_device(self.device);
+        let vals = tch::Tensor::from_slice(&values).to_device(self.device);
+
+        tch::Tensor::sparse_coo_tensor_indices_size(
+            &indices,
+            &vals,
+            [num_clauses as i64, num_nodes as i64],
+            (tch::Kind::Float, self.device),
+            false,
+        ).coalesce()
+    }
+}
+
+#[cfg(feature = "ml")]
+impl ClauseEmbedder for GcnEncoder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
+        }
+
+        let (node_features, adj, pool_matrix, clause_features) = self.build_batch_tensors(clauses);
+
+        // Run encoder inference — returns [num_clauses, hidden_dim]
+        let embeddings = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[node_features, adj, pool_matrix, clause_features])
+                .expect("GCN encoder forward failed")
+        });
+
+        // Convert to Vec<Vec<f32>>
+        let embeddings_cpu = embeddings.to_device(tch::Device::Cpu);
+        let num_clauses = clauses.len();
+        let flat: Vec<f32> = Vec::<f32>::try_from(&embeddings_cpu.view([-1]))
+            .expect("Failed to convert embeddings");
+
+        flat.chunks(self.hidden_dim)
+            .take(num_clauses)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    fn embedding_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    fn name(&self) -> &str {
+        "gcn_encoder"
+    }
+}
+
+/// TorchScript-based scorer that loads a separate scorer model
+///
+/// Supports both standard scoring (MLP) and cross-attention scoring
+/// where the scorer takes (u_embeddings, p_embeddings) as input.
+#[cfg(feature = "ml")]
+pub struct TorchScriptScorer {
+    model: tch::CModule,
+    device: tch::Device,
+    hidden_dim: usize,
+    cross_attention: bool,
+}
+
+#[cfg(feature = "ml")]
+impl TorchScriptScorer {
+    pub fn new<P: AsRef<Path>>(
+        model_path: P,
+        hidden_dim: usize,
+        cross_attention: bool,
+        use_cuda: bool,
+    ) -> Result<Self, String> {
+        let device = if use_cuda && tch::Cuda::is_available() {
+            tch::Device::Cuda(0)
+        } else {
+            tch::Device::Cpu
+        };
+
+        let model = tch::CModule::load_on_device(model_path.as_ref(), device)
+            .map_err(|e| format!("Failed to load TorchScript scorer: {}", e))?;
+
+        Ok(Self {
+            model,
+            device,
+            hidden_dim,
+            cross_attention,
+        })
+    }
+
+    fn embeddings_to_tensor(&self, embeddings: &[&[f32]]) -> tch::Tensor {
+        let flat: Vec<f32> = embeddings.iter().flat_map(|e| e.iter().copied()).collect();
+        let n = embeddings.len() as i64;
+        tch::Tensor::from_slice(&flat)
+            .view([n, self.hidden_dim as i64])
+            .to_device(self.device)
+    }
+}
+
+#[cfg(feature = "ml")]
+impl EmbeddingScorer for TorchScriptScorer {
+    fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
+        if embeddings.is_empty() {
+            return vec![];
+        }
+
+        let u_tensor = self.embeddings_to_tensor(embeddings);
+        // Empty P context
+        let p_tensor = tch::Tensor::zeros(
+            [0, self.hidden_dim as i64],
+            (tch::Kind::Float, self.device),
+        );
+
+        let scores = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[u_tensor, p_tensor])
+                .expect("Scorer forward failed")
+        });
+
+        let scores_cpu = scores.to_device(tch::Device::Cpu).view([-1]);
+        Vec::<f32>::try_from(&scores_cpu).expect("Failed to convert scores")
+    }
+
+    fn score_with_context(
+        &self,
+        u_embeddings: &[&[f32]],
+        p_embeddings: &[&[f32]],
+    ) -> Vec<f32> {
+        if u_embeddings.is_empty() {
+            return vec![];
+        }
+
+        let u_tensor = self.embeddings_to_tensor(u_embeddings);
+        let p_tensor = if p_embeddings.is_empty() {
+            tch::Tensor::zeros(
+                [0, self.hidden_dim as i64],
+                (tch::Kind::Float, self.device),
+            )
+        } else {
+            self.embeddings_to_tensor(p_embeddings)
+        };
+
+        let scores = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[u_tensor, p_tensor])
+                .expect("Scorer forward failed")
+        });
+
+        let scores_cpu = scores.to_device(tch::Device::Cpu).view([-1]);
+        Vec::<f32>::try_from(&scores_cpu).expect("Failed to convert scores")
+    }
+
+    fn uses_context(&self) -> bool {
+        self.cross_attention
+    }
+
+    fn name(&self) -> &str {
+        "torchscript_scorer"
+    }
+}
+
+/// GCN selector with split encoder/scorer architecture
+#[cfg(feature = "ml")]
+pub type GcnCrossAttentionSelector = CachingSelector<GcnEncoder, TorchScriptScorer>;
+
+/// Load a GCN cross-attention selector from separate encoder and scorer models
+///
+/// # Arguments
+/// * `encoder_path` - Path to the encoder TorchScript model
+/// * `scorer_path` - Path to the scorer TorchScript model
+/// * `hidden_dim` - Embedding dimension (must match model)
+/// * `cross_attention` - Whether the scorer uses cross-attention
+/// * `use_cuda` - Whether to use CUDA for inference
+#[cfg(feature = "ml")]
+pub fn load_gcn_cross_attention_selector<P: AsRef<Path>>(
+    encoder_path: P,
+    scorer_path: P,
+    hidden_dim: usize,
+    cross_attention: bool,
+    use_cuda: bool,
+) -> Result<GcnCrossAttentionSelector, String> {
+    let encoder = GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
+    let scorer = TorchScriptScorer::new(scorer_path, hidden_dim, cross_attention, use_cuda)?;
+    Ok(CachingSelector::new(encoder, scorer))
 }
 
 #[cfg(test)]

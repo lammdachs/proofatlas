@@ -183,6 +183,112 @@ def _make_valid_inputs(num_nodes: int, num_clauses: int):
     return node_features, adj, pool_matrix, clause_features
 
 
+class TestAttentionScorerCrossAttention:
+    """Tests for AttentionScorer cross-attention (p_emb) interface."""
+
+    def test_cross_attention_shape(self):
+        scorer = AttentionScorer(hidden_dim=64, num_heads=4)
+        u_emb = torch.randn(8, 64)
+        p_emb = torch.randn(5, 64)
+        scores = scorer(u_emb, p_emb)
+        assert scores.shape == (8,)
+
+    def test_cross_attention_empty_p(self):
+        """With sentinel only (0 processed), should still produce valid output."""
+        scorer = AttentionScorer(hidden_dim=64, num_heads=4)
+        u_emb = torch.randn(8, 64)
+        # Empty P: KV source is just the sentinel [1, hidden_dim]
+        p_emb = torch.zeros(0, 64)
+        # sentinel is prepended, so KV has 1 element
+        scores = scorer(u_emb, p_emb)
+        assert scores.shape == (8,)
+        assert not torch.isnan(scores).any()
+
+    def test_self_attention_fallback(self):
+        """p_emb=None should behave same as self-attention (backward compat)."""
+        scorer = AttentionScorer(hidden_dim=64, num_heads=4)
+        scorer.eval()
+        u_emb = torch.randn(8, 64)
+        with torch.no_grad():
+            scores_none = scorer(u_emb, None)
+            scores_no_arg = scorer(u_emb)
+        assert torch.allclose(scores_none, scores_no_arg)
+
+    def test_cross_attention_gradient_through_both(self):
+        scorer = AttentionScorer(hidden_dim=64, num_heads=4)
+        u_emb = torch.randn(8, 64, requires_grad=True)
+        p_emb = torch.randn(5, 64, requires_grad=True)
+        scores = scorer(u_emb, p_emb)
+        scores.sum().backward()
+        assert u_emb.grad is not None
+        assert p_emb.grad is not None
+
+
+class TestTransformerScorerCrossAttention:
+    """Tests for TransformerScorer cross-attention interface."""
+
+    def test_cross_attention_shape(self):
+        scorer = TransformerScorer(hidden_dim=64, num_layers=2, num_heads=4)
+        u_emb = torch.randn(8, 64)
+        p_emb = torch.randn(5, 64)
+        scores = scorer(u_emb, p_emb)
+        assert scores.shape == (8,)
+
+    def test_cross_attention_empty_p(self):
+        scorer = TransformerScorer(hidden_dim=64, num_layers=2, num_heads=4)
+        u_emb = torch.randn(8, 64)
+        p_emb = torch.zeros(0, 64)
+        scores = scorer(u_emb, p_emb)
+        assert scores.shape == (8,)
+        assert not torch.isnan(scores).any()
+
+    def test_self_attention_fallback(self):
+        scorer = TransformerScorer(hidden_dim=64, num_layers=2, num_heads=4)
+        scorer.eval()
+        u_emb = torch.randn(8, 64)
+        with torch.no_grad():
+            scores_none = scorer(u_emb, None)
+            scores_no_arg = scorer(u_emb)
+        assert torch.allclose(scores_none, scores_no_arg)
+
+    def test_cross_attention_gradient_through_both(self):
+        scorer = TransformerScorer(hidden_dim=64, num_layers=2, num_heads=4)
+        u_emb = torch.randn(8, 64, requires_grad=True)
+        p_emb = torch.randn(5, 64, requires_grad=True)
+        scores = scorer(u_emb, p_emb)
+        scores.sum().backward()
+        assert u_emb.grad is not None
+        assert p_emb.grad is not None
+
+
+class TestMLPScorerIgnoresPEmb:
+    """Tests that MLPScorer ignores p_emb."""
+
+    def test_ignores_p_emb(self):
+        scorer = MLPScorer(hidden_dim=64)
+        scorer.eval()
+        u_emb = torch.randn(10, 64)
+        p_emb = torch.randn(5, 64)
+        with torch.no_grad():
+            scores_with = scorer(u_emb, p_emb)
+            scores_without = scorer(u_emb)
+        assert torch.allclose(scores_with, scores_without)
+
+
+class TestCrossAttentionScorerIgnoresPEmb:
+    """Tests that CrossAttentionScorer ignores p_emb (legacy)."""
+
+    def test_ignores_p_emb(self):
+        scorer = CrossAttentionScorer(hidden_dim=64, num_heads=4)
+        scorer.eval()
+        u_emb = torch.randn(10, 64)
+        p_emb = torch.randn(5, 64)
+        with torch.no_grad():
+            scores_with = scorer(u_emb, p_emb)
+            scores_without = scorer(u_emb)
+        assert torch.allclose(scores_with, scores_without)
+
+
 class TestScorerIntegration:
     """Integration tests with GNN models."""
 

@@ -293,7 +293,14 @@ Selectors implement `ClauseSelector` trait:
 |----------|------|---------|-------|
 | age_weight | ✓ | - | Heuristic, no training |
 | gcn | ✓ | ✓ | Graph Convolutional Network |
+| features | - | ✓ | 9D clause feature MLP |
 | sentence | ✓ | ✓ | Sentence transformer (MiniLM) |
+
+**Scorer types** (all support `forward(u_emb, p_emb=None)`):
+- `mlp`: Simple feed-forward scorer
+- `attention`: Multi-head self/cross-attention with learnable sentinel
+- `transformer`: Full transformer block with cross-attention
+- `cross_attention`: Dot-product cross-attention (ignores p_emb)
 
 Selectors implement the `ClauseSelector` trait. The optional `stats()` method returns `SelectorStats` (cache hits/misses, embed/score time). `CachingSelector` tracks these automatically; `AgeWeightSelector` returns `None`.
 

@@ -287,6 +287,100 @@ def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
     }
 
 
+def _load_trace_state(trace_file: Path) -> Optional[Dict]:
+    """Load trace file with selection states for state-sampled training.
+
+    Returns graphs for all clauses plus selection_states for U/P sampling.
+    """
+    from .structured import clause_to_graph
+
+    try:
+        trace = _load_json(trace_file)
+    except Exception:
+        return None
+
+    if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+    if not trace.get("selection_states"):
+        return None
+
+    clauses = trace["clauses"]
+    max_age = len(clauses)
+    graphs = [clause_to_graph(c, max_age) for c in clauses]
+    labels = [c.get("label", 0) for c in clauses]
+
+    return {
+        "graphs": graphs,
+        "labels": labels,
+        "selection_states": trace["selection_states"],
+        "problem": trace_file.stem,
+    }
+
+
+def collate_state_batch(batch: List[Dict]) -> Dict[str, Any]:
+    """
+    Collate function for state-sampled batches.
+
+    For each proof, randomly samples one selection state (U/P snapshot).
+    Builds separate graph batches for U and P clause sets.
+    Labels are only for U clauses (what to select from the unprocessed set).
+    """
+    import random
+    from .structured import batch_graphs
+
+    all_u_graphs = []
+    all_p_graphs = []
+    all_u_labels = []
+    all_proof_ids = []
+
+    for proof_idx, item in enumerate(batch):
+        graphs = item["graphs"]
+        labels = item["labels"]
+        states = item["selection_states"]
+
+        # Sample a random selection state
+        state = random.choice(states)
+        u_indices = state["unprocessed"]
+        p_indices = state["processed"]
+
+        # Collect graphs and labels for U and P
+        for idx in u_indices:
+            if idx < len(graphs):
+                all_u_graphs.append(graphs[idx])
+                all_u_labels.append(labels[idx])
+                all_proof_ids.append(proof_idx)
+
+        for idx in p_indices:
+            if idx < len(graphs):
+                all_p_graphs.append(graphs[idx])
+
+    if not all_u_graphs:
+        return None
+
+    # Batch U graphs (with labels)
+    u_batched = batch_graphs(all_u_graphs, labels=all_u_labels)
+
+    result = {
+        "u_node_features": u_batched["x"],
+        "u_adj": u_batched["adj"],
+        "u_pool_matrix": u_batched["pool_matrix"],
+        "u_clause_features": u_batched.get("clause_features"),
+        "labels": u_batched["y"],
+        "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
+        "is_state_batch": True,
+    }
+
+    # Batch P graphs (no labels needed)
+    if all_p_graphs:
+        p_batched = batch_graphs(all_p_graphs)
+        result["p_node_features"] = p_batched["x"]
+        result["p_adj"] = p_batched["adj"]
+        result["p_pool_matrix"] = p_batched["pool_matrix"]
+        result["p_clause_features"] = p_batched.get("clause_features")
+
+    return result
+
+
 class DynamicBatchSampler(torch.utils.data.Sampler):
     """
     Sampler that creates batches with approximately equal total size.
@@ -398,6 +492,8 @@ class ProofDataset(torch.utils.data.Dataset):
         # Load data in parallel
         if output_type == "graph":
             load_fn = _load_trace_graph
+        elif output_type == "state":
+            load_fn = _load_trace_state
         elif output_type == "tokenized":
             load_fn = _load_trace_tokenized
         else:
@@ -840,9 +936,17 @@ def run_training(
         train_files = trace_files
         val_files = []
 
-    # Determine output type based on embedding
+    # Determine output type based on embedding and scorer
     embedding_type = get_embedding_type(preset)
-    output_type = "tokenized" if embedding_type == "string" else "graph"
+    scorer_name = preset.get("scorer", "mlp")
+    use_state_sampling = scorer_name in ("attention", "transformer") and config.get("use_state_sampling", True)
+
+    if embedding_type == "string":
+        output_type = "tokenized"
+    elif use_state_sampling:
+        output_type = "state"
+    else:
+        output_type = "graph"
 
     # Create datasets (loads all data in parallel)
     log_msg(f"Loading training data ({output_type} format)...")
@@ -851,6 +955,18 @@ def run_training(
         trace_files=train_files,
         output_type=output_type,
     )
+
+    # Fall back to graph mode if state traces not available
+    if output_type == "state" and len(train_ds) == 0:
+        log_msg("No state traces available, falling back to graph mode")
+        output_type = "graph"
+        use_state_sampling = False
+        train_ds = ProofDataset(
+            trace_dir=None,
+            trace_files=train_files,
+            output_type="graph",
+        )
+
     val_ds = None
     if val_files:
         log_msg(f"Loading validation data ({output_type} format)...")
@@ -888,6 +1004,8 @@ def run_training(
     # Choose collate function based on output type
     if output_type == "tokenized":
         collate_fn = collate_tokenized_batch
+    elif output_type == "state":
+        collate_fn = collate_state_batch
     elif output_type == "string":
         collate_fn = collate_sentence_batch
     else:
@@ -952,33 +1070,22 @@ def run_training(
     patience = config.get("patience", 10)
     patience_counter = 0
 
-    # Margin ranking loss for pairwise learning
+    # Loss configuration
+    loss_type = config.get("loss_type", "info_nce")
+    temperature = config.get("temperature", 1.0)
     margin = config.get("margin", 0.1)
-    ranking_loss = nn.MarginRankingLoss(margin=margin)
 
-    def compute_pairwise_loss(scores, labels):
-        """Compute pairwise margin ranking loss between positive and negative examples."""
-        pos_mask = labels == 1
-        neg_mask = labels == 0
-
-        if not pos_mask.any() or not neg_mask.any():
-            # Fallback to BCE if no pairs available
-            return F.binary_cross_entropy_with_logits(scores, labels.float())
-
-        pos_scores = scores[pos_mask]
-        neg_scores = scores[neg_mask]
-
-        # Sample pairs: for each positive, sample a random negative
-        n_pos = pos_scores.size(0)
-        n_neg = neg_scores.size(0)
-
-        # Random pairing: sample n_pos negatives (with replacement if needed)
-        neg_indices = torch.randint(0, n_neg, (n_pos,), device=scores.device)
-        neg_sampled = neg_scores[neg_indices]
-
-        # Target: +1 means first input should be ranked higher than second
-        target = torch.ones(n_pos, device=scores.device)
-        return ranking_loss(pos_scores, neg_sampled, target)
+    def compute_loss(scores, labels, proof_ids=None):
+        """Compute loss based on configured loss type."""
+        if loss_type == "info_nce":
+            if proof_ids is not None:
+                return info_nce_loss_per_proof(scores, labels, proof_ids, temperature)
+            else:
+                return info_nce_loss(scores, labels, temperature)
+        elif loss_type == "margin":
+            return margin_ranking_loss(scores, labels, margin=margin)
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}")
 
     for epoch in range(1, max_epochs + 1):
         model.train()
@@ -987,9 +1094,37 @@ def run_training(
         optimizer.zero_grad()
 
         for step, batch in enumerate(train_loader):
-            labels = batch["labels"].to(device)
+            if batch is None:
+                continue
 
-            if is_sentence_model:
+            labels = batch["labels"].to(device)
+            proof_ids = batch.get("proof_ids")
+            if proof_ids is not None:
+                proof_ids = proof_ids.to(device)
+
+            if batch.get("is_state_batch"):
+                # State-sampled batch: encode U and P separately, cross-attention score
+                u_x = batch["u_node_features"].to(device)
+                u_adj = batch["u_adj"].to(device)
+                u_pool = batch["u_pool_matrix"].to(device)
+                u_cf = batch.get("u_clause_features")
+                if u_cf is not None:
+                    u_cf = u_cf.to(device)
+
+                u_emb = model.encode(u_x, u_adj, u_pool, u_cf)
+
+                p_emb = None
+                if "p_node_features" in batch:
+                    p_x = batch["p_node_features"].to(device)
+                    p_adj = batch["p_adj"].to(device)
+                    p_pool = batch["p_pool_matrix"].to(device)
+                    p_cf = batch.get("p_clause_features")
+                    if p_cf is not None:
+                        p_cf = p_cf.to(device)
+                    p_emb = model.encode(p_x, p_adj, p_pool, p_cf)
+
+                scores = model.scorer(u_emb, p_emb)
+            elif is_sentence_model:
                 # Sentence model with pre-tokenized inputs
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
@@ -1004,7 +1139,7 @@ def run_training(
                     clause_features = clause_features.to(device)
                 scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
-            loss = compute_pairwise_loss(scores, labels)
+            loss = compute_loss(scores, labels, proof_ids)
             if accumulate_steps > 1:
                 loss = loss / accumulate_steps
             loss.backward()
@@ -1013,8 +1148,8 @@ def run_training(
 
             # Step optimizer after accumulating gradients
             if accumulate_steps <= 1 or (step + 1) % accumulate_steps == 0 or (step + 1) == len(train_loader):
-                if config.get("gradient_clip"):
-                    nn.utils.clip_grad_norm_(model.parameters(), config["gradient_clip"])
+                gradient_clip = config.get("gradient_clip", 1.0)
+                nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -1026,9 +1161,35 @@ def run_training(
             num_val_batches = 0
             with torch.no_grad():
                 for batch in val_loader:
-                    labels = batch["labels"].to(device)
+                    if batch is None:
+                        continue
 
-                    if is_sentence_model:
+                    labels = batch["labels"].to(device)
+                    val_proof_ids = batch.get("proof_ids")
+                    if val_proof_ids is not None:
+                        val_proof_ids = val_proof_ids.to(device)
+
+                    if batch.get("is_state_batch"):
+                        u_x = batch["u_node_features"].to(device)
+                        u_adj = batch["u_adj"].to(device)
+                        u_pool = batch["u_pool_matrix"].to(device)
+                        u_cf = batch.get("u_clause_features")
+                        if u_cf is not None:
+                            u_cf = u_cf.to(device)
+                        u_emb = model.encode(u_x, u_adj, u_pool, u_cf)
+
+                        p_emb = None
+                        if "p_node_features" in batch:
+                            p_x = batch["p_node_features"].to(device)
+                            p_adj = batch["p_adj"].to(device)
+                            p_pool = batch["p_pool_matrix"].to(device)
+                            p_cf = batch.get("p_clause_features")
+                            if p_cf is not None:
+                                p_cf = p_cf.to(device)
+                            p_emb = model.encode(p_x, p_adj, p_pool, p_cf)
+
+                        scores = model.scorer(u_emb, p_emb)
+                    elif is_sentence_model:
                         input_ids = batch["input_ids"].to(device)
                         attention_mask = batch["attention_mask"].to(device)
                         scores = model.forward_tokens(input_ids, attention_mask)
@@ -1041,7 +1202,7 @@ def run_training(
                             clause_features = clause_features.to(device)
                         scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
-                    val_loss += compute_pairwise_loss(scores, labels).item()
+                    val_loss += compute_loss(scores, labels, val_proof_ids).item()
                     num_val_batches += 1
             val_loss /= num_val_batches if num_val_batches > 0 else 1
 
@@ -1120,6 +1281,51 @@ def run_training(
             traced = torch.jit.trace(model, (example_x, example_pool))
 
         traced.save(str(weights_path))
+
+        # Also export split encoder + scorer for cross-attention in Rust
+        if needs_adj and hasattr(model, 'encode'):
+            hidden_dim = config.get("hidden_dim", 64)
+
+            # Export encoder (model.encode → embeddings)
+            class _EncoderWrapper(nn.Module):
+                def __init__(self, m):
+                    super().__init__()
+                    self.m = m
+                def forward(self, x, adj, pool, cf):
+                    return self.m.encode(x, adj, pool, cf)
+
+            encoder_wrapper = _EncoderWrapper(model)
+            encoder_wrapper.eval()
+            with torch.no_grad():
+                encoder_traced = torch.jit.trace(
+                    encoder_wrapper,
+                    (example_x, example_adj, example_pool, example_clause_features),
+                )
+            encoder_path = weights_dir / f"{model_name}_encoder.pt"
+            encoder_traced.save(str(encoder_path))
+            log_msg(f"Encoder saved: {encoder_path}")
+
+            # Export scorer (model.scorer → scores)
+            example_u_emb = torch.randn(num_clauses, hidden_dim)
+            example_p_emb = torch.randn(2, hidden_dim)
+
+            class _ScorerWrapper(nn.Module):
+                def __init__(self, scorer):
+                    super().__init__()
+                    self.scorer = scorer
+                def forward(self, u_emb, p_emb):
+                    return self.scorer(u_emb, p_emb)
+
+            scorer_wrapper = _ScorerWrapper(model.scorer)
+            scorer_wrapper.eval()
+            with torch.no_grad():
+                scorer_traced = torch.jit.trace(
+                    scorer_wrapper,
+                    (example_u_emb, example_p_emb),
+                )
+            scorer_path = weights_dir / f"{model_name}_scorer.pt"
+            scorer_traced.save(str(scorer_path))
+            log_msg(f"Scorer saved: {scorer_path}")
 
     log_msg(f"TorchScript model saved: {weights_path}")
     log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")

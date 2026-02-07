@@ -45,6 +45,10 @@ pub use clause::{ClauseSelector, SelectorStats};
 #[cfg(feature = "ml")]
 pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]
+pub use gcn::{
+    load_gcn_cross_attention_selector, GcnCrossAttentionSelector, GcnEncoder, TorchScriptScorer,
+};
+#[cfg(feature = "ml")]
 pub use sentence::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
 
 // Graph/ML re-exports

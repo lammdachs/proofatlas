@@ -252,6 +252,67 @@ class TestRustIntegration:
                 assert g["num_edges"] >= 0
 
 
+class TestPoolValues:
+    """Test pool matrix normalization."""
+
+    def test_pool_values_sqrt_normalization(self, sample_clause, sample_multi_literal_clause):
+        """Verify pool_values == 1/sqrt(count) (not 1/count)."""
+        from proofatlas.ml.structured import clause_to_graph, batch_graphs
+        import torch
+
+        g1 = clause_to_graph(sample_clause)
+        g2 = clause_to_graph(sample_multi_literal_clause)
+
+        batched = batch_graphs([g1, g2])
+        pool = batched["pool_matrix"]
+
+        # Pool matrix is sparse, coalesce and check values
+        pool = pool.coalesce()
+        values = pool.values()
+        indices = pool.indices()
+
+        # For each clause (row), the values should be 1/sqrt(num_nodes_in_clause)
+        batch = batched["batch"]
+        for clause_idx in range(2):
+            mask = indices[0] == clause_idx
+            if mask.any():
+                clause_values = values[mask]
+                num_nodes = (batch == clause_idx).sum().item()
+                expected = 1.0 / (num_nodes ** 0.5)
+                assert torch.allclose(
+                    clause_values,
+                    torch.full_like(clause_values, expected),
+                    atol=1e-5,
+                ), f"Pool values for clause {clause_idx}: expected {expected}, got {clause_values}"
+
+    def test_node_names_in_graph(self, sample_clause):
+        """clause_to_graph should include node_names list."""
+        from proofatlas.ml.structured import clause_to_graph
+
+        result = clause_to_graph(sample_clause)
+        assert "node_names" in result
+        assert isinstance(result["node_names"], list)
+        assert len(result["node_names"]) == result["num_nodes"]
+        # Should contain known names
+        assert "CLAUSE" in result["node_names"]
+        assert "LIT" in result["node_names"]
+
+    def test_batch_preserves_node_names(self, sample_clause, sample_multi_literal_clause):
+        """batch_graphs doesn't strip node_names (they stay on individual graphs)."""
+        from proofatlas.ml.structured import clause_to_graph
+
+        g1 = clause_to_graph(sample_clause)
+        g2 = clause_to_graph(sample_multi_literal_clause)
+
+        # Verify individual graph node_names
+        assert len(g1["node_names"]) == g1["num_nodes"]
+        assert len(g2["node_names"]) == g2["num_nodes"]
+
+        # Combined list should have all names
+        combined = g1["node_names"] + g2["node_names"]
+        assert len(combined) == g1["num_nodes"] + g2["num_nodes"]
+
+
 class TestProofDataset:
     """Test the ProofDataset class."""
 
