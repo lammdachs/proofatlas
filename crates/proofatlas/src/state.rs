@@ -9,7 +9,7 @@ use crate::index::IndexRegistry;
 use crate::json::{ProofJson, ProofResultJson, ClauseJson};
 use indexmap::IndexSet;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 // =============================================================================
 // Proof
@@ -184,7 +184,7 @@ pub struct SaturationState {
     /// Set U: Unprocessed/passive clauses (awaiting selection)
     pub unprocessed: IndexSet<usize>,
     /// Set N: New clauses (awaiting forward simplification)
-    pub new: VecDeque<usize>,
+    pub new: Vec<usize>,
     /// Raw event log capturing all state changes
     pub event_log: Vec<StateChange>,
     /// Tracked clause memory usage in bytes

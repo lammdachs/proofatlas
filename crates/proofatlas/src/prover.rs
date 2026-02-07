@@ -105,7 +105,7 @@ impl ProofAtlas {
 
         // Build clause storage and N set
         let mut clauses = Vec::new();
-        let mut new = std::collections::VecDeque::new();
+        let mut new = Vec::new();
         let mut clause_memory_bytes = 0usize;
 
         let mut clause_idx = 0;
@@ -123,7 +123,7 @@ impl ProofAtlas {
             index_registry.on_clause_pending(clause_idx, &oriented);
 
             clauses.push(clause);
-            new.push_back(clause_idx);
+            new.push(clause_idx);
             clause_idx += 1;
         }
 
@@ -222,7 +222,7 @@ impl ProofAtlas {
         let start_time = *self.start_time.get_or_insert_with(Instant::now);
 
         // === Step 1: Process new clauses ===
-        while let Some(&clause_idx) = self.state.new.back() {
+        while let Some(&clause_idx) = self.state.new.last() {
             // 1a: Check empty clause immediately
             if self.state.clauses[clause_idx].is_empty() {
                 let proof = self.state.extract_proof(clause_idx);
@@ -401,7 +401,7 @@ impl ProofAtlas {
 
                 self.state.clause_memory_bytes += clause_with_id.memory_bytes();
                 self.state.clauses.push(clause_with_id.clone());
-                self.state.new.push_back(new_idx);
+                self.state.new.push(new_idx);
 
                 // Re-construct with updated clause (includes id)
                 if let StateChange::Add(_, rule_name, premises) = change {
@@ -419,8 +419,8 @@ impl ProofAtlas {
             StateChange::Delete(clause_idx, _rule_name, _justification) => {
                 let clause_idx = *clause_idx;
                 // Remove from whichever set contains the clause
-                if self.state.new.back() == Some(&clause_idx) {
-                    self.state.new.pop_back();
+                if self.state.new.last() == Some(&clause_idx) {
+                    self.state.new.pop();
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
                     self.index_registry.on_clause_removed(clause_idx, clause);
@@ -433,8 +433,8 @@ impl ProofAtlas {
             StateChange::Transfer(clause_idx) => {
                 let clause_idx = *clause_idx;
                 // N → U
-                if self.state.new.back() == Some(&clause_idx) {
-                    self.state.new.pop_back();
+                if self.state.new.last() == Some(&clause_idx) {
+                    self.state.new.pop();
                 }
                 self.state.unprocessed.insert(clause_idx);
                 self.state.event_log.push(change);
