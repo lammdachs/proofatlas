@@ -763,13 +763,10 @@ class ProofInspector {
 
         count.textContent = clauseIds.size;
 
-        const parent = div.closest('.clause-set');
         if (clauseIds.size === 0) {
             div.innerHTML = '';
-            if (parent) parent.classList.add('hidden');
             return;
         }
-        if (parent) parent.classList.remove('hidden');
 
         const clauseArray = Array.from(clauseIds).sort((a, b) => a - b);
         div.innerHTML = clauseArray.map(id => {
