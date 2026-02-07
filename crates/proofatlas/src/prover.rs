@@ -222,7 +222,7 @@ impl ProofAtlas {
         let start_time = *self.start_time.get_or_insert_with(Instant::now);
 
         // === Step 1: Process new clauses ===
-        while let Some(&clause_idx) = self.state.new.front() {
+        while let Some(&clause_idx) = self.state.new.back() {
             // 1a: Check empty clause immediately
             if self.state.clauses[clause_idx].is_empty() {
                 let proof = self.state.extract_proof(clause_idx);
@@ -419,8 +419,8 @@ impl ProofAtlas {
             StateChange::Delete(clause_idx, _rule_name, _justification) => {
                 let clause_idx = *clause_idx;
                 // Remove from whichever set contains the clause
-                if self.state.new.front() == Some(&clause_idx) {
-                    self.state.new.pop_front();
+                if self.state.new.back() == Some(&clause_idx) {
+                    self.state.new.pop_back();
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
                     self.index_registry.on_clause_removed(clause_idx, clause);
@@ -433,8 +433,8 @@ impl ProofAtlas {
             StateChange::Transfer(clause_idx) => {
                 let clause_idx = *clause_idx;
                 // N → U
-                if self.state.new.front() == Some(&clause_idx) {
-                    self.state.new.pop_front();
+                if self.state.new.back() == Some(&clause_idx) {
+                    self.state.new.pop_back();
                 }
                 self.state.unprocessed.insert(clause_idx);
                 self.state.event_log.push(change);

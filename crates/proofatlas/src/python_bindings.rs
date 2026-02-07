@@ -33,6 +33,8 @@ pub struct ProofState {
     literal_selector: Box<dyn LiteralSelector + Send>,
     /// Proof trace
     proof_trace: Vec<ProofStep>,
+    /// Index of the empty clause that completed the proof (if any)
+    empty_clause_idx: Option<usize>,
 }
 
 /// Information about a clause (lightweight)
@@ -172,6 +174,7 @@ impl ProofState {
             unprocessed: VecDeque::new(),
             literal_selector: Box::new(SelectAll) as Box<dyn LiteralSelector + Send>,
             proof_trace: Vec::new(),
+            empty_clause_idx: None,
         }
     }
 
@@ -678,14 +681,16 @@ impl ProofState {
             .map_err(|e| PyValueError::new_err(format!("Profile serialization failed: {}", e)))?;
 
         // Copy back the results
-        let (proof_found, status, final_clauses, proof_steps) = match result {
+        let (proof_found, status, final_clauses, proof_steps, empty_idx) = match result {
             ProofResult::Proof(proof) => {
-                (true, "proof", proof.all_clauses, proof.steps)
+                let idx = proof.empty_clause_idx;
+                (true, "proof", proof.all_clauses, proof.steps, Some(idx))
             }
-            ProofResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps),
-            ProofResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps),
-            ProofResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps),
+            ProofResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps, None),
+            ProofResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps, None),
+            ProofResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps, None),
         };
+        self.empty_clause_idx = empty_idx;
 
         // Update our state with the results
         self.clauses = final_clauses;
@@ -747,8 +752,9 @@ impl ProofState {
 
     /// Get proof trace
     pub fn get_proof_trace(&self) -> Vec<ProofStep> {
-        // Find empty clause
-        let empty_clause_id = self.clauses.iter().position(|c| c.is_empty());
+        // Use stored empty clause index from proof extraction (avoids picking wrong
+        // empty clause when multiple exist)
+        let empty_clause_id = self.empty_clause_idx;
 
         if let Some(empty_id) = empty_clause_id {
             // Build proof trace backwards from empty clause
@@ -828,14 +834,11 @@ impl ProofState {
     /// Extract training examples: all clauses labeled by whether they're in the proof
     /// Returns list of (clause_id, label) where label=1 if in proof, 0 otherwise
     pub fn extract_training_examples(&self) -> Vec<TrainingExample> {
-        // Find empty clause
-        let empty_clause_id = self.clauses.iter().position(|c| c.is_empty());
-
-        if empty_clause_id.is_none() {
-            return Vec::new(); // No proof found
-        }
-
-        let empty_id = empty_clause_id.unwrap();
+        // Use stored empty clause index
+        let empty_id = match self.empty_clause_idx {
+            Some(idx) => idx,
+            None => return Vec::new(), // No proof found
+        };
 
         // Build set of clauses in proof DAG
         let mut proof_clauses = HashSet::new();

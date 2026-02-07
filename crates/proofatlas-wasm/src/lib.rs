@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
     parse_tptp, ProverConfig, ProofResult, ProofAtlas, LiteralSelectionStrategy,
-    Clause, Literal, AgeWeightSelector, ClauseSelector, EventLog, StateChange,
+    Clause, Literal, Interner, AgeWeightSelector, ClauseSelector, EventLog, StateChange,
 };
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ pub struct ProverOptions {
     pub literal_selection: Option<String>, // "0", "20", "21", or "22" (Vampire-compatible numbering)
     pub selector_type: Option<String>,     // "age_weight", "gcn", or "mlp" (default: "age_weight")
     pub selector_weights: Option<Vec<u8>>, // Safetensors weights for ML selectors (optional)
-    pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.167)
+    pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.5)
     pub max_iterations: Option<usize>,     // Max saturation iterations (default: 10000)
 }
 
@@ -114,7 +114,7 @@ impl ProofAtlasWasm {
             }
             _ => {
                 // Default to age_weight selector (no model needed)
-                let ratio = options.age_weight_ratio.unwrap_or(0.167);
+                let ratio = options.age_weight_ratio.unwrap_or(0.5);
                 web_sys::console::log_1(&format!("Using AgeWeight selector with ratio {}", ratio).into());
                 Box::new(AgeWeightSelector::new(ratio))
             }
@@ -122,7 +122,7 @@ impl ProofAtlasWasm {
 
         // Run saturation
         let prover = ProofAtlas::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
-        let (result, profile, sat_trace, _interner) = prover.prove();
+        let (result, profile, sat_trace, interner) = prover.prove();
 
         web_sys::console::log_1(&"Saturation completed".into());
 
@@ -135,11 +135,11 @@ impl ProofAtlasWasm {
         let time_ms = (end_time - start_time) as u32;
 
         // Helper to convert proof steps to WASM ProofStep
-        let convert_steps = |steps: &[proofatlas::ProofStep]| -> Vec<ProofStep> {
+        let convert_steps = |steps: &[proofatlas::ProofStep], interner: &proofatlas::Interner| -> Vec<ProofStep> {
             steps.iter().map(|step| {
                 ProofStep {
                     id: step.clause_idx,
-                    clause: format_clause(&step.conclusion),
+                    clause: format_clause(&step.conclusion, interner),
                     rule: step.rule_name.clone(),
                     parents: proofatlas::clause_indices(&step.premises),
                 }
@@ -147,8 +147,8 @@ impl ProofAtlasWasm {
         };
 
         // Helper to build result for non-proof cases
-        let build_incomplete_result = |status: &str, message: &str, steps: &[proofatlas::ProofStep], final_clauses_count: usize| {
-            let all_steps = convert_steps(steps);
+        let build_incomplete_result = |status: &str, message: &str, steps: &[proofatlas::ProofStep], final_clauses_count: usize, interner: &proofatlas::Interner| {
+            let all_steps = convert_steps(steps, interner);
             ProverResult {
                 success: false,
                 status: status.to_string(),
@@ -161,7 +161,7 @@ impl ProofAtlasWasm {
                     final_clauses: final_clauses_count,
                     time_ms,
                 },
-                trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
+                trace: if include_trace { Some(events_to_js_value(&sat_trace, &interner)) } else { None },
                 profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
             }
         };
@@ -170,7 +170,7 @@ impl ProofAtlasWasm {
         let prover_result = match result {
             ProofResult::Proof(proof) => {
                 // Proof found
-                let all_steps = convert_steps(&proof.steps);
+                let all_steps = convert_steps(&proof.steps, &interner);
 
                 // Extract the proof path - trace back from empty clause
                 let mut proof_indices = std::collections::HashSet::new();
@@ -211,7 +211,7 @@ impl ProofAtlasWasm {
                         final_clauses: proof.steps.len(),
                         time_ms,
                     },
-                    trace: if include_trace { Some(events_to_js_value(&sat_trace)) } else { None },
+                    trace: if include_trace { Some(events_to_js_value(&sat_trace, &interner)) } else { None },
                     profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
@@ -220,18 +220,21 @@ impl ProofAtlasWasm {
                 "Saturated without finding a proof - the formula may be satisfiable",
                 &steps,
                 clauses.len(),
+                &interner,
             ),
             ProofResult::Timeout(steps, clauses) => build_incomplete_result(
                 "timeout",
                 "Timeout reached before finding a proof",
                 &steps,
                 clauses.len(),
+                &interner,
             ),
             ProofResult::ResourceLimit(steps, clauses) => build_incomplete_result(
                 "resource_limit",
                 "Resource limit reached",
                 &steps,
                 clauses.len(),
+                &interner,
             ),
         };
 
@@ -267,7 +270,7 @@ impl ProofAtlasWasm {
 ///   }]
 /// }
 /// ```
-fn events_to_js_value(events: &EventLog) -> serde_json::Value {
+fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Value {
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -279,7 +282,7 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
     for event in events {
         if let StateChange::Add(clause, rule_name, premises) = event {
             if let Some(idx) = clause.id {
-                clauses.insert(idx, format_clause(clause));
+                clauses.insert(idx, format_clause(clause, interner));
                 derivations.insert(idx, (rule_name.clone(), proofatlas::clause_indices(premises)));
                 if rule_name == "Input" {
                     initial_clause_count = initial_clause_count.max(idx + 1);
@@ -307,7 +310,7 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
         match event {
             StateChange::Add(clause, rule_name, premises) => {
                 if let Some(idx) = clause.id {
-                    let clause_str = format_clause(clause);
+                    let clause_str = format_clause(clause, interner);
                     let rule = rule_name;
                     let premise_indices = proofatlas::clause_indices(premises);
 
@@ -400,19 +403,19 @@ fn events_to_js_value(events: &EventLog) -> serde_json::Value {
     })
 }
 
-fn format_clause(clause: &Clause) -> String {
+fn format_clause(clause: &Clause, interner: &Interner) -> String {
     if clause.literals.is_empty() {
         "⊥".to_string()
     } else {
         clause.literals.iter()
-            .map(|lit| format_literal(lit))
+            .map(|lit| format_literal(lit, interner))
             .collect::<Vec<_>>()
             .join(" ∨ ")
     }
 }
 
-fn format_literal(lit: &Literal) -> String {
-    lit.to_string()
+fn format_literal(lit: &Literal, interner: &Interner) -> String {
+    lit.display(interner).to_string()
 }
 
 // Required for wasm-bindgen

@@ -8,7 +8,7 @@
       "description": "10s timeout",
       "timeout": 10,
       "literal_selection": 21,
-      "age_weight_ratio": 0.167
+      "age_weight_ratio": 0.5
     },
 
     "age_weight": {
@@ -16,7 +16,7 @@
       "timeout": 600,
       "max_iterations": 512,
       "literal_selection": 21,
-      "age_weight_ratio": 0.167
+      "age_weight_ratio": 0.5
     },
 
     "gcn_mlp": {

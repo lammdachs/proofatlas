@@ -83,11 +83,11 @@ async function detectServer() {
 const BUILTIN_PRESETS = {
     "time": {
         "description": "10s timeout",
-        "timeout": 10, "literal_selection": 21, "age_weight_ratio": 0.167
+        "timeout": 10, "literal_selection": 21, "age_weight_ratio": 0.5
     },
     "age_weight": {
         "description": "Age-weight baseline (512 iterations)",
-        "timeout": 600, "max_iterations": 512, "literal_selection": 21, "age_weight_ratio": 0.167
+        "timeout": 600, "max_iterations": 512, "literal_selection": 21, "age_weight_ratio": 0.5
     },
 };
 
@@ -970,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateConfigJson({
         timeout: 10,
         literal_selection: 21,
-        age_weight_ratio: 0.167,
+        age_weight_ratio: 0.5,
     });
 
     // Load TPTP problem via server API
