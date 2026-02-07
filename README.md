@@ -88,7 +88,7 @@ python scripts/setup.py
 proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
 
 # With preset and timeout
-proofatlas problem.p --config time_sel21 --timeout 30
+proofatlas problem.p --config time --timeout 30
 
 # List available presets
 proofatlas --list
@@ -98,10 +98,10 @@ proofatlas --list
 
 ```bash
 # Run benchmarks with a preset
-proofatlas-bench --config time_sel21
+proofatlas-bench --config time
 
 # Retrain ML model
-proofatlas-bench --config gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp --retrain
 ```
 
 ### Local Web Interface

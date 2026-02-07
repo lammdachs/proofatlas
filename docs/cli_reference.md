@@ -40,7 +40,7 @@ proofatlas --list
 proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
 
 # With config
-proofatlas problem.p --config time_sel21
+proofatlas problem.p --config time
 
 # With timeout and literal selection
 proofatlas problem.p --timeout 30 --literal-selection 21
@@ -99,10 +99,10 @@ proofatlas-bench [options]
 proofatlas-bench
 
 # Evaluate specific config
-proofatlas-bench --config time_sel21
+proofatlas-bench --config time
 
 # Retrain a GCN model
-proofatlas-bench --config gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp --retrain
 
 # Run with parallel jobs
 proofatlas-bench --n-jobs 4
@@ -119,7 +119,7 @@ proofatlas-bench --list
 
 ### Workflow for Learned Selectors
 
-When using a config with ML (e.g., `gcn_mlp_sel21`):
+When using a config with ML (e.g., `gcn_mlp`):
 
 1. If TorchScript models exist in `.weights/`, uses them directly
 2. Otherwise, use `--retrain` to:

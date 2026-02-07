@@ -1,7 +1,7 @@
 {
   "generated": "2026-01-27T15:00:26.494282",
   "prover": "proofatlas",
-  "preset": "age_weight_sel21",
+  "preset": "age_weight",
   "completed": 8398,
   "total": 8398,
   "progress_pct": 100.0,

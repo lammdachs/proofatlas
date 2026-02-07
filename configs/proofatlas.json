@@ -1,164 +1,62 @@
 {
   "defaults": {
-    "preset": "time_sel21"
+    "preset": "time"
   },
 
   "presets": {
-    "time_sel0": {
-      "description": "10s with sel0 (all literals)",
-      "timeout": 10,
-      "literal_selection": 0,
-      "age_weight_ratio": 0.167
-    },
-
-    "time_sel20": {
-      "description": "10s with sel20 (all maximal literals)",
-      "timeout": 10,
-      "literal_selection": 20,
-      "age_weight_ratio": 0.167
-    },
-
-    "time_sel21": {
-      "description": "10s with sel21 (unique maximal, else neg max-weight, else all maximal)",
+    "time": {
+      "description": "10s timeout",
       "timeout": 10,
       "literal_selection": 21,
       "age_weight_ratio": 0.167
     },
 
-    "age_weight_sel0": {
-      "description": "Age-weight baseline (128 iterations) with sel0",
+    "age_weight": {
+      "description": "Age-weight baseline (512 iterations)",
       "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 0,
-      "age_weight_ratio": 0.167
-    },
-
-    "age_weight_sel20": {
-      "description": "Age-weight baseline (128 iterations) with sel20",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 20,
-      "age_weight_ratio": 0.167
-    },
-
-    "age_weight_sel21": {
-      "description": "Age-weight baseline (128 iterations) with sel21",
-      "timeout": 600,
-      "max_iterations": 128,
+      "max_iterations": 512,
       "literal_selection": 21,
       "age_weight_ratio": 0.167
     },
 
-    "gcn_mlp_sel0": {
-      "description": "GCN + MLP with sel0",
+    "gcn_mlp": {
+      "description": "GCN + MLP",
       "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 0,
-      "encoder": "gcn",
-      "scorer": "mlp",
-      "traces": "age_weight_sel0"
-    },
-    "gcn_mlp_sel20": {
-      "description": "GCN + MLP with sel20",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 20,
-      "encoder": "gcn",
-      "scorer": "mlp",
-      "traces": "age_weight_sel20"
-    },
-    "gcn_mlp_sel21": {
-      "description": "GCN + MLP with sel21",
-      "timeout": 600,
-      "max_iterations": 128,
+      "max_iterations": 512,
       "literal_selection": 21,
       "encoder": "gcn",
       "scorer": "mlp",
-      "traces": "age_weight_sel21"
+      "traces": "age_weight"
     },
 
-    "gcn_attention_sel0": {
-      "description": "GCN + attention with sel0",
+    "gcn_attention": {
+      "description": "GCN + attention",
       "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 0,
-      "encoder": "gcn",
-      "scorer": "attention",
-      "traces": "age_weight_sel0"
-    },
-    "gcn_attention_sel20": {
-      "description": "GCN + attention with sel20",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 20,
-      "encoder": "gcn",
-      "scorer": "attention",
-      "traces": "age_weight_sel20"
-    },
-    "gcn_attention_sel21": {
-      "description": "GCN + attention with sel21",
-      "timeout": 600,
-      "max_iterations": 128,
+      "max_iterations": 512,
       "literal_selection": 21,
       "encoder": "gcn",
       "scorer": "attention",
-      "traces": "age_weight_sel21"
+      "traces": "age_weight"
     },
 
-    "gcn_transformer_sel0": {
-      "description": "GCN + transformer with sel0",
+    "gcn_transformer": {
+      "description": "GCN + transformer",
       "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 0,
-      "encoder": "gcn",
-      "scorer": "transformer",
-      "traces": "age_weight_sel0"
-    },
-    "gcn_transformer_sel20": {
-      "description": "GCN + transformer with sel20",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 20,
-      "encoder": "gcn",
-      "scorer": "transformer",
-      "traces": "age_weight_sel20"
-    },
-    "gcn_transformer_sel21": {
-      "description": "GCN + transformer with sel21",
-      "timeout": 600,
-      "max_iterations": 128,
+      "max_iterations": 512,
       "literal_selection": 21,
       "encoder": "gcn",
       "scorer": "transformer",
-      "traces": "age_weight_sel21"
+      "traces": "age_weight"
     },
 
-    "sentence_mlp_sel0": {
-      "description": "Sentence + MLP with sel0",
+    "sentence_mlp": {
+      "description": "Sentence + MLP",
       "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 0,
-      "encoder": "sentence",
-      "scorer": "mlp",
-      "traces": "age_weight_sel0"
-    },
-    "sentence_mlp_sel20": {
-      "description": "Sentence + MLP with sel20",
-      "timeout": 600,
-      "max_iterations": 128,
-      "literal_selection": 20,
-      "encoder": "sentence",
-      "scorer": "mlp",
-      "traces": "age_weight_sel20"
-    },
-    "sentence_mlp_sel21": {
-      "description": "Sentence + MLP with sel21",
-      "timeout": 600,
-      "max_iterations": 128,
+      "max_iterations": 512,
       "literal_selection": 21,
       "encoder": "sentence",
       "scorer": "mlp",
-      "traces": "age_weight_sel21"
+      "traces": "age_weight"
     }
   }
 }

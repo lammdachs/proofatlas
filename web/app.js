@@ -81,29 +81,13 @@ async function detectServer() {
 
 // Hardcoded heuristic presets for browser-only mode (no server / config fetch fails)
 const BUILTIN_PRESETS = {
-    "time_sel0": {
-        "description": "10s with sel0 (all literals)",
-        "timeout": 10, "literal_selection": 0, "age_weight_ratio": 0.167
-    },
-    "time_sel20": {
-        "description": "10s with sel20 (all maximal literals)",
-        "timeout": 10, "literal_selection": 20, "age_weight_ratio": 0.167
-    },
-    "time_sel21": {
-        "description": "10s with sel21 (unique maximal, else neg max-weight, else all maximal)",
+    "time": {
+        "description": "10s timeout",
         "timeout": 10, "literal_selection": 21, "age_weight_ratio": 0.167
     },
-    "age_weight_sel0": {
-        "description": "Age-weight baseline (128 iterations) with sel0",
-        "timeout": 600, "max_iterations": 128, "literal_selection": 0, "age_weight_ratio": 0.167
-    },
-    "age_weight_sel20": {
-        "description": "Age-weight baseline (128 iterations) with sel20",
-        "timeout": 600, "max_iterations": 128, "literal_selection": 20, "age_weight_ratio": 0.167
-    },
-    "age_weight_sel21": {
-        "description": "Age-weight baseline (128 iterations) with sel21",
-        "timeout": 600, "max_iterations": 128, "literal_selection": 21, "age_weight_ratio": 0.167
+    "age_weight": {
+        "description": "Age-weight baseline (512 iterations)",
+        "timeout": 600, "max_iterations": 512, "literal_selection": 21, "age_weight_ratio": 0.167
     },
 };
 
@@ -168,8 +152,8 @@ async function loadConfigs() {
         applyPreset(presetName);
     });
 
-    // Default to time_sel21
-    const defaultPreset = 'time_sel21';
+    // Default to time preset
+    const defaultPreset = 'time';
     if (presets[defaultPreset]) {
         select.value = defaultPreset;
         applyPreset(defaultPreset);
@@ -982,7 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Default config JSON (overridden by loadConfigs when it applies time_sel21)
+    // Default config JSON (overridden by loadConfigs when it applies time preset)
     updateConfigJson({
         timeout: 10,
         literal_selection: 21,

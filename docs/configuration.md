@@ -28,7 +28,7 @@ Configures the ProofAtlas prover and its presets.
     "binary": "rust/target/release/prove"
   },
   "defaults": {
-    "preset": "time_sel21"
+    "preset": "time"
   },
   "presets": {
     "preset_name": { ... }
@@ -53,19 +53,19 @@ Configures the ProofAtlas prover and its presets.
 
 ```json
 {
-  "time_sel21": {
-    "description": "10s with sel21 (unique maximal)",
+  "time": {
+    "description": "10s timeout",
     "timeout": 10,
     "literal_selection": 21,
     "age_weight_ratio": 0.167
   },
-  "gcn": {
-    "description": "10s with GCN clause selector",
+  "gcn_mlp": {
+    "description": "GCN + MLP",
     "timeout": 10,
     "literal_selection": 21,
-    "model": "gcn",
-    "training": "standard",
-    "traces": "time_sel21"
+    "encoder": "gcn",
+    "scorer": "mlp",
+    "traces": "time"
   }
 }
 ```

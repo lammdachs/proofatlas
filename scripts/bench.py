@@ -4,8 +4,8 @@ Benchmark and train proofatlas theorem prover.
 
 USAGE:
     proofatlas-bench                           # Run all configs
-    proofatlas-bench --config gcn_mlp_sel21    # Run specific config
-    proofatlas-bench --config gcn_mlp_sel21 --retrain  # Retrain model
+    proofatlas-bench --config gcn_mlp    # Run specific config
+    proofatlas-bench --config gcn_mlp --retrain  # Retrain model
     proofatlas-bench --list                    # List available configs
 
     proofatlas-bench --status                  # Check job status
@@ -17,7 +17,7 @@ CACHING:
     Use --retrain to force retraining of ML models.
 
 ML MODELS:
-    Presets with embedding+scorer (e.g., gcn_mlp_sel21) automatically:
+    Presets with embedding+scorer (e.g., gcn_mlp) automatically:
     1. Collect traces using age_weight baseline (if none exist)
     2. Train the model
     3. Export to .weights/{embedding}_{scorer}.pt

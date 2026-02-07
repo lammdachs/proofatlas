@@ -1,7 +1,7 @@
 {
   "generated": "2026-01-27T00:37:41.183653",
   "prover": "proofatlas",
-  "preset": "gcn_mlp_sel21",
+  "preset": "gcn_mlp",
   "completed": 196,
   "total": 8398,
   "progress_pct": 2.3338890211955228,

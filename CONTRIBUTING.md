@@ -135,7 +135,7 @@ Use the benchmark tool to evaluate changes:
 proofatlas-bench
 
 # Run specific configuration
-proofatlas-bench --config time_sel21
+proofatlas-bench --config time
 
 # Check job status
 proofatlas-bench --status

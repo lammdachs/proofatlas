@@ -161,7 +161,7 @@ Training is typically done via the CLI:
 
 ```bash
 # Train a GCN model (collects traces if needed)
-proofatlas-bench --config gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp --retrain
 ```
 
 Or programmatically:
@@ -172,7 +172,7 @@ from proofatlas.ml.training import run_training
 # Train from collected traces
 weights_path = run_training(
     preset={"embedding": "gcn", "scorer": "mlp"},
-    trace_dir=".data/traces/time_sel21",
+    trace_dir=".data/traces/time",
     weights_dir=".weights",
     configs_dir="configs",
 )

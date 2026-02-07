@@ -1,16 +1,10 @@
 {
   "generated": "2026-02-03T18:40:08.319000",
   "runs": [
-    "proofatlas_age_weight_sel0",
-    "proofatlas_age_weight_sel20",
-    "proofatlas_age_weight_sel21",
-    "proofatlas_gcn_mlp_sel0",
-    "proofatlas_gcn_mlp_sel21",
+    "proofatlas_age_weight",
+    "proofatlas_gcn_mlp",
     "proofatlas_sentence",
-    "spass_age_weight_sel20",
     "spass_age_weight_sel21",
-    "vampire_age_weight_sel0",
-    "vampire_age_weight_sel20",
     "vampire_age_weight_sel21"
   ]
 }

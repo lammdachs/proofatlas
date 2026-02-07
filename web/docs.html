@@ -512,10 +512,10 @@ L = -log( exp(s_pos/τ) / (exp(s_pos/τ) + Σ exp(s_neg/τ)) )</pre>
                     <h3>Quick Start</h3>
                     <pre class="tptp-code" style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px;">
 # 1. Train a GCN model (collects traces if needed)
-proofatlas-bench --config gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp --retrain
 
 # 2. Evaluate the trained model
-proofatlas-bench --config gcn_mlp_sel21
+proofatlas-bench --config gcn_mlp
 
 # 3. View training metrics
 # Open training.html in browser</pre>

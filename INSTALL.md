@@ -56,7 +56,7 @@ python scripts/setup.py --skip-wasm      # Skip WASM build
 proofatlas problem.p
 
 # With a config
-proofatlas problem.p --config time_sel21
+proofatlas problem.p --config time
 
 # With options
 proofatlas problem.p --timeout 60 --literal-selection 21
@@ -93,10 +93,10 @@ Then open http://localhost:8000 in your browser.
 proofatlas-bench
 
 # Run specific config
-proofatlas-bench --config gcn_mlp_sel21
+proofatlas-bench --config gcn_mlp
 
 # Retrain ML models
-proofatlas-bench --config gcn_mlp_sel21 --retrain
+proofatlas-bench --config gcn_mlp --retrain
 
 # Check status of running job
 proofatlas-bench --status

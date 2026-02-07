@@ -4,7 +4,7 @@ Prove a single TPTP problem.
 
 USAGE:
     proofatlas problem.p
-    proofatlas problem.p --config gcn_mlp_sel21
+    proofatlas problem.p --config gcn_mlp
     proofatlas problem.p --timeout 30 --literal-selection 21
     proofatlas problem.p --json output.json
     proofatlas --list

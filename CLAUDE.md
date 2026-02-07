@@ -74,7 +74,7 @@ LIBTORCH_USE_PYTORCH=1 cargo test         # Run Rust tests
 
 ```bash
 proofatlas problem.p                          # Basic usage
-proofatlas problem.p --config time_sel21      # With preset
+proofatlas problem.p --config time             # With preset
 proofatlas problem.p --timeout 30             # With timeout
 proofatlas --list                             # List available presets
 ```
@@ -98,7 +98,7 @@ pytest python/tests/ -v                  # Python tests (no env vars needed)
 
 ```bash
 proofatlas-bench                              # Run all presets
-proofatlas-bench --config time_sel21          # Run specific preset
+proofatlas-bench --config time                 # Run specific preset
 proofatlas-bench --retrain                    # Retrain ML models
 proofatlas-bench --status                     # Check job status
 ```
