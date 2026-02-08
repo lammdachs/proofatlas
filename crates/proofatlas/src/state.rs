@@ -134,8 +134,6 @@ pub enum ProofResult {
     Saturated(Vec<ProofStep>, Vec<Clause>),
     /// Resource limit reached
     ResourceLimit(Vec<ProofStep>, Vec<Clause>),
-    /// Timeout reached
-    Timeout(Vec<ProofStep>, Vec<Clause>),
 }
 
 impl ProofResult {
@@ -153,17 +151,12 @@ impl ProofResult {
             },
             ProofResult::ResourceLimit(steps, clauses) => {
                 ProofResultJson::ResourceLimit {
-                    reason: "Clause or iteration limit exceeded".to_string(),
+                    reason: "Resource limit exceeded".to_string(),
                     final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
                     proof_steps: steps.iter().map(|s| s.into()).collect(),
                     time_seconds,
                 }
             }
-            ProofResult::Timeout(steps, clauses) => ProofResultJson::Timeout {
-                final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
-                proof_steps: steps.iter().map(|s| s.into()).collect(),
-                time_seconds,
-            },
         }
     }
 }

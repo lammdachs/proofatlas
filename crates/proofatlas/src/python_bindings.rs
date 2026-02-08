@@ -693,7 +693,6 @@ impl ProofState {
             }
             ProofResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps, None),
             ProofResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps, None),
-            ProofResult::Timeout(steps, clauses) => (false, "resource_limit", clauses, steps, None),
         };
         self.empty_clause_idx = empty_idx;
 

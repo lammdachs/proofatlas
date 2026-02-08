@@ -214,7 +214,7 @@ impl ProofAtlas {
     /// Each step processes all new clauses, then selects one given clause and
     /// generates inferences with it.
     pub fn step(&mut self) -> Option<ProofResult> {
-        let start_time = *self.start_time.get_or_insert_with(Instant::now);
+        self.start_time.get_or_insert_with(Instant::now);
 
         // === Step 1: Process new clauses ===
         while let Some(&clause_idx) = self.state.new.last() {
@@ -254,7 +254,9 @@ impl ProofAtlas {
             }
 
             for change in collected_changes {
-                self.apply_change(change);
+                if let Some(result) = self.apply_change(change) {
+                    return Some(result);
+                }
             }
 
             if forward_deleted {
@@ -297,11 +299,15 @@ impl ProofAtlas {
             }
 
             for change in all_backward_changes {
-                self.apply_change(change);
+                if let Some(result) = self.apply_change(change) {
+                    return Some(result);
+                }
             }
 
             // 1e: Transfer N → U
-            self.apply_change(StateChange::Transfer(clause_idx));
+            if let Some(result) = self.apply_change(StateChange::Transfer(clause_idx)) {
+                return Some(result);
+            }
         }
 
         // === Step 2: Check saturation ===
@@ -310,13 +316,6 @@ impl ProofAtlas {
             let clauses = self.state.clauses.clone();
             return Some(ProofResult::Saturated(steps, clauses));
         }
-
-        // Check resource limits
-        if let Some(result) = self.check_limits(start_time) {
-            return Some(result);
-        }
-
-        self.state.current_iteration += 1;
 
         // Track max sizes
         if let Some(p) = self.profile.as_mut() {
@@ -347,7 +346,9 @@ impl ProofAtlas {
 
         // === Step 4: Activate given clause (transfer from U to P) ===
         self.clause_selector.on_clause_processed(given_idx);
-        self.apply_change(StateChange::Activate(given_idx));
+        if let Some(result) = self.apply_change(StateChange::Activate(given_idx)) {
+            return Some(result);
+        }
 
         // === Step 5: Generate inferences ===
         let t0 = self.profile.as_ref().map(|_| Instant::now());
@@ -363,7 +364,9 @@ impl ProofAtlas {
             if let StateChange::Add(clause, rule_name, premises) = change {
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
-                self.apply_change(StateChange::Add(oriented, rule_name, premises));
+                if let Some(result) = self.apply_change(StateChange::Add(oriented, rule_name, premises)) {
+                    return Some(result);
+                }
             }
         }
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
@@ -377,12 +380,15 @@ impl ProofAtlas {
     // Private helper methods
     // =========================================================================
 
-    /// Apply a single StateChange, update internal state, and record to event log
-    fn apply_change(&mut self, change: StateChange) {
+    /// Apply a single StateChange, update internal state, record to event log,
+    /// and check resource limits.
+    ///
+    /// Returns `Some(ProofResult::ResourceLimit(..))` if a limit is exceeded.
+    fn apply_change(&mut self, change: StateChange) -> Option<ProofResult> {
         match &change {
             StateChange::Add(clause, _rule_name, _premises) => {
                 if clause.literals.len() > self.config.max_clause_size {
-                    return;
+                    return None;
                 }
 
                 let new_idx = self.state.clauses.len();
@@ -409,6 +415,40 @@ impl ProofAtlas {
 
                 if let Some(p) = self.profile.as_mut() {
                     p.clauses_added += 1;
+                }
+
+                // Check limits after every Add
+                let num_clauses = self.state.clauses.len();
+
+                // max_clauses: every Add (integer comparison, free)
+                if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
+                    return Some(ProofResult::ResourceLimit(
+                        self.state.build_proof_steps(),
+                        self.state.clauses.clone(),
+                    ));
+                }
+
+                // timeout + memory: every 100th Add (amortize syscall cost)
+                if num_clauses % 100 == 0 {
+                    if let Some(start) = self.start_time {
+                        if start.elapsed() > self.config.timeout {
+                            return Some(ProofResult::ResourceLimit(
+                                self.state.build_proof_steps(),
+                                self.state.clauses.clone(),
+                            ));
+                        }
+                    }
+
+                    if let Some(limit_mb) = self.config.memory_limit {
+                        if let Some(rss) = crate::config::process_memory_mb() {
+                            if rss >= limit_mb {
+                                return Some(ProofResult::ResourceLimit(
+                                    self.state.build_proof_steps(),
+                                    self.state.clauses.clone(),
+                                ));
+                            }
+                        }
+                    }
                 }
             }
             StateChange::Delete(clause_idx, _rule_name, _justification) => {
@@ -441,41 +481,20 @@ impl ProofAtlas {
                 self.state.processed.insert(clause_idx);
                 self.index_registry.on_clause_processed(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(change);
-            }
-        }
-    }
 
-    /// Check resource limits and return termination result if exceeded
-    fn check_limits(&self, start_time: Instant) -> Option<ProofResult> {
-        if let Some(limit_mb) = self.config.memory_limit {
-            if let Some(rss) = crate::config::process_memory_mb() {
-                if rss >= limit_mb {
+                // Increment iteration count at activation (given clause selection)
+                self.state.current_iteration += 1;
+
+                // Check max_iterations
+                if self.config.max_iterations > 0
+                    && self.state.current_iteration >= self.config.max_iterations
+                {
                     return Some(ProofResult::ResourceLimit(
                         self.state.build_proof_steps(),
                         self.state.clauses.clone(),
                     ));
                 }
             }
-        }
-        if self.config.max_iterations > 0
-            && self.state.current_iteration >= self.config.max_iterations
-        {
-            return Some(ProofResult::ResourceLimit(
-                self.state.build_proof_steps(),
-                self.state.clauses.clone(),
-            ));
-        }
-        if self.config.max_clauses > 0 && self.state.clauses.len() >= self.config.max_clauses {
-            return Some(ProofResult::ResourceLimit(
-                self.state.build_proof_steps(),
-                self.state.clauses.clone(),
-            ));
-        }
-        if start_time.elapsed() > self.config.timeout {
-            return Some(ProofResult::Timeout(
-                self.state.build_proof_steps(),
-                self.state.clauses.clone(),
-            ));
         }
         None
     }

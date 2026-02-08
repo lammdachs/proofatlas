@@ -34,8 +34,8 @@ fn test_simple_resolution_proof() {
                 println!("  [{}] {}", i, c);
             }
         }
-        ProofResult::ResourceLimit(_, clauses) | ProofResult::Timeout(_, clauses) => {
-            println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
+        ProofResult::ResourceLimit(_, clauses) => {
+            println!("RESOURCE LIMIT with {} clauses", clauses.len());
         }
     }
 
@@ -79,8 +79,8 @@ fn test_with_duplicate_clause() {
                 println!("  [{:?}] {} <- {:?}", step.rule_name, step.conclusion, proofatlas::clause_indices(&step.premises));
             }
         }
-        ProofResult::ResourceLimit(_, clauses) | ProofResult::Timeout(_, clauses) => {
-            println!("RESOURCE LIMIT/TIMEOUT with {} clauses", clauses.len());
+        ProofResult::ResourceLimit(_, clauses) => {
+            println!("RESOURCE LIMIT with {} clauses", clauses.len());
         }
     }
 

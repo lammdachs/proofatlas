@@ -276,11 +276,6 @@ pub enum ProofResultJson {
         proof_steps: Vec<ProofStepJson>,
         time_seconds: f64,
     },
-    Timeout {
-        final_clauses: Vec<ClauseJson>,
-        proof_steps: Vec<ProofStepJson>,
-        time_seconds: f64,
-    },
 }
 
 #[cfg(test)]

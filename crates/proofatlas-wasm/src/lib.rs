@@ -222,13 +222,6 @@ impl ProofAtlasWasm {
                 clauses.len(),
                 &interner,
             ),
-            ProofResult::Timeout(steps, clauses) => build_incomplete_result(
-                "timeout",
-                "Timeout reached before finding a proof",
-                &steps,
-                clauses.len(),
-                &interner,
-            ),
             ProofResult::ResourceLimit(steps, clauses) => build_incomplete_result(
                 "resource_limit",
                 "Resource limit reached",
