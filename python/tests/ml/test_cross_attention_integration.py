@@ -86,11 +86,11 @@ class TestGCNEncodeWithScorers:
 
 
 class TestStateBatchThroughModel:
-    """Test collate_state_batch results through model pipeline."""
+    """Test collate_proof_batch results through model pipeline."""
 
     def test_state_batch_through_model(self):
         from proofatlas.ml.structured import clause_to_graph, batch_graphs
-        from proofatlas.ml.training import collate_state_batch
+        from proofatlas.ml.training import collate_proof_batch
 
         # Build synthetic batch
         clauses = []
@@ -114,7 +114,7 @@ class TestStateBatchThroughModel:
             "problem": "test",
         }
 
-        batch_result = collate_state_batch([item])
+        batch_result = collate_proof_batch([item])
         assert batch_result is not None
 
         # Create model and run encode + score pipeline

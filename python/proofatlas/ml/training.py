@@ -195,7 +195,11 @@ def _pool_init_tokenizer():
 
 
 def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
-    """Load trace file and convert to graphs. Module-level for multiprocessing."""
+    """Load trace file and convert to graphs with selection states.
+
+    Returns graphs for all clauses plus selection_states for U/P sampling.
+    Skips traces without selection_states.
+    """
     from .structured import clause_to_graph
 
     try:
@@ -204,6 +208,8 @@ def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
         return None
 
     if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+    if not trace.get("selection_states"):
         return None
 
     clauses = trace["clauses"]
@@ -214,29 +220,7 @@ def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
     return {
         "graphs": graphs,
         "labels": labels,
-        "problem": trace_file.stem,
-    }
-
-
-def _load_trace_string(trace_file: Path) -> Optional[Dict]:
-    """Load trace file and convert to strings. Module-level for multiprocessing."""
-    from .structured import clause_to_string
-
-    try:
-        trace = _load_json(trace_file)
-    except Exception:
-        return None
-
-    if not trace.get("proof_found") or not trace.get("clauses"):
-        return None
-
-    clauses = trace["clauses"]
-    labels = [c.get("label", 0) for c in clauses]
-    strings = [clause_to_string(c) for c in clauses]
-
-    return {
-        "strings": strings,
-        "labels": labels,
+        "selection_states": trace["selection_states"],
         "problem": trace_file.stem,
     }
 
@@ -255,7 +239,11 @@ def _get_tokenizer():
 
 
 def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
-    """Load trace file and pre-tokenize strings. Module-level for multiprocessing."""
+    """Load trace file and pre-tokenize strings with selection states.
+
+    Returns tokenized inputs for all clauses plus selection_states for U/P sampling.
+    Skips traces without selection_states.
+    """
     from .structured import clause_to_string
 
     try:
@@ -264,6 +252,8 @@ def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
         return None
 
     if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+    if not trace.get("selection_states"):
         return None
 
     clauses = trace["clauses"]
@@ -283,102 +273,9 @@ def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
         "input_ids": encoded["input_ids"],
         "attention_mask": encoded["attention_mask"],
         "labels": labels,
-        "problem": trace_file.stem,
-    }
-
-
-def _load_trace_state(trace_file: Path) -> Optional[Dict]:
-    """Load trace file with selection states for state-sampled training.
-
-    Returns graphs for all clauses plus selection_states for U/P sampling.
-    """
-    from .structured import clause_to_graph
-
-    try:
-        trace = _load_json(trace_file)
-    except Exception:
-        return None
-
-    if not trace.get("proof_found") or not trace.get("clauses"):
-        return None
-    if not trace.get("selection_states"):
-        return None
-
-    clauses = trace["clauses"]
-    max_age = len(clauses)
-    graphs = [clause_to_graph(c, max_age) for c in clauses]
-    labels = [c.get("label", 0) for c in clauses]
-
-    return {
-        "graphs": graphs,
-        "labels": labels,
         "selection_states": trace["selection_states"],
         "problem": trace_file.stem,
     }
-
-
-def collate_state_batch(batch: List[Dict]) -> Dict[str, Any]:
-    """
-    Collate function for state-sampled batches.
-
-    For each proof, randomly samples one selection state (U/P snapshot).
-    Builds separate graph batches for U and P clause sets.
-    Labels are only for U clauses (what to select from the unprocessed set).
-    """
-    import random
-    from .structured import batch_graphs
-
-    all_u_graphs = []
-    all_p_graphs = []
-    all_u_labels = []
-    all_proof_ids = []
-
-    for proof_idx, item in enumerate(batch):
-        graphs = item["graphs"]
-        labels = item["labels"]
-        states = item["selection_states"]
-
-        # Sample a random selection state
-        state = random.choice(states)
-        u_indices = state["unprocessed"]
-        p_indices = state["processed"]
-
-        # Collect graphs and labels for U and P
-        for idx in u_indices:
-            if idx < len(graphs):
-                all_u_graphs.append(graphs[idx])
-                all_u_labels.append(labels[idx])
-                all_proof_ids.append(proof_idx)
-
-        for idx in p_indices:
-            if idx < len(graphs):
-                all_p_graphs.append(graphs[idx])
-
-    if not all_u_graphs:
-        return None
-
-    # Batch U graphs (with labels)
-    u_batched = batch_graphs(all_u_graphs, labels=all_u_labels)
-
-    result = {
-        "u_node_features": u_batched["x"],
-        "u_adj": u_batched["adj"],
-        "u_pool_matrix": u_batched["pool_matrix"],
-        "u_clause_features": u_batched.get("clause_features"),
-        "labels": u_batched["y"],
-        "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
-        "is_state_batch": True,
-    }
-
-    # Batch P graphs (no labels needed)
-    if all_p_graphs:
-        p_batched = batch_graphs(all_p_graphs)
-        result["p_node_features"] = p_batched["x"]
-        result["p_adj"] = p_batched["adj"]
-        result["p_pool_matrix"] = p_batched["pool_matrix"]
-        result["p_clause_features"] = p_batched.get("clause_features")
-
-    return result
 
 
 class DynamicBatchSampler(torch.utils.data.Sampler):
@@ -460,7 +357,7 @@ class ProofDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         trace_dir: Path,
-        output_type: str = "graph",  # "graph" or "string"
+        output_type: str = "graph",  # "graph" or "tokenized"
         problem_names: Optional[set] = None,
         trace_files: Optional[List[Path]] = None,
         n_workers: int = None,
@@ -468,7 +365,7 @@ class ProofDataset(torch.utils.data.Dataset):
         """
         Args:
             trace_dir: Directory containing .json trace files
-            output_type: "graph" for GNN models, "string" for sentence models
+            output_type: "graph" for GNN models, "tokenized" for sentence models
             problem_names: Optional set of problem names to include
             trace_files: Optional explicit list of trace files (overrides trace_dir)
             n_workers: Number of parallel workers (default: CPU count)
@@ -490,14 +387,10 @@ class ProofDataset(torch.utils.data.Dataset):
             raise ValueError("No JSON trace files found")
 
         # Load data in parallel
-        if output_type == "graph":
-            load_fn = _load_trace_graph
-        elif output_type == "state":
-            load_fn = _load_trace_state
-        elif output_type == "tokenized":
+        if output_type == "tokenized":
             load_fn = _load_trace_tokenized
         else:
-            load_fn = _load_trace_string
+            load_fn = _load_trace_graph
 
         if n_workers is None:
             import os
@@ -527,103 +420,125 @@ class ProofDataset(torch.utils.data.Dataset):
         return self.items[idx]
 
 
-def collate_sentence_batch(batch: List[Dict]) -> Dict[str, Any]:
+def collate_tokenized_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     """
-    Collate function for sentence-based batches.
+    Collate function for pre-tokenized sentence batches with state sampling.
 
-    Returns clause strings and labels with proof_ids for per-proof loss.
+    For each proof, randomly samples one selection state (U/P snapshot).
+    Splits tokens into U and P sets with proof_ids for per-proof loss.
     """
-    all_strings = []
-    all_labels = []
+    import random
+
+    all_u_input_ids = []
+    all_u_attention_mask = []
+    all_u_labels = []
+    all_p_input_ids = []
+    all_p_attention_mask = []
     all_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
-        strings = item["strings"]
+        input_ids = item["input_ids"]
+        attention_mask = item["attention_mask"]
         labels = item["labels"]
+        states = item["selection_states"]
 
-        all_strings.extend(strings)
-        all_labels.extend(labels)
-        all_proof_ids.extend([proof_idx] * len(strings))
+        # Sample a random selection state
+        state = random.choice(states)
+        u_indices = state["unprocessed"]
+        p_indices = state["processed"]
 
-    return {
-        "strings": all_strings,
-        "labels": torch.tensor(all_labels, dtype=torch.float32),
+        for idx in u_indices:
+            if idx < len(labels):
+                all_u_input_ids.append(input_ids[idx])
+                all_u_attention_mask.append(attention_mask[idx])
+                all_u_labels.append(labels[idx])
+                all_proof_ids.append(proof_idx)
+
+        for idx in p_indices:
+            if idx < len(labels):
+                all_p_input_ids.append(input_ids[idx])
+                all_p_attention_mask.append(attention_mask[idx])
+
+    if not all_u_input_ids:
+        return None
+
+    # Pad to uniform length across traces (each trace may have different seq lengths)
+    from torch.nn.utils.rnn import pad_sequence
+    result = {
+        "u_input_ids": pad_sequence(all_u_input_ids, batch_first=True, padding_value=0),
+        "u_attention_mask": pad_sequence(all_u_attention_mask, batch_first=True, padding_value=0),
+        "labels": torch.tensor(all_u_labels, dtype=torch.float32),
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
     }
 
+    if all_p_input_ids:
+        result["p_input_ids"] = pad_sequence(all_p_input_ids, batch_first=True, padding_value=0)
+        result["p_attention_mask"] = pad_sequence(all_p_attention_mask, batch_first=True, padding_value=0)
 
-def collate_tokenized_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    return result
+
+
+def collate_proof_batch(batch: List[Dict]) -> Dict[str, Any]:
     """
-    Collate function for pre-tokenized sentence batches.
+    Collate function for graph proof batches with state sampling.
 
-    Pads and combines pre-tokenized inputs from multiple proofs.
+    For each proof, randomly samples one selection state (U/P snapshot).
+    Builds separate graph batches for U and P clause sets.
+    Labels are only for U clauses (what to select from the unprocessed set).
     """
-    all_input_ids = []
-    all_attention_mask = []
-    all_labels = []
-
-    for item in batch:
-        all_input_ids.append(item["input_ids"])
-        all_attention_mask.append(item["attention_mask"])
-        all_labels.extend(item["labels"])
-
-    # Pad to max length across all proofs
-    max_len = max(ids.shape[1] for ids in all_input_ids)
-
-    padded_input_ids = []
-    padded_attention_mask = []
-
-    for input_ids, attention_mask in zip(all_input_ids, all_attention_mask):
-        pad_len = max_len - input_ids.shape[1]
-        if pad_len > 0:
-            input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=0)
-            attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=0)
-        padded_input_ids.append(input_ids)
-        padded_attention_mask.append(attention_mask)
-
-    return {
-        "input_ids": torch.cat(padded_input_ids, dim=0),
-        "attention_mask": torch.cat(padded_attention_mask, dim=0),
-        "labels": torch.tensor(all_labels, dtype=torch.float32),
-    }
-
-
-def collate_proof_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
-    """
-    Collate function for proof batches.
-
-    Combines all clause graphs from all proofs into batched tensors,
-    with proof_ids to track which proof each clause belongs to.
-
-    Uses batch_graphs which outputs sparse adjacency and pool matrices
-    for memory-efficient processing of large batches.
-    """
+    import random
     from .structured import batch_graphs
 
-    # Collect all graphs and labels, tracking proof membership
-    all_graphs = []
-    all_labels = []
+    all_u_graphs = []
+    all_p_graphs = []
+    all_u_labels = []
     all_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
         graphs = item["graphs"]
         labels = item["labels"]
+        states = item["selection_states"]
 
-        all_graphs.extend(graphs)
-        all_labels.extend(labels)
-        all_proof_ids.extend([proof_idx] * len(graphs))
+        # Sample a random selection state
+        state = random.choice(states)
+        u_indices = state["unprocessed"]
+        p_indices = state["processed"]
 
-    # Build batched tensors with sparse adjacency and pool matrices
-    batched = batch_graphs(all_graphs, labels=all_labels)
+        # Collect graphs and labels for U and P
+        for idx in u_indices:
+            if idx < len(graphs):
+                all_u_graphs.append(graphs[idx])
+                all_u_labels.append(labels[idx])
+                all_proof_ids.append(proof_idx)
 
-    return {
-        "node_features": batched["x"],
-        "adj": batched["adj"],
-        "pool_matrix": batched["pool_matrix"],
-        "labels": batched["y"],
+        for idx in p_indices:
+            if idx < len(graphs):
+                all_p_graphs.append(graphs[idx])
+
+    if not all_u_graphs:
+        return None
+
+    # Batch U graphs (with labels)
+    u_batched = batch_graphs(all_u_graphs, labels=all_u_labels)
+
+    result = {
+        "u_node_features": u_batched["x"],
+        "u_adj": u_batched["adj"],
+        "u_pool_matrix": u_batched["pool_matrix"],
+        "u_clause_features": u_batched.get("clause_features"),
+        "labels": u_batched["y"],
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
-        "clause_features": batched.get("clause_features"),
     }
+
+    # Batch P graphs (no labels needed)
+    if all_p_graphs:
+        p_batched = batch_graphs(all_p_graphs)
+        result["p_node_features"] = p_batched["x"]
+        result["p_adj"] = p_batched["adj"]
+        result["p_pool_matrix"] = p_batched["pool_matrix"]
+        result["p_clause_features"] = p_batched.get("clause_features")
+
+    return result
 
 
 # =============================================================================
@@ -936,15 +851,10 @@ def run_training(
         train_files = trace_files
         val_files = []
 
-    # Determine output type based on embedding and scorer
+    # Determine output type based on embedding
     embedding_type = get_embedding_type(preset)
-    scorer_name = preset.get("scorer", "mlp")
-    use_state_sampling = scorer_name in ("attention", "transformer") and config.get("use_state_sampling", True)
-
     if embedding_type == "string":
         output_type = "tokenized"
-    elif use_state_sampling:
-        output_type = "state"
     else:
         output_type = "graph"
 
@@ -955,17 +865,6 @@ def run_training(
         trace_files=train_files,
         output_type=output_type,
     )
-
-    # Fall back to graph mode if state traces not available
-    if output_type == "state" and len(train_ds) == 0:
-        log_msg("No state traces available, falling back to graph mode")
-        output_type = "graph"
-        use_state_sampling = False
-        train_ds = ProofDataset(
-            trace_dir=None,
-            trace_files=train_files,
-            output_type="graph",
-        )
 
     val_ds = None
     if val_files:
@@ -982,14 +881,21 @@ def run_training(
     log_msg(f"Training {model_name}: {len(train_ds)} traces")
 
     # Create model
-    model_type = config.get("type", "gcn")
+    emb_config = config.get("embedding", {})
+    scorer_config = config.get("scorer", {})
+    model_type = emb_config.get("type", config.get("type", "gcn"))
+    hidden_dim = emb_config.get("hidden_dim", config.get("hidden_dim", 64))
     model = create_model(
         model_type=model_type,
         node_feature_dim=config.get("input_dim", 13),
-        hidden_dim=config.get("hidden_dim", 64),
-        num_layers=config.get("num_layers", 3),
-        num_heads=config.get("num_heads", 4),
-        dropout=config.get("dropout", 0.1),
+        hidden_dim=hidden_dim,
+        num_layers=emb_config.get("num_layers", config.get("num_layers", 3)),
+        num_heads=emb_config.get("num_heads", config.get("num_heads", 4)),
+        dropout=emb_config.get("dropout", config.get("dropout", 0.1)),
+        scorer_type=scorer_config.get("type", "mlp"),
+        scorer_num_heads=scorer_config.get("num_heads", 4),
+        scorer_num_layers=scorer_config.get("num_layers", 2),
+        freeze_encoder=emb_config.get("freeze_encoder", False),
     )
 
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
@@ -998,16 +904,16 @@ def run_training(
     model = model.to(device)
 
     # Dynamic batching: group proofs up to max_clauses per batch
-    max_clauses = config.get("max_clauses_per_batch", 8192)
-    accumulate_steps = config.get("accumulate_steps", 1)
+    # Sentence models use micro-batching inside encode_tokens() to avoid OOM,
+    # but we still want smaller proof groups to keep gradient updates frequent.
+    default_max_clauses = 512 if is_sentence_model else 8192
+    max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
+    default_accumulate = 4 if is_sentence_model else 1
+    accumulate_steps = config.get("accumulate_steps", default_accumulate)
 
     # Choose collate function based on output type
     if output_type == "tokenized":
         collate_fn = collate_tokenized_batch
-    elif output_type == "state":
-        collate_fn = collate_state_batch
-    elif output_type == "string":
-        collate_fn = collate_sentence_batch
     else:
         collate_fn = collate_proof_batch
 
@@ -1102,8 +1008,21 @@ def run_training(
             if proof_ids is not None:
                 proof_ids = proof_ids.to(device)
 
-            if batch.get("is_state_batch"):
-                # State-sampled batch: encode U and P separately, cross-attention score
+            if is_sentence_model:
+                # Sentence model: encode U and P token sets separately
+                u_ids = batch["u_input_ids"].to(device)
+                u_mask = batch["u_attention_mask"].to(device)
+                u_emb = model.encode_tokens(u_ids, u_mask)
+
+                p_emb = None
+                if "p_input_ids" in batch:
+                    p_ids = batch["p_input_ids"].to(device)
+                    p_mask = batch["p_attention_mask"].to(device)
+                    p_emb = model.encode_tokens(p_ids, p_mask)
+
+                scores = model.scorer(u_emb, p_emb)
+            else:
+                # GNN model: encode U and P graph sets separately
                 u_x = batch["u_node_features"].to(device)
                 u_adj = batch["u_adj"].to(device)
                 u_pool = batch["u_pool_matrix"].to(device)
@@ -1124,20 +1043,6 @@ def run_training(
                     p_emb = model.encode(p_x, p_adj, p_pool, p_cf)
 
                 scores = model.scorer(u_emb, p_emb)
-            elif is_sentence_model:
-                # Sentence model with pre-tokenized inputs
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                scores = model.forward_tokens(input_ids, attention_mask)
-            else:
-                # GNN model with graph inputs
-                x = batch["node_features"].to(device)
-                adj = batch["adj"].to(device)
-                pool = batch["pool_matrix"].to(device)
-                clause_features = batch.get("clause_features")
-                if clause_features is not None:
-                    clause_features = clause_features.to(device)
-                scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
             loss = compute_loss(scores, labels, proof_ids)
             if accumulate_steps > 1:
@@ -1169,7 +1074,19 @@ def run_training(
                     if val_proof_ids is not None:
                         val_proof_ids = val_proof_ids.to(device)
 
-                    if batch.get("is_state_batch"):
+                    if is_sentence_model:
+                        u_ids = batch["u_input_ids"].to(device)
+                        u_mask = batch["u_attention_mask"].to(device)
+                        u_emb = model.encode_tokens(u_ids, u_mask)
+
+                        p_emb = None
+                        if "p_input_ids" in batch:
+                            p_ids = batch["p_input_ids"].to(device)
+                            p_mask = batch["p_attention_mask"].to(device)
+                            p_emb = model.encode_tokens(p_ids, p_mask)
+
+                        scores = model.scorer(u_emb, p_emb)
+                    else:
                         u_x = batch["u_node_features"].to(device)
                         u_adj = batch["u_adj"].to(device)
                         u_pool = batch["u_pool_matrix"].to(device)
@@ -1189,18 +1106,6 @@ def run_training(
                             p_emb = model.encode(p_x, p_adj, p_pool, p_cf)
 
                         scores = model.scorer(u_emb, p_emb)
-                    elif is_sentence_model:
-                        input_ids = batch["input_ids"].to(device)
-                        attention_mask = batch["attention_mask"].to(device)
-                        scores = model.forward_tokens(input_ids, attention_mask)
-                    else:
-                        x = batch["node_features"].to(device)
-                        adj = batch["adj"].to(device)
-                        pool = batch["pool_matrix"].to(device)
-                        clause_features = batch.get("clause_features")
-                        if clause_features is not None:
-                            clause_features = clause_features.to(device)
-                        scores = model(x, adj, pool, clause_features) if needs_adj else model(x, pool)
 
                     val_loss += compute_loss(scores, labels, val_proof_ids).item()
                     num_val_batches += 1
@@ -1262,29 +1167,43 @@ def run_training(
     weights_path = weights_dir / f"{model_name}.pt"
 
     model.eval()
+
+    # Trace on CPU — torch.jit.trace bakes in device placement for tensor
+    # creation ops. CPU is the default eval backend (bench --backend-eval cpu).
+    # Modules with data-dependent shapes (GraphNorm) are scripted below to
+    # preserve dynamic behavior regardless of trace device.
     model.cpu()
 
     if is_sentence_model:
         # Sentence model has its own export method that handles tokenizer
+        model.cpu()
         model.export_torchscript(str(weights_path), save_tokenizer=True)
     else:
         # GNN models: trace with example inputs (must match Rust call signature)
+        # Script GraphNorm modules before tracing — their forward() uses
+        # data-dependent shapes (batch.max().item()) that trace bakes as constants
+        if hasattr(model, 'norms'):
+            for i in range(len(model.norms)):
+                model.norms[i] = torch.jit.script(model.norms[i])
+
+        # Rust sends sparse COO tensors for adj and pool_matrix
         num_nodes, num_clauses = 10, 3
-        example_x = torch.randn(num_nodes, config.get("input_dim", 13))
-        example_adj = torch.eye(num_nodes)
-        example_pool = torch.ones(num_clauses, num_nodes) / num_nodes
-        example_clause_features = torch.randn(num_clauses, 3)  # age, role, size
+        example_x = torch.randn(num_nodes, config.get("input_dim", 13), device=trace_device)
+        example_adj = torch.eye(num_nodes, device=trace_device).to_sparse()
+        example_pool = (torch.ones(num_clauses, num_nodes, device=trace_device) / num_nodes).to_sparse()
+        example_clause_features = torch.randn(num_clauses, 3, device=trace_device)
 
         if needs_adj:
-            traced = torch.jit.trace(model, (example_x, example_adj, example_pool, example_clause_features))
+            traced = torch.jit.trace(model, (example_x, example_adj, example_pool, example_clause_features), check_trace=False)
         else:
-            traced = torch.jit.trace(model, (example_x, example_pool))
+            traced = torch.jit.trace(model, (example_x, example_pool), check_trace=False)
 
         traced.save(str(weights_path))
 
         # Also export split encoder + scorer for cross-attention in Rust
         if needs_adj and hasattr(model, 'encode'):
-            hidden_dim = config.get("hidden_dim", 64)
+            emb_cfg = config.get("embedding", {})
+            hidden_dim = emb_cfg.get("hidden_dim", config.get("hidden_dim", 64))
 
             # Export encoder (model.encode → embeddings)
             class _EncoderWrapper(nn.Module):
@@ -1300,14 +1219,15 @@ def run_training(
                 encoder_traced = torch.jit.trace(
                     encoder_wrapper,
                     (example_x, example_adj, example_pool, example_clause_features),
+                    check_trace=False,
                 )
             encoder_path = weights_dir / f"{model_name}_encoder.pt"
             encoder_traced.save(str(encoder_path))
             log_msg(f"Encoder saved: {encoder_path}")
 
             # Export scorer (model.scorer → scores)
-            example_u_emb = torch.randn(num_clauses, hidden_dim)
-            example_p_emb = torch.randn(2, hidden_dim)
+            example_u_emb = torch.randn(num_clauses, hidden_dim, device=trace_device)
+            example_p_emb = torch.randn(2, hidden_dim, device=trace_device)
 
             class _ScorerWrapper(nn.Module):
                 def __init__(self, scorer):
@@ -1322,6 +1242,7 @@ def run_training(
                 scorer_traced = torch.jit.trace(
                     scorer_wrapper,
                     (example_u_emb, example_p_emb),
+                    check_trace=False,
                 )
             scorer_path = weights_dir / f"{model_name}_scorer.pt"
             scorer_traced.save(str(scorer_path))

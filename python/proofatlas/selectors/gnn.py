@@ -406,6 +406,7 @@ class ScorerHead(nn.Module):
         return self.linear2(x)
 
 
+@torch.jit.script
 def _batch_from_pool(pool_matrix: torch.Tensor) -> torch.Tensor:
     """Derive node→graph assignment from sparse pool matrix.
 

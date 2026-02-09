@@ -28,9 +28,16 @@ OUTPUT:
     .data/runs/proofatlas/<preset>/     - Per-problem results
 """
 
+import os
+
+# Limit torch/MKL threads before any imports that load libtorch.
+# Without this, parallel workers (n_jobs>1) cause massive thread contention
+# as each subprocess inherits multithreaded libtorch from the parent fork.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import argparse
 import json
-import os
 import signal
 import sys
 import time
@@ -700,6 +707,10 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGQUIT, signal.SIG_DFL)
 
+    # Limit torch threads to prevent contention when running multiple workers
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+
     # Set CUDA device for this worker (only when using CUDA backend)
     if use_cuda and gpu_id is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -993,12 +1004,17 @@ _worker_gpu_id = None
 
 
 def _run_single_problem_with_worker_gpu(args):
-    """Wrapper that uses worker's assigned GPU."""
+    """Wrapper that uses worker's assigned GPU.
+
+    Calls _run_proofatlas_inner directly (no subprocess) since the pool worker
+    itself provides crash isolation. This avoids ~15s overhead per problem from
+    spawning a subprocess that reimports libtorch + reloads the model.
+    """
     global _worker_gpu_id
-    return _run_single_problem(args, gpu_id=_worker_gpu_id)
+    return _run_single_problem(args, gpu_id=_worker_gpu_id, direct=True)
 
 
-def _run_single_problem(args, gpu_id=None):
+def _run_single_problem(args, gpu_id=None, direct=False):
     """Worker function for execution."""
     problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda = args
 
@@ -1008,7 +1024,14 @@ def _run_single_problem(args, gpu_id=None):
         if existing and not rerun:
             return ("skip", existing)
 
-        if prover == "proofatlas":
+        if prover == "proofatlas" and direct:
+            # Call inner function directly (no subprocess) when running in pool
+            result = _run_proofatlas_inner(
+                problem, base_dir, preset, tptp_root,
+                weights_path=weights_path, collect_trace=collect_trace,
+                trace_preset=trace_preset, use_cuda=use_cuda,
+            )
+        elif prover == "proofatlas":
             result = run_proofatlas(
                 problem, base_dir, preset, tptp_root,
                 weights_path=weights_path, collect_trace=collect_trace,

@@ -301,7 +301,8 @@
         async function loadRuns() {
             try {
                 // Load index of available runs
-                const indexResponse = await fetch('data/training/index.json');
+                const cacheBust = `?t=${Date.now()}`;
+                const indexResponse = await fetch('data/training/index.json' + cacheBust);
                 if (!indexResponse.ok) {
                     showNoData();
                     return;
@@ -318,7 +319,7 @@
                 // Load each run file
                 for (const runName of runNames) {
                     try {
-                        const response = await fetch(`data/training/${runName}.json`);
+                        const response = await fetch(`data/training/${runName}.json` + cacheBust);
                         if (response.ok) {
                             const run = await response.json();
                             allRuns[runName] = run;

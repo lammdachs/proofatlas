@@ -183,6 +183,52 @@ class SentenceEncoder(nn.Module):
         # Score
         return self.scorer(clause_emb)
 
+    def encode_tokens(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        micro_batch_size: int = 64,
+    ) -> torch.Tensor:
+        """
+        Encode pre-tokenized inputs to clause embeddings.
+
+        Processes inputs in micro-batches to avoid GPU OOM on large clause sets.
+
+        Args:
+            input_ids: [batch_size, seq_len] token IDs
+            attention_mask: [batch_size, seq_len] attention mask (1=real, 0=padding)
+            micro_batch_size: Max clauses per forward pass through BERT encoder
+
+        Returns:
+            Clause embeddings [batch_size, hidden_dim]
+        """
+        n = input_ids.size(0)
+        if n <= micro_batch_size:
+            return self._encode_tokens_chunk(input_ids, attention_mask)
+
+        # Process in micro-batches to fit in GPU memory
+        chunks = []
+        for i in range(0, n, micro_batch_size):
+            chunk_ids = input_ids[i:i + micro_batch_size]
+            chunk_mask = attention_mask[i:i + micro_batch_size]
+            chunks.append(self._encode_tokens_chunk(chunk_ids, chunk_mask))
+        return torch.cat(chunks, dim=0)
+
+    def _encode_tokens_chunk(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Encode a single chunk of tokens through the BERT encoder."""
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Mean pooling over tokens (excluding padding)
+        token_embeddings = outputs.last_hidden_state
+        mask_expanded = attention_mask.unsqueeze(-1).float()
+        embeddings = (token_embeddings * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
+
+        return self.projection(embeddings)
+
     def forward_tokens(
         self,
         input_ids: torch.Tensor,
@@ -198,18 +244,7 @@ class SentenceEncoder(nn.Module):
         Returns:
             Scores [batch_size]
         """
-        # Encode with transformer
-        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-
-        # Mean pooling over tokens (excluding padding)
-        token_embeddings = outputs.last_hidden_state
-        mask_expanded = attention_mask.unsqueeze(-1).float()
-        embeddings = (token_embeddings * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
-
-        # Project to hidden_dim
-        clause_emb = self.projection(embeddings)
-
-        # Score
+        clause_emb = self.encode_tokens(input_ids, attention_mask)
         return self.scorer(clause_emb)
 
     def export_torchscript(self, path: str, save_tokenizer: bool = True):

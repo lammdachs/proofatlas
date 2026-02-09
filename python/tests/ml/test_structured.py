@@ -320,7 +320,7 @@ class TestProofDataset:
         """Test loading JSON trace files."""
         from proofatlas.ml.training import ProofDataset
 
-        # Create sample traces
+        # Create sample traces (must include selection_states)
         trace1 = {
             "proof_found": True,
             "time_seconds": 1.0,
@@ -338,6 +338,9 @@ class TestProofDataset:
                     "role": "derived",
                 },
             ],
+            "selection_states": [
+                {"selected": 0, "unprocessed": [0, 1], "processed": []},
+            ],
         }
 
         trace2 = {
@@ -351,6 +354,9 @@ class TestProofDataset:
                     "role": "axiom",
                 },
             ],
+            "selection_states": [
+                {"selected": 0, "unprocessed": [0], "processed": []},
+            ],
         }
 
         # Write traces
@@ -359,19 +365,12 @@ class TestProofDataset:
         with open(tmp_path / "trace2.json", "w") as f:
             json.dump(trace2, f)
 
-        # Test graph output (returns pre-converted graphs)
+        # Test graph output (returns pre-converted graphs with selection_states)
         dataset = ProofDataset(tmp_path, output_type="graph")
         assert len(dataset) == 2
 
         item = dataset[0]
         assert "graphs" in item
         assert "labels" in item
+        assert "selection_states" in item
         assert len(item["graphs"]) == 2
-
-        # Test string output
-        dataset_str = ProofDataset(tmp_path, output_type="string")
-        item_str = dataset_str[0]
-        assert "strings" in item_str
-        assert len(item_str["strings"]) == 2
-        # 0-arity predicates are rendered without parentheses
-        assert item_str["strings"][0] == "p"

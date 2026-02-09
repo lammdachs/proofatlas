@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from proofatlas.ml.structured import clause_to_graph, batch_graphs
-from proofatlas.ml.training import collate_state_batch
+from proofatlas.ml.training import collate_proof_batch
 
 
 def _make_clause(predicate="p", args_type="Variable", args_name="X", label=0, age=0, role="derived"):
@@ -60,11 +60,11 @@ def _make_batch_item(num_clauses=5, num_positive=2, num_states=2):
 
 
 class TestCollateStateBatch:
-    """Tests for collate_state_batch."""
+    """Tests for collate_proof_batch."""
 
     def test_basic_collation(self):
         batch = [_make_batch_item(num_clauses=6, num_positive=2)]
-        result = collate_state_batch(batch)
+        result = collate_proof_batch(batch)
 
         assert result is not None
         assert "u_node_features" in result
@@ -72,12 +72,11 @@ class TestCollateStateBatch:
         assert "u_pool_matrix" in result
         assert "labels" in result
         assert "proof_ids" in result
-        assert result["is_state_batch"] is True
 
     def test_p_graphs_included(self):
         """When processed indices exist, p_node_features should be present."""
         batch = [_make_batch_item(num_clauses=6)]
-        result = collate_state_batch(batch)
+        result = collate_proof_batch(batch)
 
         assert result is not None
         assert "p_node_features" in result
@@ -93,7 +92,7 @@ class TestCollateStateBatch:
             "unprocessed": [0, 1, 2, 3],
             "processed": [],
         }]
-        result = collate_state_batch([item])
+        result = collate_proof_batch([item])
 
         assert result is not None
         assert "p_node_features" not in result
@@ -104,7 +103,7 @@ class TestCollateStateBatch:
             _make_batch_item(num_clauses=4),
             _make_batch_item(num_clauses=4),
         ]
-        result = collate_state_batch(batch)
+        result = collate_proof_batch(batch)
 
         assert result is not None
         proof_ids = result["proof_ids"]
@@ -121,5 +120,5 @@ class TestCollateStateBatch:
             "unprocessed": [],
             "processed": [0, 1, 2, 3],
         }]
-        result = collate_state_batch([item])
+        result = collate_proof_batch([item])
         assert result is None

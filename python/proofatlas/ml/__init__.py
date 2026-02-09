@@ -26,7 +26,7 @@ from .training import (
     # Datasets
     ProofDataset,
     collate_proof_batch,
-    collate_sentence_batch,
+    collate_tokenized_batch,
     # Training
     run_training,
     load_trace_files,
@@ -91,7 +91,7 @@ __all__ = [
     # Datasets
     "ProofDataset",
     "collate_proof_batch",
-    "collate_sentence_batch",
+    "collate_tokenized_batch",
     # Training
     "run_training",
     "load_trace_files",
