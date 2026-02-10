@@ -14,7 +14,6 @@ pub struct ProverOptions {
     pub timeout_ms: Option<u32>,
     pub literal_selection: Option<String>, // "0", "20", "21", or "22" (Vampire-compatible numbering)
     pub selector_type: Option<String>,     // "age_weight", "gcn", or "mlp" (default: "age_weight")
-    pub selector_weights: Option<Vec<u8>>, // Safetensors weights for ML selectors (optional)
     pub age_weight_ratio: Option<f64>,     // Age probability for age_weight selector (default: 0.5)
     pub max_iterations: Option<usize>,     // Max saturation iterations (default: 10000)
 }

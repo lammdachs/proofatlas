@@ -1,8 +1,7 @@
 //! Extract training data from completed proofs
 
 use crate::state::Proof;
-use crate::state::{clause_indices, StateChange, EventLog};
-use crate::trace::extract_proof_from_events;
+use crate::state::clause_indices;
 use std::collections::HashSet;
 
 /// Training example: a clause with its label
@@ -79,125 +78,6 @@ pub fn compute_proof_statistics(proof: &Proof) -> ProofStatistics {
         proof_clauses: proof_clause_count,
         proof_percentage: (proof_clause_count as f64 / total_clauses as f64) * 100.0,
     }
-}
-
-// =============================================================================
-// Training Data Extraction via Event Log Replay
-// =============================================================================
-
-/// A training example capturing clause selection context
-#[derive(Debug, Clone)]
-pub struct SelectionTrainingExample {
-    /// The clause that was selected
-    pub selected_idx: usize,
-    /// All candidate clauses that were available at selection time
-    pub candidates: Vec<usize>,
-    /// Whether the selected clause is in the proof (computed after proof completion)
-    pub selected_in_proof: bool,
-    /// For each candidate, whether it's in the proof
-    pub candidate_labels: Vec<bool>,
-}
-
-/// Extract training examples from event log by replaying and tracking selections
-pub fn extract_training_from_events(events: &EventLog) -> Vec<SelectionTrainingExample> {
-    let mut examples = Vec::new();
-    let mut u: HashSet<usize> = HashSet::new();
-    let mut n: HashSet<usize> = HashSet::new();
-
-    // First pass: replay to collect selection contexts
-    struct SelectionContext {
-        selected_idx: usize,
-        candidates: Vec<usize>,
-    }
-    let mut contexts = Vec::new();
-
-    for event in events {
-        match event {
-            StateChange::Add(clause, _, _) => {
-                if let Some(idx) = clause.id {
-                    n.insert(idx);
-                }
-            }
-            StateChange::Delete(clause_idx, _, _) => {
-                // Remove from whichever set contains it
-                if !n.remove(clause_idx) {
-                    u.remove(clause_idx);
-                }
-                // Note: P removals are also handled implicitly
-            }
-            StateChange::Transfer(clause_idx) => {
-                n.remove(clause_idx);
-                u.insert(*clause_idx);
-            }
-            StateChange::Activate(clause_idx) => {
-                // This is the given clause selection - N should be empty at this point
-                if n.is_empty() {
-                    let candidates: Vec<usize> = u.iter().copied().collect();
-                    contexts.push(SelectionContext {
-                        selected_idx: *clause_idx,
-                        candidates,
-                    });
-                }
-                // Implicit: removed from U, added to P
-                u.remove(clause_idx);
-            }
-        }
-    }
-
-    // Extract proof clauses
-    let proof_clause_set: HashSet<usize> = extract_proof_from_events(events)
-        .map(|v| v.into_iter().collect())
-        .unwrap_or_default();
-
-    // Build training examples
-    for ctx in contexts {
-        let selected_in_proof = proof_clause_set.contains(&ctx.selected_idx);
-        let candidate_labels: Vec<bool> = ctx
-            .candidates
-            .iter()
-            .map(|&c| proof_clause_set.contains(&c))
-            .collect();
-
-        examples.push(SelectionTrainingExample {
-            selected_idx: ctx.selected_idx,
-            candidates: ctx.candidates,
-            selected_in_proof,
-            candidate_labels,
-        });
-    }
-
-    examples
-}
-
-/// Extract clause-level training data with proof membership labels from event log
-pub fn extract_clause_labels_from_events(events: &EventLog) -> Vec<TrainingExample> {
-    // Get proof clause set
-    let proof_clause_set: HashSet<usize> = extract_proof_from_events(events)
-        .map(|v| v.into_iter().collect())
-        .unwrap_or_default();
-
-    // Get all clauses that were ever added
-    let mut all_clauses = HashSet::new();
-    for event in events {
-        if let StateChange::Add(clause, _, _) = event {
-            if let Some(idx) = clause.id {
-                all_clauses.insert(idx);
-            }
-        }
-    }
-
-    // Build examples
-    all_clauses
-        .into_iter()
-        .map(|clause_idx| TrainingExample {
-            clause_idx,
-            label: if proof_clause_set.contains(&clause_idx) {
-                1
-            } else {
-                0
-            },
-        })
-        .collect()
 }
 
 #[cfg(test)]

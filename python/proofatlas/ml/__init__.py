@@ -42,9 +42,6 @@ from .weights import (
     is_learned_selector,
     get_model_name,
     get_encoder_type,
-    get_embedding_type,  # alias for get_encoder_type
-    STRING_EMBEDDINGS,
-    GRAPH_EMBEDDINGS,
 )
 
 from .config import (
@@ -105,9 +102,6 @@ __all__ = [
     "is_learned_selector",
     "get_model_name",
     "get_encoder_type",
-    "get_embedding_type",
-    "STRING_EMBEDDINGS",
-    "GRAPH_EMBEDDINGS",
     # Config - Data
     "DataConfig",
     "ProblemFilters",

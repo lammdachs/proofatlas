@@ -201,38 +201,6 @@ class SchedulerConfig:
 
 
 @dataclass
-class DistributedConfig:
-    """Distributed training configuration."""
-    num_gpus: int = -1  # -1 = all available
-    strategy: str = "auto"  # auto, ddp, ddp_spawn
-    precision: str = "32-true"  # 32-true, 16-mixed, bf16-mixed
-
-
-@dataclass
-class LoggingConfig:
-    """Logging configuration."""
-    log_dir: str = ".logs"
-    log_every_n_steps: int = 10
-    enable_progress_bar: bool = True
-
-
-@dataclass
-class CheckpointingConfig:
-    """Checkpointing configuration."""
-    monitor: str = "val_loss"
-    mode: str = "min"
-    save_top_k: int = 3
-
-
-@dataclass
-class EvaluationConfig:
-    """Evaluation configuration."""
-    eval_every_n_epochs: int = 10
-    num_eval_problems: int = 0  # 0 = disable
-    eval_timeout: float = 10.0
-
-
-@dataclass
 class TrainingConfig:
     """Complete training configuration for ML selectors."""
     name: str = "default"
@@ -241,10 +209,6 @@ class TrainingConfig:
     training: TrainingParams = field(default_factory=TrainingParams)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
-    distributed: DistributedConfig = field(default_factory=DistributedConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
-    checkpointing: CheckpointingConfig = field(default_factory=CheckpointingConfig)
-    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -258,10 +222,6 @@ class TrainingConfig:
             training=TrainingParams(**d.get("training", {})),
             optimizer=OptimizerConfig(**d.get("optimizer", {})),
             scheduler=SchedulerConfig(**d.get("scheduler", {})),
-            distributed=DistributedConfig(**d.get("distributed", {})),
-            logging=LoggingConfig(**d.get("logging", {})),
-            checkpointing=CheckpointingConfig(**d.get("checkpointing", {})),
-            evaluation=EvaluationConfig(**d.get("evaluation", {})),
         )
 
     def save(self, path: Union[str, Path]):

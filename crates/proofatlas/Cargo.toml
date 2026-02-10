@@ -42,4 +42,3 @@ ml = ["tch", "tokenizers"]
 wasm = []
 
 [dev-dependencies]
-# criterion = "0.5"  # Commented out due to rustc version requirements

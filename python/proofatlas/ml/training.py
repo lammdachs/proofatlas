@@ -774,7 +774,7 @@ def run_training(
     import torch.optim as optim
     from torch.utils.data import DataLoader
 
-    from .weights import get_model_name, get_embedding_type
+    from .weights import get_model_name, get_encoder_type
 
     start_time = time.time()
 
@@ -850,7 +850,7 @@ def run_training(
         val_files = []
 
     # Determine output type based on embedding
-    embedding_type = get_embedding_type(preset)
+    embedding_type = get_encoder_type(preset)
     if embedding_type == "string":
         output_type = "tokenized"
     else:

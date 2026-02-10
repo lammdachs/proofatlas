@@ -404,31 +404,3 @@ mod tests {
         assert_eq!(tcj.distinct_symbols, 3);
     }
 }
-
-/// Complete proof attempt data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProofAttemptJson {
-    pub problem_file: String,
-    pub initial_clauses: Vec<ClauseJson>,
-    pub config: ConfigJson,
-    pub result: ProofResultJson,
-    pub statistics: StatisticsJson,
-}
-
-/// Configuration used for saturation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigJson {
-    pub max_clauses: usize,
-    pub max_iterations: usize,
-    pub timeout_seconds: f64,
-    pub literal_selection: String,
-}
-
-/// Statistics from the proof attempt
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatisticsJson {
-    pub clauses_generated: usize,
-    pub clauses_processed: usize,
-    pub clauses_subsumed: usize,
-    pub time_elapsed_seconds: f64,
-}

@@ -13,10 +13,6 @@ STRING_ENCODERS = {"sentence"}
 # Encoders that use graph input (node features, adjacency, pooling)
 GRAPH_ENCODERS = {"gcn", "gat", "graphsage"}
 
-# Keep old names as aliases for backwards compatibility in training code
-STRING_EMBEDDINGS = STRING_ENCODERS
-GRAPH_EMBEDDINGS = GRAPH_ENCODERS
-
 
 def get_model_name(preset: dict) -> str:
     """Get model file name from preset config.
@@ -46,9 +42,6 @@ def get_encoder_type(preset: dict) -> Optional[str]:
     else:
         raise ValueError(f"Unknown encoder: {encoder}")
 
-
-# Keep old name as alias
-get_embedding_type = get_encoder_type
 
 
 def is_learned_selector(preset: dict) -> bool:
