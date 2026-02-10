@@ -28,7 +28,7 @@ OUTPUT:
 import os
 
 # Limit torch/MKL threads before any imports that load libtorch.
-# Without this, parallel workers (n_jobs>1) cause massive thread contention
+# Without this, parallel workers (--cpu-workers>1) cause massive thread contention
 # as each subprocess inherits multithreaded libtorch from the parent fork.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -38,13 +38,18 @@ import json
 import signal
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 # Add package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
+
+from bench_jobs import (
+    clear_job_status, clear_pids, daemonize, get_job_file, get_job_status,
+    get_log_file, kill_job, log, print_job_status, save_job_status,
+)
+from bench_provers import BenchResult, run_single_problem
 
 # Lazy imports for ML functionality (avoid loading PyTorch for --list)
 _ml_module = None
@@ -57,12 +62,6 @@ def _get_ml():
         from proofatlas import ml as _ml
         _ml_module = _ml
     return _ml_module
-
-
-def log(msg: str):
-    """Print a log message with timestamp."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {msg}")
 
 
 def find_project_root() -> Path:
@@ -79,261 +78,6 @@ def find_project_root() -> Path:
         path = path.parent
 
     raise FileNotFoundError("Could not find proofatlas project root.")
-
-
-# Job management
-JOB_FILE = ".data/bench_job.json"
-LOG_FILE = ".data/bench.log"
-PID_FILE = ".data/bench_pids.txt"
-
-
-def get_job_file(base_dir: Path) -> Path:
-    return base_dir / JOB_FILE
-
-
-def get_log_file(base_dir: Path) -> Path:
-    return base_dir / LOG_FILE
-
-
-def get_pid_file(base_dir: Path) -> Path:
-    return base_dir / PID_FILE
-
-
-def register_pid(base_dir: Path, pid: int):
-    """Register a spawned process PID for cleanup (Unix only)."""
-    if sys.platform == "win32":
-        return
-    pid_file = get_pid_file(base_dir)
-    pid_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(pid_file, "a") as f:
-        f.write(f"{pid}\n")
-
-
-def clear_pids(base_dir: Path):
-    """Clear the PID tracking file."""
-    pid_file = get_pid_file(base_dir)
-    if pid_file.exists():
-        pid_file.unlink()
-
-
-def kill_tracked_pids(base_dir: Path) -> int:
-    """Kill all tracked PIDs and clear the file (Unix only)."""
-    if sys.platform == "win32":
-        return 0
-    pid_file = get_pid_file(base_dir)
-    if not pid_file.exists():
-        return 0
-
-    killed = 0
-    try:
-        pids = pid_file.read_text().splitlines()
-        for line in pids:
-            if not line:
-                continue
-            try:
-                os.kill(int(line), signal.SIGKILL)
-                killed += 1
-            except (ValueError, OSError, ProcessLookupError):
-                pass
-        pid_file.unlink(missing_ok=True)
-    except (IOError, OSError):
-        pass
-
-    return killed
-
-
-def is_process_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
-
-
-def get_job_status(base_dir: Path) -> Optional[dict]:
-    job_file = get_job_file(base_dir)
-    if not job_file.exists():
-        return None
-
-    try:
-        with open(job_file) as f:
-            job = json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-    if not is_process_running(job["pid"]):
-        return None
-
-    log_file = Path(job.get("log_file", ""))
-    if log_file.exists():
-        try:
-            with open(log_file) as f:
-                lines = f.readlines()
-            for line in reversed(lines):
-                if line.startswith("PROGRESS:"):
-                    parts = line.strip().split(":")
-                    if len(parts) >= 5:
-                        job["current"] = int(parts[1])
-                        job["total"] = int(parts[2])
-                        job["proofs"] = int(parts[3])
-                        job["timeout"] = int(parts[4])
-                    break
-                elif line.startswith("TRAIN:"):
-                    parts = line.strip().split(":")
-                    if len(parts) >= 4:
-                        job["train_epoch"] = int(parts[1])
-                        job["train_total"] = int(parts[2])
-                        job["train_loss"] = float(parts[3])
-                    break
-        except IOError:
-            pass
-
-    return job
-
-
-def save_job_status(base_dir: Path, pid: int, args: list, num_configs: int = 1):
-    job_file = get_job_file(base_dir)
-    job_file.parent.mkdir(parents=True, exist_ok=True)
-
-    job = {
-        "pid": pid,
-        "args": args,
-        "log_file": str(get_log_file(base_dir)),
-        "start_time": datetime.now().isoformat(),
-        "num_configs": num_configs,
-    }
-
-    with open(job_file, "w") as f:
-        json.dump(job, f, indent=2)
-
-
-def clear_job_status(base_dir: Path):
-    job_file = get_job_file(base_dir)
-    if job_file.exists():
-        job_file.unlink()
-
-
-def kill_job(base_dir: Path) -> bool:
-    import subprocess
-
-    job = get_job_status(base_dir)
-
-    # Step 1: Clear job status to stop spawning new processes
-    clear_job_status(base_dir)
-
-    # Step 2: Kill the main daemon process
-    if job:
-        try:
-            os.kill(job['pid'], signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            pass
-
-    # Step 3: Kill tracked PIDs and worker processes (Unix only)
-    if sys.platform != "win32":
-        # Kill any proofatlas-bench worker processes
-        subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--config"], capture_output=True)
-
-        # Kill tracked prover PIDs
-        max_iterations = 10
-        for _ in range(max_iterations):
-            killed = kill_tracked_pids(base_dir)
-            if killed == 0:
-                break
-            time.sleep(0.2)
-
-        # Kill any remaining prover processes from this project
-        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".vampire")], capture_output=True)
-        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".spass")], capture_output=True)
-
-    return job is not None
-
-
-def print_job_status(base_dir: Path):
-    job = get_job_status(base_dir)
-    if not job:
-        print("No job currently running.")
-        return
-
-    start = datetime.fromisoformat(job["start_time"])
-    elapsed = datetime.now() - start
-    hours = elapsed.seconds // 3600
-    minutes = (elapsed.seconds % 3600) // 60
-
-    print(f"Job running (PID: {job['pid']})")
-    print(f"  Started: {start.strftime('%Y-%m-%d %H:%M:%S')} ({hours}h {minutes}m ago)")
-
-    # Parse log file for progress
-    log_file = Path(job.get("log_file", ""))
-    if log_file.exists():
-        last_progress = None
-        last_train = None
-        last_config = None  # CONFIG:name:index:total
-        phase = None
-
-        with open(log_file) as f:
-            for line in f:
-                if line.startswith("PROGRESS:"):
-                    last_progress = line.strip()
-                    phase = "eval"
-                elif line.startswith("TRAIN:"):
-                    last_train = line.strip()
-                    phase = "train"
-                elif line.startswith("CONFIG:"):
-                    last_config = line.strip()
-                elif "Collecting traces" in line:
-                    phase = "collect"
-                elif "Training" in line and "problems" in line:
-                    phase = "train"
-
-        # Check if we're in trace collection
-        is_collecting = False
-        with open(log_file) as f:
-            content = f.read()
-            if "Collecting traces" in content:
-                eval_count = content.count("Evaluating")
-                is_collecting = eval_count == 1
-
-        # Show current config with progress
-        if last_config:
-            parts = last_config.split(":")
-            if len(parts) >= 4:
-                config_name, config_idx, config_total = parts[1], parts[2], parts[3]
-                # config_name is "prover/preset" format
-                if "/" in config_name:
-                    prover, preset = config_name.split("/", 1)
-                    print(f"  Prover:  {prover}")
-                    print(f"  Config:  {preset} ({config_idx}/{config_total})")
-                else:
-                    print(f"  Config:  {config_name} ({config_idx}/{config_total})")
-
-        if phase == "train" and last_train:
-            parts = last_train.split(":")
-            if len(parts) >= 4:
-                epoch, max_epochs, loss = parts[1], parts[2], parts[3]
-                print(f"  Training: epoch {epoch}/{max_epochs}, loss={float(loss):.4f}")
-        elif is_collecting and last_progress:
-            parts = last_progress.split(":")
-            if len(parts) >= 5:
-                current, total, proofs, timeout = parts[1:5]
-                print(f"  Collecting traces: {current}/{total}, +{proofs} proofs")
-        elif phase == "eval" and last_progress:
-            parts = last_progress.split(":")
-            if len(parts) >= 5:
-                current, total, proofs, timeout = parts[1:5]
-                print(f"  Evaluating: {current}/{total}, +{proofs} proofs, T{timeout} timeout")
-        else:
-            print("  Starting...")
-    else:
-        print("  Starting...")
-
-    print(f"\nTo stop: proofatlas-bench --kill")
-
-
-@dataclass
-class BenchResult:
-    problem: str
-    status: str  # "proof", "saturated", "resource_limit", "error"
-    time_s: float
 
 
 def load_config(config_path: Path) -> dict:
@@ -507,321 +251,7 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     return problems
 
 
-# Prover execution
-
-def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
-                          weights_path: str = None, collect_trace: bool = False,
-                          trace_preset: str = None, use_cuda: bool = False,
-                          socket_path: str = None) -> BenchResult:
-    """Inner function that actually runs ProofAtlas (called in subprocess)."""
-    from proofatlas import ProofState
-
-    timeout = preset.get("timeout", 10)
-
-    try:
-        with open(problem) as f:
-            content = f.read()
-    except Exception:
-        return BenchResult(problem=problem.name, status="error", time_s=0)
-
-    # Start timer before parsing (CNF conversion counts against timeout)
-    start = time.time()
-
-    state = ProofState()
-    try:
-        # Pass timeout and memory limit to parsing to prevent CNF conversion hangs/OOM
-        memory_limit = preset.get("memory_limit")  # None means no limit
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
-    except Exception as e:
-        elapsed = time.time() - start
-        # Timeout or memory limit during CNF conversion
-        if "timed out" in str(e).lower() or "memory limit" in str(e).lower():
-            return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
-        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
-    literal_selection = preset.get("literal_selection", 21)
-
-    max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
-    ml = _get_ml()
-    is_learned = ml.is_learned_selector(preset)
-    age_weight_ratio = preset.get("age_weight_ratio", 0.167)
-    encoder = preset.get("encoder") if is_learned else None
-    scorer = preset.get("scorer") if is_learned else None
-
-    # Initialize CUDA if using string encoder with CUDA backend (required for tch to detect CUDA)
-    if use_cuda and encoder == "sentence":
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.init()
-                _ = torch.tensor([1.0]).cuda()  # Force CUDA context creation
-        except Exception:
-            pass  # If torch not available or CUDA init fails, fall back to CPU
-
-    # Remaining time after parsing
-    elapsed_parsing = time.time() - start
-    remaining_timeout = max(0.1, timeout - elapsed_parsing)
-
-    try:
-        proof_found, status, _, _ = state.run_saturation(
-            timeout=float(remaining_timeout),
-            max_iterations=max_iterations if max_iterations > 0 else None,
-            literal_selection=literal_selection,
-            age_weight_ratio=float(age_weight_ratio) if not is_learned else None,
-            encoder=encoder,
-            scorer=scorer,
-            weights_path=weights_path,
-            memory_limit=memory_limit,
-            use_cuda=use_cuda,
-            socket_path=socket_path,
-        )
-    except Exception as e:
-        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
-
-    elapsed = time.time() - start
-
-    # resource_limit stays as-is (already the canonical status for all limits)
-
-    # Collect trace for training
-    if collect_trace and proof_found and trace_preset:
-        try:
-            trace_json = state.extract_structured_trace(elapsed)
-            _get_ml().save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
-        except Exception:
-            pass
-
-    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
-
-
-def get_num_gpus() -> int:
-    """Get the number of available CUDA GPUs.
-
-    Uses nvidia-smi instead of torch to avoid initializing CUDA in the parent
-    process, which would interfere with tch-rs in forked subprocesses.
-    """
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "-L"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            # Count lines that start with "GPU"
-            return sum(1 for line in result.stdout.splitlines() if line.startswith("GPU"))
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return 0
-
-
-def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_path,
-                    collect_trace, trace_preset, result_queue, gpu_id=None, use_cuda=False,
-                    socket_path=None):
-    """Worker function that runs in subprocess and sends result via queue."""
-    # Reset signal handlers inherited from parent daemon process.
-    # Without this, if the worker is killed (e.g., timeout), it would run
-    # the parent's signal handler which deletes the job file!
-    import signal
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGQUIT, signal.SIG_DFL)
-
-    # Set CUDA device for this worker (only when using CUDA backend)
-    if use_cuda and gpu_id is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-
-    try:
-        result = _run_proofatlas_inner(
-            Path(problem_str), Path(base_dir_str), preset, Path(tptp_root_str),
-            weights_path, collect_trace, trace_preset, use_cuda,
-            socket_path=socket_path,
-        )
-        result_queue.put((result.status, result.time_s))
-    except Exception as e:
-        result_queue.put(("error", 0))
-
-
-def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
-                   weights_path: str = None, collect_trace: bool = False,
-                   trace_preset: str = None, gpu_id: int = None,
-                   use_cuda: bool = False, socket_path: str = None) -> BenchResult:
-    """Run ProofAtlas on a problem in a subprocess.
-
-    Uses multiprocessing to isolate crashes (e.g., stack overflow on deeply
-    nested terms) so they don't take down the entire benchmark process.
-    """
-    import multiprocessing
-
-    timeout = preset.get("timeout", 10)
-    process_timeout = timeout + 10  # Extra time for overhead
-
-    result_queue = multiprocessing.Queue()
-    proc = multiprocessing.Process(
-        target=_worker_process,
-        args=(str(problem), str(base_dir), preset, str(tptp_root),
-              weights_path, collect_trace, trace_preset, result_queue, gpu_id, use_cuda),
-        kwargs={"socket_path": socket_path},
-    )
-
-    start = time.time()
-    proc.start()
-    proc.join(timeout=process_timeout)
-    elapsed = time.time() - start
-
-    if proc.is_alive():
-        # Process hung - kill it
-        proc.terminate()
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
-        return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
-
-    # Check result queue first — the child may exit with non-zero code due to
-    # cleanup issues (e.g., libtorch thread destruction when forked from a thread)
-    # but still have produced a valid result.
-    try:
-        status, elapsed_inner = result_queue.get_nowait()
-        return BenchResult(problem=problem.name, status=status, time_s=elapsed_inner)
-    except Exception:
-        pass
-
-    if proc.exitcode != 0:
-        # Process crashed before producing a result (e.g., stack overflow gives exit code 134)
-        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
-    return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
-
-def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
-    """Run Vampire on a problem."""
-    import subprocess
-
-    timeout = preset.get("time_limit", 10)
-    selection = preset.get("selection", 21)
-    avatar = preset.get("avatar", "off")
-    memory_limit = preset.get("memory_limit")
-    activation_limit = preset.get("activation_limit")
-
-    cmd = [
-        str(binary),
-        "--include", str(tptp_root),
-        "--time_limit", str(timeout),
-        "--selection", str(selection),
-        "--avatar", avatar,
-    ]
-
-    if memory_limit is not None:
-        cmd.extend(["--memory_limit", str(memory_limit)])
-
-    if activation_limit is not None:
-        cmd.extend(["--activation_limit", str(activation_limit)])
-
-    cmd.append(str(problem))
-
-    start = time.time()
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        register_pid(base_dir, proc.pid)
-        try:
-            # timeout=0 means no time limit, use None for communicate
-            proc_timeout = None if timeout == 0 else timeout + 5
-            stdout, stderr = proc.communicate(timeout=proc_timeout)
-            output = stdout + stderr
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
-    except Exception:
-        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
-
-    elapsed = time.time() - start
-
-    # Parse Vampire output
-    if "Refutation found" in output or "Termination reason: Refutation" in output:
-        status = "proof"
-    elif "Termination reason: Satisfiable" in output:
-        status = "saturated"
-    elif "Termination reason: Time limit" in output or elapsed >= timeout:
-        status = "timeout"
-    elif "Termination reason: Memory limit" in output:
-        status = "timeout"  # Memory limit treated as resource limit
-    elif "Termination reason: Activation limit" in output:
-        status = "timeout"  # Activation limit treated as resource limit
-    else:
-        status = "error"
-
-    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
-
-
-def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
-    """Run SPASS on a problem."""
-    import subprocess
-
-    timeout = preset.get("TimeLimit", 10)
-    selection = preset.get("Select", 1)
-    memory = preset.get("Memory")
-    loops = preset.get("Loops")
-
-    # SPASS requires TPTP format with -TPTP flag
-    cmd = [
-        str(binary),
-        "-TPTP",
-        f"-TimeLimit={timeout}",
-        f"-Select={selection}",
-    ]
-
-    if memory is not None:
-        cmd.append(f"-Memory={memory}")
-
-    if loops is not None:
-        cmd.append(f"-Loops={loops}")
-
-    cmd.append(str(problem))
-
-    start = time.time()
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env={**os.environ, "TPTP": str(tptp_root)},
-        )
-        register_pid(base_dir, proc.pid)
-        try:
-            # timeout=0 means no time limit, use None for communicate
-            proc_timeout = None if timeout == 0 else timeout + 5
-            stdout, stderr = proc.communicate(timeout=proc_timeout)
-            output = stdout + stderr
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return BenchResult(problem=problem.name, status="timeout", time_s=timeout)
-    except Exception:
-        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
-
-    elapsed = time.time() - start
-
-    # Parse SPASS output
-    # SPASS says "SPASS beiseite: Proof found." for proofs
-    if "Proof found" in output:
-        status = "proof"
-    elif "Completion found" in output:
-        status = "saturated"
-    elif "Maximal number of loops exceeded" in output:
-        status = "timeout"  # Loop limit treated as resource limit
-    elif elapsed >= timeout or "SPASS broke down" in output:
-        status = "timeout"
-    else:
-        status = "error"
-
-    return BenchResult(problem=problem.name, status=status, time_s=elapsed)
-
+# Result persistence
 
 def get_run_result_path(base_dir: Path, prover: str, preset_name: str, problem: Path) -> Path:
     """Get path to result file for a problem."""
@@ -867,6 +297,8 @@ def save_run_result(base_dir: Path, prover: str, preset_name: str, result: Bench
         f.flush()
         os.fsync(f.fileno())
 
+
+# Web export
 
 def export_benchmark_progress(base_dir: Path, prover: str, preset_name: str,
                                stats: dict, completed: int, total: int):
@@ -920,43 +352,17 @@ def _update_benchmark_index(output_dir: Path):
         json.dump(index, f, indent=2)
 
 
-def _run_single_problem(args, gpu_id=None, socket_path=None):
-    """Worker function for execution."""
-    problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda = args
+# Scoring server management
 
-    try:
-        # Check if already evaluated (skip unless --rerun)
-        existing = load_run_result(base_dir, prover, preset_name, problem)
-        if existing and not rerun:
-            return ("skip", existing)
-
-        if prover == "proofatlas":
-            result = run_proofatlas(
-                problem, base_dir, preset, tptp_root,
-                weights_path=weights_path, collect_trace=collect_trace,
-                trace_preset=trace_preset, gpu_id=gpu_id,
-                use_cuda=use_cuda, socket_path=socket_path,
-            )
-        elif prover == "vampire":
-            result = run_vampire(problem, base_dir, preset, binary, tptp_root)
-        elif prover == "spass":
-            result = run_spass(problem, base_dir, preset, binary, tptp_root)
-        else:
-            result = BenchResult(problem=problem.name, status="error", time_s=0)
-
-        # Save individual result to .data/runs/
-        save_run_result(base_dir, prover, preset_name, result)
-        return ("run", result)
-    except Exception as e:
-        return ("error", BenchResult(problem=problem.name, status="error", time_s=0))
-
-
-def _start_scoring_server_subprocess(encoder, scorer, weights_path, socket_path, use_cuda):
+def _start_scoring_server_subprocess(encoder, scorer, weights_path, socket_path, use_cuda, gpu_id=None):
     """Start a scoring server in a subprocess (blocks in that subprocess).
 
-    Returns the subprocess.Popen object so it can be terminated later.
+    Returns (Popen, stderr_path). stderr is written to a temp file so the pipe
+    buffer can't fill up and block the server (which would freeze socket handlers
+    and cause 'connection reset' errors from workers).
     """
     import subprocess as sp
+    import tempfile
 
     script = f'''
 import sys
@@ -972,17 +378,22 @@ start_scoring_server(
 )
 '''
     env = {**os.environ}
-    if not use_cuda:
+    if use_cuda and gpu_id is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    elif not use_cuda:
         env["CUDA_VISIBLE_DEVICES"] = ""
+
+    stderr_file = tempfile.NamedTemporaryFile(prefix="proofatlas-server-", suffix=".log", delete=False)
 
     proc = sp.Popen(
         [sys.executable, '-c', script],
-        stdout=sp.PIPE,
-        stderr=sp.PIPE,
+        stdout=sp.DEVNULL,
+        stderr=stderr_file,
         cwd=str(Path(__file__).parent.parent),
         env=env,
     )
-    return proc
+    stderr_file.close()  # Process inherited the fd, we can close our handle
+    return proc, stderr_file.name
 
 
 def _wait_for_socket(socket_path, timeout=10):
@@ -995,45 +406,106 @@ def _wait_for_socket(socket_path, timeout=10):
     return False
 
 
+# Evaluation
+
+STATUS_SYMBOLS = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}
+
+
+def _log_result(result, stats, index, total, log_file, base_dir, prover, preset_name, cached=False):
+    """Update stats, print progress, log for --status parsing, export to web."""
+    stats[result.status] = stats.get(result.status, 0) + 1
+    symbol = STATUS_SYMBOLS[result.status]
+    if cached:
+        stats["skip"] += 1
+        print(f"[{index}/{total}] S{symbol} {result.problem} (cached)")
+    else:
+        print(f"[{index}/{total}] {symbol} {result.problem} ({result.time_s:.2f}s)")
+    log_file.write(f"PROGRESS:{index}:{total}:{stats['proof']}:{stats['resource_limit']}\n")
+    log_file.flush()
+    sys.stdout.flush()
+    export_benchmark_progress(base_dir, prover, preset_name, stats, index, total)
+
+
 def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    prover: str, preset: dict, log_file,
                    preset_name: str = None, weights_path: str = None,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False, n_jobs: int = 1,
-                   use_cuda: bool = False):
+                   use_cuda: bool = False, gpu_workers: int = 0):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
 
-    # Start scoring server for ML selectors
+    # Start scoring server(s) for ML selectors
     server_procs = []
-    socket_path = None
+    socket_paths = []
+    stderr_logs = []
     ml = _get_ml()
 
     if prover == "proofatlas" and ml.is_learned_selector(preset) and weights_path:
         model_label = f"{preset['encoder']}_{preset['scorer']}"
-        print(f"\nStarting scoring server for {model_label}...")
 
-        socket_path = f"/tmp/proofatlas-scoring-{os.getpid()}.sock"
-        server_proc = _start_scoring_server_subprocess(
-            encoder=preset["encoder"],
-            scorer=preset["scorer"],
-            weights_path=weights_path,
-            socket_path=socket_path,
-            use_cuda=use_cuda,
-        )
-        server_procs.append(server_proc)
+        if gpu_workers > 0:
+            # Multi-GPU: one server per GPU
+            print(f"\nStarting {gpu_workers} scoring server(s) for {model_label}...")
+            for i in range(gpu_workers):
+                sp = f"/tmp/proofatlas-scoring-{os.getpid()}-{i}.sock"
+                proc, stderr_path = _start_scoring_server_subprocess(
+                    encoder=preset["encoder"],
+                    scorer=preset["scorer"],
+                    weights_path=weights_path,
+                    socket_path=sp,
+                    use_cuda=True,
+                    gpu_id=i,
+                )
+                server_procs.append(proc)
+                socket_paths.append(sp)
+                stderr_logs.append(stderr_path)
+        else:
+            # CPU: single server
+            print(f"\nStarting scoring server for {model_label}...")
+            sp = f"/tmp/proofatlas-scoring-{os.getpid()}.sock"
+            proc, stderr_path = _start_scoring_server_subprocess(
+                encoder=preset["encoder"],
+                scorer=preset["scorer"],
+                weights_path=weights_path,
+                socket_path=sp,
+                use_cuda=False,
+            )
+            server_procs.append(proc)
+            socket_paths.append(sp)
+            stderr_logs.append(stderr_path)
 
-        if not _wait_for_socket(socket_path):
-            # Collect server stderr for diagnostics
-            server_proc.terminate()
-            _, stderr = server_proc.communicate(timeout=5)
-            print("ERROR: Scoring server failed to start")
-            if stderr:
-                for line in stderr.decode(errors="replace").splitlines()[-10:]:
-                    print(f"  Server: {line}")
-            return stats
+        # Wait for all sockets
+        for sp in socket_paths:
+            if not _wait_for_socket(sp):
+                idx = socket_paths.index(sp)
+                server_procs[idx].terminate()
+                server_procs[idx].wait(timeout=5)
+                print(f"ERROR: Scoring server failed to start at {sp}")
+                # Read stderr from log file
+                try:
+                    stderr_content = Path(stderr_logs[idx]).read_text(errors="replace")
+                    for line in stderr_content.splitlines()[-10:]:
+                        print(f"  Server: {line}")
+                except Exception:
+                    pass
+                # Terminate any servers that did start
+                for proc in server_procs:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except Exception:
+                        proc.kill()
+                for s in socket_paths:
+                    Path(s).unlink(missing_ok=True)
+                for log_path in stderr_logs:
+                    Path(log_path).unlink(missing_ok=True)
+                return stats
 
-        print(f"Scoring server ready at {socket_path}")
+        if len(socket_paths) == 1:
+            print(f"Scoring server ready at {socket_paths[0]}")
+        else:
+            print(f"All {len(socket_paths)} scoring servers ready")
 
     try:
         if prover == "proofatlas":
@@ -1047,11 +519,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         # Always collect traces for proofatlas
         collect_trace = (prover == "proofatlas")
 
-        # Detect GPUs for worker distribution (only when using CUDA backend)
-        num_gpus = get_num_gpus() if use_cuda and prover == "proofatlas" else 0
-        if num_gpus > 0:
-            print(f"Distributing workers across {num_gpus} GPU(s)")
-
         # Prepare work items
         work_items = [
             (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
@@ -1062,33 +529,15 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
             # Parallel execution — each thread spawns a subprocess via run_proofatlas()
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            # Assign GPUs round-robin per problem
-            gpu_ids = [i % num_gpus if num_gpus > 0 else None for i in range(len(work_items))]
-
             with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                futures = {executor.submit(_run_single_problem, item, gpu_id=gpu_ids[i], socket_path=socket_path): i for i, item in enumerate(work_items)}
+                futures = {executor.submit(run_single_problem, item, socket_path=socket_paths[i % len(socket_paths)] if socket_paths else None): i for i, item in enumerate(work_items)}
                 completed = 0
 
                 for future in as_completed(futures):
                     completed += 1
                     try:
                         status, result = future.result()
-                        if result.status == "timeout":
-                            result.status = "resource_limit"
-                        if status == "skip":
-                            stats[result.status] = stats.get(result.status, 0) + 1
-                            stats["skip"] += 1
-                            symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
-                            print(f"[{completed}/{len(problems)}] S{symbol} {result.problem} (cached)")
-                        else:
-                            stats[result.status] = stats.get(result.status, 0) + 1
-                            symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
-                            print(f"[{completed}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
-
-                        log_file.write(f"PROGRESS:{completed}:{len(problems)}:{stats['proof']}:{stats['resource_limit']}\n")
-                        log_file.flush()
-                        sys.stdout.flush()
-                        export_benchmark_progress(base_dir, prover, preset_name, stats, completed, len(problems))
+                        _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
                     except Exception as e:
                         print(f"ERROR: {e}")
                         stats["error"] += 1
@@ -1101,23 +550,9 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                     gc.collect()
 
                 try:
-                    status, result = _run_single_problem(item, socket_path=socket_path)
-                    if result.status == "timeout":
-                        result.status = "resource_limit"
-                    if status == "skip":
-                        stats[result.status] = stats.get(result.status, 0) + 1
-                        stats["skip"] += 1
-                        symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
-                        print(f"[{i}/{len(problems)}] S{symbol} {result.problem} (cached)")
-                    else:
-                        stats[result.status] = stats.get(result.status, 0) + 1
-                        symbol = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}[result.status]
-                        print(f"[{i}/{len(problems)}] {symbol} {result.problem} ({result.time_s:.2f}s)")
-
-                    log_file.write(f"PROGRESS:{i}:{len(problems)}:{stats['proof']}:{stats['resource_limit']}\n")
-                    log_file.flush()
-                    sys.stdout.flush()
-                    export_benchmark_progress(base_dir, prover, preset_name, stats, i, len(problems))
+                    sp = socket_paths[(i - 1) % len(socket_paths)] if socket_paths else None
+                    status, result = run_single_problem(item, socket_path=sp)
+                    _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
                 except Exception as e:
                     print(f"ERROR processing {item[0].name}: {e}")
                     sys.stdout.flush()
@@ -1138,9 +573,14 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         # Terminate scoring server subprocesses
         for proc in server_procs:
             proc.terminate()
-            proc.wait(timeout=5)
-        if socket_path:
-            Path(socket_path).unlink(missing_ok=True)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+        for sp in socket_paths:
+            Path(sp).unlink(missing_ok=True)
+        for log_path in stderr_logs:
+            Path(log_path).unlink(missing_ok=True)
 
     return stats
 
@@ -1153,10 +593,10 @@ def main():
                        help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--rerun", action="store_true",
                        help="Re-evaluate problems even if cached results exist")
-    parser.add_argument("--n-jobs", type=int, default=1,
-                       help="Number of parallel jobs (default: 1)")
-    parser.add_argument("--backend-eval", choices=["cpu", "cuda"], default="cpu",
-                       help="Backend for ML inference during evaluation (default: cpu)")
+    parser.add_argument("--cpu-workers", type=int, default=1,
+                       help="Number of parallel CPU workers (default: 1)")
+    parser.add_argument("--gpu-workers", type=int, default=0,
+                       help="Number of GPUs for ML inference (0=CPU, N>0=distribute across N GPUs)")
 
     # Job management
     parser.add_argument("--status", action="store_true",
@@ -1261,25 +701,54 @@ def main():
     # Get problems
     problems = get_problems(base_dir, tptp_config, problem_set)
 
-    # Parse backend options
-    use_cuda_eval = (args.backend_eval == "cuda")
+    # Validate worker configuration
+    gpu_workers = args.gpu_workers
+    cpu_workers = args.cpu_workers
+
+    if gpu_workers < 0:
+        print("Error: --gpu-workers cannot be negative")
+        sys.exit(1)
+
+    # Check if any runs use ML selectors
+    ml = _get_ml()
+    has_ml_runs = any(
+        r["prover"] == "proofatlas" and ml.is_learned_selector(r["preset"])
+        for r in runs
+    )
+
+    if gpu_workers > 0:
+        if not has_ml_runs:
+            print("Warning: --gpu-workers has no effect without ML selector configs, ignoring")
+            gpu_workers = 0
+        else:
+            try:
+                import torch
+                available_gpus = torch.cuda.device_count()
+            except ImportError:
+                print("Error: --gpu-workers requires PyTorch with CUDA support")
+                sys.exit(1)
+
+            if available_gpus == 0:
+                print("Error: --gpu-workers > 0 but no CUDA GPUs detected")
+                print("Use --gpu-workers 0 for CPU inference")
+                sys.exit(1)
+
+            if gpu_workers > available_gpus:
+                print(f"Error: --gpu-workers {gpu_workers} exceeds available GPUs ({available_gpus})")
+                sys.exit(1)
+
+    if gpu_workers > 0 and gpu_workers > cpu_workers:
+        print(f"Note: Clamping --gpu-workers from {gpu_workers} to {cpu_workers} (no more servers than workers)")
+        gpu_workers = cpu_workers
+
+    use_cuda_eval = gpu_workers > 0
 
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Double fork to fully daemonize (survives terminal close, SSH disconnect)
-    # Use a pipe to communicate grandchild PID back to parent
-    read_fd, write_fd = os.pipe()
-
-    pid = os.fork()
-    if pid > 0:
-        # First parent: wait for intermediate child and read grandchild PID
-        os.close(write_fd)
-        os.waitpid(pid, 0)
-        grandchild_pid = int(os.read(read_fd, 32).decode().strip())
-        os.close(read_fd)
-
-        # Job status is saved by grandchild - just wait briefly for it
+    # Daemonize
+    is_daemon, grandchild_pid = daemonize(log_file_path)
+    if not is_daemon:
         time.sleep(0.1)
         prover_names = sorted(set(r["prover"] for r in runs))
         print(f"Started job (PID: {grandchild_pid})")
@@ -1287,44 +756,21 @@ def main():
         print("Use --status to check, --kill to stop")
         return
 
-    # First child: become session leader and fork again
-    os.close(read_fd)
-    os.setsid()
-    import signal
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-    pid2 = os.fork()
-    if pid2 > 0:
-        # Intermediate child: send grandchild PID to parent and exit
-        os.write(write_fd, f"{pid2}\n".encode())
-        os.close(write_fd)
-        os._exit(0)
-
-    # Second child (grandchild): the actual daemon
-    os.close(write_fd)
-
-    # Close stdin and redirect stdout/stderr to log file early
-    # so any errors during startup are captured
-    sys.stdin.close()
-    os.close(0)
-    sys.stdout = open(log_file_path, "w")
-    sys.stderr = sys.stdout
+    # --- Daemon process from here ---
 
     # Log startup info
     print(f"Benchmark daemon started (PID: {os.getpid()})")
     print(f"Working directory: {base_dir}")
     print(f"Configs: {len(runs)}, Problems: {len(problems)}")
-    print(f"Backend: eval={'cuda' if use_cuda_eval else 'cpu'}")
+    print(f"Backend: {'cuda (' + str(gpu_workers) + ' GPUs)' if use_cuda_eval else 'cpu'}")
     sys.stdout.flush()
 
     # Clear any stale PID tracking and save job status
     clear_pids(base_dir)
-    job_file_error = None
     try:
         save_job_status(base_dir, os.getpid(), sys.argv, len(runs))
         print(f"Job file saved: {get_job_file(base_dir)}")
     except Exception as e:
-        job_file_error = str(e)
         print(f"WARNING: Failed to save job status: {e}")
         print("Use 'ps aux | grep proofatlas' to find this process")
     sys.stdout.flush()
@@ -1407,8 +853,8 @@ def main():
                 log_file=sys.stdout,
                 preset_name=preset_name, weights_path=weights_dir_str,
                 binary=binary, trace_preset=trace_preset,
-                rerun=args.rerun, n_jobs=args.n_jobs,
-                use_cuda=use_cuda_eval,
+                rerun=args.rerun, n_jobs=args.cpu_workers,
+                use_cuda=use_cuda_eval, gpu_workers=gpu_workers,
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()

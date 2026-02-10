@@ -327,6 +327,19 @@ impl ProofAtlas {
             }
         }
 
+        // === Step 2b: Check timeout before selection ===
+        // When using a remote scoring server, select() can block for seconds
+        // waiting on server mutex contention.  Check wall-clock timeout here
+        // so the prover exits promptly after a long-blocking select().
+        if let Some(start) = self.start_time {
+            if start.elapsed() > self.config.timeout {
+                return Some(ProofResult::ResourceLimit(
+                    self.state.build_proof_steps(),
+                    self.state.clauses.clone(),
+                ));
+            }
+        }
+
         // === Step 3: Select given clause ===
         let t0 = self.profile.as_ref().map(|_| Instant::now());
         let given_idx = match self.select_given_clause() {

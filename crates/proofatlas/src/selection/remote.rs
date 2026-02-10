@@ -2,6 +2,12 @@
 //!
 //! Communicates over a Unix domain socket. Not feature-gated — requires
 //! no tch-rs dependency (pure socket I/O + serde).
+//!
+//! On connection errors (broken pipe), attempts to reconnect to the server
+//! and re-initialize.  The server may still be alive even if this connection's
+//! handler thread exited (e.g., because a previous worker on the same handler
+//! was killed).  If reconnection fails repeatedly, the prover's timeout is
+//! the safety net.
 
 use std::collections::HashSet;
 use std::os::unix::net::UnixStream;
@@ -22,47 +28,126 @@ use crate::logic::{Clause, Interner};
 /// the server has already embedded) and applies softmax sampling locally.
 pub struct RemoteSelector {
     stream: UnixStream,
+    /// Socket path for reconnection.
+    socket_path: String,
+    /// Interner symbols for re-initialization after reconnect.
+    interner_symbols: Option<InternedSymbols>,
     /// Clause indices the server already has embeddings for.
     cached_indices: HashSet<usize>,
     /// Indices of clauses moved to the processed set.
     processed_indices: Vec<usize>,
-    /// Whether Init has been sent for the current problem.
-    initialized: bool,
     /// Softmax temperature (τ=1.0 default).
     temperature: f32,
     /// LCG RNG state (same algorithm as CachingSelector).
     rng_state: u64,
+    /// Number of reconnections performed.
+    reconnect_count: usize,
     // Stats
     cache_hits: usize,
     cache_misses: usize,
     network_time: Duration,
 }
 
+/// Delay between retries, capped at this maximum.
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// Maximum number of reconnection attempts before giving up.
+const MAX_RECONNECTS: usize = 5;
+
 impl RemoteSelector {
     /// Connect to a scoring server at the given socket path.
     pub fn connect(socket_path: &str) -> Result<Self, String> {
+        let stream = Self::open_stream(socket_path)?;
+
+        Ok(Self {
+            stream,
+            socket_path: socket_path.to_string(),
+            interner_symbols: None,
+            cached_indices: HashSet::new(),
+            processed_indices: Vec::new(),
+            temperature: 1.0,
+            rng_state: 12345,
+            reconnect_count: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            network_time: Duration::ZERO,
+        })
+    }
+
+    /// Open a new stream to the server with timeouts configured.
+    fn open_stream(socket_path: &str) -> Result<UnixStream, String> {
         let stream = UnixStream::connect(socket_path)
             .map_err(|e| format!("Failed to connect to scoring server at {}: {}", socket_path, e))?;
-
-        // Set timeouts to avoid indefinite hangs
         stream
             .set_read_timeout(Some(Duration::from_secs(300)))
             .map_err(|e| format!("Failed to set read timeout: {}", e))?;
         stream
             .set_write_timeout(Some(Duration::from_secs(300)))
             .map_err(|e| format!("Failed to set write timeout: {}", e))?;
+        Ok(stream)
+    }
 
-        Ok(Self {
-            stream,
-            cached_indices: HashSet::new(),
-            processed_indices: Vec::new(),
-            initialized: false,
-            temperature: 1.0,
-            rng_state: 12345,
-            cache_hits: 0,
-            cache_misses: 0,
-            network_time: Duration::ZERO,
-        })
+    /// Attempt to reconnect to the server and re-initialize.
+    ///
+    /// On success, replaces the stream, clears the embedding cache (the new
+    /// handler thread has an empty cache), and re-sends Init if we have
+    /// interner symbols.  Returns true on success.
+    fn reconnect(&mut self) -> bool {
+        self.reconnect_count += 1;
+        if self.reconnect_count > MAX_RECONNECTS {
+            eprintln!(
+                "RemoteSelector: max reconnects ({}) exceeded, giving up",
+                MAX_RECONNECTS
+            );
+            return false;
+        }
+
+        eprintln!(
+            "RemoteSelector: reconnecting (attempt {}/{})",
+            self.reconnect_count, MAX_RECONNECTS
+        );
+
+        match Self::open_stream(&self.socket_path) {
+            Ok(new_stream) => {
+                self.stream = new_stream;
+                // New handler thread has empty cache
+                self.cached_indices.clear();
+
+                // Re-send Init if we have interner symbols
+                if let Some(symbols) = &self.interner_symbols {
+                    let req = ScoringRequest::Init {
+                        interner: symbols.clone(),
+                    };
+                    match self.request(&req) {
+                        Ok(ScoringResponse::InitOk) => {
+                            eprintln!("RemoteSelector: reconnected and re-initialized");
+                            true
+                        }
+                        Ok(resp) => {
+                            eprintln!(
+                                "RemoteSelector: reconnected but Init failed: {:?}",
+                                resp
+                            );
+                            false
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "RemoteSelector: reconnected but Init request failed: {}",
+                                e
+                            );
+                            false
+                        }
+                    }
+                } else {
+                    eprintln!("RemoteSelector: reconnected (no interner to re-send)");
+                    true
+                }
+            }
+            Err(e) => {
+                eprintln!("RemoteSelector: reconnect failed: {}", e);
+                false
+            }
+        }
     }
 
     /// LCG random number generator (identical to CachingSelector).
@@ -96,57 +181,89 @@ impl ClauseSelector for RemoteSelector {
             return unprocessed.shift_remove_index(0);
         }
 
-        // Find uncached clauses
-        let uncached: Vec<(usize, Clause)> = unprocessed
-            .iter()
-            .copied()
-            .filter(|idx| !self.cached_indices.contains(idx))
-            .map(|idx| (idx, clauses[idx].clone()))
-            .collect();
+        // Retry loop — on error, revert cache marks and retry with backoff.
+        // On connection error, attempt reconnect before retrying.
+        // The prover's timeout is the safety net for persistent failures.
+        let mut retry_delay = Duration::from_millis(100);
 
-        // Track cache stats
-        let cached_count = unprocessed.len() - uncached.len();
-        self.cache_hits += cached_count;
-        self.cache_misses += uncached.len();
+        let scores = loop {
+            // Find uncached clauses (recomputed each attempt since cache
+            // marks are reverted on error)
+            let uncached_indices: Vec<usize> = unprocessed
+                .iter()
+                .copied()
+                .filter(|idx| !self.cached_indices.contains(idx))
+                .collect();
 
-        // Mark newly sent clauses as cached
-        for &(idx, _) in &uncached {
-            self.cached_indices.insert(idx);
-        }
+            // Tentatively mark as cached (reverted on error)
+            for &idx in &uncached_indices {
+                self.cached_indices.insert(idx);
+            }
 
-        // Build request
-        let unprocessed_indices: Vec<usize> = unprocessed.iter().copied().collect();
-        let req = ScoringRequest::Score {
-            uncached,
-            unprocessed_indices,
-            processed_indices: self.processed_indices.clone(),
+            let uncached: Vec<(usize, Clause)> = uncached_indices
+                .iter()
+                .map(|&idx| (idx, clauses[idx].clone()))
+                .collect();
+
+            let req = ScoringRequest::Score {
+                uncached,
+                unprocessed_indices: unprocessed.iter().copied().collect(),
+                processed_indices: self.processed_indices.clone(),
+            };
+
+            match self.request(&req) {
+                Ok(ScoringResponse::Scores(s)) if s.len() == unprocessed.len() => {
+                    // Success — record cache stats and reset reconnect counter
+                    self.cache_hits += unprocessed.len() - uncached_indices.len();
+                    self.cache_misses += uncached_indices.len();
+                    self.reconnect_count = 0;
+                    break s;
+                }
+                Ok(ScoringResponse::Scores(s)) => {
+                    eprintln!(
+                        "RemoteSelector: score count mismatch ({} vs {}), retrying...",
+                        s.len(),
+                        unprocessed.len()
+                    );
+                }
+                Ok(ScoringResponse::Error(e)) => {
+                    eprintln!("RemoteSelector: server error: {}, retrying...", e);
+                }
+                Ok(_) => {
+                    eprintln!("RemoteSelector: unexpected response, retrying...");
+                }
+                Err(e) => {
+                    // Connection error (broken pipe, etc.) — the handler thread
+                    // for this connection is dead, but the server may still be
+                    // alive.  Attempt to reconnect.
+                    eprintln!("RemoteSelector: connection error: {}", e);
+
+                    // Revert cache marks before reconnect clears them
+                    for &idx in &uncached_indices {
+                        self.cached_indices.remove(&idx);
+                    }
+
+                    if !self.reconnect() {
+                        // Reconnect failed — block until prover timeout kills us
+                        eprintln!("RemoteSelector: cannot recover, waiting for timeout");
+                        loop {
+                            std::thread::sleep(Duration::from_secs(60));
+                        }
+                    }
+                    // Reconnect succeeded — retry immediately (cache already cleared)
+                    retry_delay = Duration::from_millis(100);
+                    continue;
+                }
+            }
+
+            // Revert cache marks — server didn't embed these
+            for &idx in &uncached_indices {
+                self.cached_indices.remove(&idx);
+            }
+
+            std::thread::sleep(retry_delay);
+            retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
         };
-
-        // Send and receive scores
-        let scores = match self.request(&req) {
-            Ok(ScoringResponse::Scores(s)) => s,
-            Ok(ScoringResponse::Error(e)) => {
-                eprintln!("RemoteSelector: server error: {}", e);
-                return unprocessed.shift_remove_index(0);
-            }
-            Ok(_) => {
-                eprintln!("RemoteSelector: unexpected response");
-                return unprocessed.shift_remove_index(0);
-            }
-            Err(e) => {
-                eprintln!("RemoteSelector: connection error: {}", e);
-                return unprocessed.shift_remove_index(0);
-            }
-        };
-
-        if scores.len() != unprocessed.len() {
-            eprintln!(
-                "RemoteSelector: score count mismatch ({} vs {})",
-                scores.len(),
-                unprocessed.len()
-            );
-            return unprocessed.shift_remove_index(0);
-        }
 
         // Softmax sampling with temperature (identical to CachingSelector)
         let tau = self.temperature;
@@ -178,8 +295,8 @@ impl ClauseSelector for RemoteSelector {
     fn reset(&mut self) {
         self.cached_indices.clear();
         self.processed_indices.clear();
-        self.initialized = false;
         self.rng_state = 12345;
+        self.reconnect_count = 0;
         self.cache_hits = 0;
         self.cache_misses = 0;
         self.network_time = Duration::ZERO;
@@ -203,21 +320,36 @@ impl ClauseSelector for RemoteSelector {
 
     fn set_interner(&mut self, interner: Arc<Interner>) {
         let symbols = InternedSymbols::from_interner(&interner);
-        match self.request(&ScoringRequest::Init {
-            interner: symbols,
-        }) {
-            Ok(ScoringResponse::InitOk) => {
-                self.initialized = true;
+        // Store for re-initialization after reconnect
+        self.interner_symbols = Some(symbols.clone());
+        let req = ScoringRequest::Init { interner: symbols };
+
+        let mut retry_delay = Duration::from_millis(100);
+        loop {
+            match self.request(&req) {
+                Ok(ScoringResponse::InitOk) => {
+                    return;
+                }
+                Ok(ScoringResponse::Error(e)) => {
+                    eprintln!("RemoteSelector: Init error: {}, retrying...", e);
+                }
+                Ok(_) => {
+                    eprintln!("RemoteSelector: unexpected Init response, retrying...");
+                }
+                Err(e) => {
+                    eprintln!("RemoteSelector: Init connection error: {}", e);
+                    if !self.reconnect() {
+                        eprintln!("RemoteSelector: Init cannot recover, waiting for timeout");
+                        loop {
+                            std::thread::sleep(Duration::from_secs(60));
+                        }
+                    }
+                    // Reconnect re-sends Init internally, so we're done
+                    return;
+                }
             }
-            Ok(ScoringResponse::Error(e)) => {
-                eprintln!("RemoteSelector: Init error: {}", e);
-            }
-            Ok(_) => {
-                eprintln!("RemoteSelector: unexpected Init response");
-            }
-            Err(e) => {
-                eprintln!("RemoteSelector: Init failed: {}", e);
-            }
+            std::thread::sleep(retry_delay);
+            retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
         }
     }
 }

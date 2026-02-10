@@ -1166,7 +1166,7 @@ def run_training(
     model.eval()
 
     # Trace on CPU — torch.jit.trace bakes in device placement for tensor
-    # creation ops. CPU is the default eval backend (bench --backend-eval cpu).
+    # creation ops. CPU is the default eval backend (bench --gpu-workers 0).
     # Modules with data-dependent shapes (GraphNorm) are scripted below to
     # preserve dynamic behavior regardless of trace device.
     model.cpu()

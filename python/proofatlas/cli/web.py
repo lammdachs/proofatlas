@@ -128,6 +128,7 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     current_generation = []
     current_selection = None
     in_generation_phase = False
+    pending_demod_deletes = []  # Buffer demod deletions to emit after Add
 
     def flush():
         nonlocal current_simplification, current_generation, current_selection
@@ -166,10 +167,13 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                 if in_generation_phase:
                     flush()
                     in_generation_phase = False
+                # Emit Add first, then flush any pending demodulation deletions
                 current_simplification.append({
                     "clause_idx": idx, "clause": clause_str,
                     "rule": "Demodulation", "premises": premise_indices,
                 })
+                current_simplification.extend(pending_demod_deletes)
+                pending_demod_deletes.clear()
 
         elif "Delete" in event:
             # If in generation phase, a Delete means next iteration started
@@ -178,15 +182,21 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
                 in_generation_phase = False
             idx, rule_name, justification = event["Delete"]
             clause_str = clauses.get(idx, "")
-            rule = {
-                "Tautology": "TautologyDeletion",
-                "Subsumption": "SubsumptionDeletion",
-                "Demodulation": "DemodulationDeletion",
-            }.get(rule_name, "SubsumptionDeletion")
-            current_simplification.append({
-                "clause_idx": idx, "clause": clause_str,
-                "rule": rule, "premises": _clause_indices(justification),
-            })
+            if rule_name == "Demodulation":
+                # Buffer demodulation deletions to emit after the Add
+                pending_demod_deletes.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "DemodulationDeletion", "premises": _clause_indices(justification),
+                })
+            else:
+                rule = {
+                    "Tautology": "TautologyDeletion",
+                    "Subsumption": "SubsumptionDeletion",
+                }.get(rule_name, "SubsumptionDeletion")
+                current_simplification.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": rule, "premises": _clause_indices(justification),
+                })
 
         elif "Transfer" in event:
             # Transfer is simplification phase — if in generation, flush first

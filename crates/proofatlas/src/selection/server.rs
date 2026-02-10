@@ -78,8 +78,23 @@ impl ScoringServer {
                     let embedder = Arc::clone(&self.embedder);
                     let scorer = Arc::clone(&self.scorer);
                     thread::spawn(move || {
-                        if let Err(e) = handle_connection(stream, embedder, scorer) {
-                            eprintln!("ScoringServer: connection error: {}", e);
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handle_connection(stream, embedder, scorer)
+                        })) {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => {
+                                eprintln!("ScoringServer: connection error: {}", e);
+                            }
+                            Err(panic) => {
+                                let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                                    (*s).to_string()
+                                } else if let Some(s) = panic.downcast_ref::<String>() {
+                                    s.clone()
+                                } else {
+                                    "unknown panic".to_string()
+                                };
+                                eprintln!("ScoringServer: connection handler panicked: {}", msg);
+                            }
                         }
                     });
                 }
@@ -94,6 +109,20 @@ impl ScoringServer {
     pub fn spawn(self) -> thread::JoinHandle<()> {
         thread::spawn(move || self.run())
     }
+}
+
+/// Lock a mutex, recovering from poison (a prior thread panicked while holding it).
+///
+/// This is critical for the server: if one connection's inference call panics
+/// (e.g., CUDA OOM), the mutex gets poisoned. Without recovery, ALL other
+/// connections would fail on their next lock attempt, cascading the failure
+/// across every worker.
+#[cfg(feature = "ml")]
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| {
+        eprintln!("ScoringServer: recovering from poisoned mutex");
+        poisoned.into_inner()
+    })
 }
 
 /// Handle a single client connection.
@@ -124,9 +153,8 @@ fn handle_connection(
                 interner: symbols,
             } => {
                 let new_interner = symbols.to_interner();
-                // Set interner on embedder (needed by SentenceEmbedder)
                 {
-                    let mut emb = embedder.lock().unwrap();
+                    let mut emb = lock_or_recover(&embedder);
                     emb.set_interner(Arc::new(new_interner.clone()));
                 }
                 _interner = Some(new_interner);
@@ -139,42 +167,57 @@ fn handle_connection(
                 unprocessed_indices,
                 processed_indices,
             } => {
-                // Embed uncached clauses
-                if !uncached.is_empty() {
+                // Embed uncached clauses — catch panics so one bad batch
+                // doesn't poison the mutex and cascade to all connections
+                let embed_result = if !uncached.is_empty() {
                     let clause_refs: Vec<&crate::logic::Clause> =
                         uncached.iter().map(|(_, c)| c).collect();
-                    let embeddings = {
-                        let emb = embedder.lock().unwrap();
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let emb = lock_or_recover(&embedder);
                         emb.embed_batch(&clause_refs)
-                    };
-                    for ((idx, _), embedding) in uncached.into_iter().zip(embeddings.into_iter()) {
-                        cache.insert(idx, embedding);
-                    }
-                }
-
-                // Gather U embeddings in request order
-                let u_embeddings: Vec<&[f32]> = unprocessed_indices
-                    .iter()
-                    .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
-                    .collect();
-
-                // Gather P embeddings
-                let p_embeddings: Vec<&[f32]> = processed_indices
-                    .iter()
-                    .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
-                    .collect();
-
-                // Score
-                let scores = {
-                    let sc = scorer.lock().unwrap();
-                    if sc.uses_context() && !p_embeddings.is_empty() {
-                        sc.score_with_context(&u_embeddings, &p_embeddings)
-                    } else {
-                        sc.score_batch(&u_embeddings)
-                    }
+                    }))
+                } else {
+                    Ok(vec![])
                 };
 
-                ScoringResponse::Scores(scores)
+                match embed_result {
+                    Ok(embeddings) => {
+                        for ((idx, _), embedding) in uncached.into_iter().zip(embeddings.into_iter()) {
+                            cache.insert(idx, embedding);
+                        }
+
+                        let u_embeddings: Vec<&[f32]> = unprocessed_indices
+                            .iter()
+                            .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
+                            .collect();
+
+                        let p_embeddings: Vec<&[f32]> = processed_indices
+                            .iter()
+                            .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
+                            .collect();
+
+                        let score_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let sc = lock_or_recover(&scorer);
+                            if sc.uses_context() && !p_embeddings.is_empty() {
+                                sc.score_with_context(&u_embeddings, &p_embeddings)
+                            } else {
+                                sc.score_batch(&u_embeddings)
+                            }
+                        }));
+
+                        match score_result {
+                            Ok(scores) => ScoringResponse::Scores(scores),
+                            Err(_) => {
+                                eprintln!("ScoringServer: scorer panicked, returning error");
+                                ScoringResponse::Error("scorer panic".into())
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("ScoringServer: embedder panicked, returning error");
+                        ScoringResponse::Error("embedder panic".into())
+                    }
+                }
             }
 
             ScoringRequest::Reset => {

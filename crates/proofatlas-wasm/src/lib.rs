@@ -321,6 +321,9 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
         }
     };
 
+    // Buffer for demodulation deletions — emitted after the corresponding Add
+    let mut pending_demod_deletes: Vec<serde_json::Value> = Vec::new();
+
     for event in events {
         match event {
             StateChange::Add(clause, rule_name, premises) => {
@@ -352,12 +355,14 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                             flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
                             in_generation_phase = false;
                         }
+                        // Emit Add first, then flush any pending demodulation deletions
                         current_simplification.push(json!({
                             "clause_idx": idx,
                             "clause": clause_str,
                             "rule": "Demodulation",
                             "premises": premise_indices,
                         }));
+                        current_simplification.append(&mut pending_demod_deletes);
                     }
                 }
             }
@@ -368,18 +373,27 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                     in_generation_phase = false;
                 }
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                let rule = match rule_name.as_str() {
-                    "Tautology" => "TautologyDeletion",
-                    "Subsumption" => "SubsumptionDeletion",
-                    "Demodulation" => "DemodulationDeletion",
-                    _ => "SubsumptionDeletion",
-                };
-                current_simplification.push(json!({
-                    "clause_idx": *clause_idx,
-                    "clause": clause_str,
-                    "rule": rule,
-                    "premises": [],
-                }));
+                if rule_name.as_str() == "Demodulation" {
+                    // Buffer demodulation deletions to emit after the Add
+                    pending_demod_deletes.push(json!({
+                        "clause_idx": *clause_idx,
+                        "clause": clause_str,
+                        "rule": "DemodulationDeletion",
+                        "premises": [],
+                    }));
+                } else {
+                    let rule = match rule_name.as_str() {
+                        "Tautology" => "TautologyDeletion",
+                        "Subsumption" => "SubsumptionDeletion",
+                        _ => "SubsumptionDeletion",
+                    };
+                    current_simplification.push(json!({
+                        "clause_idx": *clause_idx,
+                        "clause": clause_str,
+                        "rule": rule,
+                        "premises": [],
+                    }));
+                }
             }
             StateChange::Transfer(clause_idx) => {
                 // Transfer is simplification phase — if in generation, flush first
