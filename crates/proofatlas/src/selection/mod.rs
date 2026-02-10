@@ -29,8 +29,12 @@ pub mod clause;
 pub mod gcn;
 pub mod graph;
 pub mod proof_trace;
+pub mod protocol;
+pub mod remote;
 #[cfg(feature = "ml")]
 pub mod sentence;
+#[cfg(feature = "ml")]
+pub mod server;
 
 // Literal selection re-exports (from logic module)
 pub use crate::logic::literal_selection::{
@@ -46,10 +50,17 @@ pub use clause::{ClauseSelector, SelectorStats};
 pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]
 pub use gcn::{
-    load_gcn_cross_attention_selector, GcnCrossAttentionSelector, GcnEncoder, TorchScriptScorer,
+    load_gcn_cross_attention_selector, load_gcn_embedder, load_gcn_encoder_scorer,
+    GcnCrossAttentionSelector, GcnEncoder, TorchScriptScorer,
 };
 #[cfg(feature = "ml")]
-pub use sentence::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
+pub use sentence::{
+    load_sentence_embedder, load_sentence_selector, PassThroughScorer, SentenceEmbedder,
+    SentenceSelector,
+};
+pub use remote::RemoteSelector;
+#[cfg(feature = "ml")]
+pub use server::ScoringServer;
 
 // Graph/ML re-exports
 pub use graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};

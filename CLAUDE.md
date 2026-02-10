@@ -24,7 +24,7 @@ proofatlas/
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
 │   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, SubsumptionChecker, SelectedLiteralIndex
-│   │       ├── selection/      # Clause selection strategies, graph building, proof trace (tch-rs ML)
+│   │       ├── selection/      # Clause selection, scoring server, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
 │   │       ├── state.rs        # SaturationState, StateChange, EventLog, traits
@@ -46,7 +46,8 @@ proofatlas/
 │
 ├── scripts/                    # Utility scripts
 │   ├── setup.py                # One-command project setup
-│   ├── bench.py                # Multi-prover benchmarking with trace collection
+│   ├── bench.py                # Multi-prover benchmarking (auto-launches scoring server for ML)
+│   ├── train.py                # Standalone ML model training (extracted from bench.py)
 │   ├── export.py               # Export results for web display
 │   └── setup_*.py              # Setup TPTP, Vampire, SPASS
 │
@@ -94,12 +95,14 @@ cargo test -- --nocapture                # With output
 pytest python/tests/ -v                  # Python tests (no env vars needed)
 ```
 
-### Benchmarking
+### Training & Benchmarking
 
 ```bash
+python scripts/train.py --config gcn_mlp       # Train ML model (separate step)
+python scripts/train.py --config gcn_mlp --use-cuda  # Train on GPU
+
 proofatlas-bench                              # Run all presets
-proofatlas-bench --config time                 # Run specific preset
-proofatlas-bench --retrain                    # Retrain ML models
+proofatlas-bench --config gcn_mlp              # Run specific preset (requires trained weights)
 proofatlas-bench --status                     # Check job status
 ```
 
@@ -283,11 +286,12 @@ Selectors implement `ClauseSelector` trait:
 - `AgeWeightSelector`: Alternates FIFO and lightest with configurable ratio
 - `FIFOSelector`: Pure age-based (wraps AgeWeightSelector with age_probability=1.0)
 - `WeightSelector`: Pure weight-based (wraps AgeWeightSelector with age_probability=0.0)
-- `CachingSelector`: ML-based with embedding cache
+- `CachingSelector`: ML-based with embedding cache (in-process, used for tests)
+- `RemoteSelector`: ML-based via scoring server (production path for ML selectors)
 
 ## ML Architecture
 
-**Workflow**: Train in PyTorch → Export to TorchScript → Load in Rust/tch-rs
+**Workflow**: Train in PyTorch → Export to TorchScript → Load in scoring server → Workers connect via Unix socket
 
 | Selector | Rust | PyTorch | Notes |
 |----------|------|---------|-------|
@@ -302,7 +306,34 @@ Selectors implement `ClauseSelector` trait:
 - `transformer`: Full transformer block with cross-attention
 - `cross_attention`: Dot-product cross-attention (ignores p_emb)
 
-Selectors implement the `ClauseSelector` trait. The optional `stats()` method returns `SelectorStats` (cache hits/misses, embed/score time). `CachingSelector` tracks these automatically; `AgeWeightSelector` returns `None`.
+### Scoring Server Architecture
+
+ML inference is decoupled from the prover via a scoring server:
+
+```
+Worker (CPU)                          Server (CPU/GPU)
+┌──────────────┐     Unix socket     ┌──────────────────┐
+│ ProofAtlas    │ ←────────────────→  │ ScoringServer     │
+│  └ Remote-    │  Init(interner)     │  ├ embedder       │
+│    Selector   │  Score(clauses,..)  │  ├ scorer         │
+│    ├ cache    │  Reset              │  └ per-connection  │
+│    └ sampling │  ←── Scores(f32[])  │    cache           │
+└──────────────┘                      └──────────────────┘
+```
+
+- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, thread per connection, each with its own embedding cache
+- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses, receives scores, applies softmax sampling locally
+- **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, `InternedSymbols`, length-prefixed bincode framing
+- **Auto-launch**: `run_saturation(socket_path=None)` with ML encoder auto-starts a server thread
+- **Shared server**: `run_saturation(socket_path="/tmp/...")` connects to an existing server (used by bench.py for parallel evaluation)
+
+**Training and evaluation are separate steps:**
+```bash
+python scripts/train.py --config gcn_mlp       # Step 1: train model
+proofatlas-bench --config gcn_mlp               # Step 2: evaluate (requires weights)
+```
+
+Selectors implement the `ClauseSelector` trait. The optional `stats()` method returns `SelectorStats` (cache hits/misses, embed/score time). `CachingSelector` and `RemoteSelector` track these automatically; `AgeWeightSelector` returns `None`.
 
 ML selectors use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch (CPU and CUDA if available) is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
 

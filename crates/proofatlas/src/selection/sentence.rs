@@ -186,6 +186,16 @@ pub fn load_sentence_selector<P: AsRef<Path>>(
     Ok(super::cached::CachingSelector::new(embedder, scorer))
 }
 
+/// Load a standalone sentence embedder (for use with ScoringServer).
+#[cfg(feature = "ml")]
+pub fn load_sentence_embedder<P: AsRef<Path>>(
+    model_path: P,
+    tokenizer_path: P,
+    use_cuda: bool,
+) -> Result<SentenceEmbedder, String> {
+    SentenceEmbedder::new(model_path, tokenizer_path, use_cuda)
+}
+
 #[cfg(test)]
 #[cfg(feature = "ml")]
 mod tests {

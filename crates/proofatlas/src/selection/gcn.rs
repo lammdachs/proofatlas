@@ -610,6 +610,29 @@ pub fn load_gcn_cross_attention_selector<P: AsRef<Path>>(
     Ok(CachingSelector::new(encoder, scorer))
 }
 
+/// Load a standalone GCN embedder (for use with ScoringServer).
+#[cfg(feature = "ml")]
+pub fn load_gcn_embedder<P: AsRef<Path>>(
+    model_path: P,
+    use_cuda: bool,
+) -> Result<GcnEmbedder, String> {
+    GcnEmbedder::new(model_path, use_cuda)
+}
+
+/// Load a GCN encoder + TorchScript scorer pair (for use with ScoringServer).
+#[cfg(feature = "ml")]
+pub fn load_gcn_encoder_scorer<P: AsRef<Path>>(
+    encoder_path: P,
+    scorer_path: P,
+    hidden_dim: usize,
+    cross_attention: bool,
+    use_cuda: bool,
+) -> Result<(GcnEncoder, TorchScriptScorer), String> {
+    let encoder = GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
+    let scorer = TorchScriptScorer::new(scorer_path, hidden_dim, cross_attention, use_cuda)?;
+    Ok((encoder, scorer))
+}
+
 #[cfg(test)]
 #[cfg(feature = "ml")]
 mod tests {

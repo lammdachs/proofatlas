@@ -544,10 +544,12 @@ impl ProofState {
     ///     memory_limit: Memory limit for clause storage in MB
     ///     enable_profiling: Enable structured profiling (default: false).
     ///                       When enabled, the third element of the return tuple is a JSON string.
+    ///     socket_path: Path to scoring server Unix socket. If set, uses RemoteSelector.
+    ///                  If None with an ML encoder, auto-launches a local scoring server.
     ///
     /// Returns:
     ///     Tuple of (proof_found: bool, status: str, profile_json: Optional[str], trace_json: Optional[str])
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, socket_path=None))]
     pub fn run_saturation(
         &mut self,
         timeout: Option<f64>,
@@ -560,6 +562,7 @@ impl ProofState {
         memory_limit: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
+        socket_path: Option<String>,
     ) -> PyResult<(bool, String, Option<String>, Option<String>)> {
         use crate::prover::ProofAtlas;
         use crate::config::ProverConfig;
@@ -574,63 +577,81 @@ impl ProofState {
             _ => None,
         };
 
+        // Keep auto-launched server handle alive until saturation completes
+        #[cfg(feature = "ml")]
+        let _server_handle: Option<std::thread::JoinHandle<()>> = None;
+        #[cfg(feature = "ml")]
+        let mut _server_handle = _server_handle;
+        let auto_socket_path: Option<String>;
+
         let clause_selector: Box<dyn crate::selection::ClauseSelector> = match encoder.as_deref() {
             None => {
+                auto_socket_path = None;
                 // No encoder = heuristic selector
                 let ratio = age_weight_ratio.unwrap_or(0.5);
                 Box::new(AgeWeightSelector::new(ratio))
             }
             #[cfg(feature = "ml")]
-            Some("gcn") | Some("gat") | Some("graphsage") => {
-                // Graph encoders
-                let weights_dir = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path)
+            Some(enc @ ("gcn" | "gat" | "graphsage" | "sentence")) => {
+                if let Some(ref path) = socket_path {
+                    // Connect to existing scoring server
+                    auto_socket_path = None;
+                    let selector = crate::selection::RemoteSelector::connect(path)
+                        .map_err(|e| PyValueError::new_err(e))?;
+                    Box::new(selector)
                 } else {
-                    std::path::PathBuf::from(".weights")
-                };
+                    // Auto-launch a local scoring server
+                    let weights_dir = if let Some(path) = weights_path.as_ref() {
+                        std::path::PathBuf::from(path)
+                    } else {
+                        std::path::PathBuf::from(".weights")
+                    };
+                    let name = model_name.as_deref().unwrap();
 
-                let name = model_name.as_deref().unwrap();
-                let model_path = weights_dir.join(format!("{}.pt", name));
+                    let (embedder, scorer_box): (Box<dyn crate::selection::cached::ClauseEmbedder>, Box<dyn crate::selection::cached::EmbeddingScorer>) = if enc == "sentence" {
+                        let model_path = weights_dir.join(format!("{}.pt", name));
+                        let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", name));
+                        if !model_path.exists() {
+                            return Err(PyValueError::new_err(format!(
+                                "Model not found at {}",
+                                model_path.display()
+                            )));
+                        }
+                        let emb = crate::selection::load_sentence_embedder(
+                            &model_path,
+                            &tokenizer_path,
+                            use_cuda.unwrap_or(true),
+                        ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
+                        (Box::new(emb), Box::new(crate::selection::PassThroughScorer))
+                    } else {
+                        let model_path = weights_dir.join(format!("{}.pt", name));
+                        if !model_path.exists() {
+                            return Err(PyValueError::new_err(format!(
+                                "Model not found at {}",
+                                model_path.display()
+                            )));
+                        }
+                        let emb = crate::selection::load_gcn_embedder(
+                            &model_path,
+                            use_cuda.unwrap_or(true),
+                        ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
+                        (Box::new(emb), Box::new(crate::selection::GcnScorer))
+                    };
 
-                if !model_path.exists() {
-                    return Err(PyValueError::new_err(format!(
-                        "Model not found at {}. Export with model.export_torchscript(path)",
-                        model_path.display()
-                    )));
+                    let sock_path = format!("/tmp/proofatlas-scoring-{}.sock", std::process::id());
+                    let server = crate::selection::ScoringServer::new(
+                        embedder,
+                        scorer_box,
+                        sock_path.clone(),
+                    );
+                    _server_handle = Some(server.spawn());
+                    std::thread::sleep(Duration::from_millis(50));
+
+                    auto_socket_path = Some(sock_path.clone());
+                    let selector = crate::selection::RemoteSelector::connect(&sock_path)
+                        .map_err(|e| PyValueError::new_err(e))?;
+                    Box::new(selector)
                 }
-
-                let selector = crate::selection::load_gcn_selector(
-                    &model_path,
-                    use_cuda.unwrap_or(true),
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-                Box::new(selector)
-            }
-            #[cfg(feature = "ml")]
-            Some("sentence") => {
-                // String encoder (sentence transformer)
-                let weights_dir = if let Some(path) = weights_path.as_ref() {
-                    std::path::PathBuf::from(path)
-                } else {
-                    std::path::PathBuf::from(".weights")
-                };
-
-                let name = model_name.as_deref().unwrap();
-                let model_path = weights_dir.join(format!("{}.pt", name));
-                let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", name));
-
-                if !model_path.exists() {
-                    return Err(PyValueError::new_err(format!(
-                        "Model not found at {}. Export with model.export_torchscript(path)",
-                        model_path.display()
-                    )));
-                }
-
-                let selector = crate::selection::load_sentence_selector(
-                    &model_path,
-                    &tokenizer_path,
-                    use_cuda.unwrap_or(true),
-                ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-                Box::new(selector)
             }
             Some(other) => {
                 #[cfg(feature = "ml")]
@@ -733,6 +754,11 @@ impl ProofState {
         // Serialize trace to JSON
         let trace_json = serde_json::to_string(&sat_trace)
             .map_err(|e| PyValueError::new_err(format!("Trace serialization failed: {}", e)))?;
+
+        // Clean up auto-launched server socket
+        if let Some(ref path) = auto_socket_path {
+            let _ = std::fs::remove_file(path);
+        }
 
         Ok((proof_found, status.to_string(), profile_json, Some(trace_json)))
     }
@@ -1059,6 +1085,74 @@ pub struct TrainingExample {
 }
 
 /// Python module definition
+/// Start a scoring server that blocks until the process is terminated.
+///
+/// Intended to be called from a subprocess (e.g., by bench.py).
+/// The server listens on the given Unix socket and serves scoring requests
+/// from worker processes.
+///
+/// Args:
+///     encoder: Encoder type ("gcn", "gat", "graphsage", or "sentence")
+///     scorer: Scorer name (used to locate model file as "{encoder}_{scorer}.pt")
+///     weights_path: Path to weights directory
+///     socket_path: Path for the Unix domain socket
+///     use_cuda: Whether to use CUDA (default: false)
+#[cfg(feature = "ml")]
+#[pyfunction]
+#[pyo3(signature = (encoder, scorer, weights_path, socket_path, use_cuda=None))]
+fn start_scoring_server(
+    encoder: &str,
+    scorer: &str,
+    weights_path: &str,
+    socket_path: &str,
+    use_cuda: Option<bool>,
+) -> PyResult<()> {
+    let weights_dir = std::path::PathBuf::from(weights_path);
+    let model_name = format!("{}_{}", encoder, scorer);
+    let cuda = use_cuda.unwrap_or(false);
+
+    let (embedder, scorer_box): (
+        Box<dyn crate::selection::cached::ClauseEmbedder>,
+        Box<dyn crate::selection::cached::EmbeddingScorer>,
+    ) = if encoder == "sentence" {
+        let model_path = weights_dir.join(format!("{}.pt", model_name));
+        let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_name));
+        if !model_path.exists() {
+            return Err(PyValueError::new_err(format!(
+                "Model not found at {}",
+                model_path.display()
+            )));
+        }
+        let emb = crate::selection::load_sentence_embedder(&model_path, &tokenizer_path, cuda)
+            .map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
+        (
+            Box::new(emb),
+            Box::new(crate::selection::PassThroughScorer),
+        )
+    } else {
+        let model_path = weights_dir.join(format!("{}.pt", model_name));
+        if !model_path.exists() {
+            return Err(PyValueError::new_err(format!(
+                "Model not found at {}",
+                model_path.display()
+            )));
+        }
+        let emb = crate::selection::load_gcn_embedder(&model_path, cuda)
+            .map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
+        (Box::new(emb), Box::new(crate::selection::GcnScorer))
+    };
+
+    let server = crate::selection::ScoringServer::new(
+        embedder,
+        scorer_box,
+        socket_path.to_string(),
+    );
+
+    // This blocks until the process is terminated
+    server.run();
+    Ok(())
+}
+
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProofState>()?;
@@ -1068,5 +1162,7 @@ fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "python")]
     m.add_class::<ClauseGraphData>()?;
     m.add_class::<TrainingExample>()?;
+    #[cfg(feature = "ml")]
+    m.add_function(wrap_pyfunction!(start_scoring_server, m)?)?;
     Ok(())
 }
