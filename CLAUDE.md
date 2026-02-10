@@ -46,7 +46,9 @@ proofatlas/
 │
 ├── scripts/                    # Utility scripts
 │   ├── setup.py                # One-command project setup
-│   ├── bench.py                # Multi-prover benchmarking (auto-launches scoring server for ML)
+│   ├── bench.py                # Benchmark orchestration, scoring server mgmt, CLI/daemon
+│   ├── bench_jobs.py           # Job/daemon management, PID tracking, status display
+│   ├── bench_provers.py        # Prover execution (proofatlas, vampire, spass)
 │   ├── train.py                # Standalone ML model training (extracted from bench.py)
 │   ├── export.py               # Export results for web display
 │   └── setup_*.py              # Setup TPTP, Vampire, SPASS
@@ -321,11 +323,12 @@ Worker (CPU)                          Server (CPU/GPU)
 └──────────────┘                      └──────────────────┘
 ```
 
-- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, thread per connection, each with its own embedding cache
-- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses, receives scores, applies softmax sampling locally
+- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, 16 MiB stack per handler thread, crash handler for diagnostics
+- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses (capped at 512/request), receives scores, applies softmax sampling locally. Auto-reconnects on failure with exponential backoff.
 - **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, `InternedSymbols`, length-prefixed bincode framing
 - **Auto-launch**: `run_saturation(socket_path=None)` with ML encoder auto-starts a server thread
 - **Shared server**: `run_saturation(socket_path="/tmp/...")` connects to an existing server (used by bench.py for parallel evaluation)
+- **Robustness**: Server auto-restarts on crash (bench.py monitors), embed batches chunked to 512, handler threads use 16 MiB stack (libtorch sparse ops need it), SIGSEGV crash handler captures native backtrace
 
 **Training and evaluation are separate steps:**
 ```bash

@@ -59,6 +59,10 @@ impl ScoringServer {
     /// per connection. The server continues accepting even if individual
     /// connections fail.
     pub fn run(&self) {
+        // Install SIGSEGV handler to capture backtrace before libtorch's handler eats it.
+        // This runs AFTER model loading (CUDA init), so it overrides libtorch's handler.
+        install_crash_handler();
+
         // Remove stale socket file
         let _ = std::fs::remove_file(&self.socket_path);
 
@@ -77,7 +81,12 @@ impl ScoringServer {
                 Ok(stream) => {
                     let embedder = Arc::clone(&self.embedder);
                     let scorer = Arc::clone(&self.scorer);
-                    thread::spawn(move || {
+                    // Use 16 MiB stack (default is 2 MiB). libtorch's sparse
+                    // tensor ops and GCN forward pass need deep stack frames;
+                    // large clause batches can overflow the default.
+                    let res = thread::Builder::new()
+                        .stack_size(16 * 1024 * 1024)
+                        .spawn(move || {
                         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             handle_connection(stream, embedder, scorer)
                         })) {
@@ -97,6 +106,9 @@ impl ScoringServer {
                             }
                         }
                     });
+                    if let Err(e) = res {
+                        eprintln!("ScoringServer: failed to spawn handler thread: {}", e);
+                    }
                 }
                 Err(e) => {
                     eprintln!("ScoringServer: accept error: {}", e);
@@ -109,6 +121,50 @@ impl ScoringServer {
     pub fn spawn(self) -> thread::JoinHandle<()> {
         thread::spawn(move || self.run())
     }
+}
+
+/// Install a SIGSEGV/SIGBUS/SIGABRT handler that prints a native backtrace.
+///
+/// libtorch installs its own SIGSEGV handler during library loading and CUDA init.
+/// This function overrides it so we can capture crash diagnostics.
+/// Uses only async-signal-safe functions (write, backtrace, backtrace_symbols_fd).
+#[cfg(feature = "ml")]
+fn install_crash_handler() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
+    if INSTALLED.swap(true, Ordering::SeqCst) {
+        return; // Already installed
+    }
+
+    unsafe extern "C" fn crash_handler(sig: libc::c_int) {
+        // Write header (async-signal-safe: raw write to fd 2)
+        let header = match sig {
+            libc::SIGSEGV => b"\n=== ScoringServer CRASH: SIGSEGV (signal 11) ===\nBacktrace:\n" as &[u8],
+            libc::SIGBUS => b"\n=== ScoringServer CRASH: SIGBUS (signal 7) ===\nBacktrace:\n",
+            libc::SIGABRT => b"\n=== ScoringServer CRASH: SIGABRT (signal 6) ===\nBacktrace:\n",
+            _ => b"\n=== ScoringServer CRASH: unknown signal ===\nBacktrace:\n",
+        };
+        libc::write(2, header.as_ptr() as *const libc::c_void, header.len());
+
+        // Capture backtrace (async-signal-safe on Linux/glibc)
+        let mut buffer = [std::ptr::null_mut::<libc::c_void>(); 128];
+        let depth = libc::backtrace(buffer.as_mut_ptr(), 128);
+        libc::backtrace_symbols_fd(buffer.as_ptr(), depth, 2);
+
+        let footer = b"=== END CRASH ===\n";
+        libc::write(2, footer.as_ptr() as *const libc::c_void, footer.len());
+
+        // Re-raise with default handler to produce core dump / proper exit
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+
+    unsafe {
+        libc::signal(libc::SIGSEGV, crash_handler as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGBUS, crash_handler as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGABRT, crash_handler as *const () as libc::sighandler_t);
+    }
+    eprintln!("ScoringServer: crash handler installed (overrides libtorch signal handlers)");
 }
 
 /// Lock a mutex, recovering from poison (a prior thread panicked while holding it).
@@ -167,15 +223,39 @@ fn handle_connection(
                 unprocessed_indices,
                 processed_indices,
             } => {
-                // Embed uncached clauses — catch panics so one bad batch
-                // doesn't poison the mutex and cascade to all connections
+                // Embed uncached clauses in chunks to cap per-call GPU memory.
+                // Large problems (e.g., PUZ021-1.p) can accumulate thousands of
+                // uncached clauses between selections.
+                const MAX_EMBED_BATCH: usize = 512;
+
                 let embed_result = if !uncached.is_empty() {
+                    if uncached.len() > MAX_EMBED_BATCH {
+                        eprintln!(
+                            "ScoringServer: large batch ({} uncached), chunking",
+                            uncached.len()
+                        );
+                    }
                     let clause_refs: Vec<&crate::logic::Clause> =
                         uncached.iter().map(|(_, c)| c).collect();
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let emb = lock_or_recover(&embedder);
-                        emb.embed_batch(&clause_refs)
-                    }))
+                    let mut all_embeddings = Vec::with_capacity(clause_refs.len());
+                    let mut failed = false;
+                    for chunk in clause_refs.chunks(MAX_EMBED_BATCH) {
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let emb = lock_or_recover(&embedder);
+                            emb.embed_batch(chunk)
+                        })) {
+                            Ok(embeddings) => all_embeddings.extend(embeddings),
+                            Err(_) => {
+                                failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if failed {
+                        Err(Box::new("embedder panic") as Box<dyn std::any::Any + Send>)
+                    } else {
+                        Ok(all_embeddings)
+                    }
                 } else {
                     Ok(vec![])
                 };
@@ -186,9 +266,13 @@ fn handle_connection(
                             cache.insert(idx, embedding);
                         }
 
-                        let u_embeddings: Vec<&[f32]> = unprocessed_indices
+                        // Collect embeddings for cached unprocessed clauses only
+                        let cached_u: Vec<(usize, &[f32])> = unprocessed_indices
                             .iter()
-                            .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
+                            .enumerate()
+                            .filter_map(|(pos, idx)| {
+                                cache.get(idx).map(|e| (pos, e.as_slice()))
+                            })
                             .collect();
 
                         let p_embeddings: Vec<&[f32]> = processed_indices
@@ -196,17 +280,27 @@ fn handle_connection(
                             .filter_map(|idx| cache.get(idx).map(|e| e.as_slice()))
                             .collect();
 
+                        let u_emb_refs: Vec<&[f32]> = cached_u.iter().map(|(_, e)| *e).collect();
                         let score_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let sc = lock_or_recover(&scorer);
                             if sc.uses_context() && !p_embeddings.is_empty() {
-                                sc.score_with_context(&u_embeddings, &p_embeddings)
+                                sc.score_with_context(&u_emb_refs, &p_embeddings)
                             } else {
-                                sc.score_batch(&u_embeddings)
+                                sc.score_batch(&u_emb_refs)
                             }
                         }));
 
                         match score_result {
-                            Ok(scores) => ScoringResponse::Scores(scores),
+                            Ok(cached_scores) => {
+                                // Build full score vector: cached clauses get their
+                                // scores, uncached clauses get 0.0 (neutral for softmax).
+                                let num_unprocessed = unprocessed_indices.len();
+                                let mut scores = vec![0.0f32; num_unprocessed];
+                                for ((pos, _), score) in cached_u.iter().zip(cached_scores.iter()) {
+                                    scores[*pos] = *score;
+                                }
+                                ScoringResponse::Scores(scores)
+                            }
                             Err(_) => {
                                 eprintln!("ScoringServer: scorer panicked, returning error");
                                 ScoringResponse::Error("scorer panic".into())

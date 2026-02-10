@@ -344,10 +344,17 @@ impl ProofAtlas {
         let t0 = self.profile.as_ref().map(|_| Instant::now());
         let given_idx = match self.select_given_clause() {
             Some(idx) => idx,
-            None => {
+            None if self.state.unprocessed.is_empty() => {
                 let steps = self.state.build_proof_steps();
                 let clauses = self.state.clauses.clone();
                 return Some(ProofResult::Saturated(steps, clauses));
+            }
+            None => {
+                // Selector returned None with clauses still available — selector error
+                // (e.g., scoring server died). Report as resource limit.
+                let steps = self.state.build_proof_steps();
+                let clauses = self.state.clauses.clone();
+                return Some(ProofResult::ResourceLimit(steps, clauses));
             }
         };
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {

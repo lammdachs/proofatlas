@@ -10,6 +10,9 @@ name = "proofatlas"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# Unix signal handling (diagnostics)
+libc = "0.2"
+
 # Parser
 nom = "7"
 

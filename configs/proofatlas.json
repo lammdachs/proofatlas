@@ -25,6 +25,7 @@
       "timeout": 600,
       "max_iterations": 512,
       "literal_selection": 21,
+      "memory_limit": 2048,
       "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight"

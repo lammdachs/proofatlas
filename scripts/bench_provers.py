@@ -89,7 +89,11 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
             socket_path=socket_path,
         )
     except Exception as e:
-        return BenchResult(problem=problem.name, status="error", time_s=time.time() - start)
+        elapsed = time.time() - start
+        # When using a scoring server, connection/communication failures are
+        # resource issues (server died/restarting), not problem-level errors.
+        status = "resource_limit" if socket_path else "error"
+        return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
     elapsed = time.time() - start
 
@@ -108,6 +112,9 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
                     collect_trace, trace_preset, result_queue, use_cuda=False,
                     socket_path=None):
     """Worker function that runs in subprocess and sends result via queue."""
+    # Ensure forked workers never initialize CUDA (the scoring server handles GPU).
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     # Reset signal handlers inherited from parent daemon process.
     # Without this, if the worker is killed (e.g., timeout), it would run
     # the parent's signal handler which deletes the job file!
@@ -159,29 +166,42 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
     proc.join(timeout=process_timeout)
     elapsed = time.time() - start
 
-    if proc.is_alive():
-        # Process hung - kill it
-        proc.terminate()
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
-        return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
-
-    # Check result queue first — the child may exit with non-zero code due to
-    # cleanup issues (e.g., libtorch thread destruction when forked from a thread)
-    # but still have produced a valid result.
     try:
-        status, elapsed_inner = result_queue.get_nowait()
-        return BenchResult(problem=problem.name, status=status, time_s=elapsed_inner)
-    except Exception:
-        pass
+        if proc.is_alive():
+            # Process hung - kill it
+            proc.terminate()
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+            return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
 
-    if proc.exitcode != 0:
-        # Process crashed before producing a result (e.g., stack overflow gives exit code 134)
+        # Check result queue first — the child may exit with non-zero code due to
+        # cleanup issues (e.g., libtorch thread destruction when forked from a thread)
+        # but still have produced a valid result.
+        try:
+            status, elapsed_inner = result_queue.get_nowait()
+            return BenchResult(problem=problem.name, status=status, time_s=elapsed_inner)
+        except Exception:
+            pass
+
+        if proc.exitcode != 0:
+            # Process crashed before producing a result (e.g., stack overflow gives exit code 134)
+            print(f"Worker crashed for {problem.name}: exit code {proc.exitcode} ({elapsed:.2f}s)")
+            sys.stdout.flush()
+            return BenchResult(problem=problem.name, status="error", time_s=elapsed)
+
         return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
-    return BenchResult(problem=problem.name, status="error", time_s=elapsed)
+    finally:
+        # Close multiprocessing resources to prevent FD leak.
+        # Without this, each call leaks pipe FDs from the Queue and Process,
+        # and after ~340 problems the daemon hits the FD limit (ulimit -n).
+        try:
+            proc.close()
+        except ValueError:
+            pass  # Process still running — will be reaped by GC
+        result_queue.close()
+        result_queue.join_thread()
 
 
 def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:
@@ -350,4 +370,8 @@ def run_single_problem(args, socket_path=None):
         save_run_result(base_dir, prover, preset_name, result)
         return ("run", result)
     except Exception as e:
+        import traceback
+        print(f"ERROR in run_single_problem({problem.name}): {e}")
+        traceback.print_exc()
+        sys.stdout.flush()
         return ("error", BenchResult(problem=problem.name, status="error", time_s=0))

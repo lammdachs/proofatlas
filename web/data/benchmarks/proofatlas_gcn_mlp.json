@@ -1,15 +1,15 @@
 {
-  "generated": "2026-02-10T15:39:29.175482",
+  "generated": "2026-02-10T22:19:52.259652",
   "prover": "proofatlas",
   "preset": "gcn_mlp",
-  "completed": 111,
+  "completed": 384,
   "total": 384,
-  "progress_pct": 28.90625,
+  "progress_pct": 100.0,
   "stats": {
-    "proof": 99,
+    "proof": 224,
     "saturated": 0,
-    "resource_limit": 12,
+    "resource_limit": 160,
     "error": 0
   },
-  "proof_rate": 89.1891891891892
+  "proof_rate": 58.333333333333336
 }

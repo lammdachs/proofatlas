@@ -42,6 +42,8 @@ pub struct RemoteSelector {
     rng_state: u64,
     /// Number of reconnections performed.
     reconnect_count: usize,
+    /// Server permanently unavailable — select() returns None immediately.
+    dead: bool,
     // Stats
     cache_hits: usize,
     cache_misses: usize,
@@ -56,8 +58,28 @@ const MAX_RECONNECTS: usize = 5;
 
 impl RemoteSelector {
     /// Connect to a scoring server at the given socket path.
+    ///
+    /// Retries with exponential backoff for up to 15 seconds to handle the
+    /// case where the server is restarting (e.g., after a crash).
     pub fn connect(socket_path: &str) -> Result<Self, String> {
-        let stream = Self::open_stream(socket_path)?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut delay = Duration::from_millis(500);
+        let stream = loop {
+            match Self::open_stream(socket_path) {
+                Ok(s) => break s,
+                Err(e) => {
+                    if Instant::now() + delay > deadline {
+                        return Err(e);
+                    }
+                    eprintln!(
+                        "RemoteSelector: connect failed ({}), retrying in {:?}...",
+                        e, delay
+                    );
+                    std::thread::sleep(delay);
+                    delay = (delay * 2).min(Duration::from_secs(2));
+                }
+            }
+        };
 
         Ok(Self {
             stream,
@@ -68,6 +90,7 @@ impl RemoteSelector {
             temperature: 1.0,
             rng_state: 12345,
             reconnect_count: 0,
+            dead: false,
             cache_hits: 0,
             cache_misses: 0,
             network_time: Duration::ZERO,
@@ -78,11 +101,15 @@ impl RemoteSelector {
     fn open_stream(socket_path: &str) -> Result<UnixStream, String> {
         let stream = UnixStream::connect(socket_path)
             .map_err(|e| format!("Failed to connect to scoring server at {}: {}", socket_path, e))?;
+        // Timeout must be long enough for mutex contention: with N workers
+        // sharing one embedder, worst-case wait is N * embed_time. 120s handles
+        // 8 workers with up to 15s per embed_batch. The prover's own timeout
+        // (typically 600s) is the real safety net.
         stream
-            .set_read_timeout(Some(Duration::from_secs(300)))
+            .set_read_timeout(Some(Duration::from_secs(120)))
             .map_err(|e| format!("Failed to set read timeout: {}", e))?;
         stream
-            .set_write_timeout(Some(Duration::from_secs(300)))
+            .set_write_timeout(Some(Duration::from_secs(120)))
             .map_err(|e| format!("Failed to set write timeout: {}", e))?;
         Ok(stream)
     }
@@ -173,7 +200,7 @@ impl RemoteSelector {
 
 impl ClauseSelector for RemoteSelector {
     fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
-        if unprocessed.is_empty() {
+        if unprocessed.is_empty() || self.dead {
             return None;
         }
 
@@ -186,13 +213,19 @@ impl ClauseSelector for RemoteSelector {
         // The prover's timeout is the safety net for persistent failures.
         let mut retry_delay = Duration::from_millis(100);
 
+        // Cap uncached clauses per request to prevent overwhelming the server
+        // after a reconnect (when the entire unprocessed set is uncached).
+        // The server returns a default score (0.0) for clauses not yet embedded.
+        const MAX_UNCACHED_PER_REQUEST: usize = 512;
+
         let scores = loop {
             // Find uncached clauses (recomputed each attempt since cache
-            // marks are reverted on error)
+            // marks are reverted on error), capped to prevent large batches
             let uncached_indices: Vec<usize> = unprocessed
                 .iter()
                 .copied()
                 .filter(|idx| !self.cached_indices.contains(idx))
+                .take(MAX_UNCACHED_PER_REQUEST)
                 .collect();
 
             // Tentatively mark as cached (reverted on error)
@@ -244,11 +277,9 @@ impl ClauseSelector for RemoteSelector {
                     }
 
                     if !self.reconnect() {
-                        // Reconnect failed — block until prover timeout kills us
-                        eprintln!("RemoteSelector: cannot recover, waiting for timeout");
-                        loop {
-                            std::thread::sleep(Duration::from_secs(60));
-                        }
+                        eprintln!("RemoteSelector: cannot recover, giving up");
+                        self.dead = true;
+                        return None;
                     }
                     // Reconnect succeeded — retry immediately (cache already cleared)
                     retry_delay = Duration::from_millis(100);
@@ -297,6 +328,7 @@ impl ClauseSelector for RemoteSelector {
         self.processed_indices.clear();
         self.rng_state = 12345;
         self.reconnect_count = 0;
+        self.dead = false;
         self.cache_hits = 0;
         self.cache_misses = 0;
         self.network_time = Duration::ZERO;
@@ -339,12 +371,9 @@ impl ClauseSelector for RemoteSelector {
                 Err(e) => {
                     eprintln!("RemoteSelector: Init connection error: {}", e);
                     if !self.reconnect() {
-                        eprintln!("RemoteSelector: Init cannot recover, waiting for timeout");
-                        loop {
-                            std::thread::sleep(Duration::from_secs(60));
-                        }
+                        eprintln!("RemoteSelector: Init cannot recover, giving up");
+                        self.dead = true;
                     }
-                    // Reconnect re-sends Init internally, so we're done
                     return;
                 }
             }

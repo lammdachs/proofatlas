@@ -33,6 +33,14 @@ import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+# Prevent CUDA initialization in the daemon and its forked worker subprocesses.
+# Without this, importing proofatlas loads libtorch_cuda.so which initializes a
+# CUDA context. Each multiprocessing.Process(fork) child inherits this context,
+# and after ~340 forks the accumulated GPU memory corruption crashes the scoring
+# server. Only the scoring server subprocess (started via Popen with its own env
+# setting CUDA_VISIBLE_DEVICES=<gpu_id>) should touch the GPU.
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 import argparse
 import json
 import signal
@@ -378,9 +386,11 @@ start_scoring_server(
 )
 '''
     env = {**os.environ}
-    if use_cuda and gpu_id is not None:
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    elif not use_cuda:
+    if use_cuda:
+        # Restore GPU visibility for the server subprocess (the parent hides GPUs
+        # via CUDA_VISIBLE_DEVICES="" to prevent fork-inherited CUDA contexts).
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id) if gpu_id is not None else "0"
+    else:
         env["CUDA_VISIBLE_DEVICES"] = ""
 
     stderr_file = tempfile.NamedTemporaryFile(prefix="proofatlas-server-", suffix=".log", delete=False)
@@ -424,6 +434,60 @@ def _log_result(result, stats, index, total, log_file, base_dir, prover, preset_
     log_file.flush()
     sys.stdout.flush()
     export_benchmark_progress(base_dir, prover, preset_name, stats, index, total)
+
+
+def _restart_server(i, server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda, reason):
+    """Restart a single scoring server. Returns True on success."""
+    old_proc = server_procs[i]
+    if old_proc.poll() is None:
+        old_proc.terminate()
+        try:
+            old_proc.wait(timeout=5)
+        except Exception:
+            old_proc.kill()
+            old_proc.wait()
+    print(f"Scoring server {i}: {reason}, restarting...")
+    sys.stdout.flush()
+    gpu_id = i if use_cuda else None
+    new_proc, new_log = _start_scoring_server_subprocess(
+        encoder=preset["encoder"],
+        scorer=preset["scorer"],
+        weights_path=weights_path,
+        socket_path=socket_paths[i],
+        use_cuda=use_cuda,
+        gpu_id=gpu_id,
+    )
+    server_procs[i] = new_proc
+    stderr_logs[i] = new_log
+    if _wait_for_socket(socket_paths[i]):
+        print(f"Scoring server {i} restarted at {socket_paths[i]}")
+        sys.stdout.flush()
+        return True
+    else:
+        print(f"ERROR: Scoring server {i} failed to restart")
+        sys.stdout.flush()
+        return False
+
+
+def _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                   completed_count=0):
+    """Check server health and restart any dead servers. Returns number restarted."""
+    if not server_procs:
+        return 0
+    restarted = 0
+    for i, proc in enumerate(server_procs):
+        if proc.poll() is not None:
+            rc = proc.returncode
+            if rc < 0:
+                desc = f"died (signal {-rc})"
+            elif rc == 0:
+                desc = "died (clean exit)"
+            else:
+                desc = f"died (exit code {rc})"
+            if _restart_server(i, server_procs, socket_paths, stderr_logs,
+                               preset, weights_path, use_cuda, desc):
+                restarted += 1
+    return restarted
 
 
 def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
@@ -535,6 +599,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
                 for future in as_completed(futures):
                     completed += 1
+                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                   completed_count=completed)
                     try:
                         status, result = future.result()
                         _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
@@ -544,6 +610,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         else:
             # Sequential execution
             for i, item in enumerate(work_items, 1):
+                _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                               completed_count=i - 1)
                 # Periodic garbage collection to prevent OOM
                 if i % 100 == 0:
                     import gc
@@ -721,10 +789,20 @@ def main():
             print("Warning: --gpu-workers has no effect without ML selector configs, ignoring")
             gpu_workers = 0
         else:
+            # Check GPU count via subprocess because CUDA_VISIBLE_DEVICES=""
+            # is set in this process to prevent fork-inherited CUDA contexts.
+            # Remove the override so the child sees all GPUs.
+            import subprocess
+            check_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
             try:
-                import torch
-                available_gpus = torch.cuda.device_count()
-            except ImportError:
+                result = subprocess.run(
+                    [sys.executable, "-c",
+                     "import torch; print(torch.cuda.device_count())"],
+                    capture_output=True, text=True, timeout=30,
+                    env=check_env,
+                )
+                available_gpus = int(result.stdout.strip())
+            except Exception:
                 print("Error: --gpu-workers requires PyTorch with CUDA support")
                 sys.exit(1)
 
