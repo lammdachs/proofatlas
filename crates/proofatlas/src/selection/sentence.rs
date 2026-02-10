@@ -10,7 +10,10 @@
 use std::path::Path;
 
 #[cfg(feature = "ml")]
-use crate::logic::Clause;
+use std::sync::Arc;
+
+#[cfg(feature = "ml")]
+use crate::logic::{Clause, Interner};
 
 /// Sentence embedder using PyTorch for inference
 ///
@@ -23,6 +26,9 @@ pub struct SentenceEmbedder {
     tokenizer: tokenizers::Tokenizer,
     device: tch::Device,
     max_length: usize,
+    /// Symbol interner for resolving clause IDs to symbol names.
+    /// Set via `set_interner` before the saturation loop.
+    interner: Option<Arc<Interner>>,
 }
 
 #[cfg(feature = "ml")]
@@ -49,6 +55,7 @@ impl SentenceEmbedder {
             tokenizer,
             device,
             max_length: 128,
+            interner: None,
         })
     }
 
@@ -103,8 +110,13 @@ impl super::cached::ClauseEmbedder for SentenceEmbedder {
             return vec![];
         }
 
-        // Convert clauses to strings
-        let clause_strings: Vec<String> = clauses.iter().map(|c| c.to_string()).collect();
+        // Convert clauses to strings using symbol names (not raw IDs)
+        let clause_strings: Vec<String> = if let Some(ref interner) = self.interner {
+            clauses.iter().map(|c| c.display(interner).to_string()).collect()
+        } else {
+            // Fallback to raw IDs if interner not set (should not happen in practice)
+            clauses.iter().map(|c| c.to_string()).collect()
+        };
 
         // Tokenize
         let (input_ids, attention_mask) = self.tokenize_clauses(&clause_strings);
@@ -133,6 +145,10 @@ impl super::cached::ClauseEmbedder for SentenceEmbedder {
 
     fn name(&self) -> &str {
         "sentence"
+    }
+
+    fn set_interner(&mut self, interner: Arc<Interner>) {
+        self.interner = Some(interner);
     }
 }
 

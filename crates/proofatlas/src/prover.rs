@@ -115,17 +115,18 @@ impl ProofAtlas {
 
             clause.id = Some(clause_idx);
 
-            // Notify indices about pending clause
-            index_registry.on_clause_pending(clause_idx, &oriented);
+            // Notify indices about added clause
+            index_registry.on_add(clause_idx, &oriented);
 
             clauses.push(clause);
             new.push(clause_idx);
             clause_idx += 1;
         }
 
-        // Reset clause selector state
+        // Reset clause selector state and provide interner for symbol name resolution
         let mut clause_selector = clause_selector;
         clause_selector.reset();
+        clause_selector.set_interner(Arc::new(clause_manager.interner.clone()));
 
         // Initialize generating rules
         let generating_inferences: Vec<Box<dyn GeneratingInference>> = vec![
@@ -263,9 +264,10 @@ impl ProofAtlas {
                 continue;
             }
 
-            // 1c: Clause survives - activate it in indices
-            self.index_registry
-                .on_clause_activated(clause_idx, &self.state.clauses[clause_idx]);
+            // 1c: Transfer N → U (activates clause in indices via on_transfer)
+            if let Some(result) = self.apply_change(StateChange::Transfer(clause_idx)) {
+                return Some(result);
+            }
 
             // 1d: Apply backward simplification rules
             let mut all_backward_changes: Vec<StateChange> = Vec::new();
@@ -302,11 +304,6 @@ impl ProofAtlas {
                 if let Some(result) = self.apply_change(change) {
                     return Some(result);
                 }
-            }
-
-            // 1e: Transfer N → U
-            if let Some(result) = self.apply_change(StateChange::Transfer(clause_idx)) {
-                return Some(result);
             }
         }
 
@@ -399,7 +396,7 @@ impl ProofAtlas {
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
-                self.index_registry.on_clause_pending(new_idx, &oriented);
+                self.index_registry.on_add(new_idx, &oriented);
 
                 self.state.clauses.push(clause_with_id.clone());
                 self.state.new.push(new_idx);
@@ -458,10 +455,10 @@ impl ProofAtlas {
                     self.state.new.pop();
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
-                    self.index_registry.on_clause_removed(clause_idx, clause);
+                    self.index_registry.on_delete(clause_idx, clause);
                 } else if self.state.processed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
-                    self.index_registry.on_clause_removed(clause_idx, clause);
+                    self.index_registry.on_delete(clause_idx, clause);
                 }
                 self.state.event_log.push(change);
             }
@@ -472,6 +469,7 @@ impl ProofAtlas {
                     self.state.new.pop();
                 }
                 self.state.unprocessed.insert(clause_idx);
+                self.index_registry.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(change);
             }
             StateChange::Activate(clause_idx) => {
@@ -479,7 +477,7 @@ impl ProofAtlas {
                 // U → P (selector already removed from U)
                 self.state.unprocessed.shift_remove(&clause_idx);
                 self.state.processed.insert(clause_idx);
-                self.index_registry.on_clause_processed(clause_idx, &self.state.clauses[clause_idx]);
+                self.index_registry.on_activate(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(change);
 
                 // Increment iteration count at activation (given clause selection)

@@ -243,8 +243,8 @@ impl Index for SubsumptionChecker {
         self.feature_index.initialize_symbols(clauses);
     }
 
-    fn on_clause_pending(&mut self, idx: usize, clause: &Clause) {
-        // Add clause to internal store + feature index (not activated yet)
+    fn on_add(&mut self, idx: usize, clause: &Clause) {
+        // Add clause to internal store + feature index (not transferred yet)
         let feature_idx = self.feature_index.add_clause(clause);
         debug_assert_eq!(idx, feature_idx, "SubsumptionChecker index mismatch: expected {}, got {}", idx, feature_idx);
         // Ensure clauses vec is large enough
@@ -254,7 +254,7 @@ impl Index for SubsumptionChecker {
         self.clauses[idx] = clause.clone();
     }
 
-    fn on_clause_activated(&mut self, idx: usize, _clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, _clause: &Clause) {
         if self.active.contains(&idx) {
             return;
         }
@@ -274,7 +274,7 @@ impl Index for SubsumptionChecker {
         }
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
         self.active.remove(&idx);
         self.feature_index.deactivate(idx);
 

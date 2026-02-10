@@ -14,11 +14,12 @@
 //! - Embeddings to be reused across multiple scoring calls
 //! - Clear separation between expensive embedding computation and cheap scoring
 
-use crate::logic::Clause;
+use crate::logic::{Clause, Interner};
 use super::clause::SelectorStats;
 use super::ClauseSelector;
 use indexmap::IndexSet;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Trait for models that compute clause embeddings
@@ -37,6 +38,11 @@ pub trait ClauseEmbedder: Send {
 
     /// Get the name of this embedder
     fn name(&self) -> &str;
+
+    /// Provide the symbol interner for clause serialization.
+    /// Embedders that need symbol names (e.g., sentence transformers) should
+    /// store this and use it during `embed_batch`.
+    fn set_interner(&mut self, _interner: Arc<Interner>) {}
 }
 
 /// Trait for models that score embeddings
@@ -87,6 +93,8 @@ pub struct CachingSelector<E: ClauseEmbedder, S: EmbeddingScorer> {
     cache: HashMap<usize, Vec<f32>>,
     /// Indices of clauses in the processed set (for cross-attention context)
     processed_indices: Vec<usize>,
+    /// Softmax temperature for sampling (τ=1.0 is default)
+    temperature: f32,
     /// RNG state for sampling
     rng_state: u64,
     /// Accumulated cache hits
@@ -110,13 +118,19 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> std::fmt::Debug for CachingSelector<
 }
 
 impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
-    /// Create a new caching selector
+    /// Create a new caching selector with default temperature (τ=1.0)
     pub fn new(embedder: E, scorer: S) -> Self {
+        Self::with_temperature(embedder, scorer, 1.0)
+    }
+
+    /// Create a new caching selector with a specific softmax temperature
+    pub fn with_temperature(embedder: E, scorer: S, temperature: f32) -> Self {
         Self {
             embedder,
             scorer,
             cache: HashMap::new(),
             processed_indices: Vec::new(),
+            temperature,
             rng_state: 12345,
             cache_hits: 0,
             cache_misses: 0,
@@ -208,11 +222,12 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
         };
         self.score_time += t0.elapsed();
 
-        // Softmax sampling
+        // Softmax sampling with temperature
+        let tau = self.temperature;
         let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let exp_scores: Vec<f64> = scores
             .iter()
-            .map(|&s| ((s - max_score) as f64).exp())
+            .map(|&s| (((s - max_score) / tau) as f64).exp())
             .collect();
         let sum: f64 = exp_scores.iter().sum();
         let probs: Vec<f64> = exp_scores.iter().map(|&e| e / sum).collect();
@@ -255,6 +270,10 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
             embed_time: self.embed_time,
             score_time: self.score_time,
         })
+    }
+
+    fn set_interner(&mut self, interner: Arc<Interner>) {
+        self.embedder.set_interner(interner);
     }
 }
 

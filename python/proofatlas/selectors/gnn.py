@@ -400,7 +400,7 @@ class ScorerHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear1(x)
-        x = F.relu(x)
+        x = F.gelu(x)
         return self.linear2(x)
 
 

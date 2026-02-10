@@ -87,19 +87,19 @@ impl Index for SelectedLiteralIndex {
         IndexKind::SelectedLiterals
     }
 
-    fn on_clause_pending(&mut self, _idx: usize, _clause: &Clause) {
-        // Only interested in processed clauses
+    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+        // Only interested in activated clauses
     }
 
-    fn on_clause_activated(&mut self, _idx: usize, _clause: &Clause) {
-        // Only interested in processed clauses (U -> P transition)
+    fn on_transfer(&mut self, _idx: usize, _clause: &Clause) {
+        // Only interested in activated clauses (U -> P transition)
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
         self.purge_clause(idx);
     }
 
-    fn on_clause_processed(&mut self, idx: usize, clause: &Clause) {
+    fn on_activate(&mut self, idx: usize, clause: &Clause) {
         let selected: Vec<usize> = self.selector.select(clause).into_iter().collect();
 
         for &lit_idx in &selected {
@@ -151,7 +151,7 @@ mod tests {
         ]);
 
         // Process clause
-        index.on_clause_processed(0, &clause);
+        index.on_activate(0, &clause);
 
         // Should find candidates for (P, true) and (Q, false)
         assert_eq!(index.candidates_by_predicate(p_id, true).len(), 1);
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(index.candidates_by_predicate(q_id, true).len(), 0);
 
         // Remove clause
-        index.on_clause_removed(0, &clause);
+        index.on_delete(0, &clause);
         assert_eq!(index.candidates_by_predicate(p_id, true).len(), 0);
         assert_eq!(index.candidates_by_predicate(q_id, false).len(), 0);
     }
@@ -184,10 +184,10 @@ mod tests {
             ),
         ]);
 
-        index.on_clause_processed(0, &clause);
+        index.on_activate(0, &clause);
         assert!(index.equality_clauses().contains(&0));
 
-        index.on_clause_removed(0, &clause);
+        index.on_delete(0, &clause);
         assert!(!index.equality_clauses().contains(&0));
     }
 
@@ -209,7 +209,7 @@ mod tests {
             ),
         ]);
 
-        index.on_clause_processed(0, &clause);
+        index.on_activate(0, &clause);
         assert!(!index.equality_clauses().contains(&0));
     }
 }

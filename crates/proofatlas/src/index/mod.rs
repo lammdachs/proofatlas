@@ -58,29 +58,30 @@ pub enum IndexKind {
 
 /// Trait for index implementations that track clause lifecycle events.
 ///
-/// Indices receive notifications when clauses enter/exit different states:
-/// - `on_clause_pending`: Clause added to N (new, awaiting forward simplification)
-/// - `on_clause_activated`: Clause transferred from N to U (survived forward simplification)
-/// - `on_clause_removed`: Clause deleted from U or P (backward simplification)
+/// Method names mirror the `StateChange` enum variants:
+/// - `on_add`: Clause added to N (new, awaiting forward simplification)
+/// - `on_transfer`: Clause transferred from N to U (survived forward simplification)
+/// - `on_delete`: Clause deleted from U or P (backward simplification)
+/// - `on_activate`: Clause activated from U to P (given clause selected)
 pub trait Index: Send + Sync {
     /// Get the kind of this index
     fn kind(&self) -> IndexKind;
 
-    /// Called when a clause is added to N (pending, not yet active).
+    /// Called on `Add`: clause added to N (pending, not yet active).
     /// Some indices (like FeatureVectors) pre-compute features here.
-    fn on_clause_pending(&mut self, idx: usize, clause: &Clause);
+    fn on_add(&mut self, idx: usize, clause: &Clause);
 
-    /// Called when a clause is activated (transferred from N to U).
+    /// Called on `Transfer`: clause transferred from N to U.
     /// Most indices start tracking the clause here.
-    fn on_clause_activated(&mut self, idx: usize, clause: &Clause);
+    fn on_transfer(&mut self, idx: usize, clause: &Clause);
 
-    /// Called when a clause is removed from U or P.
+    /// Called on `Delete`: clause removed from U or P.
     /// Indices should stop tracking the clause.
-    fn on_clause_removed(&mut self, idx: usize, clause: &Clause);
+    fn on_delete(&mut self, idx: usize, clause: &Clause);
 
-    /// Called when a clause is moved from U to P (processed).
+    /// Called on `Activate`: clause moved from U to P (processed).
     /// Used by SelectedLiteralIndex to index clauses by their selected literals.
-    fn on_clause_processed(&mut self, _idx: usize, _clause: &Clause) {}
+    fn on_activate(&mut self, _idx: usize, _clause: &Clause) {}
 
     /// Initialize the index with all input clauses (for pre-computing symbol tables, etc.)
     fn initialize(&mut self, _clauses: &[Clause]) {}
@@ -139,17 +140,17 @@ impl Index for UnitClausesIndex {
         IndexKind::UnitClauses
     }
 
-    fn on_clause_pending(&mut self, _idx: usize, _clause: &Clause) {
-        // Units are only tracked when activated
+    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+        // Units are only tracked when transferred
     }
 
-    fn on_clause_activated(&mut self, idx: usize, clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, clause: &Clause) {
         if clause.literals.len() == 1 {
             self.units.insert(idx);
         }
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
         self.units.shift_remove(&idx);
     }
 
@@ -220,17 +221,17 @@ impl Index for UnitEqualitiesIndex {
         IndexKind::UnitEqualities
     }
 
-    fn on_clause_pending(&mut self, _idx: usize, _clause: &Clause) {
-        // Unit equalities are only tracked when activated
+    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+        // Unit equalities are only tracked when transferred
     }
 
-    fn on_clause_activated(&mut self, idx: usize, clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, clause: &Clause) {
         if self.is_unit_equality(clause) {
             self.unit_equalities.insert(idx);
         }
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
         self.unit_equalities.shift_remove(&idx);
     }
 
@@ -307,18 +308,18 @@ impl Index for FeatureVectorIndex {
         self.inner.initialize_symbols(clauses);
     }
 
-    fn on_clause_pending(&mut self, idx: usize, clause: &Clause) {
-        // Add clause to feature index (but not activated yet)
+    fn on_add(&mut self, idx: usize, clause: &Clause) {
+        // Add clause to feature index (but not transferred yet)
         let feature_idx = self.inner.add_clause(clause);
         // Verify indices stay in sync
         debug_assert_eq!(idx, feature_idx, "FeatureIndex index mismatch: expected {}, got {}", idx, feature_idx);
     }
 
-    fn on_clause_activated(&mut self, idx: usize, _clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, _clause: &Clause) {
         self.inner.activate(idx);
     }
 
-    fn on_clause_removed(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
         self.inner.deactivate(idx);
     }
 
@@ -370,31 +371,31 @@ impl IndexRegistry {
         }
     }
 
-    /// Route a clause pending event to all indices.
-    pub fn on_clause_pending(&mut self, idx: usize, clause: &Clause) {
+    /// Route an Add event to all indices.
+    pub fn on_add(&mut self, idx: usize, clause: &Clause) {
         for index in self.indices.values_mut() {
-            index.on_clause_pending(idx, clause);
+            index.on_add(idx, clause);
         }
     }
 
-    /// Route a clause activated event to all indices.
-    pub fn on_clause_activated(&mut self, idx: usize, clause: &Clause) {
+    /// Route a Transfer event (N → U) to all indices.
+    pub fn on_transfer(&mut self, idx: usize, clause: &Clause) {
         for index in self.indices.values_mut() {
-            index.on_clause_activated(idx, clause);
+            index.on_transfer(idx, clause);
         }
     }
 
-    /// Route a clause removed event to all indices.
-    pub fn on_clause_removed(&mut self, idx: usize, clause: &Clause) {
+    /// Route a Delete event to all indices.
+    pub fn on_delete(&mut self, idx: usize, clause: &Clause) {
         for index in self.indices.values_mut() {
-            index.on_clause_removed(idx, clause);
+            index.on_delete(idx, clause);
         }
     }
 
-    /// Route a clause processed event (U → P) to all indices.
-    pub fn on_clause_processed(&mut self, idx: usize, clause: &Clause) {
+    /// Route an Activate event (U → P) to all indices.
+    pub fn on_activate(&mut self, idx: usize, clause: &Clause) {
         for index in self.indices.values_mut() {
-            index.on_clause_processed(idx, clause);
+            index.on_activate(idx, clause);
         }
     }
 
@@ -549,11 +550,11 @@ mod tests {
 
         assert!(index.is_empty());
 
-        index.on_clause_activated(0, &clause);
+        index.on_transfer(0, &clause);
         assert_eq!(index.len(), 1);
         assert!(index.contains(&0));
 
-        index.on_clause_removed(0, &clause);
+        index.on_delete(0, &clause);
         assert!(index.is_empty());
     }
 
@@ -566,8 +567,8 @@ mod tests {
         // Create index after interning all symbols
         let mut index = UnitEqualitiesIndex::new(&interner);
 
-        index.on_clause_activated(0, &eq_clause);
-        index.on_clause_activated(1, &non_eq);
+        index.on_transfer(0, &eq_clause);
+        index.on_transfer(1, &non_eq);
 
         assert_eq!(index.len(), 1);
         assert!(index.contains(&0));

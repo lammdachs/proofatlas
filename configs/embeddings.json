@@ -5,7 +5,8 @@
     "gcn": {
       "type": "gcn",
       "hidden_dim": 256,
-      "num_layers": 6
+      "num_layers": 6,
+      "node_info": "both"
     },
 
     "sentence": {

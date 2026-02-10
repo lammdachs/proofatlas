@@ -5,8 +5,9 @@
 //! - `GcnSelector` - GCN-based ML selector (requires `torch` feature)
 //! - `SentenceSelector` - Sentence transformer selector (requires `torch` + `sentence` features)
 
-use crate::logic::Clause;
+use crate::logic::{Clause, Interner};
 use indexmap::IndexSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Accumulated statistics from a clause selector.
@@ -41,4 +42,10 @@ pub trait ClauseSelector: Send {
     /// Notify the selector that a clause has been moved to the processed set (U→P).
     /// Used by cross-attention selectors to track the P set for context.
     fn on_clause_processed(&mut self, _clause_idx: usize) {}
+
+    /// Provide the symbol interner for clause serialization.
+    /// Called by the prover after parsing, before the saturation loop.
+    /// ML selectors that need symbol names (e.g., sentence transformers) should
+    /// store this and use it during embedding.
+    fn set_interner(&mut self, _interner: Arc<Interner>) {}
 }

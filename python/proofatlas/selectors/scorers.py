@@ -162,8 +162,11 @@ class TransformerScorer(nn.Module):
         if ffn_dim is None:
             ffn_dim = hidden_dim * 4
 
-        # Learnable sentinel s_0
-        self.sentinel = nn.Parameter(torch.randn(1, hidden_dim) * 0.02)
+        # Per-layer learnable sentinels s_0^(l)
+        self.sentinels = nn.ParameterList([
+            nn.Parameter(torch.randn(1, hidden_dim) * 0.02)
+            for _ in range(num_layers)
+        ])
 
         # Per-layer cross-attention + FFN blocks
         self.q_norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
@@ -206,7 +209,7 @@ class TransformerScorer(nn.Module):
             q_input = self.q_norms[i](x)
 
             if p_emb is not None:
-                kv_source = torch.cat([self.sentinel, p_emb], dim=0)
+                kv_source = torch.cat([self.sentinels[i], p_emb], dim=0)
             else:
                 kv_source = q_input
 

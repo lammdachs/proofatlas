@@ -223,7 +223,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 
 ### Polymorphic Rule Architecture
 
-Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events (pending, activated, removed, processed).
+Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events via methods that mirror `StateChange` variants: `on_add`, `on_transfer`, `on_delete`, `on_activate`.
 
 **SimplifyingInference trait** (`state.rs`):
 - `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify/delete clause in N using U∪P

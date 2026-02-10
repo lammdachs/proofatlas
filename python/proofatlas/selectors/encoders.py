@@ -21,6 +21,8 @@ from .gnn import (
     NodeFeatureEmbedding,
     ClauseFeatureEmbedding,
     GCNLayer,
+    GraphNorm,
+    _batch_from_pool,
 )
 from .scorers import create_scorer
 
@@ -74,14 +76,18 @@ class GCNEncoder(ClauseEncoder):
         for _ in range(num_layers - 1):
             self.convs.append(GCNLayer(hidden_dim, hidden_dim))
 
-        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.norms = nn.ModuleList([GraphNorm(hidden_dim) for _ in range(num_layers)])
 
         # Clause feature embedding (optional)
         if use_clause_features:
             self.clause_embedding = ClauseFeatureEmbedding(sin_dim=sin_dim)
-            self._output_dim = hidden_dim + self.clause_embedding.output_dim
+            # Project concatenated features back to hidden_dim (matching ClauseGCN)
+            concat_dim = hidden_dim + self.clause_embedding.output_dim
+            self.clause_proj = nn.Linear(concat_dim, hidden_dim)
+            self._output_dim = hidden_dim
         else:
             self.clause_embedding = None
+            self.clause_proj = None
             self._output_dim = hidden_dim
 
     @property
@@ -107,13 +113,16 @@ class GCNEncoder(ClauseEncoder):
         Returns:
             Clause embeddings [num_clauses, output_dim]
         """
+        # Derive batch tensor (node → graph mapping) from pool matrix
+        batch = _batch_from_pool(pool_matrix)
+
         # Embed node features
         x = self.node_embedding(node_features)
 
         # GCN message passing
         for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
             x = conv(x, adj)
-            x = norm(x)
+            x = norm(x, batch)
             x = F.relu(x)
 
         # Pool to clause level
@@ -129,7 +138,7 @@ class GCNEncoder(ClauseEncoder):
                     num_clauses, self.clause_embedding.output_dim,
                     device=clause_emb.device, dtype=clause_emb.dtype
                 )
-            clause_emb = torch.cat([clause_emb, clause_feat_emb], dim=-1)
+            clause_emb = self.clause_proj(torch.cat([clause_emb, clause_feat_emb], dim=-1))
 
         return clause_emb
 
