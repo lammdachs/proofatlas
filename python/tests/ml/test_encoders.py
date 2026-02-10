@@ -60,8 +60,8 @@ class TestGCNEncoder:
 
     def test_output_dim_with_clause_features(self):
         encoder = GCNEncoder(hidden_dim=64, use_clause_features=True)
-        # output_dim = hidden_dim + clause_feature_dim (21 with sin_dim=8)
-        assert encoder.output_dim == 64 + 21
+        # output_dim = hidden_dim (clause features projected back to hidden_dim)
+        assert encoder.output_dim == 64
 
     def test_output_dim_without_clause_features(self):
         encoder = GCNEncoder(hidden_dim=64, use_clause_features=False)
