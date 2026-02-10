@@ -676,15 +676,20 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
             proc.join()
         return BenchResult(problem=problem.name, status="timeout", time_s=elapsed)
 
-    if proc.exitcode != 0:
-        # Process crashed (e.g., stack overflow gives exit code 134)
-        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
+    # Check result queue first — the child may exit with non-zero code due to
+    # cleanup issues (e.g., libtorch thread destruction when forked from a thread)
+    # but still have produced a valid result.
     try:
         status, elapsed_inner = result_queue.get_nowait()
         return BenchResult(problem=problem.name, status=status, time_s=elapsed_inner)
     except Exception:
+        pass
+
+    if proc.exitcode != 0:
+        # Process crashed before producing a result (e.g., stack overflow gives exit code 134)
         return BenchResult(problem=problem.name, status="error", time_s=elapsed)
+
+    return BenchResult(problem=problem.name, status="error", time_s=elapsed)
 
 
 def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_root: Path) -> BenchResult:

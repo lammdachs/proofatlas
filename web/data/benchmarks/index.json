@@ -1,5 +1,5 @@
 {
-  "generated": "2026-02-09T20:27:05.962775",
+  "generated": "2026-02-10T11:49:14.254502",
   "runs": [
     "proofatlas_age_weight",
     "proofatlas_gcn_attention",
@@ -7,6 +7,7 @@
     "proofatlas_gcn_transformer",
     "proofatlas_sentence",
     "proofatlas_sentence_mlp",
+    "proofatlas_time",
     "spass_age_weight_sel20",
     "spass_age_weight_sel21",
     "vampire_age_weight_sel0",
