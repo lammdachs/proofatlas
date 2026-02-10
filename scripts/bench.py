@@ -707,10 +707,6 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGQUIT, signal.SIG_DFL)
 
-    # Limit torch threads to prevent contention when running multiple workers
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
-
     # Set CUDA device for this worker (only when using CUDA backend)
     if use_cuda and gpu_id is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -999,22 +995,7 @@ def _update_benchmark_index(output_dir: Path):
         json.dump(index, f, indent=2)
 
 
-# Global variable for worker GPU assignment (set by worker_init)
-_worker_gpu_id = None
-
-
-def _run_single_problem_with_worker_gpu(args):
-    """Wrapper that uses worker's assigned GPU.
-
-    Calls _run_proofatlas_inner directly (no subprocess) since the pool worker
-    itself provides crash isolation. This avoids ~15s overhead per problem from
-    spawning a subprocess that reimports libtorch + reloads the model.
-    """
-    global _worker_gpu_id
-    return _run_single_problem(args, gpu_id=_worker_gpu_id, direct=True)
-
-
-def _run_single_problem(args, gpu_id=None, direct=False):
+def _run_single_problem(args, gpu_id=None):
     """Worker function for execution."""
     problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda = args
 
@@ -1024,14 +1005,7 @@ def _run_single_problem(args, gpu_id=None, direct=False):
         if existing and not rerun:
             return ("skip", existing)
 
-        if prover == "proofatlas" and direct:
-            # Call inner function directly (no subprocess) when running in pool
-            result = _run_proofatlas_inner(
-                problem, base_dir, preset, tptp_root,
-                weights_path=weights_path, collect_trace=collect_trace,
-                trace_preset=trace_preset, use_cuda=use_cuda,
-            )
-        elif prover == "proofatlas":
+        if prover == "proofatlas":
             result = run_proofatlas(
                 problem, base_dir, preset, tptp_root,
                 weights_path=weights_path, collect_trace=collect_trace,
@@ -1078,34 +1052,21 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     if num_gpus > 0:
         print(f"Distributing workers across {num_gpus} GPU(s)")
 
-    # Prepare work items (GPU assigned per-worker, not per-problem)
+    # Prepare work items
     work_items = [
         (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
         for problem in problems
     ]
 
     if n_jobs > 1:
-        # Parallel execution with GPU assignment per worker
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        import multiprocessing
+        # Parallel execution — each thread spawns a subprocess via run_proofatlas()
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Shared counter for assigning GPUs to workers
-        gpu_counter = multiprocessing.Value('i', 0)
+        # Assign GPUs round-robin per problem
+        gpu_ids = [i % num_gpus if num_gpus > 0 else None for i in range(len(work_items))]
 
-        def worker_init(counter, n_gpus):
-            """Initialize worker with a GPU assignment."""
-            global _worker_gpu_id
-            if n_gpus > 0:
-                with counter.get_lock():
-                    _worker_gpu_id = counter.value % n_gpus
-                    counter.value += 1
-            else:
-                _worker_gpu_id = None
-
-        with ProcessPoolExecutor(max_workers=n_jobs,
-                                 initializer=worker_init,
-                                 initargs=(gpu_counter, num_gpus)) as executor:
-            futures = {executor.submit(_run_single_problem_with_worker_gpu, item): i for i, item in enumerate(work_items)}
+        with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+            futures = {executor.submit(_run_single_problem, item, gpu_id=gpu_ids[i]): i for i, item in enumerate(work_items)}
             completed = 0
 
             for future in as_completed(futures):

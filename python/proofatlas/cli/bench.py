@@ -6,13 +6,6 @@ This module provides the entry point for the `proofatlas-bench` command.
 It imports and runs the main function from scripts/bench.py.
 """
 
-import os
-
-# Must be set before any import that loads libtorch (proofatlas, torch, etc.)
-# to prevent thread contention when running parallel workers.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-
 import sys
 from pathlib import Path
 
