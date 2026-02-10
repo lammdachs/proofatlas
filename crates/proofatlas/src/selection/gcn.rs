@@ -30,8 +30,6 @@ use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub struct GcnEmbedder {
     model: tch::CModule,
     device: tch::Device,
-    /// Fixed max_age for normalization (default: 10000)
-    max_age: usize,
 }
 
 #[cfg(feature = "ml")]
@@ -50,7 +48,6 @@ impl GcnEmbedder {
         Ok(Self {
             model,
             device,
-            max_age: 10000,
         })
     }
 
@@ -95,13 +92,13 @@ impl GcnEmbedder {
         let pool_matrix =
             self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
 
-        // Build clause features [num_clauses, 3]: age_normalized, role, size
+        // Build clause features [num_clauses, 3]: age, role, size
         let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
         for clause in clauses {
-            let age_normalized = clause.age as f32 / self.max_age as f32;
+            let age = clause.age as f32;
             let role = clause.role.to_feature_value();
             let size = clause.literals.len() as f32;
-            clause_feat_flat.extend_from_slice(&[age_normalized.min(1.0), role, size]);
+            clause_feat_flat.extend_from_slice(&[age, role, size]);
         }
         let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
             .view([num_clauses as i64, 3])
@@ -289,7 +286,6 @@ pub fn load_gcn_selector<P: AsRef<Path>>(
 pub struct GcnEncoder {
     model: tch::CModule,
     device: tch::Device,
-    max_age: usize,
     hidden_dim: usize,
 }
 
@@ -309,7 +305,6 @@ impl GcnEncoder {
         Ok(Self {
             model,
             device,
-            max_age: 10000,
             hidden_dim,
         })
     }
@@ -350,13 +345,13 @@ impl GcnEncoder {
         let pool_matrix =
             self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
 
-        // Build clause features [num_clauses, 3]
+        // Build clause features [num_clauses, 3]: age, role, size
         let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
         for clause in clauses {
-            let age_normalized = clause.age as f32 / self.max_age as f32;
+            let age = clause.age as f32;
             let role = clause.role.to_feature_value();
             let size = clause.literals.len() as f32;
-            clause_feat_flat.extend_from_slice(&[age_normalized.min(1.0), role, size]);
+            clause_feat_flat.extend_from_slice(&[age, role, size]);
         }
         let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
             .view([num_clauses as i64, 3])

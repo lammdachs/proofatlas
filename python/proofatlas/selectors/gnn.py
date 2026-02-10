@@ -151,12 +151,12 @@ class ClauseFeatureEmbedding(nn.Module):
         Returns:
             [num_clauses, output_dim] embedded features
         """
-        age = x[:, 0]           # normalized 0-1
+        age = x[:, 0]           # raw integer step count
         role = x[:, 1].long()   # int 0-4
         size = x[:, 2]          # number of literals
 
         # Encode features
-        age_enc = self.sinusoidal_encode(age * 100)  # Scale to 0-100
+        age_enc = self.sinusoidal_encode(age)
         role_onehot = F.one_hot(role.clamp(0, 4), num_classes=5).float()
         size_enc = self.sinusoidal_encode(size)
 
@@ -393,16 +393,14 @@ class ScorerHead(nn.Module):
     Named fields match Burn's ScorerHead structure for weight compatibility.
     """
 
-    def __init__(self, hidden_dim: int, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int):
         super().__init__()
         self.linear1 = nn.Linear(hidden_dim, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, 1)
-        self.dropout = dropout
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear1(x)
         x = F.relu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
         return self.linear2(x)
 
 
@@ -444,7 +442,6 @@ class ClauseGCN(nn.Module):
         node_feature_dim: int = 3,
         hidden_dim: int = 64,
         num_layers: int = 3,
-        dropout: float = 0.1,
         scorer_type: str = "mlp",
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
@@ -454,7 +451,6 @@ class ClauseGCN(nn.Module):
     ):
         super().__init__()
         self.num_layers = num_layers
-        self.dropout = dropout
         self.use_clause_features = use_clause_features
         self.node_info = node_info
 
@@ -496,7 +492,6 @@ class ClauseGCN(nn.Module):
             hidden_dim,
             num_heads=scorer_num_heads,
             num_layers=scorer_num_layers,
-            dropout=dropout,
         )
 
         # Keep reference to feature embedding for backwards compatibility
@@ -540,8 +535,6 @@ class ClauseGCN(nn.Module):
             x = conv(x, adj)
             x = norm(x, batch)
             x = F.relu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
 
         # Pool to clause level (handles sparse or dense pool_matrix)
         clause_emb = sparse_mm(pool_matrix, x)
@@ -591,8 +584,6 @@ class ClauseGCN(nn.Module):
             x = conv(x, adj)
             x = norm(x, batch)
             x = F.relu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
 
         clause_emb = sparse_mm(pool_matrix, x)
 

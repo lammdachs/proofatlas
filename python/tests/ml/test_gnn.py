@@ -84,21 +84,6 @@ class TestScorerHead:
         out = scorer(x)
         assert out.shape == (10, 1)
 
-    def test_train_eval_difference(self):
-        """Test that dropout affects training mode."""
-        scorer = ScorerHead(hidden_dim=64, dropout=0.5)
-        x = torch.randn(10, 64)
-
-        scorer.train()
-        out1 = scorer(x)
-        out2 = scorer(x)
-
-        scorer.eval()
-        out3 = scorer(x)
-        out4 = scorer(x)
-        assert torch.allclose(out3, out4)
-
-
 class TestGraphNorm:
     """Tests for GraphNorm."""
 
@@ -206,7 +191,7 @@ class TestClauseGCN:
             assert not torch.isnan(scores).any()
 
     def test_with_different_scorers(self):
-        for scorer_type in ["mlp", "attention", "transformer", "cross_attention"]:
+        for scorer_type in ["mlp", "attention", "transformer"]:
             model = ClauseGCN(
                 hidden_dim=64,
                 num_layers=2,
@@ -329,7 +314,7 @@ class TestTorchScriptExport:
 
         assert torch.allclose(original, exported)
 
-    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer", "cross_attention"])
+    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer"])
     def test_gcn_export_all_scorers(self, valid_inputs, tmp_path, scorer_type):
         """Test TorchScript export with all scorer types."""
         model = ClauseGCN(hidden_dim=64, num_layers=2, scorer_type=scorer_type)

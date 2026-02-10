@@ -214,8 +214,7 @@ def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
 
     clauses = trace["clauses"]
     labels = [c.get("label", 0) for c in clauses]
-    max_age = len(clauses)
-    graphs = [clause_to_graph(c, max_age) for c in clauses]
+    graphs = [clause_to_graph(c) for c in clauses]
 
     return {
         "graphs": graphs,
@@ -678,7 +677,6 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
         hidden_dim=model_config.get("hidden_dim", 64),
         num_layers=model_config.get("num_layers", 3),
         num_heads=model_config.get("num_heads", 4),
-        dropout=model_config.get("dropout", 0.1),
     )
 
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -891,7 +889,6 @@ def run_training(
         hidden_dim=hidden_dim,
         num_layers=emb_config.get("num_layers", config.get("num_layers", 3)),
         num_heads=emb_config.get("num_heads", config.get("num_heads", 4)),
-        dropout=emb_config.get("dropout", config.get("dropout", 0.1)),
         scorer_type=scorer_config.get("type", "mlp"),
         scorer_num_heads=scorer_config.get("num_heads", 4),
         scorer_num_layers=scorer_config.get("num_layers", 2),

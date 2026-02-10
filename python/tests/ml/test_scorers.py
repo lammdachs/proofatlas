@@ -7,7 +7,6 @@ from proofatlas.selectors.scorers import (
     MLPScorer,
     AttentionScorer,
     TransformerScorer,
-    CrossAttentionScorer,
     create_scorer,
 )
 
@@ -84,27 +83,6 @@ class TestTransformerScorer:
         assert x.grad is not None
 
 
-class TestCrossAttentionScorer:
-    def test_forward_shape(self):
-        scorer = CrossAttentionScorer(hidden_dim=64, num_heads=4)
-        x = torch.randn(10, 64)
-        scores = scorer(x)
-        assert scores.shape == (10,)
-
-    def test_single_clause(self):
-        scorer = CrossAttentionScorer(hidden_dim=64, num_heads=4)
-        x = torch.randn(1, 64)
-        scores = scorer(x)
-        assert scores.shape == (1,)
-
-    def test_learnable_query(self):
-        """Verify the learnable query parameter exists and is trainable."""
-        scorer = CrossAttentionScorer(hidden_dim=64, num_heads=4)
-        assert hasattr(scorer, 'query')
-        assert scorer.query.requires_grad
-        assert scorer.query.shape == (1, 64)
-
-
 class TestCreateScorer:
     def test_mlp(self):
         scorer = create_scorer("mlp", hidden_dim=64)
@@ -118,19 +96,9 @@ class TestCreateScorer:
         scorer = create_scorer("transformer", hidden_dim=64, num_heads=4, num_layers=2)
         assert isinstance(scorer, TransformerScorer)
 
-    def test_cross_attention(self):
-        scorer = create_scorer("cross_attention", hidden_dim=64, num_heads=4)
-        assert isinstance(scorer, CrossAttentionScorer)
-
     def test_invalid_type(self):
         with pytest.raises(ValueError, match="Unknown scorer type"):
             create_scorer("invalid", hidden_dim=64)
-
-    def test_dropout_ignored(self):
-        """Verify dropout parameter is accepted but ignored."""
-        scorer = create_scorer("attention", hidden_dim=64, dropout=0.5)
-        assert isinstance(scorer, AttentionScorer)
-
 
 class TestScorerTrainEval:
     """Test train/eval mode behavior."""
@@ -266,20 +234,6 @@ class TestMLPScorerIgnoresPEmb:
 
     def test_ignores_p_emb(self):
         scorer = MLPScorer(hidden_dim=64)
-        scorer.eval()
-        u_emb = torch.randn(10, 64)
-        p_emb = torch.randn(5, 64)
-        with torch.no_grad():
-            scores_with = scorer(u_emb, p_emb)
-            scores_without = scorer(u_emb)
-        assert torch.allclose(scores_with, scores_without)
-
-
-class TestCrossAttentionScorerIgnoresPEmb:
-    """Tests that CrossAttentionScorer ignores p_emb (legacy)."""
-
-    def test_ignores_p_emb(self):
-        scorer = CrossAttentionScorer(hidden_dim=64, num_heads=4)
         scorer.eval()
         u_emb = torch.randn(10, 64)
         p_emb = torch.randn(5, 64)

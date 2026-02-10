@@ -11,7 +11,6 @@ Available scorers:
 - MLPScorer: Independent MLP per clause (ignores p_emb)
 - AttentionScorer: Cross-attention (U queries, [s_0; P] keys/values). Falls back to self-attention when p_emb is None.
 - TransformerScorer: Multi-layer cross-attention stack. Falls back to self-attention when p_emb is None.
-- CrossAttentionScorer: Learnable query attends to clauses (legacy, kept for reference)
 """
 
 import math
@@ -234,99 +233,20 @@ class TransformerScorer(nn.Module):
         return self.scorer(x).view(-1)
 
 
-class CrossAttentionScorer(nn.Module):
-    """
-    Cross-attention scoring with a learnable query (legacy).
-
-    Architecture:
-        1. Norm → Learnable query attends to all clause embeddings
-        2. Context vector modulates clause scores via dot product
-
-    This is similar to the [CLS] token approach in BERT,
-    but the query directly computes attention weights as scores.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        num_heads: int = 4,
-    ):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        self.head_dim = hidden_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
-
-        # Learnable query
-        self.query = nn.Parameter(torch.randn(1, hidden_dim))
-
-        # Pre-norm for clauses
-        self.norm = nn.LayerNorm(hidden_dim)
-
-        # Projections
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.v_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        nn.init.normal_(self.query, std=0.02)
-
-    def forward(self, u_emb: torch.Tensor, p_emb: torch.Tensor = None) -> torch.Tensor:
-        """
-        Args:
-            u_emb: Clause embeddings [num_clauses, hidden_dim]
-            p_emb: Ignored (legacy scorer, kept for interface compatibility)
-
-        Returns:
-            Scores [num_clauses]
-        """
-        num_clauses = u_emb.size(0)
-
-        # Pre-norm
-        x_normed = self.norm(u_emb)
-
-        # Project query, keys, values
-        q = self.q_proj(self.query)  # [1, hidden_dim]
-        k = self.k_proj(x_normed)  # [num_clauses, hidden_dim]
-        v = self.v_proj(x_normed)  # [num_clauses, hidden_dim]
-
-        # Reshape for multi-head attention
-        q = q.view(1, self.num_heads, self.head_dim).transpose(0, 1)  # [num_heads, 1, head_dim]
-        k = k.view(num_clauses, self.num_heads, self.head_dim).transpose(0, 1)  # [num_heads, num_clauses, head_dim]
-        v = v.view(num_clauses, self.num_heads, self.head_dim).transpose(0, 1)
-
-        # Attention: query attends to all clauses
-        attn = torch.bmm(q, k.transpose(1, 2)) * self.scale  # [num_heads, 1, num_clauses]
-        attn = F.softmax(attn, dim=-1)
-
-        # Weighted sum of values
-        context = torch.bmm(attn, v)  # [num_heads, 1, head_dim]
-        context = context.transpose(0, 1).contiguous().view(1, self.hidden_dim)  # [1, hidden_dim]
-
-        # Clause scores via dot product with context
-        scores = torch.mm(u_emb, context.t())  # [num_clauses, 1]
-
-        return scores.view(-1)
-
-
 def create_scorer(
     scorer_type: str,
     hidden_dim: int,
     num_heads: int = 4,
     num_layers: int = 2,
-    dropout: float = 0.0,  # Ignored for modern attention, kept for API compatibility
 ) -> nn.Module:
     """
     Factory function to create a scorer.
 
     Args:
-        scorer_type: One of "mlp", "attention", "transformer", "cross_attention"
+        scorer_type: One of "mlp", "attention", "transformer"
         hidden_dim: Hidden dimension of clause embeddings
         num_heads: Number of attention heads (for attention-based scorers)
         num_layers: Number of transformer layers (for transformer scorer)
-        dropout: Ignored (kept for API compatibility)
 
     Returns:
         Scorer module
@@ -337,8 +257,6 @@ def create_scorer(
         return AttentionScorer(hidden_dim, num_heads=num_heads)
     elif scorer_type == "transformer":
         return TransformerScorer(hidden_dim, num_layers=num_layers, num_heads=num_heads)
-    elif scorer_type == "cross_attention":
-        return CrossAttentionScorer(hidden_dim, num_heads=num_heads)
     else:
         raise ValueError(f"Unknown scorer type: {scorer_type}. "
-                        f"Available: mlp, attention, transformer, cross_attention")
+                        f"Available: mlp, attention, transformer")

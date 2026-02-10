@@ -5,12 +5,11 @@ This module provides modular components for clause selection:
 
 Modular design (recommended):
     - Encoders: GCNEncoder
-    - Scorers: MLPScorer, AttentionScorer, TransformerScorer, CrossAttentionScorer
+    - Scorers: MLPScorer, AttentionScorer, TransformerScorer
     - ClauseSelector: Combines encoder + projection + scorer
 
-Legacy models (convenience wrappers):
+Convenience wrappers:
     - ClauseGCN
-    - ClauseTransformer, ClauseGNNTransformer
 
 Example:
     # Modular approach
@@ -37,11 +36,9 @@ from .scorers import (
     MLPScorer,
     AttentionScorer,
     TransformerScorer,
-    CrossAttentionScorer,
     create_scorer,
 )
-from .transformer import ClauseTransformer, ClauseGNNTransformer
-from .baseline import NodeMLP, AgeWeightHeuristic
+from .baseline import AgeWeightHeuristic
 from .utils import normalize_adjacency, sparse_mm
 from .factory import create_model
 
@@ -55,7 +52,6 @@ __all__ = [
     "MLPScorer",
     "AttentionScorer",
     "TransformerScorer",
-    "CrossAttentionScorer",
     "create_scorer",
     # GNN models
     "ClauseGCN",
@@ -64,11 +60,7 @@ __all__ = [
     # Feature embeddings
     "NodeFeatureEmbedding",
     "ClauseFeatureEmbedding",
-    # Transformer models
-    "ClauseTransformer",
-    "ClauseGNNTransformer",
     # Baselines
-    "NodeMLP",
     "AgeWeightHeuristic",
     # Utilities
     "normalize_adjacency",

@@ -102,7 +102,7 @@ class TestClauseSelector:
         assert scores.shape == (5,)
         assert not torch.isnan(scores).any()
 
-    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer", "cross_attention"])
+    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer"])
     def test_all_scorer_combinations(self, valid_inputs, scorer_type):
         """Test that GCN encoder works with any scorer."""
         encoder = create_encoder("gcn", hidden_dim=64, num_layers=2)
@@ -161,7 +161,7 @@ class TestClauseSelector:
 
         assert torch.allclose(original, exported)
 
-    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer", "cross_attention"])
+    @pytest.mark.parametrize("scorer_type", ["mlp", "attention", "transformer"])
     def test_torchscript_all_scorers(self, valid_inputs, tmp_path, scorer_type):
         """Test TorchScript export works with all scorer types."""
         encoder = GCNEncoder(hidden_dim=64, num_layers=2)

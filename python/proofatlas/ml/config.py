@@ -153,14 +153,13 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model architecture configuration (PyTorch implementation)."""
-    type: str = "gcn"  # gcn, gat, graphsage, transformer, gnn_transformer, mlp, sentence
+    type: str = "gcn"  # gcn, sentence
     hidden_dim: int = 64
     num_layers: int = 3
     num_heads: int = 4
-    dropout: float = 0.1
     input_dim: int = 8  # raw feature dimension from graph.rs (compact format)
     # Scorer configuration
-    scorer_type: str = "mlp"  # mlp, attention, transformer, cross_attention
+    scorer_type: str = "mlp"  # mlp, attention, transformer
     scorer_num_heads: int = 4
     scorer_num_layers: int = 2
     # Sentence model configuration

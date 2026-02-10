@@ -1,8 +1,8 @@
 """Tests for all embedding+scorer combinations.
 
 Tests all combinations:
-- Graph embedding (gcn) x 4 scorers = 4 combinations
-- String embedding (sentence) x 4 scorers = 4 combinations
+- Graph embedding (gcn) x 3 scorers = 3 combinations
+- String embedding (sentence) x 3 scorers = 3 combinations
 """
 
 import pytest
@@ -79,7 +79,7 @@ def clause_strings():
 # =============================================================================
 
 GRAPH_EMBEDDINGS = ["gcn"]
-SCORERS = ["mlp", "attention", "transformer", "cross_attention"]
+SCORERS = ["mlp", "attention", "transformer"]
 
 
 class TestGraphEmbeddings:
@@ -230,7 +230,6 @@ class TestModelNaming:
         ("gcn", "mlp"),
         ("gcn", "attention"),
         ("gcn", "transformer"),
-        ("gcn", "cross_attention"),
     ])
     def test_model_name_format(self, embedding, scorer):
         """Test that model names follow {embedding}_{scorer} convention."""

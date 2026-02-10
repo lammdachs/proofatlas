@@ -6,53 +6,6 @@ import torch
 import torch.nn as nn
 
 
-class NodeMLP(nn.Module):
-    """
-    Simple MLP baseline - no graph structure, just pools node features.
-
-    Architecture:
-        node_features → MLP → pool to clauses → score
-    """
-
-    def __init__(
-        self,
-        node_feature_dim: int = 13,
-        hidden_dim: int = 64,
-        num_layers: int = 2,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-
-        layers = []
-        in_dim = node_feature_dim
-        for i in range(num_layers):
-            layers.append(nn.Linear(in_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            if i < num_layers - 1:
-                layers.append(nn.Dropout(dropout))
-            in_dim = hidden_dim
-
-        self.encoder = nn.Sequential(*layers)
-        self.scorer = nn.Linear(hidden_dim, 1)
-
-    def forward(
-        self,
-        node_features: torch.Tensor,
-        pool_matrix: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Args:
-            node_features: [total_nodes, node_feature_dim]
-            pool_matrix: [num_clauses, total_nodes]
-
-        Returns:
-            Scores [num_clauses]
-        """
-        h = self.encoder(node_features)
-        clause_emb = torch.mm(pool_matrix, h)
-        return self.scorer(clause_emb).view(-1)
-
-
 class AgeWeightHeuristic(nn.Module):
     """
     Age-weight heuristic as a neural network.

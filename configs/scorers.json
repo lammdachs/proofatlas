@@ -3,8 +3,7 @@
     "mlp": {
       "type": "mlp",
       "hidden_dim": 64,
-      "num_layers": 2,
-      "dropout": 0.1
+      "num_layers": 2
     },
 
     "attention": {
@@ -16,8 +15,7 @@
       "type": "transformer",
       "hidden_dim": 64,
       "num_layers": 2,
-      "num_heads": 4,
-      "dropout": 0.1
+      "num_heads": 4
     }
   }
 }

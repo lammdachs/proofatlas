@@ -102,7 +102,7 @@ class TestStateBatchThroughModel:
                 "role": "axiom" if i < 2 else "derived",
             })
 
-        graphs = [clause_to_graph(c, max_age=6) for c in clauses]
+        graphs = [clause_to_graph(c) for c in clauses]
         labels = [c["label"] for c in clauses]
 
         item = {

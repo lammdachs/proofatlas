@@ -95,7 +95,7 @@ class TestClauseToGraph:
         from proofatlas.ml.structured import clause_to_graph
         import numpy as np
 
-        result = clause_to_graph(sample_clause, max_age=100)
+        result = clause_to_graph(sample_clause)
 
         # Check numpy array types (torch tensors created during batching)
         assert isinstance(result["edge_index"], np.ndarray)

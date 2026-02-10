@@ -6,8 +6,7 @@ import torch
 import torch.nn as nn
 
 from .gnn import ClauseGCN
-from .transformer import ClauseTransformer, ClauseGNNTransformer
-from .baseline import NodeMLP, AgeWeightHeuristic
+from .baseline import AgeWeightHeuristic
 from .sentence import SentenceEncoder, HAS_TRANSFORMERS
 from .features import ClauseFeatures
 
@@ -29,20 +28,14 @@ def create_model(
     Args:
         model_type: One of:
             - "gcn": Graph Convolutional Network
-            - "gat": Graph Attention Network
-            - "graphsage": GraphSAGE
-            - "transformer": Transformer (no GNN)
-            - "gnn_transformer": Hybrid GNN + Transformer
-            - "mlp": Simple MLP baseline
             - "age_weight": Age-weight heuristic
+            - "features": Clause feature MLP
             - "sentence": Pretrained sentence encoder (requires transformers)
-        node_feature_dim: Input feature dimension (default: 3, legacy: 8 or 13)
+        node_feature_dim: Input feature dimension (default: 3)
         hidden_dim: Hidden layer dimension
         num_layers: Number of layers
         **kwargs: Model-specific arguments:
-            - dropout: Dropout rate (default: 0.1)
-            - num_heads: Attention heads for GAT (default: 4)
-            - scorer_type: Scoring head type: "mlp", "attention", "transformer", "cross_attention"
+            - scorer_type: Scoring head type: "mlp", "attention", "transformer"
             - scorer_num_heads: Attention heads for attention-based scorers (default: 4)
             - scorer_num_layers: Layers for transformer scorer (default: 2)
             - use_clause_features: Use clause-level features in scorer (default: True)
@@ -69,35 +62,10 @@ def create_model(
             node_feature_dim=node_feature_dim,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
-            dropout=kwargs.get('dropout', 0.1),
             use_clause_features=use_clause_features,
             sin_dim=sin_dim,
             node_info=kwargs.get('node_info', 'features'),
             **scorer_kwargs,
-        )
-    elif model_type == "transformer":
-        return ClauseTransformer(
-            node_feature_dim=node_feature_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            num_heads=kwargs.get('num_heads', 4),
-            dropout=kwargs.get('dropout', 0.1),
-        )
-    elif model_type == "gnn_transformer":
-        return ClauseGNNTransformer(
-            node_feature_dim=node_feature_dim,
-            hidden_dim=hidden_dim,
-            num_gnn_layers=kwargs.get('num_gnn_layers', 2),
-            num_transformer_layers=kwargs.get('num_transformer_layers', 2),
-            num_heads=kwargs.get('num_heads', 4),
-            dropout=kwargs.get('dropout', 0.1),
-        )
-    elif model_type == "mlp":
-        return NodeMLP(
-            node_feature_dim=node_feature_dim,
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            dropout=kwargs.get('dropout', 0.1),
         )
     elif model_type == "age_weight":
         return AgeWeightHeuristic(

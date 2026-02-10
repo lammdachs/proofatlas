@@ -36,7 +36,7 @@ def _make_batch_item(num_clauses=5, num_positive=2, num_states=2):
             age=i,
         ))
 
-    graphs = [clause_to_graph(c, max_age=num_clauses) for c in clauses]
+    graphs = [clause_to_graph(c) for c in clauses]
     labels = [c["label"] for c in clauses]
 
     # Create selection states with U and P sets

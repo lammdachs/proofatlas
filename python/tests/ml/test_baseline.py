@@ -3,72 +3,7 @@
 import pytest
 import torch
 
-from proofatlas.selectors.baseline import NodeMLP, AgeWeightHeuristic
-
-
-class TestNodeMLP:
-    """Tests for NodeMLP baseline model."""
-
-    def test_forward_shape(self):
-        model = NodeMLP(node_feature_dim=13, hidden_dim=64, num_layers=2)
-        node_features = torch.randn(20, 13)
-        pool_matrix = torch.zeros(5, 20)
-        for i in range(5):
-            pool_matrix[i, i*4:(i+1)*4] = 0.25
-
-        scores = model(node_features, pool_matrix)
-        assert scores.shape == (5,)
-
-    def test_single_clause(self):
-        model = NodeMLP(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(4, 13)
-        pool_matrix = torch.ones(1, 4) / 4
-
-        scores = model(node_features, pool_matrix)
-        assert scores.shape == (1,)
-
-    def test_different_num_layers(self):
-        for num_layers in [1, 2, 3, 4]:
-            model = NodeMLP(node_feature_dim=13, hidden_dim=32, num_layers=num_layers)
-            node_features = torch.randn(10, 13)
-            pool_matrix = torch.ones(3, 10) / 10
-
-            scores = model(node_features, pool_matrix)
-            assert scores.shape == (3,)
-
-    def test_gradient_flow(self):
-        model = NodeMLP(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        node_features = torch.randn(10, 13, requires_grad=True)
-        pool_matrix = torch.ones(3, 10) / 10
-
-        scores = model(node_features, pool_matrix)
-        loss = scores.sum()
-        loss.backward()
-        assert node_features.grad is not None
-
-    def test_train_eval_mode(self):
-        model = NodeMLP(node_feature_dim=13, hidden_dim=32, num_layers=2, dropout=0.5)
-        node_features = torch.randn(10, 13)
-        pool_matrix = torch.ones(3, 10) / 10
-
-        # Eval mode should be deterministic
-        model.eval()
-        scores1 = model(node_features, pool_matrix)
-        scores2 = model(node_features, pool_matrix)
-        assert torch.allclose(scores1, scores2)
-
-    def test_no_graph_structure(self):
-        """NodeMLP ignores adjacency - only uses pooled features."""
-        model = NodeMLP(node_feature_dim=13, hidden_dim=32, num_layers=2)
-        model.eval()
-
-        node_features = torch.randn(8, 13)
-        pool_matrix = torch.ones(2, 8) / 8
-
-        # Same features, same pooling - should give same results
-        scores1 = model(node_features, pool_matrix)
-        scores2 = model(node_features, pool_matrix)
-        assert torch.allclose(scores1, scores2)
+from proofatlas.selectors.baseline import AgeWeightHeuristic
 
 
 class TestAgeWeightHeuristic:

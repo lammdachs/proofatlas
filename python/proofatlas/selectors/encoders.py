@@ -56,14 +56,12 @@ class GCNEncoder(ClauseEncoder):
         self,
         hidden_dim: int = 64,
         num_layers: int = 3,
-        dropout: float = 0.1,
         sin_dim: int = 8,
         use_clause_features: bool = True,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.dropout = dropout
         self.use_clause_features = use_clause_features
 
         # Node feature embedding
@@ -117,8 +115,6 @@ class GCNEncoder(ClauseEncoder):
             x = conv(x, adj)
             x = norm(x)
             x = F.relu(x)
-            if i < self.num_layers - 1:
-                x = F.dropout(x, p=self.dropout, training=self.training)
 
         # Pool to clause level
         clause_emb = torch.mm(pool_matrix, x)

@@ -119,7 +119,6 @@ def _term_to_string(term: Dict[str, Any]) -> str:
 
 def clause_to_graph(
     clause: Dict[str, Any],
-    max_age: int = 1000,
 ) -> Dict[str, Any]:
     """Convert structured clause to graph (numpy arrays).
 
@@ -132,7 +131,6 @@ def clause_to_graph(
 
     Args:
         clause: Structured clause dict
-        max_age: Maximum age for normalization
 
     Returns:
         Dictionary with numpy arrays:
@@ -143,7 +141,7 @@ def clause_to_graph(
             num_edges: int
             clause_features: [3] raw clause features (age, role, size)
     """
-    builder = _GraphBuilder(max_age)
+    builder = _GraphBuilder()
     builder.build_clause(clause)
 
     return builder.to_numpy(clause)
@@ -163,8 +161,7 @@ class _GraphBuilder:
     # Clause feature dimension (age, role, size)
     CLAUSE_FEATURE_DIM = 3
 
-    def __init__(self, max_age: int = 1000):
-        self.max_age = max_age
+    def __init__(self):
         # Store as flat lists for efficiency (avoid numpy array per node)
         self.node_features: List[Tuple[float, float, float]] = []
         self.node_types: List[int] = []
@@ -270,17 +267,15 @@ class _GraphBuilder:
         # Node types
         node_types = np.array(self.node_types, dtype=np.uint8)
 
-        # Clause-level features (raw values, will be sinusoidal encoded by scorer)
+        # Clause-level features (raw values, sinusoidal encoded by ClauseFeatureEmbedding)
         age = clause.get("age", 0)
         role = clause.get("role", "derived")
         size = len(clause.get("literals", []))
 
-        # Normalize age by max_age for consistency
-        normalized_age = float(age) / float(max(self.max_age, 1))
         role_idx = float(ROLE_MAP.get(role, 4))
 
         clause_features = np.array(
-            [normalized_age, role_idx, float(size)], dtype=np.float32
+            [float(age), role_idx, float(size)], dtype=np.float32
         )
 
         return {
@@ -308,21 +303,16 @@ def clauses_to_strings(clauses: List[Dict[str, Any]]) -> List[str]:
 
 def clauses_to_graphs(
     clauses: List[Dict[str, Any]],
-    max_age: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Convert list of structured clauses to graph numpy arrays.
 
     Args:
         clauses: List of structured clause dicts
-        max_age: Maximum age for normalization (default: len(clauses))
 
     Returns:
         List of graph dicts with numpy arrays
     """
-    if max_age is None:
-        max_age = len(clauses)
-
-    return [clause_to_graph(c, max_age) for c in clauses]
+    return [clause_to_graph(c) for c in clauses]
 
 
 def load_structured_trace(path: str) -> Dict[str, Any]:
