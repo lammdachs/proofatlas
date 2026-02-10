@@ -471,6 +471,9 @@ impl ProofState {
         clause_with_id.id = Some(new_id);
 
         self.clauses.push(clause_with_id);
+        if self.clauses[new_id].is_empty() {
+            self.empty_clause_idx = Some(new_id);
+        }
         self.unprocessed.push_back(new_id);
 
         // Record in proof trace
