@@ -103,16 +103,18 @@ class ClauseFeatureEmbedding(nn.Module):
     """
     Embeds clause-level features into a representation for the scorer.
 
-    New architecture (IJCAR26 plan):
-    Raw feature layout (3 dims):
-        0: Age (normalized 0-1)
-        1: Role (int 0-4: axiom, hypothesis, definition, negated_conjecture, derived)
-        2: Size (number of literals)
+    Raw feature layout (9 dims):
+        0: Age           -> sinusoidal (sin_dim dims)
+        1: Role (0-4)    -> one-hot (5 dims)
+        2: Rule (0-6)    -> one-hot (7 dims)
+        3: Size          -> sinusoidal (sin_dim dims)
+        4: Depth          -> sinusoidal (sin_dim dims)
+        5: Symbol count   -> sinusoidal (sin_dim dims)
+        6: Distinct syms  -> sinusoidal (sin_dim dims)
+        7: Variable count -> sinusoidal (sin_dim dims)
+        8: Distinct vars  -> sinusoidal (sin_dim dims)
 
-    Output layout:
-        - Age: sinusoidal (sin_dim dims)
-        - Role: one-hot (5 dims)
-        - Size: sinusoidal (sin_dim dims)
+    Output: 7 * sin_dim + 5 + 7 = 7*8 + 12 = 68  (with default sin_dim=8)
     """
 
     def __init__(self, sin_dim: int = 8):
@@ -124,8 +126,8 @@ class ClauseFeatureEmbedding(nn.Module):
         assert sin_dim % 2 == 0, "sin_dim must be even"
         self.sin_dim = sin_dim
 
-        # Output dim: sin_dim (age) + 5 (role) + sin_dim (size)
-        self.output_dim = sin_dim + 5 + sin_dim
+        # 7 sinusoidal features + 5 (role one-hot) + 7 (rule one-hot)
+        self.output_dim = 7 * sin_dim + 5 + 7
 
         # Precompute div_term for sinusoidal encoding
         div_term = torch.exp(torch.arange(0, sin_dim, 2).float() * (-math.log(10000.0) / sin_dim))
@@ -146,21 +148,32 @@ class ClauseFeatureEmbedding(nn.Module):
         Embed raw clause features.
 
         Args:
-            x: [num_clauses, 3] raw clause features (age, role, size)
+            x: [num_clauses, 9] raw clause features
 
         Returns:
             [num_clauses, output_dim] embedded features
         """
-        age = x[:, 0]           # raw integer step count
-        role = x[:, 1].long()   # int 0-4
-        size = x[:, 2]          # number of literals
+        age = x[:, 0]
+        role = x[:, 1].long()
+        rule = x[:, 2].long()
+        size = x[:, 3]
+        depth = x[:, 4]
+        symbol_count = x[:, 5]
+        distinct_symbols = x[:, 6]
+        variable_count = x[:, 7]
+        distinct_vars = x[:, 8]
 
-        # Encode features
-        age_enc = self.sinusoidal_encode(age)
-        role_onehot = F.one_hot(role.clamp(0, 4), num_classes=5).float()
-        size_enc = self.sinusoidal_encode(size)
-
-        return torch.cat([age_enc, role_onehot, size_enc], dim=-1)
+        return torch.cat([
+            self.sinusoidal_encode(age),                    # sin_dim
+            F.one_hot(role.clamp(0, 4), 5).float(),         # 5
+            F.one_hot(rule.clamp(0, 6), 7).float(),         # 7
+            self.sinusoidal_encode(size),                   # sin_dim
+            self.sinusoidal_encode(depth),                  # sin_dim
+            self.sinusoidal_encode(symbol_count),           # sin_dim
+            self.sinusoidal_encode(distinct_symbols),       # sin_dim
+            self.sinusoidal_encode(variable_count),         # sin_dim
+            self.sinusoidal_encode(distinct_vars),          # sin_dim
+        ], dim=-1)
 
 
 class SymbolEmbedding(nn.Module):
@@ -404,17 +417,23 @@ class ScorerHead(nn.Module):
         return self.linear2(x)
 
 
-@torch.jit.script
-def _batch_from_pool(pool_matrix: torch.Tensor) -> torch.Tensor:
-    """Derive node→graph assignment from sparse pool matrix.
+def _batch_from_pool(pool_matrix) -> torch.Tensor:
+    """Derive node→graph assignment from pool matrix.
 
     Args:
-        pool_matrix: [num_clauses, num_nodes] sparse or dense
+        pool_matrix: Either (row, col, val, shape) edge-list tuple,
+                     sparse tensor, or dense tensor
 
     Returns:
         [num_nodes] long tensor of graph indices
     """
-    if pool_matrix.is_sparse:
+    if isinstance(pool_matrix, (tuple, list)):
+        row, col, val, shape = pool_matrix
+        num_nodes = shape[1] if isinstance(shape, (tuple, list)) else shape
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=row.device)
+        batch[col] = row
+        return batch
+    elif pool_matrix.is_sparse:
         indices = pool_matrix.coalesce().indices()
         num_nodes = pool_matrix.size(1)
         batch = torch.zeros(num_nodes, dtype=torch.long, device=pool_matrix.device)
@@ -430,11 +449,11 @@ class ClauseGCN(nn.Module):
 
     New architecture (IJCAR26 plan):
         Node features (3d) → node_embedding → GCN layers → pool to clauses
-        Clause features (3d) → clause_embedding
+        Clause features (9d) → clause_embedding
         Concatenate(pooled, clause_emb) → scorer → scores
 
     This separates structural information (encoded by GCN) from
-    clause-level metadata (age, role, size) which is sinusoidal encoded.
+    clause-level metadata which is sinusoidal/one-hot encoded.
     """
 
     def __init__(
@@ -510,7 +529,7 @@ class ClauseGCN(nn.Module):
             node_features: [total_nodes, 3] raw node features (type, arity, arg_pos)
             adj: Normalized adjacency matrix [total_nodes, total_nodes]
             pool_matrix: [num_clauses, total_nodes] for pooling nodes to clauses
-            clause_features: [num_clauses, 3] raw clause features (age, role, size)
+            clause_features: [num_clauses, 9] raw clause features
                             Optional for backwards compatibility
             node_names: List of symbol name strings for each node.
                        Required when node_info is "names" or "both".
@@ -626,11 +645,17 @@ class ClauseGCN(nn.Module):
 
         dummy_pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
 
-        # Clause features: [age (0-1), role (0-4), size (>=1)]
-        dummy_clause_features = torch.zeros(num_clauses, 3)
-        dummy_clause_features[:, 0] = torch.rand(num_clauses)  # age
+        # Clause features: 9 dims
+        dummy_clause_features = torch.zeros(num_clauses, 9)
+        dummy_clause_features[:, 0] = torch.rand(num_clauses) * 100   # age
         dummy_clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()  # role
-        dummy_clause_features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()  # size
+        dummy_clause_features[:, 2] = torch.randint(0, 7, (num_clauses,)).float()  # rule
+        dummy_clause_features[:, 3] = torch.randint(1, 10, (num_clauses,)).float()  # size
+        dummy_clause_features[:, 4] = torch.randint(0, 8, (num_clauses,)).float()  # depth
+        dummy_clause_features[:, 5] = torch.randint(1, 20, (num_clauses,)).float()  # symbol_count
+        dummy_clause_features[:, 6] = torch.randint(1, 10, (num_clauses,)).float()  # distinct_symbols
+        dummy_clause_features[:, 7] = torch.randint(0, 10, (num_clauses,)).float()  # variable_count
+        dummy_clause_features[:, 8] = torch.randint(0, 5, (num_clauses,)).float()   # distinct_vars
 
         with torch.no_grad():
             traced = torch.jit.trace(

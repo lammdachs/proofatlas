@@ -98,6 +98,7 @@ fn demodulate_clause(clause: &Clause, lhs: &Term, rhs: &Term, kbo: &KBO) -> Opti
             id: clause.id,
             role: clause.role,
             age: clause.age,
+            derivation_rule: clause.derivation_rule,
         })
     } else {
         None

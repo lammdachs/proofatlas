@@ -17,6 +17,7 @@ use crate::profile::SaturationProfile;
 use crate::index::{IndexKind, IndexRegistry, SelectedLiteralIndex};
 use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::generating::{
     ResolutionRule, SuperpositionRule, FactoringRule,
     EqualityResolutionRule, EqualityFactoringRule,
@@ -53,6 +54,8 @@ pub struct ProofAtlas {
     start_time: Option<Instant>,
     /// Initial clauses to be added during init()
     initial_clauses: Vec<Clause>,
+    /// Cancellation flag — set to `true` to stop the saturation loop.
+    pub cancel: Arc<AtomicBool>,
 }
 
 impl ProofAtlas {
@@ -146,6 +149,7 @@ impl ProofAtlas {
             profile,
             start_time: None,
             initial_clauses,
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -300,10 +304,13 @@ impl ProofAtlas {
             }
         }
 
-        // === Step 2b: Check timeout before selection ===
+        // === Step 2b: Check timeout/cancel before selection ===
         // When using a remote scoring server, select() can block for seconds
         // waiting on server mutex contention.  Check wall-clock timeout here
         // so the prover exits promptly after a long-blocking select().
+        if self.cancel.load(Ordering::Relaxed) {
+            return Some(ProofResult::ResourceLimit);
+        }
         if let Some(start) = self.start_time {
             if start.elapsed() > self.config.timeout {
                 return Some(ProofResult::ResourceLimit);
@@ -393,6 +400,7 @@ impl ProofAtlas {
                 clause_with_id.id = Some(new_idx);
                 clause_with_id.age = self.state.current_iteration;
                 clause_with_id.role = crate::logic::ClauseRole::Derived;
+                clause_with_id.derivation_rule = Clause::rule_name_to_id(_rule_name);
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
@@ -429,19 +437,23 @@ impl ProofAtlas {
                     return Some(ProofResult::ResourceLimit);
                 }
 
-                // timeout + memory: every 100th Add (amortize syscall cost)
-                if num_clauses % 100 == 0 {
-                    if let Some(start) = self.start_time {
-                        if start.elapsed() > self.config.timeout {
-                            return Some(ProofResult::ResourceLimit);
-                        }
-                    }
-
+                // memory + timeout + cancel: every 10th Add (amortize /proc read)
+                if num_clauses % 10 == 0 {
                     if let Some(limit_mb) = self.config.memory_limit {
                         if let Some(rss) = crate::config::process_memory_mb() {
                             if rss >= limit_mb {
                                 return Some(ProofResult::ResourceLimit);
                             }
+                        }
+                    }
+
+                    if self.cancel.load(Ordering::Relaxed) {
+                        return Some(ProofResult::ResourceLimit);
+                    }
+
+                    if let Some(start) = self.start_time {
+                        if start.elapsed() > self.config.timeout {
+                            return Some(ProofResult::ResourceLimit);
                         }
                     }
                 }
@@ -471,6 +483,7 @@ impl ProofAtlas {
                     clause_with_id.id = Some(new_idx);
                     clause_with_id.age = self.state.current_iteration;
                     clause_with_id.role = crate::logic::ClauseRole::Derived;
+                    clause_with_id.derivation_rule = Clause::rule_name_to_id(_rule_name);
 
                     let mut oriented = repl.clone();
                     self.clause_manager.orient_equalities(&mut oriented);
@@ -502,12 +515,7 @@ impl ProofAtlas {
                     if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
                         return Some(ProofResult::ResourceLimit);
                     }
-                    if num_clauses % 100 == 0 {
-                        if let Some(start) = self.start_time {
-                            if start.elapsed() > self.config.timeout {
-                                return Some(ProofResult::ResourceLimit);
-                            }
-                        }
+                    if num_clauses % 10 == 0 {
                         if let Some(limit_mb) = self.config.memory_limit {
                             if let Some(rss) = crate::config::process_memory_mb() {
                                 if rss >= limit_mb {

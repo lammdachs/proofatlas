@@ -184,6 +184,7 @@ impl Clause {
             id: None, // New clause gets no ID
             role: self.role,
             age: self.age,
+            derivation_rule: self.derivation_rule,
         }
     }
 }

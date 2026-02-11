@@ -75,7 +75,7 @@ impl GcnEmbedder {
                 [num_clauses as i64, 1], (tch::Kind::Float, self.device), true,
             );
             let clause_features =
-                tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
+                tch::Tensor::zeros([num_clauses as i64, 9], (tch::Kind::Float, self.device));
             return (node_features, adj, pool_matrix, clause_features);
         }
 
@@ -92,16 +92,23 @@ impl GcnEmbedder {
         let pool_matrix =
             self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
 
-        // Build clause features [num_clauses, 3]: age, role, size
-        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
+        // Build clause features [num_clauses, 9]
+        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 9);
         for clause in clauses {
-            let age = clause.age as f32;
-            let role = clause.role.to_feature_value();
-            let size = clause.literals.len() as f32;
-            clause_feat_flat.extend_from_slice(&[age, role, size]);
+            clause_feat_flat.extend_from_slice(&[
+                clause.age as f32,                          // [0] age
+                clause.role.to_feature_value(),             // [1] role
+                clause.derivation_rule as f32,              // [2] rule
+                clause.literals.len() as f32,               // [3] size
+                clause.max_depth() as f32,                  // [4] depth
+                clause.symbol_count() as f32,               // [5] symbol_count
+                clause.distinct_symbol_count() as f32,      // [6] distinct_symbols
+                clause.variable_count() as f32,             // [7] variable_count
+                clause.distinct_variable_count() as f32,    // [8] distinct_vars
+            ]);
         }
         let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
-            .view([num_clauses as i64, 3])
+            .view([num_clauses as i64, 9])
             .to_device(self.device);
 
         (node_features, adj, pool_matrix, clause_features)
@@ -330,7 +337,7 @@ impl GcnEncoder {
                 [num_clauses as i64, 1], (tch::Kind::Float, self.device), true,
             );
             let clause_features =
-                tch::Tensor::zeros([num_clauses as i64, 3], (tch::Kind::Float, self.device));
+                tch::Tensor::zeros([num_clauses as i64, 9], (tch::Kind::Float, self.device));
             return (node_features, adj, pool_matrix, clause_features);
         }
 
@@ -345,16 +352,23 @@ impl GcnEncoder {
         let pool_matrix =
             self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
 
-        // Build clause features [num_clauses, 3]: age, role, size
-        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 3);
+        // Build clause features [num_clauses, 9]
+        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 9);
         for clause in clauses {
-            let age = clause.age as f32;
-            let role = clause.role.to_feature_value();
-            let size = clause.literals.len() as f32;
-            clause_feat_flat.extend_from_slice(&[age, role, size]);
+            clause_feat_flat.extend_from_slice(&[
+                clause.age as f32,                          // [0] age
+                clause.role.to_feature_value(),             // [1] role
+                clause.derivation_rule as f32,              // [2] rule
+                clause.literals.len() as f32,               // [3] size
+                clause.max_depth() as f32,                  // [4] depth
+                clause.symbol_count() as f32,               // [5] symbol_count
+                clause.distinct_symbol_count() as f32,      // [6] distinct_symbols
+                clause.variable_count() as f32,             // [7] variable_count
+                clause.distinct_variable_count() as f32,    // [8] distinct_vars
+            ]);
         }
         let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
-            .view([num_clauses as i64, 3])
+            .view([num_clauses as i64, 9])
             .to_device(self.device);
 
         (node_features, adj, pool_matrix, clause_features)

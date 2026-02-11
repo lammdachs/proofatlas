@@ -23,6 +23,7 @@ pub fn rename_clause_variables(clause: &Clause, suffix: &str, interner: &mut Int
         id: clause.id,
         role: clause.role,
         age: clause.age,
+        derivation_rule: clause.derivation_rule,
     }
 }
 

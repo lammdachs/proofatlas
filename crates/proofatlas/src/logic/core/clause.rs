@@ -62,6 +62,9 @@ pub struct Clause {
     pub role: ClauseRole,
     /// Age of the clause (derivation step when it was created, 0 for input clauses)
     pub age: usize,
+    /// Derivation rule ID (0=input, 1=resolution, 2=factoring, 3=superposition,
+    /// 4=equality_resolution, 5=equality_factoring, 6=demodulation)
+    pub derivation_rule: u8,
 }
 
 /// A CNF formula (conjunction of clauses)
@@ -78,6 +81,7 @@ impl Clause {
             id: None,
             role: ClauseRole::default(),
             age: 0,
+            derivation_rule: 0,
         }
     }
 
@@ -88,6 +92,7 @@ impl Clause {
             id: None,
             role,
             age: 0,
+            derivation_rule: 0,
         }
     }
 
@@ -98,6 +103,7 @@ impl Clause {
             id: None,
             role: ClauseRole::Derived,
             age,
+            derivation_rule: 0,
         }
     }
 
@@ -159,6 +165,109 @@ impl Clause {
                     .map(Self::term_symbol_count)
                     .sum::<usize>()
             }
+        }
+    }
+
+    /// Maximum term nesting depth across all literals
+    pub fn max_depth(&self) -> usize {
+        self.literals
+            .iter()
+            .flat_map(|lit| lit.args.iter())
+            .map(Self::term_depth)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn term_depth(term: &Term) -> usize {
+        match term {
+            Term::Variable(_) | Term::Constant(_) => 0,
+            Term::Function(_, args) => {
+                1 + args.iter().map(Self::term_depth).max().unwrap_or(0)
+            }
+        }
+    }
+
+    /// Count of distinct function, constant, and predicate symbols
+    pub fn distinct_symbol_count(&self) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        for lit in &self.literals {
+            // Predicate symbol (tag with high bit to distinguish from function/constant IDs)
+            seen.insert(lit.predicate.id.as_u32() as u64 | (1u64 << 32));
+            for arg in &lit.args {
+                Self::collect_distinct_symbols(arg, &mut seen);
+            }
+        }
+        seen.len()
+    }
+
+    fn collect_distinct_symbols(term: &Term, seen: &mut std::collections::HashSet<u64>) {
+        match term {
+            Term::Variable(_) => {}
+            Term::Constant(c) => { seen.insert(c.id.as_u32() as u64); }
+            Term::Function(f, args) => {
+                seen.insert(f.id.as_u32() as u64);
+                for arg in args {
+                    Self::collect_distinct_symbols(arg, seen);
+                }
+            }
+        }
+    }
+
+    /// Total variable occurrences across all literals
+    pub fn variable_count(&self) -> usize {
+        self.literals
+            .iter()
+            .flat_map(|lit| lit.args.iter())
+            .map(Self::term_variable_count)
+            .sum()
+    }
+
+    fn term_variable_count(term: &Term) -> usize {
+        match term {
+            Term::Variable(_) => 1,
+            Term::Constant(_) => 0,
+            Term::Function(_, args) => {
+                args.iter().map(Self::term_variable_count).sum()
+            }
+        }
+    }
+
+    /// Count of distinct variables
+    pub fn distinct_variable_count(&self) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        for lit in &self.literals {
+            for arg in &lit.args {
+                Self::collect_distinct_variables(arg, &mut seen);
+            }
+        }
+        seen.len()
+    }
+
+    fn collect_distinct_variables(term: &Term, seen: &mut std::collections::HashSet<u32>) {
+        match term {
+            Term::Variable(v) => { seen.insert(v.id.as_u32()); }
+            Term::Constant(_) => {}
+            Term::Function(_, args) => {
+                for arg in args {
+                    Self::collect_distinct_variables(arg, seen);
+                }
+            }
+        }
+    }
+
+    /// Map a rule name string to its numeric ID for ML features.
+    ///
+    /// Must match the mapping in `python_bindings.rs::extract_tensor_trace`.
+    pub fn rule_name_to_id(rule_name: &str) -> u8 {
+        match rule_name {
+            "Input" => 0,
+            "Resolution" => 1,
+            "Factoring" => 2,
+            "Superposition" => 3,
+            "EqualityResolution" => 4,
+            "EqualityFactoring" => 5,
+            "Demodulation" => 6,
+            _ => 0, // Unknown rules default to input
         }
     }
 
