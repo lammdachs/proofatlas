@@ -2,6 +2,7 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -108,18 +109,26 @@ impl PyProofAtlas {
         let include_dirs: Vec<String> = include_dir.into_iter().map(|s| s.to_string()).collect();
         let content_owned = content.to_string();
 
-        // Run parsing in a thread with larger stack to handle deeply nested formulas
-        // Default Python thread stack is too small for formulas with depth > 2000
-        let parsed = std::thread::Builder::new()
+        // Run parsing in a thread with larger stack to handle deeply nested formulas.
+        // Default Python thread stack is too small for formulas with depth > 2000.
+        // Poll the join handle so Ctrl+C works during parsing.
+        let handle = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || {
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
                 parse_tptp(&content_owned, &include_refs, timeout_instant, memory_limit)
             })
-            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?
-            .join()
-            .map_err(|_| PyValueError::new_err("Parser thread panicked"))?
-            .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
+
+        let parsed = loop {
+            if handle.is_finished() {
+                break handle.join()
+                    .map_err(|_| PyValueError::new_err("Parser thread panicked"))?
+                    .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+            }
+            Python::with_gil(|py| py.check_signals())?;
+            std::thread::sleep(Duration::from_millis(50));
+        };
 
         // Extract interner and formula from parsed problem
         self.interner = parsed.interner;
@@ -293,16 +302,30 @@ impl PyProofAtlas {
         let interner = std::mem::take(&mut self.interner);
         let mut prover = ProofAtlas::new(clauses, config, clause_selector, interner);
 
-        // Run saturation in a thread with larger stack, move prover in and back out
-        let (prover, result) = std::thread::Builder::new()
+        // Run saturation in a thread with larger stack, move prover in and back out.
+        // Poll the join handle so we can check for Python signals (Ctrl+C) between polls.
+        let cancel = prover.cancel.clone();
+        let handle = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
             .spawn(move || {
                 let result = prover.prove();
                 (prover, result)
             })
-            .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
-            .join()
-            .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?;
+
+        let (prover, result) = loop {
+            if handle.is_finished() {
+                break handle.join()
+                    .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
+            }
+            // Check for Python signals (KeyboardInterrupt from Ctrl+C)
+            Python::with_gil(|py| py.check_signals())
+                .map_err(|e| {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    e
+                })?;
+            std::thread::sleep(Duration::from_millis(50));
+        };
 
         // Serialize profile to JSON if present
         self.profile_json = prover.profile()
@@ -429,64 +452,207 @@ impl PyProofAtlas {
         }).collect()
     }
 
-    /// Extract training data in structured JSON format (model-independent)
+    /// Extract tensor trace data for ML training.
     ///
-    /// Returns a JSON string with the trace data that can be converted
-    /// to graphs or strings at training time.
-    pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
-        use crate::json::{TraceJson, TrainingClauseJson};
+    /// Returns a tuple of two Python dicts (graph_dict, sentence_dict), each containing
+    /// numpy arrays ready to be saved as .npz files.
+    ///
+    /// The graph dict uses `GraphBuilder::build_from_clauses()` — the same function
+    /// used at inference time by the scoring server — as the single source of truth
+    /// for clause→graph conversion.
+    ///
+    /// The sentence dict uses `clause.display(interner)` — the same method used at
+    /// inference time by the sentence encoder.
+    pub fn extract_tensor_trace<'py>(&self, py: Python<'py>, time_seconds: f64)
+        -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)>
+    {
+        use numpy::{PyArray1, PyArray2};
+        use crate::selection::graph::GraphBuilder;
 
         let interner = self.interner();
         let clauses = self.clauses();
         let events = self.event_log();
+        let num_clauses = clauses.len();
 
-        // Build proof clause set
-        let proof_clauses: HashSet<usize> = self.get_proof_clause_set();
+        // --- Proof clause set and derivation info ---
+        let proof_clauses = self.get_proof_clause_set();
 
-        // Build derivation info map from event log
-        let mut derivation_info: HashMap<usize, (Vec<usize>, String)> = HashMap::new();
+        let mut derivation_info: HashMap<usize, String> = HashMap::new();
         for event in events {
             match event {
-                RustStateChange::Add(clause, rule_name, premises) => {
+                RustStateChange::Add(clause, rule_name, _) => {
                     if let Some(idx) = clause.id {
-                        derivation_info.insert(idx, (clause_indices(premises), rule_name.clone()));
+                        derivation_info.insert(idx, rule_name.clone());
                     }
                 }
-                RustStateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                RustStateChange::Simplify(_, Some(clause), rule_name, _) => {
                     if let Some(idx) = clause.id {
-                        derivation_info.insert(idx, (clause_indices(premises), rule_name.clone()));
+                        derivation_info.insert(idx, rule_name.clone());
                     }
                 }
                 _ => {}
             }
         }
 
-        // Build structured clauses with derivation info
-        let training_clauses: Vec<TrainingClauseJson> = clauses
-            .iter()
-            .enumerate()
-            .map(|(idx, clause)| {
-                let in_proof = proof_clauses.contains(&idx);
-                let (parents, rule) = derivation_info
-                    .get(&idx)
-                    .cloned()
-                    .unwrap_or_else(|| (vec![], "input".to_string()));
-                TrainingClauseJson::from_clause(clause, interner, in_proof, parents, rule)
-            })
+        // --- Graph data via GraphBuilder::build_from_clauses ---
+        let clause_refs: Vec<&Clause> = clauses.iter().collect();
+        let batch_graph = GraphBuilder::build_from_clauses(&clause_refs);
+
+        // node_features [total_nodes, 3]
+        let node_feat_2d: Vec<Vec<f32>> = batch_graph.node_features.iter()
+            .map(|nf| nf.to_vec())
+            .collect();
+        let node_features = PyArray2::from_vec2(py, &node_feat_2d)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create node_features: {}", e)))?;
+
+        // edge_src, edge_dst [total_edges]
+        let total_edges = batch_graph.edge_indices.len();
+        let mut edge_src = Vec::with_capacity(total_edges);
+        let mut edge_dst = Vec::with_capacity(total_edges);
+        for &(s, d) in &batch_graph.edge_indices {
+            edge_src.push(s as i32);
+            edge_dst.push(d as i32);
+        }
+        let edge_src_arr = PyArray1::from_vec(py, edge_src);
+        let edge_dst_arr = PyArray1::from_vec(py, edge_dst);
+
+        // node_offsets [num_clauses + 1] and edge_offsets [num_clauses + 1]
+        let mut node_offsets = Vec::with_capacity(num_clauses + 1);
+        let mut edge_offsets = Vec::with_capacity(num_clauses + 1);
+        node_offsets.push(0i64);
+        edge_offsets.push(0i64);
+        for i in 0..num_clauses {
+            node_offsets.push(batch_graph.clause_boundaries[i].1 as i64);
+            edge_offsets.push(batch_graph.edge_boundaries[i].1 as i64);
+        }
+        let node_offsets_arr = PyArray1::from_vec(py, node_offsets);
+        let edge_offsets_arr = PyArray1::from_vec(py, edge_offsets);
+
+        // --- Clause features [num_clauses, 9] ---
+        let mut clause_features_2d = Vec::with_capacity(num_clauses);
+        for (idx, clause) in clauses.iter().enumerate() {
+            let rule_name = derivation_info.get(&idx).map(|s| s.as_str()).unwrap_or("input");
+            let rule_id = match rule_name {
+                "input" => 0.0f32,
+                "resolution" => 1.0,
+                "factoring" => 2.0,
+                "superposition" => 3.0,
+                "equality_resolution" => 4.0,
+                "equality_factoring" => 5.0,
+                "demodulation" => 6.0,
+                _ => 0.0, // Unknown rules default to input
+            };
+
+            // Compute term statistics (reusing logic from json.rs::term_stats)
+            let mut depth: usize = 0;
+            let mut symbol_count: usize = 0;
+            let mut variable_count: usize = 0;
+            let mut distinct_symbols: HashSet<u64> = HashSet::new();
+            let mut distinct_variables: HashSet<u64> = HashSet::new();
+
+            for lit in &clause.literals {
+                symbol_count += 1;
+                distinct_symbols.insert(lit.predicate.id.0 as u64 | (1u64 << 32));
+                for arg in &lit.args {
+                    let (d, sc, vc) = Self::term_stats(arg, &mut distinct_symbols, &mut distinct_variables);
+                    depth = depth.max(d);
+                    symbol_count += sc;
+                    variable_count += vc;
+                }
+            }
+
+            clause_features_2d.push(vec![
+                clause.age as f32,                  // [0] age
+                clause.role.to_feature_value(),     // [1] role
+                rule_id,                            // [2] rule
+                clause.literals.len() as f32,       // [3] size
+                depth as f32,                       // [4] depth
+                symbol_count as f32,                // [5] symbol_count
+                distinct_symbols.len() as f32,      // [6] distinct_symbols
+                variable_count as f32,              // [7] variable_count
+                distinct_variables.len() as f32,    // [8] distinct_vars
+            ]);
+        }
+        let clause_features = PyArray2::from_vec2(py, &clause_features_2d)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create clause_features: {}", e)))?;
+
+        // --- Labels [num_clauses] ---
+        let labels: Vec<u8> = (0..num_clauses)
+            .map(|i| if proof_clauses.contains(&i) { 1 } else { 0 })
+            .collect();
+        let labels_arr = PyArray1::from_vec(py, labels);
+
+        // --- Selection states (offset-encoded) ---
+        let states = self.build_selection_states_raw();
+        let num_states = states.len();
+
+        let mut state_selected = Vec::with_capacity(num_states);
+        let mut state_u_offsets = Vec::with_capacity(num_states + 1);
+        let mut state_u_indices = Vec::new();
+        let mut state_p_offsets = Vec::with_capacity(num_states + 1);
+        let mut state_p_indices = Vec::new();
+
+        state_u_offsets.push(0i64);
+        state_p_offsets.push(0i64);
+
+        for (selected, u_set, p_set) in &states {
+            state_selected.push(*selected as i32);
+            state_u_indices.extend(u_set.iter().map(|&x| x as i32));
+            state_u_offsets.push(state_u_indices.len() as i64);
+            state_p_indices.extend(p_set.iter().map(|&x| x as i32));
+            state_p_offsets.push(state_p_indices.len() as i64);
+        }
+
+        let state_selected_arr = PyArray1::from_vec(py, state_selected);
+        let state_u_offsets_arr = PyArray1::from_vec(py, state_u_offsets);
+        let state_u_indices_arr = PyArray1::from_vec(py, state_u_indices);
+        let state_p_offsets_arr = PyArray1::from_vec(py, state_p_offsets);
+        let state_p_indices_arr = PyArray1::from_vec(py, state_p_indices);
+
+        // --- Metadata ---
+        let proof_found = self.empty_clause_idx().is_some();
+        let proof_found_arr = PyArray1::from_vec(py, vec![proof_found]);
+        let time_arr = PyArray1::from_vec(py, vec![time_seconds]);
+
+        // --- Clause strings for sentence trace ---
+        let clause_strings: Vec<String> = clauses.iter()
+            .map(|c| c.display(interner).to_string())
             .collect();
 
-        // Replay event log to build selection state snapshots
-        let selection_states = self.build_selection_states();
+        // --- Build graph dict ---
+        let graph_dict = PyDict::new(py);
+        graph_dict.set_item("node_features", node_features)?;
+        graph_dict.set_item("edge_src", edge_src_arr)?;
+        graph_dict.set_item("edge_dst", edge_dst_arr)?;
+        graph_dict.set_item("node_offsets", node_offsets_arr)?;
+        graph_dict.set_item("edge_offsets", edge_offsets_arr)?;
+        graph_dict.set_item("clause_features", &clause_features)?;
+        graph_dict.set_item("labels", &labels_arr)?;
+        graph_dict.set_item("state_selected", &state_selected_arr)?;
+        graph_dict.set_item("state_u_offsets", &state_u_offsets_arr)?;
+        graph_dict.set_item("state_u_indices", &state_u_indices_arr)?;
+        graph_dict.set_item("state_p_offsets", &state_p_offsets_arr)?;
+        graph_dict.set_item("state_p_indices", &state_p_indices_arr)?;
+        graph_dict.set_item("proof_found", &proof_found_arr)?;
+        graph_dict.set_item("time_seconds", &time_arr)?;
 
-        let trace = TraceJson {
-            proof_found: self.empty_clause_idx().is_some(),
-            time_seconds,
-            clauses: training_clauses,
-            selection_states,
-        };
+        // --- Build sentence dict ---
+        let sentence_dict = PyDict::new(py);
+        // clause_strings as Python list of strings
+        let py_strings = pyo3::types::PyList::new(py, &clause_strings)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create clause_strings: {}", e)))?;
+        sentence_dict.set_item("clause_strings", py_strings)?;
+        sentence_dict.set_item("clause_features", clause_features)?;
+        sentence_dict.set_item("labels", labels_arr)?;
+        sentence_dict.set_item("state_selected", state_selected_arr)?;
+        sentence_dict.set_item("state_u_offsets", state_u_offsets_arr)?;
+        sentence_dict.set_item("state_u_indices", state_u_indices_arr)?;
+        sentence_dict.set_item("state_p_offsets", state_p_offsets_arr)?;
+        sentence_dict.set_item("state_p_indices", state_p_indices_arr)?;
+        sentence_dict.set_item("proof_found", proof_found_arr)?;
+        sentence_dict.set_item("time_seconds", time_arr)?;
 
-        serde_json::to_string(&trace)
-            .map_err(|e| PyValueError::new_err(format!("JSON serialization failed: {}", e)))
+        Ok((graph_dict, sentence_dict))
     }
 }
 
@@ -536,7 +702,8 @@ impl PyProofAtlas {
     }
 
     /// Replay event log to build selection state snapshots (U/P at each Activate)
-    fn build_selection_states(&self) -> Vec<crate::json::SelectionStateJson> {
+    /// Returns raw tuples: (selected, u_indices, p_indices)
+    fn build_selection_states_raw(&self) -> Vec<(usize, Vec<usize>, Vec<usize>)> {
         use std::collections::BTreeSet;
 
         let events = self.event_log();
@@ -568,11 +735,11 @@ impl PyProofAtlas {
                 }
                 RustStateChange::Activate(clause_idx) => {
                     // Snapshot U and P before moving the selected clause
-                    states.push(crate::json::SelectionStateJson {
-                        selected: *clause_idx,
-                        unprocessed: u.iter().copied().collect(),
-                        processed: p.iter().copied().collect(),
-                    });
+                    states.push((
+                        *clause_idx,
+                        u.iter().copied().collect(),
+                        p.iter().copied().collect(),
+                    ));
                     u.remove(clause_idx);
                     p.insert(*clause_idx);
                 }
@@ -580,6 +747,39 @@ impl PyProofAtlas {
         }
 
         states
+    }
+
+    /// Recursively compute term statistics.
+    /// Returns (depth, symbol_count, variable_count).
+    fn term_stats(
+        term: &crate::logic::Term,
+        distinct_symbols: &mut HashSet<u64>,
+        distinct_variables: &mut HashSet<u64>,
+    ) -> (usize, usize, usize) {
+        use crate::logic::Term;
+        match term {
+            Term::Variable(v) => {
+                distinct_variables.insert(v.id.0 as u64);
+                (0, 0, 1)
+            }
+            Term::Constant(c) => {
+                distinct_symbols.insert(c.id.0 as u64 | (2u64 << 32));
+                (0, 1, 0)
+            }
+            Term::Function(f, args) => {
+                distinct_symbols.insert(f.id.0 as u64 | (3u64 << 32));
+                let mut max_depth = 0usize;
+                let mut sc = 1usize;
+                let mut vc = 0usize;
+                for arg in args {
+                    let (d, s, v) = Self::term_stats(arg, distinct_symbols, distinct_variables);
+                    max_depth = max_depth.max(d);
+                    sc += s;
+                    vc += v;
+                }
+                (max_depth + 1, sc, vc)
+            }
+        }
     }
 }
 

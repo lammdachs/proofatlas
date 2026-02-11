@@ -16,9 +16,11 @@ USAGE:
     python scripts/train.py --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
 
 This script:
-1. Collects proof traces using age_weight baseline (if none exist)
-2. Trains the model in a subprocess (CUDA isolation)
-3. Saves weights to .weights/
+1. Trains the model (requires pre-collected .npz traces)
+2. Saves weights to .weights/
+
+Traces must be collected first via:
+    proofatlas-bench --config age_weight --trace
 
 After training, run evaluation with:
     proofatlas-bench --config gcn_mlp
@@ -35,8 +37,6 @@ import json
 import subprocess
 import sys
 import time
-import pickle
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -186,177 +186,6 @@ def validate_args(args, config):
     return max_batch_bytes, accumulate_batches
 
 
-def run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem_names,
-                             web_data_dir, use_cuda=False, cpu_workers=0,
-                             gpu_workers=1, max_batch_bytes=None,
-                             accumulate_batches=None):
-    """Run training in a subprocess to avoid CUDA context issues.
-
-    For multi-GPU (gpu_workers > 1), uses torch.multiprocessing.spawn inside
-    the subprocess so each GPU gets its own process.
-    """
-    # Serialize arguments to a temp file (problem_names can be large)
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.pkl', delete=False) as f:
-        args_file = f.name
-        pickle.dump({
-            'preset': preset,
-            'trace_dir': str(trace_dir),
-            'weights_dir': str(weights_dir),
-            'configs_dir': str(configs_dir),
-            'problem_names': list(problem_names) if problem_names else None,
-            'web_data_dir': str(web_data_dir) if web_data_dir else None,
-            'cpu_workers': cpu_workers,
-            'gpu_workers': gpu_workers,
-            'max_batch_bytes': max_batch_bytes,
-            'accumulate_batches': accumulate_batches,
-        }, f)
-
-    # Build training script
-    if gpu_workers > 1:
-        script = f'''
-import os
-import pickle
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path("{Path(__file__).parent.parent / "python"}").resolve()))
-
-with open("{args_file}", "rb") as f:
-    args = pickle.load(f)
-
-import torch.multiprocessing as mp
-
-def train_worker(rank, args):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "29500"
-    from proofatlas import ml
-    ml.run_training(
-        preset=args["preset"],
-        trace_dir=Path(args["trace_dir"]),
-        weights_dir=Path(args["weights_dir"]),
-        configs_dir=Path(args["configs_dir"]),
-        problem_names=set(args["problem_names"]) if args["problem_names"] else None,
-        web_data_dir=Path(args["web_data_dir"]) if args["web_data_dir"] else None,
-        log_file=sys.stdout,
-        cpu_workers=args["cpu_workers"],
-        rank=rank,
-        world_size=args["gpu_workers"],
-        max_batch_bytes=args["max_batch_bytes"],
-        accumulate_batches=args["accumulate_batches"],
-    )
-
-mp.spawn(train_worker, args=(args,), nprocs=args["gpu_workers"], join=True)
-print("TRAINING_RESULT:" + str(Path(args["weights_dir"])))
-'''
-    else:
-        script = f'''
-import pickle
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path("{Path(__file__).parent.parent / "python"}").resolve()))
-
-with open("{args_file}", "rb") as f:
-    args = pickle.load(f)
-
-from proofatlas import ml
-result = ml.run_training(
-    preset=args["preset"],
-    trace_dir=Path(args["trace_dir"]),
-    weights_dir=Path(args["weights_dir"]),
-    configs_dir=Path(args["configs_dir"]),
-    problem_names=set(args["problem_names"]) if args["problem_names"] else None,
-    web_data_dir=Path(args["web_data_dir"]) if args["web_data_dir"] else None,
-    log_file=sys.stdout,
-    cpu_workers=args["cpu_workers"],
-    max_batch_bytes=args["max_batch_bytes"],
-    accumulate_batches=args["accumulate_batches"],
-)
-print("TRAINING_RESULT:" + str(result))
-'''
-
-    try:
-        env = None
-        if not use_cuda:
-            env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
-        proc = subprocess.run(
-            [sys.executable, '-c', script],
-            capture_output=True,
-            text=True,
-            cwd=str(Path(__file__).parent.parent),
-            env=env,
-        )
-
-        # Forward output
-        if proc.stdout:
-            for line in proc.stdout.splitlines():
-                if line.startswith("TRAINING_RESULT:"):
-                    result_path = Path(line.split(":", 1)[1])
-                    return result_path
-                else:
-                    print(line)
-
-        if proc.returncode != 0:
-            if proc.stderr:
-                for line in proc.stderr.splitlines():
-                    print(f"ERROR: {line}", file=sys.stderr)
-            raise ValueError(f"Training failed with exit code {proc.returncode}")
-
-        raise ValueError("Training completed but no result path found")
-    finally:
-        # Clean up temp file
-        Path(args_file).unlink(missing_ok=True)
-
-
-def collect_traces(base_dir, problems, tptp_root, preset, trace_preset, use_cuda):
-    """Collect proof traces using age_weight baseline."""
-    from proofatlas import ProofAtlas
-
-    traces_dir = base_dir / ".data" / "traces" / trace_preset
-    traces_dir.mkdir(parents=True, exist_ok=True)
-
-    existing = list(traces_dir.glob("*.json"))
-    if existing:
-        log(f"Found {len(existing)} existing traces in {traces_dir}")
-        return
-
-    log(f"No traces found in {traces_dir}")
-    log("Collecting traces using age_weight baseline...")
-
-    timeout = preset.get("timeout", 10)
-    literal_selection = preset.get("literal_selection", 21)
-    age_weight_ratio = preset.get("age_weight_ratio", 0.167)
-    memory_limit = preset.get("memory_limit")
-    from proofatlas import ml
-    collected = 0
-
-    for i, problem in enumerate(problems, 1):
-        try:
-            with open(problem) as f:
-                content = f.read()
-
-            state = ProofAtlas()
-            state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
-
-            proof_found, status = state.prove(
-                timeout=float(timeout),
-                literal_selection=literal_selection,
-                age_weight_ratio=float(age_weight_ratio),
-                memory_limit=memory_limit,
-            )
-
-            if proof_found:
-                trace_json = state.extract_structured_trace(timeout)
-                ml.save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
-                collected += 1
-
-            if i % 100 == 0:
-                log(f"  [{i}/{len(problems)}] {collected} traces collected")
-
-        except Exception:
-            continue
-
-    log(f"Trace collection complete: {collected} traces")
-
-
 def get_problems(base_dir, tptp_config, problem_set):
     """Get list of TPTP problem files matching the problem set criteria."""
     tptp_root = base_dir / tptp_config["paths"]["root"]
@@ -484,50 +313,74 @@ def handle_kill(base_dir):
 
 def run_training_job(args, base_dir, preset, problems, tptp_config):
     """Run the actual training (called directly or as daemon)."""
-    from proofatlas import ml
-    from bench_jobs import register_pid, get_pid_file
+    from proofatlas.ml.training import run_training
+    from proofatlas.ml.weights import get_model_name
 
-    model_name = f"{preset['encoder']}_{preset['scorer']}"
-    tptp_root = base_dir / tptp_config["paths"]["root"]
+    model_name = get_model_name(preset)
     weights_dir = Path(args.weights_dir) if args.weights_dir else base_dir / ".weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate CLI args
     max_batch_bytes, accumulate_batches = validate_args(args, preset)
 
-    # Collect traces if needed
+    # Resolve trace directory
     trace_preset = preset.get("traces") or args.config
     if args.trace_dir:
         trace_dir = Path(args.trace_dir)
     else:
         trace_dir = base_dir / ".data" / "traces" / trace_preset
-        existing_traces = list(trace_dir.glob("*.json")) if trace_dir.exists() else []
-        if not existing_traces:
-            collect_traces(base_dir, problems, tptp_root, preset, trace_preset, args.use_cuda)
+
+    # Check that traces exist
+    if not trace_dir.exists() or not any(trace_dir.glob("*.npz")):
+        log(f"Error: No .npz trace files found in {trace_dir}")
+        log(f"Collect traces first with: proofatlas-bench --config age_weight --trace")
+        sys.exit(1)
 
     # Train model
     problem_names = {p.stem for p in problems}
     log("Starting training...")
 
-    try:
-        weights_path = run_training_subprocess(
+    # Multi-GPU DDP
+    if args.gpu_workers > 1:
+        import torch.multiprocessing as mp
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
+
+        def train_worker(rank):
+            run_training(
+                preset=preset,
+                trace_dir=trace_dir,
+                weights_dir=weights_dir,
+                configs_dir=base_dir / "configs",
+                problem_names=problem_names,
+                web_data_dir=base_dir / "web" / "data",
+                log_file=sys.stdout,
+                cpu_workers=args.cpu_workers,
+                rank=rank,
+                world_size=args.gpu_workers,
+                max_batch_bytes=max_batch_bytes,
+                accumulate_batches=accumulate_batches,
+            )
+
+        mp.spawn(train_worker, nprocs=args.gpu_workers, join=True)
+    else:
+        weights_path = run_training(
             preset=preset,
             trace_dir=trace_dir,
             weights_dir=weights_dir,
             configs_dir=base_dir / "configs",
             problem_names=problem_names,
             web_data_dir=base_dir / "web" / "data",
-            use_cuda=args.use_cuda,
+            log_file=sys.stdout,
             cpu_workers=args.cpu_workers,
-            gpu_workers=args.gpu_workers,
             max_batch_bytes=max_batch_bytes,
             accumulate_batches=accumulate_batches,
+            force_cpu=not args.use_cuda,
         )
-        log(f"Training complete! Weights saved to: {weights_path}")
-        log(f"Run evaluation with: proofatlas-bench --config {args.config}")
-    except ValueError as e:
-        log(f"Training failed: {e}")
-        sys.exit(1)
+
+    log(f"Training complete! Weights saved to: {weights_dir}")
+    log(f"Run evaluation with: proofatlas-bench --config {args.config}")
 
 
 def main():
@@ -586,8 +439,8 @@ def main():
         sys.exit(1)
 
     preset = presets[args.config]
-    from proofatlas import ml
-    if not ml.is_learned_selector(preset):
+    from proofatlas.ml.weights import is_learned_selector
+    if not is_learned_selector(preset):
         print(f"Error: Config '{args.config}' is not an ML selector (no encoder/scorer)")
         sys.exit(1)
 
@@ -607,7 +460,8 @@ def main():
 
     # Check for existing weights
     weights_dir = Path(args.weights_dir) if args.weights_dir else base_dir / ".weights"
-    existing_weights = ml.find_weights(weights_dir, preset)
+    from proofatlas.ml.weights import find_weights
+    existing_weights = find_weights(weights_dir, preset)
     if existing_weights:
         log(f"Found existing weights: {existing_weights}")
         log("Will overwrite with new training run")

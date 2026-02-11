@@ -261,6 +261,9 @@ fn parse_content(
     let mut cnf_formulas = Vec::new();
     let mut fof_formulas = Vec::new();
 
+    // Strip block comments (/* ... */) before processing
+    let input = strip_block_comments(input);
+
     // Split input into logical statements (ending with '.')
     let mut current_statement = String::new();
 
@@ -337,6 +340,18 @@ fn parse_content(
                     }
                 }
             }
+            // Reject unrecognized statements
+            else {
+                let preview = if statement.len() > 80 {
+                    format!("{}...", &statement[..80])
+                } else {
+                    statement.to_string()
+                };
+                return Err(format!(
+                    "Unsupported statement (expected cnf, fof, or include): {}",
+                    preview
+                ));
+            }
 
             current_statement.clear();
         }
@@ -346,6 +361,32 @@ fn parse_content(
         cnf_formulas,
         fof_formulas,
     })
+}
+
+/// Strip block comments (/* ... */) from input, preserving line structure
+fn strip_block_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // consume '*'
+            // Skip until closing */
+            loop {
+                match chars.next() {
+                    Some('*') if chars.peek() == Some(&'/') => {
+                        chars.next(); // consume '/'
+                        break;
+                    }
+                    Some('\n') => result.push('\n'), // preserve line structure
+                    Some(_) => {}
+                    None => break, // unclosed comment, just stop
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 fn parse_include_directive(
@@ -1310,5 +1351,41 @@ mod tests {
         assert!(result.interner.get_constant("a").is_some());
         assert!(result.interner.get_function("f").is_some());
         assert!(result.interner.get_predicate("p").is_some());
+    }
+
+    #[test]
+    fn test_reject_unsupported_statement() {
+        let err = parse_tptp("tff(t, type, p: $o).", &[], None, None).unwrap_err();
+        assert!(err.contains("Unsupported statement"), "got: {}", err);
+
+        let err = parse_tptp("thf(t, type, p: $o).", &[], None, None).unwrap_err();
+        assert!(err.contains("Unsupported statement"), "got: {}", err);
+
+        let err = parse_tptp("garbage here.", &[], None, None).unwrap_err();
+        assert!(err.contains("Unsupported statement"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_comments_still_skipped() {
+        // Line comments
+        let result = parse_tptp(
+            "% this is a comment\ncnf(test, axiom, p(a)).",
+            &[], None, None,
+        ).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+
+        // Block comments
+        let result = parse_tptp(
+            "/* block comment */\ncnf(test, axiom, p(a)).",
+            &[], None, None,
+        ).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+
+        // Block comment containing a period
+        let result = parse_tptp(
+            "/* comment with a period. and more. */\ncnf(test, axiom, p(a)).",
+            &[], None, None,
+        ).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
     }
 }

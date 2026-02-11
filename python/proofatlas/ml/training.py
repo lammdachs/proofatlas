@@ -7,6 +7,7 @@ extracted to dedicated modules (losses, datasets, logger, export).
 """
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,9 +27,7 @@ from .losses import (
     compute_loss,
 )
 from .datasets import (
-    ProofDataset,
     ProofBatchDataset,
-    DynamicBatchSampler,
     collate_proof_batch,
     collate_tokenized_batch,
     scan_trace_files,
@@ -82,22 +81,24 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
 # =============================================================================
 
 
-def save_trace(traces_dir: Path, preset: str, problem: str, trace_json: str):
-    """Save proof trace for training in structured JSON format.
+def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
+    """Save tensor trace data as .npz files.
 
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
         preset: Preset name for trace subdirectory
         problem: Problem file name
-        trace_json: Structured JSON string from extract_structured_trace()
+        graph_dict: Dict of numpy arrays for graph trace
+        sentence_dict: Dict of numpy arrays for sentence trace
     """
+    import numpy as np
+
     try:
         preset_dir = Path(traces_dir) / preset
         preset_dir.mkdir(parents=True, exist_ok=True)
-        problem_name = Path(problem).stem
-        json_path = preset_dir / f"{problem_name}.json"
-        with open(json_path, "w") as f:
-            f.write(trace_json)
+        stem = Path(problem).stem
+        np.savez_compressed(preset_dir / f"{stem}.graph.npz", **graph_dict)
+        np.savez_compressed(preset_dir / f"{stem}.sentence.npz", **sentence_dict)
     except Exception:
         pass
 
@@ -105,6 +106,7 @@ def save_trace(traces_dir: Path, preset: str, problem: str, trace_json: str):
 def load_trace_files(
     traces_dir: Path,
     preset: str,
+    encoder_type: str = "graph",
     problem_names: Optional[set] = None,
 ) -> List[Path]:
     """Get list of trace files for a preset.
@@ -112,6 +114,7 @@ def load_trace_files(
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
         preset: Trace preset name (subdirectory in traces_dir)
+        encoder_type: "graph" or "string" — determines which .npz suffix to glob
         problem_names: Optional set of problem names to include. If None, loads all.
 
     Returns:
@@ -121,9 +124,11 @@ def load_trace_files(
     if not preset_dir.exists():
         return []
 
-    trace_files = sorted(preset_dir.glob("*.json"))
+    suffix = "sentence.npz" if encoder_type == "string" else "graph.npz"
+    trace_files = sorted(preset_dir.glob(f"*.{suffix}"))
     if problem_names is not None:
-        trace_files = [f for f in trace_files if f.stem in problem_names]
+        # Strip the double suffix (.graph.npz or .sentence.npz) to get the problem stem
+        trace_files = [f for f in trace_files if f.name.rsplit(".", 2)[0] in problem_names]
 
     return trace_files
 
@@ -131,6 +136,14 @@ def load_trace_files(
 # =============================================================================
 # Forward Pass (shared between train and val)
 # =============================================================================
+
+
+def _edge_list_to(edge_list, device):
+    """Move edge-list tuple/list or tensor to device."""
+    if isinstance(edge_list, (tuple, list)):
+        row, col, val, shape = edge_list
+        return (row.to(device), col.to(device), val.to(device), shape)
+    return edge_list.to(device)
 
 
 def _forward_pass(model, batch, device, is_sentence_model):
@@ -161,8 +174,8 @@ def _forward_pass(model, batch, device, is_sentence_model):
         return model.scorer(u_emb, p_emb)
     else:
         u_x = batch["u_node_features"].to(device)
-        u_adj = batch["u_adj"].to(device)
-        u_pool = batch["u_pool_matrix"].to(device)
+        u_adj = _edge_list_to(batch["u_adj"], device)
+        u_pool = _edge_list_to(batch["u_pool_matrix"], device)
         u_cf = batch.get("u_clause_features")
         if u_cf is not None:
             u_cf = u_cf.to(device)
@@ -172,8 +185,8 @@ def _forward_pass(model, batch, device, is_sentence_model):
         p_emb = None
         if "p_node_features" in batch:
             p_x = batch["p_node_features"].to(device)
-            p_adj = batch["p_adj"].to(device)
-            p_pool = batch["p_pool_matrix"].to(device)
+            p_adj = _edge_list_to(batch["p_adj"], device)
+            p_pool = _edge_list_to(batch["p_pool_matrix"], device)
             p_cf = batch.get("p_clause_features")
             if p_cf is not None:
                 p_cf = p_cf.to(device)
@@ -201,6 +214,7 @@ def run_training(
     world_size: int = 1,
     max_batch_bytes: Optional[int] = None,
     accumulate_batches: Optional[int] = None,
+    force_cpu: bool = False,
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -253,8 +267,14 @@ def run_training(
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
         device = torch.device(f"cuda:{rank}")
         torch.cuda.set_device(device)
+    elif force_cpu:
+        device = torch.device("cpu")
     else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            use_cuda = torch.cuda.is_available()
+        except Exception:
+            use_cuda = False
+        device = torch.device("cuda" if use_cuda else "cpu")
 
     try:
         return _run_training_inner(
@@ -345,14 +365,24 @@ def _run_training_inner(
     config["scorer"] = scorer_arch
     config["input_dim"] = embeddings_config.get("input_dim", 8)
 
-    # Get trace files
+    # Determine output type based on embedding
+    embedding_type = get_encoder_type(preset)
+    if embedding_type == "string":
+        output_type = "tokenized"
+    else:
+        output_type = "graph"
+
+    model_name = get_model_name(preset)
+
+    # Get trace files (.npz format)
     trace_dir = Path(trace_dir)
-    trace_files = sorted(trace_dir.glob("*.json"))
+    suffix = "sentence.npz" if embedding_type == "string" else "graph.npz"
+    trace_files = sorted(trace_dir.glob(f"*.{suffix}"))
     if problem_names is not None:
-        trace_files = [f for f in trace_files if f.stem in problem_names]
+        trace_files = [f for f in trace_files if f.name.rsplit(".", 2)[0] in problem_names]
 
     if not trace_files:
-        raise ValueError(f"No trace files found in {trace_dir}")
+        raise ValueError(f"No trace files found in {trace_dir} (looking for *.{suffix})")
 
     log_msg(f"Found {len(trace_files)} trace files")
 
@@ -366,24 +396,10 @@ def _run_training_inner(
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
     random.shuffle(valid_files)
-
-    if val_ratio > 0:
-        val_count = max(1, int(len(valid_files) * val_ratio))
-        train_files = valid_files[val_count:]
-        val_files = valid_files[:val_count]
-    else:
-        train_files = valid_files
-        val_files = []
-
-    # Determine output type based on embedding
-    embedding_type = get_encoder_type(preset)
-    if embedding_type == "string":
-        output_type = "tokenized"
-    else:
-        output_type = "graph"
-
-    model_name = get_model_name(preset)
-    log_msg(f"Training {model_name}: {len(train_files)} traces")
+    n_val = int(len(valid_files) * val_ratio)
+    val_files = valid_files[:n_val]
+    train_files = valid_files[n_val:]
+    log_msg(f"Training {model_name}: {len(train_files)} train, {len(val_files)} val traces")
 
     # Resolve batch size and accumulation: CLI overrides > config
     is_sentence_model_type = (embedding_type == "string")
@@ -570,7 +586,7 @@ def _run_training_inner(
         train_loss /= num_batches if num_batches > 0 else 1
 
         val_loss = 0
-        if val_loader:
+        if val_loader is not None:
             model.eval()
             num_val_batches = 0
             with torch.no_grad():
@@ -591,7 +607,7 @@ def _run_training_inner(
             val_loss /= num_val_batches if num_val_batches > 0 else 1
 
         # Track best model and early stopping (rank 0 only tracks, but all ranks continue)
-        current_val = val_loss if val_loader else train_loss
+        current_val = val_loss if val_loader is not None else train_loss
         if current_val < best_val_loss:
             best_val_loss = current_val
             best_epoch = epoch
@@ -603,7 +619,7 @@ def _run_training_inner(
             patience_counter += 1
 
         # Log to console and file
-        if val_loader:
+        if val_loader is not None:
             log_msg(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f} | val={val_loss:.4f}")
         else:
             log_msg(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
@@ -613,7 +629,7 @@ def _run_training_inner(
             web_logger.log_epoch(
                 epoch=epoch,
                 train_loss=train_loss,
-                val_loss=val_loss if val_loader else None,
+                val_loss=val_loss if val_loader is not None else None,
                 val_acc=None,
                 lr=lr,
             )

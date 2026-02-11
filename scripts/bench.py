@@ -495,7 +495,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    preset_name: str = None, weights_path: str = None,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False, n_jobs: int = 1,
-                   use_cuda: bool = False, gpu_workers: int = 0):
+                   use_cuda: bool = False, gpu_workers: int = 0,
+                   collect_traces: bool = False):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
 
@@ -580,8 +581,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
         else:
             print(f"\nEvaluating {len(problems)} problems" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
 
-        # Always collect traces for proofatlas
-        collect_trace = (prover == "proofatlas")
+        collect_trace = collect_traces and (prover == "proofatlas")
 
         # Prepare work items
         work_items = [
@@ -665,6 +665,9 @@ def main():
                        help="Number of parallel CPU workers (default: 1)")
     parser.add_argument("--gpu-workers", type=int, default=0,
                        help="Number of GPUs for ML inference (0=CPU, N>0=distribute across N GPUs)")
+
+    parser.add_argument("--trace", action="store_true",
+                       help="Collect training traces (.npz) for successful proofs")
 
     # Job management
     parser.add_argument("--status", action="store_true",
@@ -933,6 +936,7 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.cpu_workers,
                 use_cuda=use_cuda_eval, gpu_workers=gpu_workers,
+                collect_traces=args.trace,
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()

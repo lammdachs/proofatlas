@@ -2,7 +2,7 @@
 
 This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
-- Structured data: JSON trace format with converters
+- Structured data: .npz trace format with converters
 - Training: training loop and utilities
 - Config: configuration loading for data and selectors
 
@@ -26,9 +26,7 @@ from .losses import (
 )
 
 from .datasets import (
-    ProofDataset,
     ProofBatchDataset,
-    DynamicBatchSampler,
     collate_proof_batch,
     collate_tokenized_batch,
     scan_trace_files,
@@ -42,7 +40,7 @@ from .export import export_model
 from .training import (
     run_training,
     load_trace_files,
-    save_trace,
+    save_tensor_trace,
     save_model,
     load_model,
 )
@@ -76,10 +74,7 @@ from .config import (
 from .structured import (
     # Conversion functions
     clause_to_string,
-    clause_to_graph,
     clauses_to_strings,
-    clauses_to_graphs,
-    load_structured_trace,
     batch_graphs as batch_structured_graphs,
 )
 
@@ -97,9 +92,7 @@ __all__ = [
     "margin_ranking_loss",
     "compute_loss",
     # Datasets
-    "ProofDataset",
     "ProofBatchDataset",
-    "DynamicBatchSampler",
     "collate_proof_batch",
     "collate_tokenized_batch",
     "scan_trace_files",
@@ -107,7 +100,7 @@ __all__ = [
     # Training
     "run_training",
     "load_trace_files",
-    "save_trace",
+    "save_tensor_trace",
     # Export
     "export_model",
     # Utilities
@@ -137,9 +130,6 @@ __all__ = [
     "merge_configs",
     # Structured data conversion
     "clause_to_string",
-    "clause_to_graph",
     "clauses_to_strings",
-    "clauses_to_graphs",
-    "load_structured_trace",
     "batch_structured_graphs",
 ]

@@ -15,22 +15,14 @@
 
   "presets": {
     "time": {
-      "description": "10s with Select=1 (prefer negative, like Vampire sel21)",
+      "description": "10s",
       "TimeLimit": 10,
       "Select": 1
     },
-
-    "age_weight_sel20": {
-      "description": "128 loops with Select=0 (all maximal)",
-      "TimeLimit": 600,
-      "Loops": 128,
-      "Select": 0
-    },
-
     "age_weight_sel21": {
-      "description": "128 loops with Select=1 (prefer negative)",
+      "description": "256 loops",
       "TimeLimit": 600,
-      "Loops": 128,
+      "Loops": 256,
       "Select": 1
     }
   }

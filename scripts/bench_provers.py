@@ -67,7 +67,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
-    age_weight_ratio = preset.get("age_weight_ratio", 0.167)
+    age_weight_ratio = preset.get("age_weight_ratio", 0.5)
     encoder = preset.get("encoder") if is_learned else None
     scorer = preset.get("scorer") if is_learned else None
 
@@ -100,8 +100,8 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Collect trace for training
     if collect_trace and proof_found and trace_preset:
         try:
-            trace_json = state.extract_structured_trace(elapsed)
-            _get_ml().save_trace(base_dir / ".data" / "traces", trace_preset, problem.name, trace_json)
+            graph_dict, sentence_dict = state.extract_tensor_trace(elapsed)
+            _get_ml().save_tensor_trace(base_dir / ".data" / "traces", trace_preset, problem.name, graph_dict, sentence_dict)
         except Exception:
             pass
 

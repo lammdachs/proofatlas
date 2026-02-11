@@ -287,6 +287,10 @@ pub struct BatchClauseGraph {
     /// Clause boundaries: (start_node, end_node) for each clause
     /// Used to build the pool matrix
     pub clause_boundaries: Vec<(usize, usize)>,
+
+    /// Edge boundaries: (start_edge, end_edge) for each clause
+    /// Used to split per-clause edges in trace extraction
+    pub edge_boundaries: Vec<(usize, usize)>,
 }
 
 impl GraphBuilder {
@@ -299,10 +303,12 @@ impl GraphBuilder {
         let mut features: Vec<[f32; 3]> = Vec::new();
         let mut edges: Vec<(usize, usize)> = Vec::new();
         let mut clause_boundaries: Vec<(usize, usize)> = Vec::new();
+        let mut edge_boundaries: Vec<(usize, usize)> = Vec::new();
         let mut next_id: usize = 0;
 
         for clause in clauses {
             let start = next_id;
+            let edge_start = edges.len();
 
             // Clause root node: [type=0, arity=0, arg_pos=0]
             let clause_node = next_id;
@@ -335,6 +341,7 @@ impl GraphBuilder {
             }
 
             clause_boundaries.push((start, next_id));
+            edge_boundaries.push((edge_start, edges.len()));
         }
 
         BatchClauseGraph {
@@ -342,6 +349,7 @@ impl GraphBuilder {
             edge_indices: edges,
             node_features: features,
             clause_boundaries,
+            edge_boundaries,
         }
     }
 

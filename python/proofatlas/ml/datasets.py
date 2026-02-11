@@ -3,35 +3,19 @@
 Provides ProofBatchDataset (IterableDataset) that produces complete batch
 tensors in workers, and collate functions for graph/tokenized formats.
 
-Each CPU worker does all the work: load trace, sample state, collate per-proof,
-measure bytes, accumulate into batches, and yield complete batch tensors.
+Trace files are .npz (numpy compressed archives) produced by Rust's
+extract_tensor_trace(). Each worker does: load .npz, sample state, slice
+arrays, collate into batch, yield.
 """
 
-import json
 import random
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+import numpy as np
 import torch
 from torch.utils.data import IterableDataset
-
-# Use orjson for faster JSON loading if available
-try:
-    import orjson
-    _ORJSON_AVAILABLE = True
-except ImportError:
-    _ORJSON_AVAILABLE = False
-
-
-def _load_json(path: Path) -> dict:
-    """Load JSON file using orjson if available, else standard json."""
-    if _ORJSON_AVAILABLE:
-        with open(path, "rb") as f:
-            return orjson.loads(f.read())
-    else:
-        with open(path) as f:
-            return json.load(f)
 
 
 def _scan_trace(trace_file: Path) -> Optional[int]:
@@ -40,23 +24,20 @@ def _scan_trace(trace_file: Path) -> Optional[int]:
     Returns clause count if valid, None if trace should be skipped.
     """
     try:
-        trace = _load_json(trace_file)
+        with np.load(trace_file, allow_pickle=True) as data:
+            if not bool(data["proof_found"][0]):
+                return None
+            if "state_selected" not in data or len(data["state_selected"]) == 0:
+                return None
+            if "labels" not in data:
+                return None
+            return len(data["labels"])
     except Exception:
         return None
 
-    if not trace.get("proof_found") or not trace.get("clauses"):
-        return None
-    if not trace.get("selection_states"):
-        return None
-
-    return len(trace["clauses"])
-
 
 def _batch_bytes(batch: dict) -> int:
-    """Measure actual byte size of collated batch tensors.
-
-    Handles both dense and sparse tensors.
-    """
+    """Measure actual byte size of collated batch tensors."""
     total = 0
     for v in batch.values():
         if isinstance(v, torch.Tensor):
@@ -68,94 +49,155 @@ def _batch_bytes(batch: dict) -> int:
     return total
 
 
+def _estimate_graph_bytes(item: dict) -> int:
+    """Estimate collated tensor bytes from pre-sampled graph data (numpy arrays)."""
+    total = 0
+    for graphs in (item.get("u_graphs", []), item.get("p_graphs", [])):
+        for g in graphs:
+            num_nodes = g["num_nodes"]
+            num_edges = g["num_edges"]
+            # x: [num_nodes, 3] float32
+            total += num_nodes * 3 * 4
+            # adj sparse: indices [2, num_nodes + num_edges] int64 + values float32
+            total += (num_nodes + num_edges) * 2 * 8  # indices
+            total += (num_nodes + num_edges) * 4       # values
+            # pool_matrix sparse: indices [2, num_nodes] int64 + values float32
+            total += num_nodes * 2 * 8
+            total += num_nodes * 4
+            # clause_features: [CLAUSE_FEATURE_DIM] float32
+            total += 9 * 4
+    # labels: float32 per u_graph + proof_ids: int64 per u_graph
+    n_u = len(item.get("u_graphs", []))
+    total += n_u * 4 + n_u * 8
+    return total
+
+
+def _estimate_tokenized_bytes(item: dict) -> int:
+    """Estimate collated tensor bytes from pre-sampled tokenized data."""
+    total = 0
+    for key in ("u_input_ids", "u_attention_mask", "p_input_ids", "p_attention_mask"):
+        t = item.get(key)
+        if t is not None and isinstance(t, torch.Tensor):
+            total += t.nelement() * t.element_size()
+    n_u = len(item.get("u_labels", []))
+    total += n_u * 4 + n_u * 8  # labels float32 + proof_ids int64
+    return total
+
+
 def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
-    """Load trace, sample a random selection state, return pre-sampled graph data.
+    """Load .npz trace, sample a random selection state, return pre-sampled graph data.
 
-    Returns U/P clause subsets already split and ready for collation.
+    Returns U/P clause subsets with per-clause graph dicts ready for batch_graphs().
     """
-    from .structured import clause_to_graph
-
     try:
-        trace = _load_json(trace_file)
+        data = dict(np.load(trace_file, allow_pickle=True))
     except Exception:
         return None
 
-    if not trace.get("proof_found") or not trace.get("clauses"):
+    if not bool(data["proof_found"][0]):
         return None
-    if not trace.get("selection_states"):
+    if len(data.get("state_selected", [])) == 0:
         return None
 
-    clauses = trace["clauses"]
-    labels = [c.get("label", 0) for c in clauses]
-    states = trace["selection_states"]
+    node_features = data["node_features"]       # [total_nodes, 3]
+    edge_src = data["edge_src"]                  # [total_edges]
+    edge_dst = data["edge_dst"]                  # [total_edges]
+    node_offsets = data["node_offsets"]           # [num_clauses + 1]
+    edge_offsets = data["edge_offsets"]           # [num_clauses + 1]
+    clause_features = data["clause_features"]    # [num_clauses, 9]
+    labels = data["labels"]                      # [num_clauses]
 
-    # Sample a random selection state
-    state = random.choice(states)
-    u_indices = state["unprocessed"]
-    p_indices = state["processed"]
+    state_selected = data["state_selected"]
+    state_u_offsets = data["state_u_offsets"]
+    state_u_indices = data["state_u_indices"]
+    state_p_offsets = data["state_p_offsets"]
+    state_p_indices = data["state_p_indices"]
 
-    # Build graphs and labels for U and P
-    u_graphs = []
-    u_labels = []
-    for idx in u_indices:
-        if idx < len(clauses):
-            u_graphs.append(clause_to_graph(clauses[idx]))
-            u_labels.append(labels[idx])
+    num_states = len(state_selected)
+    si = random.randrange(num_states)
 
-    p_graphs = []
-    for idx in p_indices:
-        if idx < len(clauses):
-            p_graphs.append(clause_to_graph(clauses[idx]))
+    # Get U and P clause indices for this state
+    u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
+    p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
+    u_indices = state_u_indices[u_start:u_end].astype(np.int64)
+    p_indices = state_p_indices[p_start:p_end].astype(np.int64)
 
-    if not u_graphs:
+    if len(u_indices) == 0:
         return None
+
+    def _extract_clause_graph(idx):
+        """Extract per-clause graph dict from flat arrays."""
+        i = int(idx)
+        n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
+        e_start, e_end = int(edge_offsets[i]), int(edge_offsets[i + 1])
+
+        x = node_features[n_start:n_end].copy()
+        num_nodes = n_end - n_start
+        num_edges = e_end - e_start
+
+        if num_edges > 0:
+            src = edge_src[e_start:e_end].astype(np.int64) - n_start
+            dst = edge_dst[e_start:e_end].astype(np.int64) - n_start
+            edge_index = np.stack([src, dst])
+        else:
+            edge_index = np.zeros((2, 0), dtype=np.int64)
+
+        return {
+            "x": x,
+            "edge_index": edge_index,
+            "num_nodes": num_nodes,
+            "num_edges": num_edges,
+            "clause_features": clause_features[i].copy(),
+        }
+
+    u_graphs = [_extract_clause_graph(idx) for idx in u_indices]
+    u_labels = [int(labels[int(idx)]) for idx in u_indices]
+
+    p_graphs = [_extract_clause_graph(idx) for idx in p_indices]
 
     return {
         "u_graphs": u_graphs,
         "p_graphs": p_graphs,
         "u_labels": u_labels,
-        "problem": trace_file.stem,
+        "problem": trace_file.name.rsplit(".", 2)[0],
     }
 
 
 def _load_and_presample_tokenized(trace_file: Path) -> Optional[Dict]:
-    """Load trace, sample a random selection state, return pre-sampled tokenized data."""
-    from .structured import clause_to_string
-
+    """Load .npz trace, sample a random selection state, return pre-sampled tokenized data."""
     try:
-        trace = _load_json(trace_file)
+        data = dict(np.load(trace_file, allow_pickle=True))
     except Exception:
         return None
 
-    if not trace.get("proof_found") or not trace.get("clauses"):
+    if not bool(data["proof_found"][0]):
         return None
-    if not trace.get("selection_states"):
+    if len(data.get("state_selected", [])) == 0:
         return None
 
-    clauses = trace["clauses"]
-    labels = [c.get("label", 0) for c in clauses]
-    states = trace["selection_states"]
+    clause_strings = data["clause_strings"]    # [num_clauses] object array
+    labels = data["labels"]                    # [num_clauses]
 
-    # Sample a random selection state
-    state = random.choice(states)
-    u_indices = state["unprocessed"]
-    p_indices = state["processed"]
+    state_selected = data["state_selected"]
+    state_u_offsets = data["state_u_offsets"]
+    state_u_indices = data["state_u_indices"]
+    state_p_offsets = data["state_p_offsets"]
+    state_p_indices = data["state_p_indices"]
 
-    # Build strings and labels for U and P
-    u_strings = []
-    u_labels = []
-    for idx in u_indices:
-        if idx < len(clauses):
-            u_strings.append(clause_to_string(clauses[idx]))
-            u_labels.append(labels[idx])
+    num_states = len(state_selected)
+    si = random.randrange(num_states)
 
-    p_strings = []
-    for idx in p_indices:
-        if idx < len(clauses):
-            p_strings.append(clause_to_string(clauses[idx]))
+    u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
+    p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
+    u_indices = state_u_indices[u_start:u_end].astype(np.int64)
+    p_indices = state_p_indices[p_start:p_end].astype(np.int64)
 
-    if not u_strings:
+    if len(u_indices) == 0:
         return None
+
+    u_strings = [str(clause_strings[int(idx)]) for idx in u_indices]
+    u_labels = [int(labels[int(idx)]) for idx in u_indices]
+    p_strings = [str(clause_strings[int(idx)]) for idx in p_indices]
 
     # Pre-tokenize
     tokenizer = _get_tokenizer()
@@ -165,7 +207,7 @@ def _load_and_presample_tokenized(trace_file: Path) -> Optional[Dict]:
         "u_input_ids": u_encoded["input_ids"],
         "u_attention_mask": u_encoded["attention_mask"],
         "u_labels": u_labels,
-        "problem": trace_file.stem,
+        "problem": trace_file.name.rsplit(".", 2)[0],
     }
 
     if p_strings:
@@ -192,12 +234,11 @@ def _get_tokenizer():
 class ProofBatchDataset(IterableDataset):
     """IterableDataset that produces complete batch tensors with exact byte measurement.
 
-    Each worker loads traces, samples selection states, collates per-proof,
-    measures actual tensor bytes, and yields complete batches. The main process
-    just receives ready-to-use batch dicts.
+    Each worker loads .npz traces, samples selection states, collates per-proof,
+    measures actual tensor bytes, and yields complete batches.
 
     Args:
-        files: List of trace file paths
+        files: List of trace file paths (.graph.npz or .sentence.npz)
         output_type: "graph" for GNN models, "tokenized" for sentence models
         max_batch_bytes: Maximum collated tensor bytes per batch
         shuffle: Whether to shuffle files each epoch
@@ -256,11 +297,11 @@ class ProofBatchDataset(IterableDataset):
             if item is None:
                 continue
 
-            # Collate single proof to measure actual tensor bytes
-            single = self._collate([item])
-            if single is None:
-                continue
-            proof_bytes = _batch_bytes(single)
+            # Estimate tensor bytes without creating throwaway sparse tensors
+            if self.output_type == "tokenized":
+                proof_bytes = _estimate_tokenized_bytes(item)
+            else:
+                proof_bytes = _estimate_graph_bytes(item)
 
             if buffer_bytes + proof_bytes > self.max_batch_bytes and buffer:
                 batch = self._collate(buffer)
@@ -302,11 +343,7 @@ def scan_trace_files(files: List[Path], max_workers: int = 4) -> List[Path]:
 
 
 def collate_tokenized_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor]]:
-    """Collate pre-sampled tokenized items into a batch.
-
-    Items are already split into U/P sets. This just concatenates across proofs
-    and assigns proof_ids.
-    """
+    """Collate pre-sampled tokenized items into a batch."""
     from torch.nn.utils.rnn import pad_sequence
 
     all_u_input_ids = []
@@ -355,11 +392,7 @@ def collate_tokenized_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tenso
 
 
 def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
-    """Collate pre-sampled graph items into a batch.
-
-    Items are already split into U/P graph sets. This just concatenates across
-    proofs and assigns proof_ids.
-    """
+    """Collate pre-sampled graph items into a batch."""
     from .structured import batch_graphs
 
     all_u_graphs = []
@@ -407,170 +440,3 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
         result["p_clause_features"] = p_batched.get("clause_features")
 
     return result
-
-
-# Keep old classes for backward compatibility
-class DynamicBatchSampler(torch.utils.data.Sampler):
-    """Sampler that creates batches with approximately equal total size.
-
-    Deprecated: use ProofBatchDataset instead.
-    """
-
-    def __init__(self, dataset, max_clauses: int = 8192, shuffle: bool = True):
-        self.dataset = dataset
-        self.max_clauses = max_clauses
-        self.shuffle = shuffle
-        self.sizes = dataset.sizes
-
-    def __iter__(self):
-        indices = list(range(len(self.dataset)))
-        if self.shuffle:
-            random.shuffle(indices)
-
-        batch = []
-        batch_size = 0
-
-        for idx in indices:
-            size = self.sizes[idx]
-
-            if size > self.max_clauses:
-                if batch:
-                    yield batch
-                    batch = []
-                    batch_size = 0
-                yield [idx]
-                continue
-
-            if batch_size + size > self.max_clauses and batch:
-                yield batch
-                batch = []
-                batch_size = 0
-
-            batch.append(idx)
-            batch_size += size
-
-        if batch:
-            yield batch
-
-    def __len__(self):
-        total = sum(self.sizes)
-        return max(1, total // self.max_clauses)
-
-
-class ProofDataset(torch.utils.data.Dataset):
-    """Dataset that lazily loads structured JSON traces on access.
-
-    Deprecated: use ProofBatchDataset instead.
-    """
-
-    def __init__(
-        self,
-        trace_dir: Path,
-        output_type: str = "graph",
-        problem_names: Optional[set] = None,
-        trace_files: Optional[List[Path]] = None,
-        n_workers: int = None,
-    ):
-        self.output_type = output_type
-
-        if trace_files is not None:
-            files = list(trace_files)
-        elif trace_dir:
-            trace_dir = Path(trace_dir)
-            files = sorted(trace_dir.glob("*.json"))
-            if problem_names is not None:
-                files = [f for f in files if f.stem in problem_names]
-        else:
-            files = []
-
-        if not files:
-            raise ValueError("No JSON trace files found")
-
-        self.files = []
-        self.sizes = []
-        for f in files:
-            n_clauses = _scan_trace(f)
-            if n_clauses is not None:
-                self.files.append(f)
-                self.sizes.append(n_clauses)
-
-        if not self.files:
-            raise ValueError("No valid traces found (all filtered or empty)")
-
-        self.items = self
-
-    def __len__(self):
-        return len(self.files)
-
-    def __getitem__(self, idx):
-        if self.output_type == "tokenized":
-            return _load_trace_tokenized(self.files[idx])
-        else:
-            return _load_trace_graph(self.files[idx])
-
-
-def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
-    """Load trace file and convert to graphs with selection states.
-
-    Deprecated: used by ProofDataset. New code uses _load_and_presample_graph.
-    """
-    from .structured import clause_to_graph
-
-    try:
-        trace = _load_json(trace_file)
-    except Exception:
-        return None
-
-    if not trace.get("proof_found") or not trace.get("clauses"):
-        return None
-    if not trace.get("selection_states"):
-        return None
-
-    clauses = trace["clauses"]
-    labels = [c.get("label", 0) for c in clauses]
-    graphs = [clause_to_graph(c) for c in clauses]
-
-    return {
-        "graphs": graphs,
-        "labels": labels,
-        "selection_states": trace["selection_states"],
-        "problem": trace_file.stem,
-    }
-
-
-def _load_trace_tokenized(trace_file: Path) -> Optional[Dict]:
-    """Load trace file and pre-tokenize strings with selection states.
-
-    Deprecated: used by ProofDataset. New code uses _load_and_presample_tokenized.
-    """
-    from .structured import clause_to_string
-
-    try:
-        trace = _load_json(trace_file)
-    except Exception:
-        return None
-
-    if not trace.get("proof_found") or not trace.get("clauses"):
-        return None
-    if not trace.get("selection_states"):
-        return None
-
-    clauses = trace["clauses"]
-    labels = [c.get("label", 0) for c in clauses]
-    strings = [clause_to_string(c) for c in clauses]
-
-    tokenizer = _get_tokenizer()
-    encoded = tokenizer(
-        strings,
-        padding=True,
-        truncation=True,
-        return_tensors="pt",
-    )
-
-    return {
-        "input_ids": encoded["input_ids"],
-        "attention_mask": encoded["attention_mask"],
-        "labels": labels,
-        "selection_states": trace["selection_states"],
-        "problem": trace_file.stem,
-    }

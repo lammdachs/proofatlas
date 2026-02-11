@@ -14,21 +14,7 @@
   },
 
   "configs": {
-    "standard": {
-      "description": "Standard training with 20% validation split"
-    },
-
-    "no_val": {
-      "description": "Training without validation split",
-      "val_ratio": 0.0
-    },
-
     "quick": {
-      "description": "Quick training for testing",
-      "max_epochs": 20
-    },
-
-    "quick_val": {
       "description": "Quick training with validation",
       "max_epochs": 20,
       "val_ratio": 0.2
@@ -36,14 +22,8 @@
 
     "long": {
       "description": "Extended training for better convergence",
-      "max_epochs": 200
-    },
-
-    "sgd": {
-      "description": "SGD with momentum",
-      "optimizer": "sgd",
-      "learning_rate": 0.01,
-      "momentum": 0.9
+      "max_epochs": 200,
+      "val_ratio": 0.2
     }
   }
 }
