@@ -30,6 +30,7 @@ pub mod gcn;
 pub mod graph;
 pub mod proof_trace;
 pub mod protocol;
+#[cfg(unix)]
 pub mod remote;
 #[cfg(feature = "ml")]
 pub mod sentence;
@@ -58,6 +59,7 @@ pub use sentence::{
     load_sentence_embedder, load_sentence_selector, PassThroughScorer, SentenceEmbedder,
     SentenceSelector,
 };
+#[cfg(unix)]
 pub use remote::RemoteSelector;
 #[cfg(feature = "ml")]
 pub use server::ScoringServer;

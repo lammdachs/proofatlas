@@ -241,13 +241,15 @@ STATUS_MESSAGES = {
 }
 
 
-def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
+def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
+              project_root: Path = None) -> dict:
     """Run the prover server-side and return result in WASM-compatible format.
 
     Args:
         tptp_input: TPTP problem content
         options: Prover configuration options
         tptp_root: Optional path to TPTP root directory for resolving include() directives
+        project_root: Project root directory for resolving weights path
     """
     from proofatlas import ProofState
 
@@ -268,6 +270,12 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None) -> dict:
 
     if memory_limit is not None:
         kwargs["memory_limit"] = memory_limit
+
+    # Resolve weights path relative to project root (CWD may differ)
+    if project_root and options.get("encoder"):
+        weights_dir = project_root / ".weights"
+        if weights_dir.exists():
+            kwargs["weights_path"] = str(weights_dir)
 
     proof_found, status, profile_json, trace_json = state.run_saturation(**kwargs)
     elapsed_ms = int((time.time() - start) * 1000)
@@ -447,7 +455,8 @@ class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
                         tptp_root = str(version_dir)
                         break
 
-            result = run_prove(tptp_input, options, tptp_root=tptp_root)
+            result = run_prove(tptp_input, options, tptp_root=tptp_root,
+                               project_root=self.project_root)
             self.send_json(result)
         except json.JSONDecodeError as e:
             self.send_json({"error": f"Invalid JSON: {e}"}, 400)

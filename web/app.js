@@ -189,7 +189,7 @@ function updateConfigJson(config) {
 
 const KNOWN_CONFIG_KEYS = new Set([
     'description', 'timeout', 'literal_selection', 'age_weight_ratio',
-    'max_iterations', 'encoder', 'scorer', 'traces',
+    'max_iterations', 'memory_limit', 'encoder', 'scorer', 'traces',
 ]);
 
 function validateConfig(config) {
