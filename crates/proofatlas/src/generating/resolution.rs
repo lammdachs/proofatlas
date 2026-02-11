@@ -9,6 +9,7 @@ use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use std::collections::BTreeSet;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 /// Apply binary resolution between two clauses using literal selection
 pub fn resolution(
@@ -97,9 +98,33 @@ impl GeneratingInference for ResolutionRule {
         indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
+        let cancel = cm.cancel.clone();
+        let start_time = cm.start_time;
+        let timeout = cm.timeout;
+        let memory_limit = cm.memory_limit;
+        let baseline_rss = cm.baseline_rss_mb;
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
+
+        let stopped = || -> bool {
+            if cancel.load(AtomicOrdering::Relaxed) { return true; }
+            if let Some(start) = start_time {
+                if start.elapsed() > timeout {
+                    cancel.store(true, AtomicOrdering::Relaxed);
+                    return true;
+                }
+            }
+            if let Some(limit) = memory_limit {
+                if let Some(rss) = crate::config::process_memory_mb() {
+                    if rss.saturating_sub(baseline_rss) >= limit {
+                        cancel.store(true, AtomicOrdering::Relaxed);
+                        return true;
+                    }
+                }
+            }
+            false
+        };
 
         if let Some(sli) = indices.selected_literals() {
             // Collect unique candidate clause indices from index
@@ -114,6 +139,7 @@ impl GeneratingInference for ResolutionRule {
             }
 
             for &partner_idx in &candidate_set {
+                if stopped() { break; }
                 if let Some(partner) = state.clauses.get(partner_idx) {
                     changes.extend(resolution(given, partner, given_idx, partner_idx, selector, interner));
                     if partner_idx != given_idx {
@@ -123,12 +149,13 @@ impl GeneratingInference for ResolutionRule {
             }
 
             // Self-resolution if given wasn't already a candidate
-            if !candidate_set.contains(&given_idx) {
+            if !candidate_set.contains(&given_idx) && !stopped() {
                 changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
             }
         } else {
             // Fallback: iterate all processed clauses
             for &processed_idx in state.processed.iter() {
+                if stopped() { break; }
                 if processed_idx == given_idx {
                     continue;
                 }
@@ -137,7 +164,9 @@ impl GeneratingInference for ResolutionRule {
                     changes.extend(resolution(processed_clause, given, processed_idx, given_idx, selector, interner));
                 }
             }
-            changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+            if !stopped() {
+                changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+            }
         }
 
         changes

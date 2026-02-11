@@ -9,6 +9,7 @@ use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 /// Position in a term/atom where unification can occur
 struct Position {
@@ -281,38 +282,59 @@ impl GeneratingInference for SuperpositionRule {
         indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
+        let cancel = cm.cancel.clone();
+        let start_time = cm.start_time;
+        let timeout = cm.timeout;
+        let memory_limit = cm.memory_limit;
+        let baseline_rss = cm.baseline_rss_mb;
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
+
+        let stopped = || -> bool {
+            if cancel.load(AtomicOrdering::Relaxed) { return true; }
+            if let Some(start) = start_time {
+                if start.elapsed() > timeout {
+                    cancel.store(true, AtomicOrdering::Relaxed);
+                    return true;
+                }
+            }
+            if let Some(limit) = memory_limit {
+                if let Some(rss) = crate::config::process_memory_mb() {
+                    if rss.saturating_sub(baseline_rss) >= limit {
+                        cancel.store(true, AtomicOrdering::Relaxed);
+                        return true;
+                    }
+                }
+            }
+            false
+        };
 
         if let Some(sli) = indices.selected_literals() {
             let eq_clauses = sli.equality_clauses();
             let given_has_eq = eq_clauses.contains(&given_idx);
 
-            // Order-preserving: iterate processed in original order, skip using index
             for &processed_idx in state.processed.iter() {
+                if stopped() { break; }
                 if processed_idx == given_idx {
                     continue;
                 }
                 if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                    // Given as rewriter: only if given has a selected positive equality
                     if given_has_eq {
                         changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
                     }
-                    // Processed as rewriter: only if processed has a selected positive equality
                     if eq_clauses.contains(&processed_idx) {
                         changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
                     }
                 }
             }
 
-            // Self-superposition: only if given has a selected positive equality
-            if given_has_eq {
+            if given_has_eq && !stopped() {
                 changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
             }
         } else {
-            // Fallback: iterate all processed clauses
             for &processed_idx in state.processed.iter() {
+                if stopped() { break; }
                 if processed_idx == given_idx {
                     continue;
                 }
@@ -321,7 +343,9 @@ impl GeneratingInference for SuperpositionRule {
                     changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
                 }
             }
-            changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+            if !stopped() {
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+            }
         }
 
         changes

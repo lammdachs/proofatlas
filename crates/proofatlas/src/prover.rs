@@ -106,7 +106,9 @@ impl ProofAtlas {
         index_registry.add_index(Box::new(sl_index));
 
         // Create clause manager
-        let clause_manager = ClauseManager::new(interner, literal_selector);
+        let mut clause_manager = ClauseManager::new(interner, literal_selector);
+        clause_manager.memory_limit = config.memory_limit;
+        clause_manager.baseline_rss_mb = crate::config::process_memory_mb().unwrap_or(0);
 
         // Reset clause selector state and provide interner for symbol name resolution
         let mut clause_selector = clause_selector;
@@ -138,6 +140,9 @@ impl ProofAtlas {
             initial_clause_count,
         };
 
+        let cancel = Arc::new(AtomicBool::new(false));
+        clause_manager.cancel = cancel.clone();
+
         ProofAtlas {
             config,
             clause_manager,
@@ -149,7 +154,7 @@ impl ProofAtlas {
             profile,
             start_time: None,
             initial_clauses,
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel,
         }
     }
 
@@ -160,6 +165,8 @@ impl ProofAtlas {
     pub fn prove(&mut self) -> ProofResult {
         let start_time = Instant::now();
         self.start_time = Some(start_time);
+        self.clause_manager.start_time = Some(start_time);
+        self.clause_manager.timeout = self.config.timeout;
 
         if let Some(result) = self.init() {
             return result;
@@ -213,7 +220,11 @@ impl ProofAtlas {
     /// Each step processes all new clauses, then selects one given clause and
     /// generates inferences with it.
     pub fn step(&mut self) -> Option<ProofResult> {
-        self.start_time.get_or_insert_with(Instant::now);
+        let now = *self.start_time.get_or_insert_with(Instant::now);
+        if self.clause_manager.start_time.is_none() {
+            self.clause_manager.start_time = Some(now);
+            self.clause_manager.timeout = self.config.timeout;
+        }
 
         // === Step 1: Process new clauses ===
         'simplify: while let Some(&clause_idx) = self.state.new.last() {
@@ -441,7 +452,8 @@ impl ProofAtlas {
                 if num_clauses % 10 == 0 {
                     if let Some(limit_mb) = self.config.memory_limit {
                         if let Some(rss) = crate::config::process_memory_mb() {
-                            if rss >= limit_mb {
+                            let baseline = self.clause_manager.baseline_rss_mb;
+                            if rss.saturating_sub(baseline) >= limit_mb {
                                 return Some(ProofResult::ResourceLimit);
                             }
                         }
@@ -518,7 +530,8 @@ impl ProofAtlas {
                     if num_clauses % 10 == 0 {
                         if let Some(limit_mb) = self.config.memory_limit {
                             if let Some(rss) = crate::config::process_memory_mb() {
-                                if rss >= limit_mb {
+                                let baseline = self.clause_manager.baseline_rss_mb;
+                                if rss.saturating_sub(baseline) >= limit_mb {
                                     return Some(ProofResult::ResourceLimit);
                                 }
                             }

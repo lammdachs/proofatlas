@@ -7,6 +7,9 @@
 use super::{Clause, Interner, KBOConfig, TermOrdering, KBO};
 use super::literal_selection::LiteralSelector;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+use crate::time_compat::Instant;
 
 /// Centralized clause management combining the symbol interner, literal
 /// selection strategy, and term ordering.
@@ -17,6 +20,16 @@ pub struct ClauseManager {
     pub literal_selector: Arc<dyn LiteralSelector>,
     /// Term ordering (KBO) for equality orientation and ordering constraints
     pub term_ordering: KBO,
+    /// Shared cancellation flag (set when any limit fires)
+    pub cancel: Arc<AtomicBool>,
+    /// Timeout for the proof search
+    pub timeout: Duration,
+    /// Start time of the proof search
+    pub start_time: Option<Instant>,
+    /// Memory limit in MB (delta from baseline RSS)
+    pub memory_limit: Option<usize>,
+    /// Baseline RSS in MB at construction time
+    pub baseline_rss_mb: usize,
 }
 
 impl ClauseManager {
@@ -27,6 +40,11 @@ impl ClauseManager {
             interner,
             literal_selector,
             term_ordering: KBO::new(KBOConfig::default()),
+            cancel: Arc::new(AtomicBool::new(false)),
+            timeout: Duration::from_secs(600),
+            start_time: None,
+            memory_limit: None,
+            baseline_rss_mb: 0,
         }
     }
 

@@ -4,13 +4,12 @@
 //! - Rules declare which indices they need via `required_indices()`
 //! - SaturationState creates only the needed indices in an `IndexRegistry`
 //! - On clause lifecycle events, the registry routes updates to all indices
-//! - At rule invocation time, an `IndexProvider` gives read-only access
 //!
 //! ## Index Types
 //!
-//! - `UnitClauses`: Single-literal clauses for unit subsumption
 //! - `UnitEqualities`: Unit positive equalities for demodulation
-//! - `FeatureVectors`: Feature vector trie for subsumption filtering
+//! - `Subsumption`: Feature-vector-based subsumption checker
+//! - `SelectedLiterals`: Selected literal index for generating inference candidate filtering
 //!
 //! ## Design
 //!
@@ -26,9 +25,9 @@ pub mod subsumption;
 use crate::logic::{Clause, Interner, PredicateId};
 use indexmap::IndexSet;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-pub use feature_vector::{FeatureIndex, FeatureVector, SymbolTable};
+pub use feature_vector::FeatureIndex;
 pub use selected_literals::SelectedLiteralIndex;
 pub use subsumption::SubsumptionChecker;
 
@@ -40,12 +39,8 @@ pub use subsumption::SubsumptionChecker;
 /// Types of indices available for rules to request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IndexKind {
-    /// Single-literal clauses for unit subsumption
-    UnitClauses,
-    /// Unit positive equalities (subset of UnitClauses) for demodulation
+    /// Unit positive equalities for demodulation
     UnitEqualities,
-    /// Feature vector trie for subsumption filtering
-    FeatureVectors,
     /// Subsumption checker for forward/backward subsumption
     Subsumption,
     /// Selected literal index for generating inference candidate filtering
@@ -68,7 +63,6 @@ pub trait Index: Send + Sync {
     fn kind(&self) -> IndexKind;
 
     /// Called on `Add`: clause added to N (pending, not yet active).
-    /// Some indices (like FeatureVectors) pre-compute features here.
     fn on_add(&mut self, idx: usize, clause: &Clause);
 
     /// Called on `Transfer`: clause transferred from N to U.
@@ -91,81 +85,10 @@ pub trait Index: Send + Sync {
 }
 
 // =============================================================================
-// UnitClausesIndex
-// =============================================================================
-
-/// Index tracking single-literal clauses for efficient unit subsumption.
-#[derive(Debug)]
-pub struct UnitClausesIndex {
-    /// Set of active unit clause indices
-    units: IndexSet<usize>,
-}
-
-impl UnitClausesIndex {
-    pub fn new() -> Self {
-        UnitClausesIndex {
-            units: IndexSet::new(),
-        }
-    }
-
-    /// Get all active unit clause indices
-    pub fn iter(&self) -> impl Iterator<Item = &usize> {
-        self.units.iter()
-    }
-
-    /// Check if an index is in the unit set
-    pub fn contains(&self, idx: &usize) -> bool {
-        self.units.contains(idx)
-    }
-
-    /// Get the number of unit clauses
-    pub fn len(&self) -> usize {
-        self.units.len()
-    }
-
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.units.is_empty()
-    }
-}
-
-impl Default for UnitClausesIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Index for UnitClausesIndex {
-    fn kind(&self) -> IndexKind {
-        IndexKind::UnitClauses
-    }
-
-    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
-        // Units are only tracked when transferred
-    }
-
-    fn on_transfer(&mut self, idx: usize, clause: &Clause) {
-        if clause.literals.len() == 1 {
-            self.units.insert(idx);
-        }
-    }
-
-    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
-        self.units.shift_remove(&idx);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// =============================================================================
 // UnitEqualitiesIndex
 // =============================================================================
 
 /// Index tracking unit positive equalities for demodulation.
-///
-/// This is a subset of UnitClauses that only includes positive equalities.
 #[derive(Debug)]
 pub struct UnitEqualitiesIndex {
     /// Set of active unit equality clause indices
@@ -241,94 +164,6 @@ impl Index for UnitEqualitiesIndex {
 }
 
 // =============================================================================
-// FeatureVectorIndex
-// =============================================================================
-
-/// Index using feature vectors for efficient subsumption candidate filtering.
-///
-/// This wraps the existing FeatureIndex from subsumption.rs.
-#[derive(Debug)]
-pub struct FeatureVectorIndex {
-    /// The underlying feature index
-    inner: FeatureIndex,
-}
-
-impl FeatureVectorIndex {
-    pub fn new() -> Self {
-        FeatureVectorIndex {
-            inner: FeatureIndex::new(),
-        }
-    }
-
-    /// Get the underlying feature index for queries
-    pub fn inner(&self) -> &FeatureIndex {
-        &self.inner
-    }
-
-    /// Find potential subsumers for a clause (forward query).
-    /// Returns indices of active clauses C where feature(C) ≤ feature(target).
-    pub fn find_potential_subsumers(&self, target: &Clause) -> Vec<usize> {
-        self.inner.find_potential_subsumers(target)
-    }
-
-    /// Find potentially subsumed clauses (backward query).
-    /// Returns indices of active clauses D where feature(source) ≤ feature(D).
-    pub fn find_potentially_subsumed(&self, source_idx: usize) -> Vec<usize> {
-        self.inner.find_potentially_subsumed(source_idx)
-    }
-
-    /// Check if source could potentially subsume target based on feature vectors.
-    /// Returns true if feature(source) ≤ feature(target) componentwise.
-    /// This is a direct O(d) comparison without trie traversal.
-    #[inline]
-    pub fn could_subsume(&self, source_idx: usize, target_idx: usize) -> bool {
-        if let (Some(source_features), Some(target_features)) = (
-            self.inner.get_features(source_idx),
-            self.inner.get_features(target_idx),
-        ) {
-            target_features.compatible_as_subsumed(source_features)
-        } else {
-            false
-        }
-    }
-}
-
-impl Default for FeatureVectorIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Index for FeatureVectorIndex {
-    fn kind(&self) -> IndexKind {
-        IndexKind::FeatureVectors
-    }
-
-    fn initialize(&mut self, clauses: &[Clause]) {
-        self.inner.initialize_symbols(clauses);
-    }
-
-    fn on_add(&mut self, idx: usize, clause: &Clause) {
-        // Add clause to feature index (but not transferred yet)
-        let feature_idx = self.inner.add_clause(clause);
-        // Verify indices stay in sync
-        debug_assert_eq!(idx, feature_idx, "FeatureIndex index mismatch: expected {}, got {}", idx, feature_idx);
-    }
-
-    fn on_transfer(&mut self, idx: usize, _clause: &Clause) {
-        self.inner.activate(idx);
-    }
-
-    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
-        self.inner.deactivate(idx);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// =============================================================================
 // IndexRegistry
 // =============================================================================
 
@@ -347,14 +182,12 @@ impl IndexRegistry {
     /// # Arguments
     /// * `required` - Set of index kinds that rules have declared they need
     /// * `interner` - Symbol interner for creating indices that need it
-    pub fn new(required: &HashSet<IndexKind>, interner: &Interner) -> Self {
+    pub fn new(required: &std::collections::HashSet<IndexKind>, interner: &Interner) -> Self {
         let mut indices: HashMap<IndexKind, Box<dyn Index>> = HashMap::new();
 
         for &kind in required {
             let index: Box<dyn Index> = match kind {
-                IndexKind::UnitClauses => Box::new(UnitClausesIndex::new()),
                 IndexKind::UnitEqualities => Box::new(UnitEqualitiesIndex::new(interner)),
-                IndexKind::FeatureVectors => Box::new(FeatureVectorIndex::new()),
                 IndexKind::Subsumption => Box::new(SubsumptionChecker::new()),
                 IndexKind::SelectedLiterals => continue, // Created externally via add_index()
             };
@@ -406,24 +239,10 @@ impl IndexRegistry {
 
     // Type-safe accessors
 
-    /// Get the UnitClausesIndex if it was created
-    pub fn unit_clauses(&self) -> Option<&UnitClausesIndex> {
-        self.indices
-            .get(&IndexKind::UnitClauses)
-            .and_then(|idx| idx.as_any().downcast_ref())
-    }
-
     /// Get the UnitEqualitiesIndex if it was created
     pub fn unit_equalities(&self) -> Option<&UnitEqualitiesIndex> {
         self.indices
             .get(&IndexKind::UnitEqualities)
-            .and_then(|idx| idx.as_any().downcast_ref())
-    }
-
-    /// Get the FeatureVectorIndex if it was created
-    pub fn feature_vectors(&self) -> Option<&FeatureVectorIndex> {
-        self.indices
-            .get(&IndexKind::FeatureVectors)
             .and_then(|idx| idx.as_any().downcast_ref())
     }
 
@@ -455,66 +274,10 @@ impl std::fmt::Debug for IndexRegistry {
     }
 }
 
-// =============================================================================
-// IndexProvider
-// =============================================================================
-
-/// Read-only view of indices, restricted to what a rule declared it needs.
-///
-/// This is passed to rules at call time and only allows access to indices
-/// that the rule declared via `required_indices()`.
-pub struct IndexProvider<'a> {
-    registry: &'a IndexRegistry,
-    allowed: &'a HashSet<IndexKind>,
-}
-
-impl<'a> IndexProvider<'a> {
-    /// Create a new provider with the given allowed indices.
-    pub fn new(registry: &'a IndexRegistry, allowed: &'a HashSet<IndexKind>) -> Self {
-        IndexProvider { registry, allowed }
-    }
-
-    /// Get the UnitClausesIndex if the rule declared it as a requirement
-    pub fn unit_clauses(&self) -> Option<&UnitClausesIndex> {
-        if self.allowed.contains(&IndexKind::UnitClauses) {
-            self.registry.unit_clauses()
-        } else {
-            None
-        }
-    }
-
-    /// Get the UnitEqualitiesIndex if the rule declared it as a requirement
-    pub fn unit_equalities(&self) -> Option<&UnitEqualitiesIndex> {
-        if self.allowed.contains(&IndexKind::UnitEqualities) {
-            self.registry.unit_equalities()
-        } else {
-            None
-        }
-    }
-
-    /// Get the FeatureVectorIndex if the rule declared it as a requirement
-    pub fn feature_vectors(&self) -> Option<&FeatureVectorIndex> {
-        if self.allowed.contains(&IndexKind::FeatureVectors) {
-            self.registry.feature_vectors()
-        } else {
-            None
-        }
-    }
-
-}
-
-impl std::fmt::Debug for IndexProvider<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IndexProvider")
-            .field("allowed", self.allowed)
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Literal, PredicateSymbol, Term, Variable};
+    use crate::logic::{Constant, Literal, PredicateSymbol, Term, Variable};
 
     fn create_test_interner() -> Interner {
         Interner::new()
@@ -536,26 +299,10 @@ mod tests {
         Clause::new(vec![Literal::positive(
             PredicateSymbol::new(eq_id, 2),
             vec![
-                Term::Constant(crate::logic::Constant::new(a_id)),
-                Term::Constant(crate::logic::Constant::new(b_id)),
+                Term::Constant(Constant::new(a_id)),
+                Term::Constant(Constant::new(b_id)),
             ],
         )])
-    }
-
-    #[test]
-    fn test_unit_clauses_index() {
-        let mut index = UnitClausesIndex::new();
-        let mut interner = create_test_interner();
-        let clause = create_unit_clause(&mut interner);
-
-        assert!(index.is_empty());
-
-        index.on_transfer(0, &clause);
-        assert_eq!(index.len(), 1);
-        assert!(index.contains(&0));
-
-        index.on_delete(0, &clause);
-        assert!(index.is_empty());
     }
 
     #[test]
@@ -573,40 +320,5 @@ mod tests {
         assert_eq!(index.len(), 1);
         assert!(index.contains(&0));
         assert!(!index.contains(&1));
-    }
-
-    #[test]
-    fn test_index_registry_creation() {
-        let interner = create_test_interner();
-        let mut required = HashSet::new();
-        required.insert(IndexKind::UnitClauses);
-        required.insert(IndexKind::UnitEqualities);
-
-        let registry = IndexRegistry::new(&required, &interner);
-
-        assert!(registry.has(IndexKind::UnitClauses));
-        assert!(registry.has(IndexKind::UnitEqualities));
-        assert!(!registry.has(IndexKind::FeatureVectors));
-        assert!(!registry.has(IndexKind::FeatureVectors));
-    }
-
-    #[test]
-    fn test_index_provider_restricts_access() {
-        let interner = create_test_interner();
-        let mut required = HashSet::new();
-        required.insert(IndexKind::UnitClauses);
-        required.insert(IndexKind::UnitEqualities);
-        required.insert(IndexKind::FeatureVectors);
-
-        let registry = IndexRegistry::new(&required, &interner);
-
-        // Provider that only allows UnitClauses
-        let mut allowed = HashSet::new();
-        allowed.insert(IndexKind::UnitClauses);
-        let provider = IndexProvider::new(&registry, &allowed);
-
-        assert!(provider.unit_clauses().is_some());
-        assert!(provider.unit_equalities().is_none()); // Not allowed
-        assert!(provider.feature_vectors().is_none()); // Not allowed
     }
 }

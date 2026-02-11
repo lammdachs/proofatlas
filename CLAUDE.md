@@ -23,7 +23,7 @@ proofatlas/
 │   │       │   └── clause_manager.rs     # ClauseManager: interner + selector + KBO
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
-│   │       ├── index/          # Index trait, IndexRegistry, FeatureVectorIndex, SubsumptionChecker, SelectedLiteralIndex
+│   │       ├── index/          # Index trait, IndexRegistry, SubsumptionChecker, SelectedLiteralIndex
 │   │       ├── selection/      # Clause selection, scoring server, graph building, proof trace (tch-rs ML)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -222,6 +222,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 - Symbol interning (`Interner`)
 - Literal selection (`LiteralSelector` trait)
 - Term ordering (`KBO`)
+- Resource-limit state: `cancel` (shared `AtomicBool`), `start_time`, `timeout`, `memory_limit`, `baseline_rss_mb` — generating rules check these mid-inference via `stopped()` closures to break out of expensive candidate loops early
 - Methods: `orient_equalities()`
 
 **SaturationState** (`state.rs`): Lean data container holding:
@@ -244,8 +245,7 @@ Rules are **stateless** — they receive the full context at call time and do no
 
 **IndexRegistry** (`index/mod.rs`): Central registry owning all indices, routes clause lifecycle events:
 - `SubsumptionChecker` (`index/subsumption.rs`): Feature vector index + clause keys + unit tracking for subsumption
-- `UnitEqualitiesIndex`: Tracks unit positive equalities for demodulation
-- `FeatureVectorIndex`: Feature vectors for subsumption candidate filtering
+- `UnitEqualitiesIndex`: Tracks unit positive equalities for backward demodulation
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `StateChange` values for atomic state modifications:
