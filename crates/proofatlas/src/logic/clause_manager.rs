@@ -7,7 +7,7 @@
 use super::{Clause, Interner, KBOConfig, TermOrdering, KBO};
 use super::literal_selection::LiteralSelector;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
 use crate::time_compat::Instant;
 
@@ -46,6 +46,22 @@ impl ClauseManager {
             memory_limit: None,
             baseline_rss_mb: 0,
         }
+    }
+
+    /// Check whether the proof search should stop (cancel flag or timeout).
+    ///
+    /// Sets the cancel flag on timeout so subsequent checks are O(1).
+    pub fn is_cancelled(&self) -> bool {
+        if self.cancel.load(AtomicOrdering::Relaxed) {
+            return true;
+        }
+        if let Some(start) = self.start_time {
+            if start.elapsed() > self.timeout {
+                self.cancel.store(true, AtomicOrdering::Relaxed);
+                return true;
+            }
+        }
+        false
     }
 
     /// Orient equality literals so the larger term (by KBO) is on the left.

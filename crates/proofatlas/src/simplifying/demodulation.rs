@@ -202,11 +202,16 @@ impl SimplifyingInference for DemodulationRule {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;
 
-        // Query unit equalities from IndexRegistry
-        let unit_eq_index = indices.unit_equalities()?;
+        // Use discrimination tree for candidate filtering
+        let disc_tree = indices.discrimination_tree()?;
+        let candidates = disc_tree.retrieve_clause_candidates(clause);
 
-        // Try to demodulate using each unit equality
-        for &unit_idx in unit_eq_index.iter() {
+        // Try to demodulate using only structurally compatible unit equalities
+        // Check cancel/timeout to avoid overshooting resource limits
+        for unit_idx in candidates {
+            if cm.is_cancelled() {
+                return None;
+            }
             if let Some(unit_clause) = state.clauses.get(unit_idx) {
                 let results = demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
                 if !results.is_empty() {
@@ -246,6 +251,9 @@ impl SimplifyingInference for DemodulationRule {
 
         // Try to demodulate each clause in U∪P
         for &target_idx in state.unprocessed.iter().chain(state.processed.iter()) {
+            if cm.is_cancelled() {
+                break;
+            }
             if target_idx == clause_idx {
                 continue;
             }

@@ -18,6 +18,7 @@
 //! - Indices are created once and shared across rules that need them
 //! - Lifecycle events are routed atomically to all indices
 
+pub mod discrimination_tree;
 pub mod feature_vector;
 pub mod selected_literals;
 pub mod subsumption;
@@ -27,6 +28,7 @@ use indexmap::IndexSet;
 use std::any::Any;
 use std::collections::HashMap;
 
+pub use discrimination_tree::DiscriminationTree;
 pub use feature_vector::FeatureIndex;
 pub use selected_literals::SelectedLiteralIndex;
 pub use subsumption::SubsumptionChecker;
@@ -41,6 +43,8 @@ pub use subsumption::SubsumptionChecker;
 pub enum IndexKind {
     /// Unit positive equalities for demodulation
     UnitEqualities,
+    /// Discrimination tree for demodulation candidate filtering
+    DiscriminationTree,
     /// Subsumption checker for forward/backward subsumption
     Subsumption,
     /// Selected literal index for generating inference candidate filtering
@@ -188,6 +192,9 @@ impl IndexRegistry {
         for &kind in required {
             let index: Box<dyn Index> = match kind {
                 IndexKind::UnitEqualities => Box::new(UnitEqualitiesIndex::new(interner)),
+                IndexKind::DiscriminationTree => {
+                    Box::new(discrimination_tree::DiscriminationTree::new(interner))
+                }
                 IndexKind::Subsumption => Box::new(SubsumptionChecker::new()),
                 IndexKind::SelectedLiterals => continue, // Created externally via add_index()
             };
@@ -243,6 +250,13 @@ impl IndexRegistry {
     pub fn unit_equalities(&self) -> Option<&UnitEqualitiesIndex> {
         self.indices
             .get(&IndexKind::UnitEqualities)
+            .and_then(|idx| idx.as_any().downcast_ref())
+    }
+
+    /// Get the DiscriminationTree if it was created
+    pub fn discrimination_tree(&self) -> Option<&DiscriminationTree> {
+        self.indices
+            .get(&IndexKind::DiscriminationTree)
             .and_then(|idx| idx.as_any().downcast_ref())
     }
 

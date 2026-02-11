@@ -197,8 +197,8 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 ### Demodulation
 - Uses one-way matching (only rewrite rule variables can be substituted)
 - Enforces ordering constraint lσ ≻ rσ
-- Forward demodulation: simplify new clauses before adding
-- Backward demodulation: when unit equality selected, simplify existing clauses
+- Forward demodulation: uses `DiscriminationTree` index for O(|term|) candidate filtering instead of scanning all unit equalities
+- Backward demodulation: when unit equality selected, simplify existing clauses (still linear scan of U∪P)
 
 ### CNF Conversion
 - FOF formulas converted via distribution
@@ -246,6 +246,7 @@ Rules are **stateless** — they receive the full context at call time and do no
 **IndexRegistry** (`index/mod.rs`): Central registry owning all indices, routes clause lifecycle events:
 - `SubsumptionChecker` (`index/subsumption.rs`): Feature vector index + clause keys + unit tracking for subsumption
 - `UnitEqualitiesIndex`: Tracks unit positive equalities for backward demodulation
+- `DiscriminationTree` (`index/discrimination_tree.rs`): Trie index on rewrite rule LHS terms for O(|term|) forward demodulation candidate filtering (replaces linear scan of all unit equalities)
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `StateChange` values for atomic state modifications:

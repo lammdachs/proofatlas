@@ -84,6 +84,7 @@ impl ProofAtlas {
         // Create IndexRegistry with all required indices
         let required_indices: HashSet<IndexKind> = [
             IndexKind::UnitEqualities,
+            IndexKind::DiscriminationTree,
             IndexKind::Subsumption,
         ].into_iter().collect();
         let mut index_registry = IndexRegistry::new(&required_indices, &interner);
