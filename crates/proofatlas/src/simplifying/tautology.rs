@@ -41,12 +41,12 @@ impl SimplifyingInference for TautologyRule {
         state: &SaturationState,
         _cm: &ClauseManager,
         _indices: &IndexRegistry,
-    ) -> Vec<StateChange> {
+    ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         if self.is_tautology(clause) {
-            vec![StateChange::Delete(clause_idx, self.name().into(), vec![])]
+            Some(StateChange::Simplify(clause_idx, None, self.name().into(), vec![]))
         } else {
-            vec![]
+            None
         }
     }
 }

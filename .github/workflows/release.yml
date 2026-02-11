@@ -8,8 +8,6 @@ on:
 permissions:
   contents: read
 
-# TODO: Add macOS wheels and Python version matrix
-
 jobs:
   linux-wheels:
     runs-on: ubuntu-24.04
@@ -36,37 +34,8 @@ jobs:
           name: wheels-linux
           path: dist/
 
-  windows-wheels:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v4
-
-      - name: Install PyTorch and maturin
-        run: |
-          uv venv
-          uv pip install torch
-          uv pip install maturin
-
-      - name: Build wheel
-        run: |
-          .venv\Scripts\activate
-          maturin build --release -o dist --target x86_64-pc-windows-msvc
-        env:
-          LIBTORCH_USE_PYTORCH: "1"
-          # All native code must use dynamic CRT (/MD) to match libtorch
-          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=-crt-static"
-          CFLAGS: "/MD"
-          CXXFLAGS: "/MD"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows
-          path: dist/
-
   publish:
-    needs: [linux-wheels, windows-wheels]
+    needs: [linux-wheels]
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi

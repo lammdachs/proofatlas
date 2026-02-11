@@ -2,6 +2,10 @@
 
 Provides ProofDataset, DynamicBatchSampler, and collate functions for
 both graph (GNN) and tokenized (sentence) model formats.
+
+ProofDataset uses lazy loading: traces are loaded from disk on __getitem__,
+not all at init time. This keeps memory usage proportional to batch size
+rather than dataset size.
 """
 
 import json
@@ -28,18 +32,22 @@ def _load_json(path: Path) -> dict:
             return json.load(f)
 
 
-def _pool_init():
-    """Initializer for pool workers - ignore SIGTERM so parent handles it."""
-    import signal
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+def _scan_trace(trace_file: Path) -> Optional[int]:
+    """Quick scan to validate a trace and return its clause count.
 
+    Returns clause count if valid, None if trace should be skipped.
+    """
+    try:
+        trace = _load_json(trace_file)
+    except Exception:
+        return None
 
-def _pool_init_tokenizer():
-    """Initializer for pool workers that preloads the tokenizer."""
-    import signal
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    # Preload tokenizer in each worker to avoid repeated loading
-    _get_tokenizer()
+    if not trace.get("proof_found") or not trace.get("clauses"):
+        return None
+    if not trace.get("selection_states"):
+        return None
+
+    return len(trace["clauses"])
 
 
 def _load_trace_graph(trace_file: Path) -> Optional[Dict]:
@@ -136,23 +144,14 @@ class DynamicBatchSampler(torch.utils.data.Sampler):
     def __init__(self, dataset, max_clauses: int = 8192, shuffle: bool = True):
         """
         Args:
-            dataset: ProofDataset with items containing size info
+            dataset: ProofDataset with .sizes list
             max_clauses: Maximum total clauses per batch
             shuffle: Whether to shuffle between epochs
         """
         self.dataset = dataset
         self.max_clauses = max_clauses
         self.shuffle = shuffle
-
-        # Get sizes for each item
-        self.sizes = []
-        for item in dataset.items:
-            if "graphs" in item:
-                self.sizes.append(len(item["graphs"]))
-            elif "labels" in item:
-                self.sizes.append(len(item["labels"]))
-            else:
-                self.sizes.append(1)
+        self.sizes = dataset.sizes
 
     def __iter__(self):
         indices = list(range(len(self.dataset)))
@@ -196,9 +195,11 @@ class DynamicBatchSampler(torch.utils.data.Sampler):
 
 class ProofDataset(torch.utils.data.Dataset):
     """
-    Dataset that loads structured JSON traces and converts to graphs/strings.
+    Dataset that lazily loads structured JSON traces on access.
 
-    Data is loaded in parallel using multiprocessing for speed.
+    Init scans files to validate and get clause counts (O(1) memory per file).
+    Actual graph/tokenized conversion happens in __getitem__, so memory usage
+    is proportional to batch size, not dataset size.
     """
 
     def __init__(
@@ -215,7 +216,7 @@ class ProofDataset(torch.utils.data.Dataset):
             output_type: "graph" for GNN models, "tokenized" for sentence models
             problem_names: Optional set of problem names to include
             trace_files: Optional explicit list of trace files (overrides trace_dir)
-            n_workers: Number of parallel workers (default: CPU count)
+            n_workers: Unused, kept for API compatibility
         """
         self.output_type = output_type
 
@@ -233,40 +234,29 @@ class ProofDataset(torch.utils.data.Dataset):
         if not files:
             raise ValueError("No JSON trace files found")
 
-        # Load data in parallel
-        if output_type == "tokenized":
-            load_fn = _load_trace_tokenized
-        else:
-            load_fn = _load_trace_graph
+        # Scan files: validate and get clause counts (discards JSON immediately)
+        self.files = []
+        self.sizes = []
+        for f in files:
+            n_clauses = _scan_trace(f)
+            if n_clauses is not None:
+                self.files.append(f)
+                self.sizes.append(n_clauses)
 
-        if n_workers is None:
-            import os
-            # Cap at 2 to avoid OOM: fork duplicates libtorch address space
-            n_workers = min(os.cpu_count() or 4, 2)
-
-        if n_workers > 1 and len(files) > 10:
-            from multiprocessing import get_context
-            # Use spawn to avoid duplicating libtorch memory via fork
-            ctx = get_context("spawn")
-            init_fn = _pool_init_tokenizer if output_type == "tokenized" else _pool_init
-            with ctx.Pool(n_workers, initializer=init_fn) as pool:
-                results = pool.map(load_fn, files)
-        else:
-            # For single-threaded loading, preload tokenizer if needed
-            if output_type == "tokenized":
-                _get_tokenizer()
-            results = [load_fn(f) for f in files]
-
-        self.items = [r for r in results if r is not None]
-
-        if not self.items:
+        if not self.files:
             raise ValueError("No valid traces found (all filtered or empty)")
 
+        # For backward compatibility with code that accesses .items
+        self.items = self
+
     def __len__(self):
-        return len(self.items)
+        return len(self.files)
 
     def __getitem__(self, idx):
-        return self.items[idx]
+        if self.output_type == "tokenized":
+            return _load_trace_tokenized(self.files[idx])
+        else:
+            return _load_trace_graph(self.files[idx])
 
 
 def collate_tokenized_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
@@ -286,6 +276,8 @@ def collate_tokenized_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     all_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
+        if item is None:
+            continue
         input_ids = item["input_ids"]
         attention_mask = item["attention_mask"]
         labels = item["labels"]
@@ -344,6 +336,8 @@ def collate_proof_batch(batch: List[Dict]) -> Dict[str, Any]:
     all_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
+        if item is None:
+            continue
         graphs = item["graphs"]
         labels = item["labels"]
         states = item["selection_states"]

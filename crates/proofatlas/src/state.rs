@@ -54,8 +54,9 @@ impl Proof {
 pub enum StateChange {
     /// New clause added to N (from inference or input): (clause, rule_name, premises)
     Add(Clause, String, Vec<Position>),
-    /// Clause deleted from its current set: (clause_idx, rule_name, justification)
-    Delete(usize, String, Vec<Position>),
+    /// Clause simplified: removed and optionally replaced.
+    /// (clause_idx, replacement, rule_name, premises)
+    Simplify(usize, Option<Clause>, String, Vec<Position>),
     /// Clause transferred from N to U (survived forward simplification)
     Transfer(usize),
     /// Clause selected and transferred from U to P
@@ -89,7 +90,7 @@ pub trait SimplifyingInference: Send + Sync {
         state: &SaturationState,
         cm: &ClauseManager,
         indices: &IndexRegistry,
-    ) -> Vec<StateChange>;
+    ) -> Option<StateChange>;
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
     fn simplify_backward(
@@ -191,10 +192,18 @@ impl SaturationState {
     pub fn extract_proof(&self, empty_clause_idx: usize) -> Proof {
         let mut derivation_map: HashMap<usize, (String, Vec<Position>)> = HashMap::new();
         for event in &self.event_log {
-            if let StateChange::Add(clause, rule_name, premises) = event {
-                if let Some(idx) = clause.id {
-                    derivation_map.insert(idx, (rule_name.clone(), premises.clone()));
+            match event {
+                StateChange::Add(clause, rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_map.insert(idx, (rule_name.clone(), premises.clone()));
+                    }
                 }
+                StateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_map.insert(idx, (rule_name.clone(), premises.clone()));
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -242,15 +251,24 @@ impl SaturationState {
         self.event_log
             .iter()
             .filter_map(|event| {
-                if let StateChange::Add(clause, rule_name, premises) = event {
-                    clause.id.map(|idx| ProofStep {
-                        clause_idx: idx,
-                        rule_name: rule_name.clone(),
-                        premises: premises.clone(),
-                        conclusion: clause.clone(),
-                    })
-                } else {
-                    None
+                match event {
+                    StateChange::Add(clause, rule_name, premises) => {
+                        clause.id.map(|idx| ProofStep {
+                            clause_idx: idx,
+                            rule_name: rule_name.clone(),
+                            premises: premises.clone(),
+                            conclusion: clause.clone(),
+                        })
+                    }
+                    StateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                        clause.id.map(|idx| ProofStep {
+                            clause_idx: idx,
+                            rule_name: rule_name.clone(),
+                            premises: premises.clone(),
+                            conclusion: clause.clone(),
+                        })
+                    }
+                    _ => None,
                 }
             })
             .collect()

@@ -77,14 +77,14 @@ impl SimplifyingInference for SubsumptionRule {
         state: &SaturationState,
         _cm: &ClauseManager,
         indices: &IndexRegistry,
-    ) -> Vec<StateChange> {
+    ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         if let Some(checker) = indices.subsumption_checker() {
             if let Some(subsumer_idx) = checker.find_subsumer(clause) {
-                return vec![StateChange::Delete(clause_idx, self.name().into(), vec![Position::clause(subsumer_idx)])];
+                return Some(StateChange::Simplify(clause_idx, None, self.name().into(), vec![Position::clause(subsumer_idx)]));
             }
         }
-        vec![]
+        None
     }
 
     fn simplify_backward(
@@ -113,7 +113,7 @@ impl SimplifyingInference for SubsumptionRule {
         subsumed
             .into_iter()
             .filter(|&idx| state.processed.contains(&idx) || state.unprocessed.contains(&idx))
-            .map(|idx| StateChange::Delete(idx, rule_name.clone(), vec![Position::clause(clause_idx)]))
+            .map(|idx| StateChange::Simplify(idx, None, rule_name.clone(), vec![Position::clause(clause_idx)]))
             .collect()
     }
 }

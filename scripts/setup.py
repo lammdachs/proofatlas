@@ -11,7 +11,6 @@ Usage:
 import argparse
 import importlib
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -200,21 +199,18 @@ def setup_external_tools():
     else:
         run_script(PROJECT_ROOT / "scripts" / "setup_tptp.py", "TPTP setup")
 
-    # Vampire and SPASS (Linux only)
-    if platform.system().lower() == "linux":
-        vampire = PROJECT_ROOT / ".vampire" / "vampire"
-        if vampire.exists():
-            print("  Vampire already installed")
-        else:
-            run_script(PROJECT_ROOT / "scripts" / "setup_vampire.py", "Vampire setup")
-
-        spass = PROJECT_ROOT / ".spass" / "SPASS"
-        if spass.exists():
-            print("  SPASS already installed")
-        else:
-            run_script(PROJECT_ROOT / "scripts" / "setup_spass.py", "SPASS setup")
+    # Vampire and SPASS
+    vampire = PROJECT_ROOT / ".vampire" / "vampire"
+    if vampire.exists():
+        print("  Vampire already installed")
     else:
-        print("  Skipping Vampire/SPASS (Linux only)")
+        run_script(PROJECT_ROOT / "scripts" / "setup_vampire.py", "Vampire setup")
+
+    spass = PROJECT_ROOT / ".spass" / "SPASS"
+    if spass.exists():
+        print("  SPASS already installed")
+    else:
+        run_script(PROJECT_ROOT / "scripts" / "setup_spass.py", "SPASS setup")
 
 
 def build_wasm():

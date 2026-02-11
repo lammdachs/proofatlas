@@ -8,14 +8,11 @@ use std::collections::HashSet;
 pub fn extract_proof_from_events(events: &EventLog) -> Option<Vec<usize>> {
     // Find the empty clause
     let empty_clause_idx = events.iter().find_map(|e| {
-        if let StateChange::Add(clause, _, _) = e {
-            if clause.is_empty() {
-                clause.id
-            } else {
-                None
+        match e {
+            StateChange::Add(clause, _, _) | StateChange::Simplify(_, Some(clause), _, _) => {
+                if clause.is_empty() { clause.id } else { None }
             }
-        } else {
-            None
+            _ => None,
         }
     })?;
 
@@ -23,10 +20,18 @@ pub fn extract_proof_from_events(events: &EventLog) -> Option<Vec<usize>> {
     let mut derivation_map: std::collections::HashMap<usize, (String, Vec<usize>)> =
         std::collections::HashMap::new();
     for event in events {
-        if let StateChange::Add(clause, rule_name, premises) = event {
-            if let Some(idx) = clause.id {
-                derivation_map.insert(idx, (rule_name.clone(), clause_indices(premises)));
+        match event {
+            StateChange::Add(clause, rule_name, premises) => {
+                if let Some(idx) = clause.id {
+                    derivation_map.insert(idx, (rule_name.clone(), clause_indices(premises)));
+                }
             }
+            StateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                if let Some(idx) = clause.id {
+                    derivation_map.insert(idx, (rule_name.clone(), clause_indices(premises)));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -97,12 +102,21 @@ impl<'a> EventLogReplayer<'a> {
                 self.clauses[idx] = clause.clone();
                 self.n.insert(idx);
             }
-            StateChange::Delete(clause_idx, _, _) => {
+            StateChange::Simplify(clause_idx, replacement, _, _) => {
                 // Remove from whichever set contains it
                 if !self.n.remove(clause_idx) {
                     if !self.u.remove(clause_idx) {
                         self.p.remove(clause_idx);
                     }
+                }
+                // If there's a replacement, add it to N
+                if let Some(clause) = replacement {
+                    let idx = clause.id.unwrap_or(self.clauses.len());
+                    if idx >= self.clauses.len() {
+                        self.clauses.resize(idx + 1, Clause::new(vec![]));
+                    }
+                    self.clauses[idx] = clause.clone();
+                    self.n.insert(idx);
                 }
             }
             StateChange::Transfer(clause_idx) => {

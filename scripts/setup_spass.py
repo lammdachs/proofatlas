@@ -4,12 +4,10 @@ Setup SPASS theorem prover.
 Downloads and builds SPASS from source to .spass/
 
 Requires: gcc, flex, bison (build from source)
-Supports: Linux, macOS
-Windows: Use WSL or build manually with MinGW
+Supports: Linux
 """
 
 import json
-import platform
 import shutil
 import subprocess
 import sys
@@ -35,35 +33,22 @@ def check_build_dependencies() -> list:
 
 
 def get_install_hint(missing: list) -> str:
-    """Get platform-specific install hints."""
-    system = platform.system().lower()
-
-    if system == "linux":
-        # Try to detect package manager
-        if check_command("apt-get"):
-            pkgs = " ".join(missing)
-            if "gcc" in missing:
-                pkgs = pkgs.replace("gcc", "build-essential")
-            return f"sudo apt-get install {pkgs}"
-        elif check_command("dnf"):
-            pkgs = " ".join(missing)
-            if "gcc" in missing:
-                pkgs = pkgs.replace("gcc", "gcc make")
-            return f"sudo dnf install {pkgs}"
-        elif check_command("pacman"):
-            pkgs = " ".join(missing)
-            if "gcc" in missing:
-                pkgs = pkgs.replace("gcc", "base-devel")
-            return f"sudo pacman -S {pkgs}"
-        else:
-            return f"Install: {', '.join(missing)}"
-    elif system == "darwin":
-        # macOS - use Homebrew
-        if check_command("brew"):
-            pkgs = " ".join(missing)
-            return f"brew install {pkgs}"
-        else:
-            return f"Install Homebrew, then: brew install {' '.join(missing)}"
+    """Get install hints for missing build tools."""
+    if check_command("apt-get"):
+        pkgs = " ".join(missing)
+        if "gcc" in missing:
+            pkgs = pkgs.replace("gcc", "build-essential")
+        return f"sudo apt-get install {pkgs}"
+    elif check_command("dnf"):
+        pkgs = " ".join(missing)
+        if "gcc" in missing:
+            pkgs = pkgs.replace("gcc", "gcc make")
+        return f"sudo dnf install {pkgs}"
+    elif check_command("pacman"):
+        pkgs = " ".join(missing)
+        if "gcc" in missing:
+            pkgs = pkgs.replace("gcc", "base-devel")
+        return f"sudo pacman -S {pkgs}"
     else:
         return f"Install: {', '.join(missing)}"
 
@@ -86,17 +71,6 @@ def main():
     parser = argparse.ArgumentParser(description="Setup SPASS theorem prover")
     parser.add_argument("--force", "-f", action="store_true", help="Force reinstall")
     args = parser.parse_args()
-
-    # Check platform
-    system = platform.system().lower()
-    if system == "windows":
-        print("SPASS must be built from source.")
-        print("On Windows, use WSL (Windows Subsystem for Linux) or MinGW.")
-        print()
-        print("With WSL:")
-        print("  1. Install WSL: wsl --install")
-        print("  2. Run this script from within WSL")
-        sys.exit(1)
 
     root = get_project_root()
     config_path = root / "configs" / "spass.json"

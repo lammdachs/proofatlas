@@ -735,16 +735,30 @@ impl ProofState {
         // web trace converter uses all_clauses for clause text lookup.
         self.proof_trace.clear();
         for event in &sat_trace {
-            if let RustStateChange::Add(clause, rule_name, premises) = event {
-                if let Some(idx) = clause.id {
-                    let clause_string = clause.display(&self.interner).to_string();
-                    self.proof_trace.push(ProofStep {
-                        clause_id: idx,
-                        parent_ids: clause_indices(premises),
-                        rule_name: rule_name.clone(),
-                        clause_string,
-                    });
+            match event {
+                RustStateChange::Add(clause, rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        let clause_string = clause.display(&self.interner).to_string();
+                        self.proof_trace.push(ProofStep {
+                            clause_id: idx,
+                            parent_ids: clause_indices(premises),
+                            rule_name: rule_name.clone(),
+                            clause_string,
+                        });
+                    }
                 }
+                RustStateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        let clause_string = clause.display(&self.interner).to_string();
+                        self.proof_trace.push(ProofStep {
+                            clause_id: idx,
+                            parent_ids: clause_indices(premises),
+                            rule_name: rule_name.clone(),
+                            clause_string,
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -1032,10 +1046,15 @@ impl ProofState {
                         n.insert(idx);
                     }
                 }
-                RustStateChange::Delete(clause_idx, _, _) => {
+                RustStateChange::Simplify(clause_idx, replacement, _, _) => {
                     n.remove(clause_idx);
                     u.remove(clause_idx);
                     p.remove(clause_idx);
+                    if let Some(clause) = replacement {
+                        if let Some(idx) = clause.id {
+                            n.insert(idx);
+                        }
+                    }
                 }
                 RustStateChange::Transfer(clause_idx) => {
                     n.remove(clause_idx);

@@ -231,7 +231,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events via methods that mirror `StateChange` variants: `on_add`, `on_transfer`, `on_delete`, `on_activate`.
 
 **SimplifyingInference trait** (`state.rs`):
-- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify/delete clause in N using U∪P
+- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry) -> Option<StateChange>`: Simplify/delete clause in N using U∪P
 - `simplify_backward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify clauses in U∪P using new clause
 - Implementations in `simplifying/`: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
 
@@ -245,16 +245,16 @@ Rules are **stateless** — they receive the full context at call time and do no
 - `FeatureVectorIndex`: Feature vectors for subsumption candidate filtering
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
-All rules return `Vec<StateChange>` for atomic state modifications:
+All rules return `StateChange` values for atomic state modifications:
 - `Add(clause, rule_name, premises)`: Add new clause to N
-- `Delete(clause_idx, rule_name, justification)`: Delete from any set (simplification)
+- `Simplify(clause_idx, replacement, rule_name, premises)`: Remove clause and optionally replace it
 - `Transfer(clause_idx)`: Move clause N→U
 - `Activate(clause_idx)`: Move clause U→P
 
 This architecture enables adding new rules without modifying the main loop.
 
 ### Derivation Tracking
-Derivation information (rule name and premises) is stored directly in `StateChange::Add` and `StateChange::Delete` tuple variants—there is no separate `Derivation` struct. The standalone `clause_indices(premises: &[Position]) -> Vec<usize>` helper extracts clause indices from premise positions for proof extraction.
+Derivation information (rule name and premises) is stored directly in `StateChange::Add` and `StateChange::Simplify` tuple variants—there is no separate `Derivation` struct. The standalone `clause_indices(premises: &[Position]) -> Vec<usize>` helper extracts clause indices from premise positions for proof extraction.
 
 ### Event Log
 The saturation state maintains an event log (`Vec<StateChange>`) as the single source of truth for derivations. All clause additions (`Add(clause, rule_name, premises)`) include the derivation info inline. This enables:

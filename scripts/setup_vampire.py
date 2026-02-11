@@ -3,7 +3,7 @@
 Setup Vampire theorem prover.
 Downloads pre-built binary for the current platform to .vampire/
 
-Supports: Linux, macOS, Windows (x86_64 and arm64)
+Supports: Linux (x86_64 and aarch64)
 """
 
 import json
@@ -21,31 +21,16 @@ def get_project_root() -> Path:
 
 def detect_platform() -> str:
     """Detect current platform and return config key."""
-    system = platform.system().lower()
     machine = platform.machine().lower()
 
-    # Normalize OS
-    if system == "linux":
-        os_name = "linux"
-    elif system == "darwin":
-        os_name = "darwin"
-    elif system == "windows":
-        os_name = "windows"
-    else:
-        raise RuntimeError(f"Unsupported operating system: {system}")
-
-    # Normalize architecture
     if machine in ("x86_64", "amd64"):
         arch = "x86_64"
     elif machine in ("aarch64", "arm64"):
-        if os_name == "linux":
-            arch = "aarch64"
-        else:
-            arch = "arm64"
+        arch = "aarch64"
     else:
         raise RuntimeError(f"Unsupported architecture: {machine}")
 
-    return f"{os_name}-{arch}"
+    return f"linux-{arch}"
 
 
 def download_progress(block_num: int, block_size: int, total_size: int):
@@ -87,8 +72,7 @@ def main():
     source = sources[plat]
     target_dir = root / ".vampire"
 
-    # Binary name differs on Windows
-    binary_name = "vampire.exe" if plat.startswith("windows") else "vampire"
+    binary_name = "vampire"
     binary_path = target_dir / binary_name
 
     print("Vampire Setup")
@@ -141,9 +125,7 @@ def main():
                 f.rename(target)
             break
 
-    # Make executable (Unix only)
-    if not plat.startswith("windows"):
-        binary_path.chmod(0o755)
+    binary_path.chmod(0o755)
 
     # Verify
     if binary_path.exists():

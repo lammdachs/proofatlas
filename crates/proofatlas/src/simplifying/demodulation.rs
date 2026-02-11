@@ -197,15 +197,12 @@ impl SimplifyingInference for DemodulationRule {
         state: &SaturationState,
         cm: &ClauseManager,
         indices: &IndexRegistry,
-    ) -> Vec<StateChange> {
+    ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;
 
         // Query unit equalities from IndexRegistry
-        let unit_eq_index = match indices.unit_equalities() {
-            Some(idx) => idx,
-            None => return vec![],
-        };
+        let unit_eq_index = indices.unit_equalities()?;
 
         // Try to demodulate using each unit equality
         for &unit_idx in unit_eq_index.iter() {
@@ -216,19 +213,17 @@ impl SimplifyingInference for DemodulationRule {
                         let mut simplified_clause = conclusion.clone();
                         orient_clause_equalities(&mut simplified_clause, interner);
 
-                        return vec![
-                            StateChange::Delete(clause_idx, self.name().into(), vec![Position::clause(unit_idx)]),
-                            StateChange::Add(
-                                simplified_clause,
-                                "Demodulation".into(),
-                                vec![Position::clause(clause_idx), Position::clause(unit_idx)],
-                            ),
-                        ];
+                        return Some(StateChange::Simplify(
+                            clause_idx,
+                            Some(simplified_clause),
+                            "Demodulation".into(),
+                            vec![Position::clause(clause_idx), Position::clause(unit_idx)],
+                        ));
                     }
                 }
             }
         }
-        vec![]
+        None
     }
 
     fn simplify_backward(
@@ -247,7 +242,6 @@ impl SimplifyingInference for DemodulationRule {
         }
 
         let mut changes = Vec::new();
-        let rule_name: String = self.name().into();
 
         // Try to demodulate each clause in U∪P
         for &target_idx in state.unprocessed.iter().chain(state.processed.iter()) {
@@ -262,11 +256,9 @@ impl SimplifyingInference for DemodulationRule {
                         let mut simplified_clause = conclusion.clone();
                         orient_clause_equalities(&mut simplified_clause, interner);
 
-                        changes.push(StateChange::Delete(target_idx, rule_name.clone(), vec![Position::clause(clause_idx)]));
-
-                        // Add the simplified clause to N
-                        changes.push(StateChange::Add(
-                            simplified_clause,
+                        changes.push(StateChange::Simplify(
+                            target_idx,
+                            Some(simplified_clause),
                             "Demodulation".into(),
                             vec![Position::clause(target_idx), Position::clause(clause_idx)],
                         ));

@@ -218,7 +218,7 @@ impl ProofAtlas {
         self.start_time.get_or_insert_with(Instant::now);
 
         // === Step 1: Process new clauses ===
-        while let Some(&clause_idx) = self.state.new.last() {
+        'simplify: while let Some(&clause_idx) = self.state.new.last() {
             // 1a: Check empty clause immediately
             if self.state.clauses[clause_idx].is_empty() {
                 let proof = self.state.extract_proof(clause_idx);
@@ -226,42 +226,34 @@ impl ProofAtlas {
             }
 
             // 1b: Apply forward simplification rules
-            let mut forward_deleted = false;
-            let mut collected_changes: Vec<StateChange> = Vec::new();
-
+            let mut forward_change: Option<StateChange> = None;
             for rule in self.simplifying_inferences.iter() {
                 let rule_name = rule.name();
                 let t_rule = self.profile.as_ref().map(|_| Instant::now());
 
-                let changes = rule.simplify_forward(
+                let change = rule.simplify_forward(
                     clause_idx,
                     &self.state,
                     &self.clause_manager,
                     &self.index_registry,
                 );
 
-                let success = !changes.is_empty();
-
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
-                    p.record_simplification_forward_attempt(rule_name, success, t.elapsed());
+                    p.record_simplification_forward_attempt(rule_name, change.is_some(), t.elapsed());
                     p.forward_simplify_time += t.elapsed();
                 }
 
-                if success {
-                    collected_changes = changes;
-                    forward_deleted = true;
+                if change.is_some() {
+                    forward_change = change;
                     break;
                 }
             }
 
-            for change in collected_changes {
+            if let Some(change) = forward_change {
                 if let Some(result) = self.apply_change(change) {
                     return Some(result);
                 }
-            }
-
-            if forward_deleted {
-                continue;
+                continue 'simplify;
             }
 
             // 1c: Transfer N → U (activates clause in indices via on_transfer)
@@ -283,12 +275,7 @@ impl ProofAtlas {
                     &self.index_registry,
                 );
 
-                let count = changes
-                    .iter()
-                    .filter(|c| {
-                        matches!(c, StateChange::Delete(..) | StateChange::Add(..))
-                    })
-                    .count();
+                let count = changes.len();
 
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
                     p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
@@ -468,9 +455,9 @@ impl ProofAtlas {
                     }
                 }
             }
-            StateChange::Delete(clause_idx, _rule_name, _justification) => {
+            StateChange::Simplify(clause_idx, ref replacement, ref _rule_name, ref _premises) => {
                 let clause_idx = *clause_idx;
-                // Remove from whichever set contains the clause
+                // Remove the simplified clause from whichever set contains it
                 if self.state.new.last() == Some(&clause_idx) {
                     self.state.new.pop();
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
@@ -480,7 +467,72 @@ impl ProofAtlas {
                     let clause = &self.state.clauses[clause_idx];
                     self.index_registry.on_delete(clause_idx, clause);
                 }
-                self.state.event_log.push(change);
+
+                // If there's a replacement clause, add it to N
+                let logged_change = if let Some(repl) = replacement {
+                    if repl.literals.len() > self.config.max_clause_size {
+                        self.state.event_log.push(change);
+                        return None;
+                    }
+
+                    let new_idx = self.state.clauses.len();
+                    let mut clause_with_id = repl.clone();
+                    clause_with_id.id = Some(new_idx);
+                    clause_with_id.age = self.state.current_iteration;
+                    clause_with_id.role = crate::logic::ClauseRole::Derived;
+
+                    let mut oriented = repl.clone();
+                    self.clause_manager.orient_equalities(&mut oriented);
+                    self.index_registry.on_add(new_idx, &oriented);
+
+                    self.state.clauses.push(clause_with_id.clone());
+                    self.state.new.push(new_idx);
+
+                    if let Some(p) = self.profile.as_mut() {
+                        p.clauses_added += 1;
+                    }
+
+                    // Log with the clause that has an id assigned
+                    let StateChange::Simplify(idx, _, rule_name, premises) = change else {
+                        unreachable!()
+                    };
+                    let logged = StateChange::Simplify(idx, Some(clause_with_id), rule_name, premises);
+                    self.state.event_log.push(logged);
+
+                    // Check limits after adding replacement
+                    let num_clauses = self.state.clauses.len();
+                    if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
+                        return Some(ProofResult::ResourceLimit(
+                            self.state.build_proof_steps(),
+                            self.state.clauses.clone(),
+                        ));
+                    }
+                    if num_clauses % 100 == 0 {
+                        if let Some(start) = self.start_time {
+                            if start.elapsed() > self.config.timeout {
+                                return Some(ProofResult::ResourceLimit(
+                                    self.state.build_proof_steps(),
+                                    self.state.clauses.clone(),
+                                ));
+                            }
+                        }
+                        if let Some(limit_mb) = self.config.memory_limit {
+                            if let Some(rss) = crate::config::process_memory_mb() {
+                                if rss >= limit_mb {
+                                    return Some(ProofResult::ResourceLimit(
+                                        self.state.build_proof_steps(),
+                                        self.state.clauses.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    return None;
+                } else {
+                    change
+                };
+                self.state.event_log.push(logged_change);
             }
             StateChange::Transfer(clause_idx) => {
                 let clause_idx = *clause_idx;

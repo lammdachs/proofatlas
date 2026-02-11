@@ -38,9 +38,7 @@ def get_pid_file(base_dir: Path, prefix: str = "bench") -> Path:
 
 
 def register_pid(base_dir: Path, pid: int):
-    """Register a spawned process PID for cleanup (Unix only)."""
-    if sys.platform == "win32":
-        return
+    """Register a spawned process PID for cleanup."""
     pid_file = get_pid_file(base_dir)
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     with open(pid_file, "a") as f:
@@ -55,9 +53,7 @@ def clear_pids(base_dir: Path):
 
 
 def kill_tracked_pids(base_dir: Path) -> int:
-    """Kill all tracked PIDs and clear the file (Unix only)."""
-    if sys.platform == "win32":
-        return 0
+    """Kill all tracked PIDs and clear the file."""
     pid_file = get_pid_file(base_dir)
     if not pid_file.exists():
         return 0
@@ -166,22 +162,20 @@ def kill_job(base_dir: Path) -> bool:
         except (OSError, ProcessLookupError):
             pass
 
-    # Step 3: Kill tracked PIDs and worker processes (Unix only)
-    if sys.platform != "win32":
-        # Kill any proofatlas-bench worker processes
-        subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--config"], capture_output=True)
+    # Step 3: Kill tracked PIDs and worker processes
+    subprocess.run(["pkill", "-9", "-f", "proofatlas-bench.*--config"], capture_output=True)
 
-        # Kill tracked prover PIDs
-        max_iterations = 10
-        for _ in range(max_iterations):
-            killed = kill_tracked_pids(base_dir)
-            if killed == 0:
-                break
-            time.sleep(0.2)
+    # Kill tracked prover PIDs
+    max_iterations = 10
+    for _ in range(max_iterations):
+        killed = kill_tracked_pids(base_dir)
+        if killed == 0:
+            break
+        time.sleep(0.2)
 
-        # Kill any remaining prover processes from this project
-        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".vampire")], capture_output=True)
-        subprocess.run(["pkill", "-9", "-f", str(base_dir / ".spass")], capture_output=True)
+    # Kill any remaining prover processes from this project
+    subprocess.run(["pkill", "-9", "-f", str(base_dir / ".vampire")], capture_output=True)
+    subprocess.run(["pkill", "-9", "-f", str(base_dir / ".spass")], capture_output=True)
 
     return job is not None
 

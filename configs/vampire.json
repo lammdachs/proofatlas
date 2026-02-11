@@ -2,11 +2,7 @@
   "version": "5.0.0",
   "sources": {
     "linux-x86_64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Linux-X64.zip",
-    "linux-aarch64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Linux-ARM64.zip",
-    "darwin-x86_64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-macOS-X64.zip",
-    "darwin-arm64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-macOS-ARM64.zip",
-    "windows-x86_64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Windows-X64.zip",
-    "windows-arm64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Windows-ARM64.zip"
+    "linux-aarch64": "https://github.com/vprover/vampire/releases/download/v5.0.0/vampire-Linux-ARM64.zip"
   },
 
   "paths": {

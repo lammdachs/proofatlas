@@ -294,7 +294,7 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
     // Second pass: build iterations using a phase-aware state machine.
     //
     // The prover emits events per iteration in this order:
-    //   1. Simplification (Delete/Add "Demodulation" on N, backward Delete on U/P)
+    //   1. Simplification (Simplify on N, backward Simplify on U/P)
     //   2. Transfer (N → U)
     //   3. Activate (U → P) — given clause selection
     //   4. Generation (Add "Resolution", "Superposition", etc.)
@@ -321,9 +321,6 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
         }
     };
 
-    // Buffer for demodulation deletions — emitted after the corresponding Add
-    let mut pending_demod_deletes: Vec<serde_json::Value> = Vec::new();
-
     for event in events {
         match event {
             StateChange::Add(clause, rule_name, premises) => {
@@ -336,52 +333,45 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                         continue;
                     }
 
-                    let is_generating = matches!(
-                        rule_name.as_str(),
-                        "Resolution" | "Factoring" | "Superposition" | "EqualityResolution" | "EqualityFactoring"
-                    );
-
-                    if is_generating {
-                        current_generation.push(json!({
-                            "clause_idx": idx,
-                            "clause": clause_str,
-                            "rule": rule_name,
-                            "premises": premise_indices,
-                        }));
-                    } else if rule_name == "Demodulation" {
-                        // Demodulation Add is simplification — if we're in generation phase,
-                        // this belongs to the next iteration
-                        if in_generation_phase {
-                            flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
-                            in_generation_phase = false;
-                        }
-                        // Emit Add first, then flush any pending demodulation deletions
-                        current_simplification.push(json!({
-                            "clause_idx": idx,
-                            "clause": clause_str,
-                            "rule": "Demodulation",
-                            "premises": premise_indices,
-                        }));
-                        current_simplification.append(&mut pending_demod_deletes);
-                    }
+                    // All Add events in the trace are generating inferences
+                    current_generation.push(json!({
+                        "clause_idx": idx,
+                        "clause": clause_str,
+                        "rule": rule_name,
+                        "premises": premise_indices,
+                    }));
                 }
             }
-            StateChange::Delete(clause_idx, rule_name, _justification) => {
-                // If we're in generation phase, a Delete means next iteration started
+            StateChange::Simplify(clause_idx, replacement, rule_name, premises) => {
+                // If we're in generation phase, a Simplify means next iteration started
                 if in_generation_phase {
                     flush(&mut iterations, &mut current_simplification, &mut current_selection, &mut current_generation);
                     in_generation_phase = false;
                 }
                 let clause_str = clauses.get(clause_idx).cloned().unwrap_or_default();
-                if rule_name.as_str() == "Demodulation" {
-                    // Buffer demodulation deletions to emit after the Add
-                    pending_demod_deletes.push(json!({
+                let premise_indices = proofatlas::clause_indices(premises);
+
+                if let Some(repl) = replacement {
+                    // Replacement (demodulation): emit deletion then add
+                    let repl_idx = repl.id.unwrap_or(0);
+                    let repl_str = format_clause(repl, interner);
+                    // Store replacement clause text for later lookups
+                    clauses.insert(repl_idx, repl_str.clone());
+
+                    current_simplification.push(json!({
+                        "clause_idx": repl_idx,
+                        "clause": repl_str,
+                        "rule": rule_name,
+                        "premises": premise_indices,
+                    }));
+                    current_simplification.push(json!({
                         "clause_idx": *clause_idx,
                         "clause": clause_str,
-                        "rule": "DemodulationDeletion",
+                        "rule": format!("{}Deletion", rule_name),
                         "premises": [],
                     }));
                 } else {
+                    // Pure deletion (tautology, subsumption)
                     let rule = match rule_name.as_str() {
                         "Tautology" => "TautologyDeletion",
                         "Subsumption" => "SubsumptionDeletion",
