@@ -381,20 +381,15 @@ impl ProofAtlas {
     fn apply_change(&mut self, change: StateChange) -> Option<ProofResult> {
         match &change {
             StateChange::Add(clause, _rule_name, _premises) => {
-                let is_input = matches!(&_rule_name as &str, "Input");
-
-                // Never silently drop input clauses
-                if !is_input && clause.literals.len() > self.config.max_clause_size {
+                if clause.literals.len() > self.config.max_clause_size {
                     return None;
                 }
 
                 let new_idx = self.state.clauses.len();
                 let mut clause_with_id = clause.clone();
                 clause_with_id.id = Some(new_idx);
-                if !is_input {
-                    clause_with_id.age = self.state.current_iteration;
-                    clause_with_id.role = crate::logic::ClauseRole::Derived;
-                }
+                clause_with_id.age = self.state.current_iteration;
+                clause_with_id.role = crate::logic::ClauseRole::Derived;
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
@@ -423,38 +418,35 @@ impl ProofAtlas {
                     p.clauses_added += 1;
                 }
 
-                // Skip resource limit checks for input clauses
-                if !is_input {
-                    // Check limits after every Add
-                    let num_clauses = self.state.clauses.len();
+                // Check limits after every Add
+                let num_clauses = self.state.clauses.len();
 
-                    // max_clauses: every Add (integer comparison, free)
-                    if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
-                        return Some(ProofResult::ResourceLimit(
-                            self.state.build_proof_steps(),
-                            self.state.clauses.clone(),
-                        ));
+                // max_clauses: every Add (integer comparison, free)
+                if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
+                    return Some(ProofResult::ResourceLimit(
+                        self.state.build_proof_steps(),
+                        self.state.clauses.clone(),
+                    ));
+                }
+
+                // timeout + memory: every 100th Add (amortize syscall cost)
+                if num_clauses % 100 == 0 {
+                    if let Some(start) = self.start_time {
+                        if start.elapsed() > self.config.timeout {
+                            return Some(ProofResult::ResourceLimit(
+                                self.state.build_proof_steps(),
+                                self.state.clauses.clone(),
+                            ));
+                        }
                     }
 
-                    // timeout + memory: every 100th Add (amortize syscall cost)
-                    if num_clauses % 100 == 0 {
-                        if let Some(start) = self.start_time {
-                            if start.elapsed() > self.config.timeout {
+                    if let Some(limit_mb) = self.config.memory_limit {
+                        if let Some(rss) = crate::config::process_memory_mb() {
+                            if rss >= limit_mb {
                                 return Some(ProofResult::ResourceLimit(
                                     self.state.build_proof_steps(),
                                     self.state.clauses.clone(),
                                 ));
-                            }
-                        }
-
-                        if let Some(limit_mb) = self.config.memory_limit {
-                            if let Some(rss) = crate::config::process_memory_mb() {
-                                if rss >= limit_mb {
-                                    return Some(ProofResult::ResourceLimit(
-                                        self.state.build_proof_steps(),
-                                        self.state.clauses.clone(),
-                                    ));
-                                }
                             }
                         }
                     }
