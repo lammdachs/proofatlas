@@ -1,4 +1,7 @@
-"""Tests for state-sampling collation."""
+"""Tests for state-sampling collation.
+
+collate_proof_batch expects pre-sampled items with u_graphs, p_graphs, u_labels keys.
+"""
 
 import pytest
 import torch
@@ -25,8 +28,8 @@ def _make_clause(predicate="p", args_type="Variable", args_name="X", label=0, ag
     }
 
 
-def _make_batch_item(num_clauses=5, num_positive=2, num_states=2):
-    """Create a batch item with synthetic graphs and selection_states."""
+def _make_batch_item(num_clauses=5, num_positive=2, u_indices=None, p_indices=None):
+    """Create a pre-sampled batch item with u_graphs, p_graphs, u_labels."""
     clauses = []
     for i in range(num_clauses):
         clauses.append(_make_clause(
@@ -39,22 +42,16 @@ def _make_batch_item(num_clauses=5, num_positive=2, num_states=2):
     graphs = [clause_to_graph(c) for c in clauses]
     labels = [c["label"] for c in clauses]
 
-    # Create selection states with U and P sets
-    states = []
-    for s in range(num_states):
-        # Split clauses between U and P
-        u_indices = list(range(s, num_clauses, 2))  # odd or even indices
-        p_indices = list(range(1 - s, num_clauses, 2))
-        states.append({
-            "selected": u_indices[0] if u_indices else 0,
-            "unprocessed": u_indices,
-            "processed": p_indices,
-        })
+    # Default U/P split: even indices are U, odd are P
+    if u_indices is None:
+        u_indices = list(range(0, num_clauses, 2))
+    if p_indices is None:
+        p_indices = list(range(1, num_clauses, 2))
 
     return {
-        "graphs": graphs,
-        "labels": labels,
-        "selection_states": states,
+        "u_graphs": [graphs[i] for i in u_indices],
+        "p_graphs": [graphs[i] for i in p_indices],
+        "u_labels": [labels[i] for i in u_indices],
         "problem": "test_problem",
     }
 
@@ -85,13 +82,11 @@ class TestCollateStateBatch:
 
     def test_empty_processed(self):
         """No processed clauses → no p_node_features key."""
-        item = _make_batch_item(num_clauses=4)
-        # Override states to have empty processed sets
-        item["selection_states"] = [{
-            "selected": 0,
-            "unprocessed": [0, 1, 2, 3],
-            "processed": [],
-        }]
+        item = _make_batch_item(
+            num_clauses=4,
+            u_indices=[0, 1, 2, 3],
+            p_indices=[],
+        )
         result = collate_proof_batch([item])
 
         assert result is not None
@@ -112,13 +107,11 @@ class TestCollateStateBatch:
         assert 1 in proof_ids.tolist()
 
     def test_returns_none_for_empty_u(self):
-        """State with no valid U should return None."""
-        item = _make_batch_item(num_clauses=4)
-        # Override to have empty unprocessed set
-        item["selection_states"] = [{
-            "selected": 0,
-            "unprocessed": [],
-            "processed": [0, 1, 2, 3],
-        }]
+        """Pre-sampled item with no U graphs should return None."""
+        item = _make_batch_item(
+            num_clauses=4,
+            u_indices=[],
+            p_indices=[0, 1, 2, 3],
+        )
         result = collate_proof_batch([item])
         assert result is None

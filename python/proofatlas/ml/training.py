@@ -27,9 +27,11 @@ from .losses import (
 )
 from .datasets import (
     ProofDataset,
+    ProofBatchDataset,
     DynamicBatchSampler,
     collate_proof_batch,
     collate_tokenized_batch,
+    scan_trace_files,
 )
 from .logger import JSONLogger
 from .export import export_model
@@ -194,6 +196,11 @@ def run_training(
     log_callback: Optional[callable] = None,
     web_data_dir: Optional[Path] = None,
     log_file: Optional[Any] = None,
+    cpu_workers: int = 0,
+    rank: int = 0,
+    world_size: int = 1,
+    max_batch_bytes: Optional[int] = None,
+    accumulate_batches: Optional[int] = None,
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -206,6 +213,11 @@ def run_training(
         log_callback: Optional callback(epoch, max_epochs, train_loss) for logging
         web_data_dir: Directory for web data (web/data/) - enables live web updates
         log_file: File object for logging (e.g., bench.log)
+        cpu_workers: Number of DataLoader workers (default: 0)
+        rank: GPU rank for DDP (default: 0)
+        world_size: Total GPU count for DDP (default: 1)
+        max_batch_bytes: Override max batch size in bytes (default: from config)
+        accumulate_batches: Override gradient accumulation steps (default: from config)
 
     Returns:
         Path to weights directory (not the file) to match find_weights().
@@ -219,9 +231,13 @@ def run_training(
     from .weights import get_model_name, get_encoder_type
 
     start_time = time.time()
+    is_main = rank == 0
+    use_ddp = world_size > 1
 
     def log_msg(msg: str):
-        """Log message with timestamp to stdout and optionally to log_file."""
+        """Log message with timestamp (only on rank 0)."""
+        if not is_main:
+            return
         timestamp = datetime.now().strftime("%H:%M:%S")
         line = f"[{timestamp}] {msg}"
         if log_file and log_file is not sys.stdout:
@@ -230,6 +246,70 @@ def run_training(
             log_file.flush()
         else:
             print(line, flush=True)
+
+    # DDP setup
+    if use_ddp:
+        import torch.distributed as dist
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+        device = torch.device(f"cuda:{rank}")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    try:
+        return _run_training_inner(
+            preset=preset,
+            trace_dir=trace_dir,
+            weights_dir=weights_dir,
+            configs_dir=configs_dir,
+            problem_names=problem_names,
+            log_callback=log_callback,
+            web_data_dir=web_data_dir,
+            log_msg=log_msg,
+            cpu_workers=cpu_workers,
+            rank=rank,
+            world_size=world_size,
+            device=device,
+            is_main=is_main,
+            use_ddp=use_ddp,
+            max_batch_bytes=max_batch_bytes,
+            accumulate_batches=accumulate_batches,
+            start_time=start_time,
+        )
+    finally:
+        if use_ddp:
+            import torch.distributed as dist
+            dist.destroy_process_group()
+
+
+def _run_training_inner(
+    *,
+    preset,
+    trace_dir,
+    weights_dir,
+    configs_dir,
+    problem_names,
+    log_callback,
+    web_data_dir,
+    log_msg,
+    cpu_workers,
+    rank,
+    world_size,
+    device,
+    is_main,
+    use_ddp,
+    max_batch_bytes,
+    accumulate_batches,
+    start_time,
+):
+    """Inner training loop, separated for clean DDP cleanup."""
+    import random
+    import time
+
+    import torch.optim as optim
+    from torch.utils.data import DataLoader
+
+    from .weights import get_model_name, get_encoder_type
 
     # Load configs
     configs_dir = Path(configs_dir)
@@ -276,17 +356,23 @@ def run_training(
 
     log_msg(f"Found {len(trace_files)} trace files")
 
+    # Validate trace files
+    valid_files = scan_trace_files(trace_files)
+    if not valid_files:
+        raise ValueError("No valid traces found (all filtered or empty)")
+    log_msg(f"Validated {len(valid_files)} traces")
+
     # Problem-level split
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    random.shuffle(trace_files)
+    random.shuffle(valid_files)
 
     if val_ratio > 0:
-        val_count = max(1, int(len(trace_files) * val_ratio))
-        train_files = trace_files[val_count:]
-        val_files = trace_files[:val_count]
+        val_count = max(1, int(len(valid_files) * val_ratio))
+        train_files = valid_files[val_count:]
+        val_files = valid_files[:val_count]
     else:
-        train_files = trace_files
+        train_files = valid_files
         val_files = []
 
     # Determine output type based on embedding
@@ -296,27 +382,64 @@ def run_training(
     else:
         output_type = "graph"
 
-    # Create datasets (loads all data in parallel)
+    model_name = get_model_name(preset)
+    log_msg(f"Training {model_name}: {len(train_files)} traces")
+
+    # Resolve batch size and accumulation: CLI overrides > config
+    is_sentence_model_type = (embedding_type == "string")
+
+    if max_batch_bytes is None:
+        # Fall back to config-based defaults
+        default_max_clauses = 512 if is_sentence_model_type else 8192
+        max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
+        # Estimate: ~1KB per clause for graphs, ~0.5KB for tokenized
+        bytes_per_clause = 512 if is_sentence_model_type else 1024
+        resolved_max_batch_bytes = max_clauses * bytes_per_clause
+    else:
+        resolved_max_batch_bytes = max_batch_bytes
+
+    default_accumulate = 4 if is_sentence_model_type else 1
+    accumulate_steps = accumulate_batches if accumulate_batches is not None else config.get("accumulate_steps", default_accumulate)
+
+    log_msg(f"Batch: {_fmt_bytes(resolved_max_batch_bytes)} max, {accumulate_steps} accumulation steps, {cpu_workers} workers")
+
+    # Create datasets using ProofBatchDataset
     log_msg(f"Loading training data ({output_type} format)...")
-    train_ds = ProofDataset(
-        trace_dir=None,
-        trace_files=train_files,
+    train_ds = ProofBatchDataset(
+        files=train_files,
         output_type=output_type,
+        max_batch_bytes=resolved_max_batch_bytes,
+        shuffle=True,
     )
 
     val_ds = None
     if val_files:
         log_msg(f"Loading validation data ({output_type} format)...")
-        val_ds = ProofDataset(
-            trace_dir=None,
-            trace_files=val_files,
+        val_ds = ProofBatchDataset(
+            files=val_files,
             output_type=output_type,
+            max_batch_bytes=resolved_max_batch_bytes,
+            shuffle=False,
         )
 
-    log_msg(f"Train: {len(train_ds)} traces, Val: {len(val_ds) if val_ds else 0} traces")
+    log_msg(f"Train: {train_ds.num_files} traces, Val: {val_ds.num_files if val_ds else 0} traces")
 
-    model_name = get_model_name(preset)
-    log_msg(f"Training {model_name}: {len(train_ds)} traces")
+    # DataLoader: batch_size=None because IterableDataset yields complete batches
+    # collate_fn passes through the single batch dict from each yield
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=None,
+        num_workers=cpu_workers,
+        pin_memory=(device.type == "cuda"),
+    )
+    val_loader = None
+    if val_ds:
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=None,
+            num_workers=cpu_workers,
+            pin_memory=(device.type == "cuda"),
+        )
 
     # Create model
     emb_config = config.get("embedding", {})
@@ -337,27 +460,12 @@ def run_training(
 
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
     is_sentence_model = model_type == "sentence"
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    # Dynamic batching
-    default_max_clauses = 512 if is_sentence_model else 8192
-    max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
-    default_accumulate = 4 if is_sentence_model else 1
-    accumulate_steps = config.get("accumulate_steps", default_accumulate)
-
-    collate_fn = collate_tokenized_batch if output_type == "tokenized" else collate_proof_batch
-
-    train_sampler = DynamicBatchSampler(train_ds, max_clauses=max_clauses, shuffle=True)
-    train_loader = DataLoader(
-        train_ds, batch_sampler=train_sampler, collate_fn=collate_fn, num_workers=0
-    )
-    val_loader = None
-    if val_ds:
-        val_sampler = DynamicBatchSampler(val_ds, max_clauses=max_clauses, shuffle=False)
-        val_loader = DataLoader(
-            val_ds, batch_sampler=val_sampler, collate_fn=collate_fn, num_workers=0
-        )
+    # DDP wrapping
+    if use_ddp:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        model = DDP(model, device_ids=[rank])
 
     # Optimizer
     optimizer_type = config.get("optimizer", "adamw").lower()
@@ -378,9 +486,9 @@ def run_training(
 
     max_epochs = config.get("max_epochs", 100)
 
-    # Initialize web logger for live updates
+    # Initialize web logger for live updates (rank 0 only)
     web_logger = None
-    if web_data_dir:
+    if web_data_dir and is_main:
         web_logger = JSONLogger(web_data_dir, model_name)
         web_logger.log_config(
             model_config={
@@ -391,12 +499,15 @@ def run_training(
                 "scorer_type": scorer_name,
             },
             training_config={
-                "batch_size": accumulate_steps,
+                "batch_size": _fmt_bytes(resolved_max_batch_bytes),
+                "accumulate_steps": accumulate_steps,
                 "learning_rate": lr,
                 "max_epochs": max_epochs,
                 "optimizer": optimizer_type,
                 "weight_decay": weight_decay,
                 "margin": config.get("margin", 0.1),
+                "cpu_workers": cpu_workers,
+                "gpu_workers": world_size,
             },
         )
 
@@ -411,6 +522,7 @@ def run_training(
     loss_type = config.get("loss_type", "info_nce")
     temperature = config.get("temperature", 1.0)
     margin = config.get("margin", 0.1)
+    gradient_clip = config.get("gradient_clip", 1.0)
 
     for epoch in range(1, max_epochs + 1):
         model.train()
@@ -427,21 +539,33 @@ def run_training(
             if proof_ids is not None:
                 proof_ids = proof_ids.to(device)
 
-            scores = _forward_pass(model, batch, device, is_sentence_model)
+            # Use no_sync for intermediate accumulation steps with DDP
+            is_accumulation_step = accumulate_steps > 1 and (step + 1) % accumulate_steps != 0
+            ctx = model.no_sync() if (use_ddp and is_accumulation_step) else _nullcontext()
 
-            loss = compute_loss(scores, labels, proof_ids, loss_type, temperature, margin)
-            if accumulate_steps > 1:
-                loss = loss / accumulate_steps
-            loss.backward()
+            with ctx:
+                raw_model = model.module if use_ddp else model
+                scores = _forward_pass(raw_model, batch, device, is_sentence_model)
+
+                loss = compute_loss(scores, labels, proof_ids, loss_type, temperature, margin)
+                if accumulate_steps > 1:
+                    loss = loss / accumulate_steps
+                loss.backward()
+
             train_loss += loss.item() * (accumulate_steps if accumulate_steps > 1 else 1)
             num_batches += 1
 
             # Step optimizer after accumulating gradients
-            if accumulate_steps <= 1 or (step + 1) % accumulate_steps == 0 or (step + 1) == len(train_loader):
-                gradient_clip = config.get("gradient_clip", 1.0)
+            if accumulate_steps <= 1 or (step + 1) % accumulate_steps == 0:
                 nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
                 optimizer.step()
                 optimizer.zero_grad()
+
+        # Flush remaining accumulated gradients at end of epoch
+        if accumulate_steps > 1 and num_batches % accumulate_steps != 0:
+            nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+            optimizer.step()
+            optimizer.zero_grad()
 
         train_loss /= num_batches if num_batches > 0 else 1
 
@@ -459,18 +583,21 @@ def run_training(
                     if val_proof_ids is not None:
                         val_proof_ids = val_proof_ids.to(device)
 
-                    scores = _forward_pass(model, batch, device, is_sentence_model)
+                    raw_model = model.module if use_ddp else model
+                    scores = _forward_pass(raw_model, batch, device, is_sentence_model)
 
                     val_loss += compute_loss(scores, labels, val_proof_ids, loss_type, temperature, margin).item()
                     num_val_batches += 1
             val_loss /= num_val_batches if num_val_batches > 0 else 1
 
-        # Track best model and early stopping
+        # Track best model and early stopping (rank 0 only tracks, but all ranks continue)
         current_val = val_loss if val_loader else train_loss
         if current_val < best_val_loss:
             best_val_loss = current_val
             best_epoch = epoch
-            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            if is_main:
+                raw_model = model.module if use_ddp else model
+                best_state_dict = {k: v.cpu().clone() for k, v in raw_model.state_dict().items()}
             patience_counter = 0
         else:
             patience_counter += 1
@@ -491,7 +618,7 @@ def run_training(
                 lr=lr,
             )
 
-        if log_callback:
+        if log_callback and is_main:
             log_callback(epoch, max_epochs, train_loss)
 
         # Early stopping check
@@ -499,35 +626,56 @@ def run_training(
             log_msg(f"Early stopping at epoch {epoch} (patience={patience})")
             break
 
-    # Restore best model
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-        log_msg(f"Restored best model from epoch {best_epoch}")
+    # Restore best model and export (rank 0 only)
+    if is_main:
+        raw_model = model.module if use_ddp else model
+        if best_state_dict is not None:
+            raw_model.load_state_dict(best_state_dict)
+            log_msg(f"Restored best model from epoch {best_epoch}")
 
-    # Log final results
-    total_time = time.time() - start_time
-    early_stopped = patience_counter >= patience
-    if web_logger:
-        web_logger.log_final(
-            best_epoch=best_epoch,
-            best_val_loss=best_val_loss,
-            total_time=total_time,
-            termination_reason="early_stopped" if early_stopped else "completed",
+        # Log final results
+        total_time = time.time() - start_time
+        early_stopped = patience_counter >= patience
+        if web_logger:
+            web_logger.log_final(
+                best_epoch=best_epoch,
+                best_val_loss=best_val_loss,
+                total_time=total_time,
+                termination_reason="early_stopped" if early_stopped else "completed",
+            )
+
+        # Export to TorchScript for Rust inference
+        weights_path = export_model(
+            model=raw_model,
+            weights_dir=weights_dir,
+            model_name=model_name,
+            config=config,
+            is_sentence_model=is_sentence_model,
+            needs_adj=needs_adj,
         )
 
-    # Export to TorchScript for Rust inference
-    weights_path = export_model(
-        model=model,
-        weights_dir=weights_dir,
-        model_name=model_name,
-        config=config,
-        is_sentence_model=is_sentence_model,
-        needs_adj=needs_adj,
-    )
-
-    log_msg(f"TorchScript model saved: {weights_path}")
-    log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")
+        log_msg(f"TorchScript model saved: {weights_path}")
+        log_msg(f"Training completed in {total_time:.1f}s (best epoch: {best_epoch})")
 
     # Return the weights directory (not the file path) to match find_weights()
-    # Rust expects a directory and constructs the full path itself
     return Path(weights_dir)
+
+
+class _nullcontext:
+    """Minimal no-op context manager (avoids importing contextlib)."""
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+
+
+def _fmt_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n >= 1024 * 1024 * 1024:
+        return f"{n / (1024**3):.1f}G"
+    elif n >= 1024 * 1024:
+        return f"{n / (1024**2):.1f}M"
+    elif n >= 1024:
+        return f"{n / 1024:.1f}K"
+    else:
+        return f"{n}B"

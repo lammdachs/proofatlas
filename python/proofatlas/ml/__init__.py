@@ -27,9 +27,12 @@ from .losses import (
 
 from .datasets import (
     ProofDataset,
+    ProofBatchDataset,
     DynamicBatchSampler,
     collate_proof_batch,
     collate_tokenized_batch,
+    scan_trace_files,
+    _batch_bytes as batch_bytes,
 )
 
 from .logger import JSONLogger
@@ -95,9 +98,12 @@ __all__ = [
     "compute_loss",
     # Datasets
     "ProofDataset",
+    "ProofBatchDataset",
     "DynamicBatchSampler",
     "collate_proof_batch",
     "collate_tokenized_batch",
+    "scan_trace_files",
+    "batch_bytes",
     # Training
     "run_training",
     "load_trace_files",

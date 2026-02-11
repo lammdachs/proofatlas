@@ -9,6 +9,12 @@ USAGE:
     python scripts/train.py --status                        # Check job status
     python scripts/train.py --kill                          # Stop training job
 
+    # Worker pipeline flags:
+    python scripts/train.py --config gcn_mlp --cpu-workers 4       # Parallel batch prep
+    python scripts/train.py --config gcn_mlp --gpu-workers 2       # Multi-GPU DDP
+    python scripts/train.py --config gcn_mlp --batch-size 16M      # Max batch tensor bytes
+    python scripts/train.py --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
+
 This script:
 1. Collects proof traces using age_weight baseline (if none exist)
 2. Trains the model in a subprocess (CUDA isolation)
@@ -60,12 +66,134 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
+def parse_byte_size(s: str) -> int:
+    """Parse a human-readable byte size string.
+
+    Supports suffixes: K/KB, M/MB, G/GB (case-insensitive).
+    Plain integers are treated as bytes.
+
+    Examples:
+        "16M" -> 16777216
+        "512K" -> 524288
+        "2G" -> 2147483648
+        "1048576" -> 1048576
+    """
+    s = s.strip().upper()
+    multipliers = {
+        'K': 1024,
+        'KB': 1024,
+        'M': 1024 ** 2,
+        'MB': 1024 ** 2,
+        'G': 1024 ** 3,
+        'GB': 1024 ** 3,
+    }
+
+    for suffix, mult in sorted(multipliers.items(), key=lambda x: -len(x[0])):
+        if s.endswith(suffix):
+            num = s[:-len(suffix)].strip()
+            try:
+                return int(float(num) * mult)
+            except ValueError:
+                raise argparse.ArgumentTypeError(f"Invalid byte size: '{s}'")
+
+    try:
+        return int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid byte size: '{s}'. Use suffixes like 16M, 512K, 2G"
+        )
+
+
+def _fmt_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n >= 1024 * 1024 * 1024:
+        return f"{n / (1024**3):.1f}G"
+    elif n >= 1024 * 1024:
+        return f"{n / (1024**2):.1f}M"
+    elif n >= 1024:
+        return f"{n / 1024:.1f}K"
+    else:
+        return f"{n}B"
+
+
+def check_cuda_device_count() -> int:
+    """Check available CUDA GPU count via subprocess (avoids CUDA context in main)."""
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', 'import torch; print(torch.cuda.device_count())'],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def validate_args(args, config):
+    """Validate CLI arguments and return resolved values.
+
+    Returns (max_batch_bytes, accumulate_batches) after validation.
+    """
+    errors = []
+
+    if args.cpu_workers < 0:
+        errors.append(f"--cpu-workers must be >= 0 (got {args.cpu_workers})")
+    if args.gpu_workers < 1:
+        errors.append(f"--gpu-workers must be >= 1 (got {args.gpu_workers})")
+
+    # Parse batch size
+    max_batch_bytes = None
+    if args.batch_size is not None:
+        max_batch_bytes = parse_byte_size(args.batch_size)
+        if max_batch_bytes <= 0:
+            errors.append(f"--batch-size must be > 0 (got {args.batch_size})")
+
+    # Resolve accumulate_batches
+    accumulate_batches = args.accumulate_batches
+    if accumulate_batches is not None and accumulate_batches <= 0:
+        errors.append(f"--accumulate-batches must be > 0 (got {accumulate_batches})")
+
+    # GPU checks
+    if args.gpu_workers > 1:
+        available = check_cuda_device_count()
+        if available == 0:
+            errors.append("--gpu-workers > 1 requires CUDA GPUs, but none detected")
+        elif args.gpu_workers > available:
+            errors.append(
+                f"--gpu-workers {args.gpu_workers} exceeds available GPUs ({available})"
+            )
+
+    # Accumulation must cover all GPU workers
+    if accumulate_batches is not None and accumulate_batches < args.gpu_workers:
+        errors.append(
+            f"--accumulate-batches ({accumulate_batches}) must be >= "
+            f"--gpu-workers ({args.gpu_workers})"
+        )
+
+    if errors:
+        for e in errors:
+            print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Log effective batch info
+    if max_batch_bytes is not None:
+        eff_accum = accumulate_batches or 1
+        effective = max_batch_bytes * eff_accum * args.gpu_workers
+        log(f"Effective batch: {_fmt_bytes(max_batch_bytes)} x {eff_accum} accum "
+            f"x {args.gpu_workers} GPUs = ~{_fmt_bytes(effective)}")
+
+    return max_batch_bytes, accumulate_batches
+
+
 def run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem_names,
-                             web_data_dir, use_cuda=False):
+                             web_data_dir, use_cuda=False, cpu_workers=0,
+                             gpu_workers=1, max_batch_bytes=None,
+                             accumulate_batches=None):
     """Run training in a subprocess to avoid CUDA context issues.
 
-    CUDA contexts don't survive fork. Running training in a subprocess
-    keeps the main process CUDA-free.
+    For multi-GPU (gpu_workers > 1), uses torch.multiprocessing.spawn inside
+    the subprocess so each GPU gets its own process.
     """
     # Serialize arguments to a temp file (problem_names can be large)
     with tempfile.NamedTemporaryFile(mode='wb', suffix='.pkl', delete=False) as f:
@@ -77,10 +205,50 @@ def run_training_subprocess(preset, trace_dir, weights_dir, configs_dir, problem
             'configs_dir': str(configs_dir),
             'problem_names': list(problem_names) if problem_names else None,
             'web_data_dir': str(web_data_dir) if web_data_dir else None,
+            'cpu_workers': cpu_workers,
+            'gpu_workers': gpu_workers,
+            'max_batch_bytes': max_batch_bytes,
+            'accumulate_batches': accumulate_batches,
         }, f)
 
-    # Run training script
-    script = f'''
+    # Build training script
+    if gpu_workers > 1:
+        script = f'''
+import os
+import pickle
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("{Path(__file__).parent.parent / "python"}").resolve()))
+
+with open("{args_file}", "rb") as f:
+    args = pickle.load(f)
+
+import torch.multiprocessing as mp
+
+def train_worker(rank, args):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
+    from proofatlas import ml
+    ml.run_training(
+        preset=args["preset"],
+        trace_dir=Path(args["trace_dir"]),
+        weights_dir=Path(args["weights_dir"]),
+        configs_dir=Path(args["configs_dir"]),
+        problem_names=set(args["problem_names"]) if args["problem_names"] else None,
+        web_data_dir=Path(args["web_data_dir"]) if args["web_data_dir"] else None,
+        log_file=sys.stdout,
+        cpu_workers=args["cpu_workers"],
+        rank=rank,
+        world_size=args["gpu_workers"],
+        max_batch_bytes=args["max_batch_bytes"],
+        accumulate_batches=args["accumulate_batches"],
+    )
+
+mp.spawn(train_worker, args=(args,), nprocs=args["gpu_workers"], join=True)
+print("TRAINING_RESULT:" + str(Path(args["weights_dir"])))
+'''
+    else:
+        script = f'''
 import pickle
 import sys
 from pathlib import Path
@@ -98,6 +266,9 @@ result = ml.run_training(
     problem_names=set(args["problem_names"]) if args["problem_names"] else None,
     web_data_dir=Path(args["web_data_dir"]) if args["web_data_dir"] else None,
     log_file=sys.stdout,
+    cpu_workers=args["cpu_workers"],
+    max_batch_bytes=args["max_batch_bytes"],
+    accumulate_batches=args["accumulate_batches"],
 )
 print("TRAINING_RESULT:" + str(result))
 '''
@@ -321,6 +492,9 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     weights_dir = Path(args.weights_dir) if args.weights_dir else base_dir / ".weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
 
+    # Validate CLI args
+    max_batch_bytes, accumulate_batches = validate_args(args, preset)
+
     # Collect traces if needed
     trace_preset = preset.get("traces") or args.config
     if args.trace_dir:
@@ -344,6 +518,10 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             problem_names=problem_names,
             web_data_dir=base_dir / "web" / "data",
             use_cuda=args.use_cuda,
+            cpu_workers=args.cpu_workers,
+            gpu_workers=args.gpu_workers,
+            max_batch_bytes=max_batch_bytes,
+            accumulate_batches=accumulate_batches,
         )
         log(f"Training complete! Weights saved to: {weights_path}")
         log(f"Run evaluation with: proofatlas-bench --config {args.config}")
@@ -370,6 +548,17 @@ def main():
                        help="Show status of running training job")
     parser.add_argument("--kill", action="store_true",
                        help="Kill running training job")
+
+    # Worker pipeline flags
+    parser.add_argument("--cpu-workers", type=int, default=2,
+                       help="DataLoader workers for parallel batch preparation (default: 2)")
+    parser.add_argument("--gpu-workers", type=int, default=1,
+                       help="DDP processes across GPUs (default: 1, no DDP)")
+    parser.add_argument("--batch-size", type=str, default=None,
+                       help="Max collated tensor bytes per micro-batch (default: 16M). "
+                            "Supports suffixes: K, M, G (e.g., 16M, 512K, 2G)")
+    parser.add_argument("--accumulate-batches", type=int, default=None,
+                       help="Gradient accumulation steps (default: from config)")
 
     args = parser.parse_args()
     base_dir = find_project_root()

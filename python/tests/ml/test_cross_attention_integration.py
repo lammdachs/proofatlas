@@ -92,7 +92,7 @@ class TestStateBatchThroughModel:
         from proofatlas.ml.structured import clause_to_graph, batch_graphs
         from proofatlas.ml.datasets import collate_proof_batch
 
-        # Build synthetic batch
+        # Build synthetic pre-sampled batch item
         clauses = []
         for i in range(6):
             clauses.append({
@@ -105,12 +105,12 @@ class TestStateBatchThroughModel:
         graphs = [clause_to_graph(c) for c in clauses]
         labels = [c["label"] for c in clauses]
 
+        u_indices = [0, 1, 2]
+        p_indices = [3, 4, 5]
         item = {
-            "graphs": graphs,
-            "labels": labels,
-            "selection_states": [
-                {"selected": 0, "unprocessed": [0, 1, 2], "processed": [3, 4, 5]},
-            ],
+            "u_graphs": [graphs[i] for i in u_indices],
+            "p_graphs": [graphs[i] for i in p_indices],
+            "u_labels": [labels[i] for i in u_indices],
             "problem": "test",
         }
 
