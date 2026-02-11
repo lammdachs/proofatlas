@@ -37,7 +37,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
                           trace_preset: str = None, use_cuda: bool = False,
                           socket_path: str = None) -> BenchResult:
     """Inner function that actually runs ProofAtlas (called in subprocess)."""
-    from proofatlas import ProofState
+    from proofatlas import ProofAtlas
 
     timeout = preset.get("timeout", 10)
 
@@ -50,7 +50,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Start timer before parsing (CNF conversion counts against timeout)
     start = time.time()
 
-    state = ProofState()
+    state = ProofAtlas()
     try:
         # Pass timeout and memory limit to parsing to prevent CNF conversion hangs/OOM
         memory_limit = preset.get("memory_limit")  # None means no limit
@@ -76,7 +76,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     remaining_timeout = max(0.1, timeout - elapsed_parsing)
 
     try:
-        proof_found, status, _, _ = state.run_saturation(
+        proof_found, status = state.prove(
             timeout=float(remaining_timeout),
             max_iterations=max_iterations if max_iterations > 0 else None,
             literal_selection=literal_selection,

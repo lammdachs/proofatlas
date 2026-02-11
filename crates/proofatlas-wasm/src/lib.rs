@@ -272,14 +272,23 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
     let mut initial_clause_count = 0;
 
     for event in events {
-        if let StateChange::Add(clause, rule_name, premises) = event {
-            if let Some(idx) = clause.id {
-                clauses.insert(idx, format_clause(clause, interner));
-                derivations.insert(idx, (rule_name.clone(), proofatlas::clause_indices(premises)));
-                if rule_name == "Input" {
-                    initial_clause_count = initial_clause_count.max(idx + 1);
+        match event {
+            StateChange::Add(clause, rule_name, premises) => {
+                if let Some(idx) = clause.id {
+                    clauses.insert(idx, format_clause(clause, interner));
+                    derivations.insert(idx, (rule_name.clone(), proofatlas::clause_indices(premises)));
+                    if rule_name == "Input" {
+                        initial_clause_count = initial_clause_count.max(idx + 1);
+                    }
                 }
             }
+            StateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                if let Some(idx) = clause.id {
+                    clauses.insert(idx, format_clause(clause, interner));
+                    derivations.insert(idx, (rule_name.clone(), proofatlas::clause_indices(premises)));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -328,18 +337,24 @@ fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Val
                     let clause_str = format_clause(clause, interner);
                     let premise_indices = proofatlas::clause_indices(premises);
 
-                    // Skip initial input clauses
                     if rule_name == "Input" {
-                        continue;
+                        // Show input clause additions in the simplification phase
+                        // (before any given clause selection)
+                        current_simplification.push(json!({
+                            "clause_idx": idx,
+                            "clause": clause_str,
+                            "rule": "Input",
+                            "premises": premise_indices,
+                        }));
+                    } else {
+                        // All other Add events are generating inferences
+                        current_generation.push(json!({
+                            "clause_idx": idx,
+                            "clause": clause_str,
+                            "rule": rule_name,
+                            "premises": premise_indices,
+                        }));
                     }
-
-                    // All Add events in the trace are generating inferences
-                    current_generation.push(json!({
-                        "clause_idx": idx,
-                        "clause": clause_str,
-                        "rule": rule_name,
-                        "premises": premise_indices,
-                    }));
                 }
             }
             StateChange::Simplify(clause_idx, replacement, rule_name, premises) => {

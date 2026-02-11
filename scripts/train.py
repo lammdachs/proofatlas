@@ -308,7 +308,7 @@ print("TRAINING_RESULT:" + str(result))
 
 def collect_traces(base_dir, problems, tptp_root, preset, trace_preset, use_cuda):
     """Collect proof traces using age_weight baseline."""
-    from proofatlas import ProofState
+    from proofatlas import ProofAtlas
 
     traces_dir = base_dir / ".data" / "traces" / trace_preset
     traces_dir.mkdir(parents=True, exist_ok=True)
@@ -333,10 +333,10 @@ def collect_traces(base_dir, problems, tptp_root, preset, trace_preset, use_cuda
             with open(problem) as f:
                 content = f.read()
 
-            state = ProofState()
+            state = ProofAtlas()
             state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
 
-            proof_found, status, _, _ = state.run_saturation(
+            proof_found, status = state.prove(
                 timeout=float(timeout),
                 literal_selection=literal_selection,
                 age_weight_ratio=float(age_weight_ratio),

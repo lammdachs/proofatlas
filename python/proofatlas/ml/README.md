@@ -15,11 +15,11 @@ pip install proofatlas torch
 ## Quick Start
 
 ```python
-from proofatlas import ProofState
+from proofatlas import ProofAtlas
 from proofatlas.ml import to_torch_tensors, batch_graphs
 
 # Create clause graphs
-state = ProofState()
+state = ProofAtlas()
 clause_ids = state.add_clauses_from_tptp("cnf(test, axiom, p(X)).")
 graph = state.clause_to_graph(clause_ids[0])
 
@@ -136,10 +136,10 @@ Raw features - encoding (one-hot, sinusoidal) is done in the model's FeatureEmbe
 ### Example 1: Simple Conversion
 
 ```python
-from proofatlas import ProofState
+from proofatlas import ProofAtlas
 from proofatlas.ml import to_torch_tensors
 
-state = ProofState()
+state = ProofAtlas()
 clause_ids = state.add_clauses_from_tptp("cnf(test, axiom, p(X, a)).")
 graph = state.clause_to_graph(clause_ids[0])
 

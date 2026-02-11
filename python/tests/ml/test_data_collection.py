@@ -1,186 +1,165 @@
 """Tests for ML data collection from proofs"""
 
+import json
 import pytest
-import torch
-from proofatlas import ProofState
-from proofatlas.ml import to_torch_tensors
+from proofatlas import ProofAtlas
 
 
-def run_saturation(state: ProofState, max_iterations: int = 100) -> bool:
-    """Run saturation and return whether proof was found."""
-    proof_found, _, _, _ = state.run_saturation(max_iterations=max_iterations)
-    return proof_found
+class TestStructuredTrace:
+    """Test extract_structured_trace() output"""
 
-
-class TestTrainingDataExtraction:
-    """Test extraction of training examples from proofs"""
-
-    def test_simple_proof_all_in_proof(self):
-        """All clauses used in minimal proof"""
-        state = ProofState()
+    def test_trace_contains_expected_fields(self):
+        """Structured trace has proof_found, time_seconds, clauses"""
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        proof_found = run_saturation(state, max_iterations=100)
+        proof_found, _ = state.prove(timeout=10.0)
         assert proof_found
 
-        examples = state.extract_training_examples()
-        assert len(examples) >= 3  # At least 2 input + 1 empty clause
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
 
-        # All clauses should be in proof for this minimal problem
-        proof_count = sum(1 for e in examples if e.label == 1)
-        assert proof_count >= 3  # At least inputs + empty clause
+        assert "proof_found" in trace
+        assert "time_seconds" in trace
+        assert "clauses" in trace
+        assert trace["proof_found"] is True
+        assert trace["time_seconds"] == 1.0
 
-    def test_proof_with_unused_clauses(self):
-        """Some clauses not used in proof"""
-        state = ProofState()
+    def test_trace_clauses_have_labels(self):
+        """Each clause has a label (1=in proof, 0=not)"""
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(not_p_a, negated_conjecture, ~p(a)).
             cnf(q_b, axiom, q(b)).
-            cnf(r_c, axiom, r(c)).
         """)
 
-        proof_found = run_saturation(state, max_iterations=100)
+        proof_found, _ = state.prove(timeout=10.0)
         assert proof_found
 
-        examples = state.extract_training_examples()
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
 
-        # Check we have both positive and negative examples
-        labels = [e.label for e in examples]
+        labels = [c["label"] for c in trace["clauses"]]
         assert 1 in labels  # At least one in proof
-        assert 0 in labels  # At least one not in proof
+        assert 0 in labels  # q(b) should not be in proof
 
-        # q(b) and r(c) should not be in proof
-        stats = state.get_proof_statistics()
-        assert stats["proof_clauses"] < stats["total_clauses"]
-
-    def test_no_proof_returns_empty(self):
-        """No training examples if no proof found"""
-        state = ProofState()
-        state.add_clauses_from_tptp("""
-            cnf(p_a, axiom, p(a)).
-            cnf(q_b, axiom, q(b)).
-        """)
-
-        # Limit iterations to prevent finding a proof
-        proof_found = run_saturation(state, max_iterations=10)
-        # This may or may not find proof depending on problem
-
-        if not state.contains_empty_clause():
-            examples = state.extract_training_examples()
-            assert len(examples) == 0
-
-    def test_graph_extraction_for_training(self):
-        """Test that we can extract graphs for all training examples"""
-        state = ProofState()
+    def test_trace_clause_structure(self):
+        """Each clause has literals, age, role, derivation info"""
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        proof_found = run_saturation(state, max_iterations=100)
+        proof_found, _ = state.prove(timeout=10.0)
         assert proof_found
 
-        examples = state.extract_training_examples()
-        clause_ids = [e.clause_idx for e in examples]
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
 
-        # Get graphs
-        graphs = state.clauses_to_graphs(clause_ids)
-        assert len(graphs) == len(examples)
+        for clause in trace["clauses"]:
+            assert "literals" in clause
+            assert "label" in clause
+            assert "age" in clause
+            assert "role" in clause
 
-        # Convert all to tensors
-        for graph in graphs:
-            tensors = to_torch_tensors(graph)
-            assert "x" in tensors
-            assert "edge_index" in tensors
-            assert tensors["x"].shape[1] == 8  # Node feature dimension
-
-    def test_proof_statistics(self):
-        """Test proof statistics computation"""
-        state = ProofState()
+    def test_trace_has_selection_states(self):
+        """Structured trace includes selection state snapshots"""
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
-            cnf(not_p_a, negated_conjecture, ~p(a)).
-            cnf(q_b, axiom, q(b)).
+            cnf(not_p_x_or_q, axiom, ~p(X) | q(X)).
+            cnf(not_q_a, negated_conjecture, ~q(a)).
         """)
 
-        proof_found = run_saturation(state, max_iterations=100)
+        proof_found, _ = state.prove(timeout=10.0)
         assert proof_found
 
-        stats = state.get_proof_statistics()
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
 
-        assert "total_clauses" in stats
-        assert "proof_clauses" in stats
-        assert "non_proof_clauses" in stats
-        assert "proof_percentage" in stats
+        assert "selection_states" in trace
+        # Should have at least one selection state (one iteration)
+        assert len(trace["selection_states"]) > 0
 
-        # Verify consistency
-        assert stats["proof_clauses"] + stats["non_proof_clauses"] == stats["total_clauses"]
+        for ss in trace["selection_states"]:
+            assert "selected" in ss
+            assert "unprocessed" in ss
+            assert "processed" in ss
 
+    def test_trace_parseable_by_structured_loader(self):
+        """Structured trace can be loaded by load_structured_trace"""
+        import tempfile
+        import os
+        from proofatlas.ml.structured import load_structured_trace
 
-class TestSaturationLoop:
-    """Test the Python saturation loop"""
-
-    def test_finds_simple_proof(self):
-        """Basic proof finding"""
-        state = ProofState()
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        result = run_saturation(state, max_iterations=100)
-        assert result is True
-        assert state.contains_empty_clause()
+        proof_found, _ = state.prove(timeout=10.0)
+        assert proof_found
 
-    def test_saturates_without_proof(self):
-        """Saturation without finding proof"""
-        state = ProofState()
+        trace_json = state.extract_structured_trace(1.0)
+
+        # Write to temp file and load back
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(trace_json)
+            tmp_path = f.name
+
+        try:
+            loaded = load_structured_trace(tmp_path)
+            assert "proof_found" in loaded
+            assert "clauses" in loaded
+            assert loaded["proof_found"] is True
+        finally:
+            os.unlink(tmp_path)
+
+    def test_no_proof_trace(self):
+        """Structured trace with no proof has proof_found=False"""
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(q_b, axiom, q(b)).
         """)
 
-        result = run_saturation(state, max_iterations=100)
-        # May or may not saturate, but shouldn't find proof
-        # The result depends on the problem
+        proof_found, _ = state.prove(timeout=10.0, max_iterations=100)
 
-    def test_respects_iteration_limit(self):
-        """Iteration limit prevents infinite loop"""
-        state = ProofState()
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
+
+        if not proof_found:
+            assert trace["proof_found"] is False
+            # All labels should be 0 (no proof)
+            labels = [c["label"] for c in trace["clauses"]]
+            assert all(l == 0 for l in labels)
+
+    def test_trace_clause_graphs(self):
+        """Clauses from structured trace can be converted to graphs"""
+        from proofatlas.ml.structured import clause_to_graph
+
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(p_a, axiom, p(a)).
             cnf(not_p_a, negated_conjecture, ~p(a)).
         """)
 
-        # With only 1 iteration, shouldn't find proof
-        result = run_saturation(state, max_iterations=1)
-        # Proof should not be found with only 1 iteration
-        # (need at least 2: select p(a), then select ~p(a))
+        proof_found, _ = state.prove(timeout=10.0)
+        assert proof_found
 
+        trace_json = state.extract_structured_trace(1.0)
+        trace = json.loads(trace_json)
 
-class TestProofClauseIds:
-    """Test getting proof clause IDs"""
-
-    def test_proof_clause_ids(self):
-        """Get IDs of clauses in proof"""
-        state = ProofState()
-        state.add_clauses_from_tptp("""
-            cnf(p_a, axiom, p(a)).
-            cnf(not_p_a, negated_conjecture, ~p(a)).
-            cnf(q_b, axiom, q(b)).
-        """)
-
-        run_saturation(state, max_iterations=100)
-
-        proof_ids = state.proof_clause_ids()
-        all_ids = state.all_clause_ids()
-
-        # Proof IDs should be subset of all IDs
-        assert set(proof_ids).issubset(set(all_ids))
-
-        # Should have fewer proof clauses than total
-        assert len(proof_ids) <= len(all_ids)
+        for clause in trace["clauses"]:
+            graph = clause_to_graph(clause)
+            assert "edge_index" in graph
+            assert "x" in graph
+            assert "node_types" in graph
+            assert "num_nodes" in graph
+            assert graph["num_nodes"] > 0

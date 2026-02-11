@@ -57,8 +57,8 @@ def find_project_root(web_dir: Path) -> Path:
 def check_ml_available() -> bool:
     """Check if ML selectors are available (tch-rs / libtorch)."""
     try:
-        from proofatlas import ProofState
-        state = ProofState()
+        from proofatlas import ProofAtlas
+        state = ProofAtlas()
         # Try creating with a graph embedding type - if tch-rs is available this won't error
         # We just check that the module loads successfully
         return True
@@ -70,8 +70,8 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     """Convert the Rust EventLog JSON into the flat event format for ProofInspector.
 
     The Rust format is a list of StateChange events with types:
-    - Add: clause added to N
-    - Delete: clause removed from N, U, or P
+    - Add: clause added to N (from inference or input)
+    - Simplify: clause removed and optionally replaced (simplification)
     - Transfer: clause moved from N to U
     - Activate: clause moved from U to P (given clause selection)
 
@@ -88,18 +88,15 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     for c in all_clauses:
         clauses[c["id"]] = c["clause"]
 
-    # First pass: collect derivations and count initial clauses
-    derivations = {}
+    # First pass: count initial clauses
     initial_clause_count = 0
 
     for event in events:
         if "Add" in event:
             clause, rule, premises = event["Add"]
             idx = clause.get("id")
-            if idx is not None:
-                derivations[idx] = (rule, premises)
-                if rule == "Input":
-                    initial_clause_count = max(initial_clause_count, idx + 1)
+            if idx is not None and rule == "Input":
+                initial_clause_count = max(initial_clause_count, idx + 1)
 
     # Build initial_clauses array
     initial_clauses = [
@@ -110,14 +107,13 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     # Second pass: build iterations using a phase-aware state machine.
     #
     # The prover emits events per iteration in this order:
-    #   1. Simplification (Delete/Add "Demodulation" on N, backward Delete on U/P)
+    #   1. Simplification (Simplify on N, backward Simplify on U/P)
     #   2. Transfer (N → U)
     #   3. Activate (U → P) — given clause selection
     #   4. Generation (Add "Resolution", "Superposition", etc.)
     #
     # We track two phases: SIMPLIFICATION (before Activate) and GENERATION (after).
     # A non-generating event during GENERATION means the next iteration has started.
-    GENERATING_RULES = {"Resolution", "Factoring", "Superposition", "EqualityResolution", "EqualityFactoring"}
 
     def _clause_indices(positions):
         """Extract clause indices from a list of Position objects (dicts with 'clause' key)."""
@@ -128,7 +124,6 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
     current_generation = []
     current_selection = None
     in_generation_phase = False
-    pending_demod_deletes = []  # Buffer demod deletions to emit after Add
 
     def flush():
         nonlocal current_simplification, current_generation, current_selection
@@ -149,53 +144,54 @@ def _convert_trace(trace_json: str, all_clauses: list) -> dict:
             if idx is None:
                 continue
 
-            # Skip initial input clauses
-            if rule == "Input":
-                continue
-
             clause_str = clauses.get(idx, "")
-
             premise_indices = _clause_indices(premises)
 
-            if rule in GENERATING_RULES:
+            if rule == "Input":
+                # Show input clause additions in the simplification phase
+                current_simplification.append({
+                    "clause_idx": idx, "clause": clause_str,
+                    "rule": "Input", "premises": premise_indices,
+                })
+            else:
+                # All other Add events are generating inferences
                 current_generation.append({
                     "clause_idx": idx, "clause": clause_str,
                     "rule": rule, "premises": premise_indices,
                 })
-            elif rule == "Demodulation":
-                # Demodulation Add is simplification — if in generation phase, flush first
-                if in_generation_phase:
-                    flush()
-                    in_generation_phase = False
-                # Emit Add first, then flush any pending demodulation deletions
-                current_simplification.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": "Demodulation", "premises": premise_indices,
-                })
-                current_simplification.extend(pending_demod_deletes)
-                pending_demod_deletes.clear()
 
-        elif "Delete" in event:
-            # If in generation phase, a Delete means next iteration started
+        elif "Simplify" in event:
+            clause_idx, replacement, rule_name, premises = event["Simplify"]
+
+            # If in generation phase, a Simplify means next iteration started
             if in_generation_phase:
                 flush()
                 in_generation_phase = False
-            idx, rule_name, justification = event["Delete"]
-            clause_str = clauses.get(idx, "")
-            if rule_name == "Demodulation":
-                # Buffer demodulation deletions to emit after the Add
-                pending_demod_deletes.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": "DemodulationDeletion", "premises": _clause_indices(justification),
+
+            clause_str = clauses.get(clause_idx, "")
+            premise_indices = _clause_indices(premises)
+
+            if replacement is not None:
+                # Replacement (demodulation): emit add then deletion
+                repl_idx = replacement.get("id", 0)
+                repl_str = clauses.get(repl_idx, "")
+                current_simplification.append({
+                    "clause_idx": repl_idx, "clause": repl_str,
+                    "rule": rule_name, "premises": premise_indices,
+                })
+                current_simplification.append({
+                    "clause_idx": clause_idx, "clause": clause_str,
+                    "rule": f"{rule_name}Deletion", "premises": [],
                 })
             else:
+                # Pure deletion (tautology, subsumption)
                 rule = {
                     "Tautology": "TautologyDeletion",
                     "Subsumption": "SubsumptionDeletion",
                 }.get(rule_name, "SubsumptionDeletion")
                 current_simplification.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": rule, "premises": _clause_indices(justification),
+                    "clause_idx": clause_idx, "clause": clause_str,
+                    "rule": rule, "premises": premise_indices,
                 })
 
         elif "Transfer" in event:
@@ -251,16 +247,16 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
         tptp_root: Optional path to TPTP root directory for resolving include() directives
         project_root: Project root directory for resolving weights path
     """
-    from proofatlas import ProofState
+    from proofatlas import ProofAtlas
 
     start = time.time()
-    state = ProofState()
+    state = ProofAtlas()
     memory_limit = options.get("memory_limit")
     state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root, memory_limit=memory_limit)
-    initial_count = state.get_statistics()["total"]
+    initial_count = state.statistics()["total"]
 
     # Build saturation kwargs — pass config keys directly,
-    # letting run_saturation() use its own defaults for the rest
+    # letting prove() use its own defaults for the rest
     kwargs = {"enable_profiling": True}
 
     for key in ("timeout", "max_iterations", "literal_selection",
@@ -277,13 +273,14 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
         if weights_dir.exists():
             kwargs["weights_path"] = str(weights_dir)
 
-    proof_found, status, profile_json, trace_json = state.run_saturation(**kwargs)
+    proof_found, status = state.prove(**kwargs)
     elapsed_ms = int((time.time() - start) * 1000)
 
     # Get all steps and proof trace
-    all_steps = state.get_all_steps()
-    proof_steps = state.get_proof_trace() if proof_found else []
-    stats = state.get_statistics()
+    all_steps_list = state.all_steps()
+    proof_steps_list = state.proof_steps() if proof_found else []
+    stats = state.statistics()
+    profile_json = state.profile_json()
 
     # Convert ProofStep objects to dicts matching WASM format
     # All steps are now real derivations (no trace-only events to filter)
@@ -295,23 +292,24 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
             "parents": list(s.parent_ids),
         }
 
-    all_clauses = [step_to_dict(s) for s in all_steps]
+    all_clauses = [step_to_dict(s) for s in all_steps_list]
 
     # Determine message
     if proof_found:
-        message = f"Proof found with {len(proof_steps)} steps"
+        message = f"Proof found with {len(proof_steps_list)} steps"
     else:
         message = STATUS_MESSAGES.get(status, status)
 
     # Parse the structured saturation trace from Rust and convert to
     # the flat event format expected by the JS ProofInspector.
+    trace_json = state.trace_json()
     trace = _convert_trace(trace_json, all_clauses) if trace_json else None
 
     return {
         "success": proof_found,
         "status": "proof_found" if proof_found else status,
         "message": message,
-        "proof": [step_to_dict(s) for s in proof_steps] if proof_found else None,
+        "proof": [step_to_dict(s) for s in proof_steps_list] if proof_found else None,
         "all_clauses": all_clauses,
         "statistics": {
             "initial_clauses": initial_count,
@@ -347,6 +345,12 @@ class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
+
+    def end_headers(self):
+        # Prevent caching for WASM/JS pkg files (rebuilt frequently during development)
+        if self.path.startswith("/pkg/"):
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
 
     def do_GET(self):
         if self.path == "/api/health":

@@ -305,28 +305,19 @@ async function initializeWasm() {
         await init();
         prover = new ProofAtlasWasm();
         console.log('WASM module loaded successfully');
-        document.getElementById('prove-btn').disabled = false;
-
-        // Small delay to ensure DOM is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Load examples after WASM is ready
-        try {
-            await loadExamples();
-        } catch (loadError) {
-            console.error('Error loading examples:', loadError);
-        }
-
-        // Force a reflow of the select element
-        const select = document.getElementById('example-select');
-        if (select) {
-            select.style.display = 'none';
-            select.offsetHeight; // Force reflow
-            select.style.display = '';
-        }
     } catch (error) {
-        console.error('Failed to load WASM module:', error);
-        showError('Failed to initialize the prover. Please refresh the page.');
+        console.warn('WASM module failed to load:', error);
+        if (!serverAvailable) {
+            showError('Failed to initialize the browser prover. Please refresh the page.');
+        }
+        // When server is available, proving works without WASM — just no browser-only mode
+    }
+
+    // Load examples regardless of WASM status
+    try {
+        await loadExamples();
+    } catch (loadError) {
+        console.error('Error loading examples:', loadError);
     }
 }
 
@@ -536,11 +527,6 @@ class ProofInspector {
         this.unprocessedClauses.clear();
         this.processedClauses.clear();
 
-        // Initial clauses start in N
-        if (this.trace.initial_clauses) {
-            this.trace.initial_clauses.forEach(c => this.newClauses.add(c.id));
-        }
-
         // Replay all iterations before the target fully
         for (let i = 0; i < iterNum; i++) {
             this.replayIteration(this.trace.iterations[i]);
@@ -732,6 +718,8 @@ class ProofInspector {
                 return `Delete [${ev.clause_idx}] (demodulated)`;
             case 'Transfer':
                 return `Transfer [${ev.clause_idx}] N → U`;
+            case 'Input':
+                return `Input [${ev.clause_idx}] → N`;
             case 'Demodulation':
                 return `Demodulate [${ev.premises[0] || '?'}] by [${ev.premises[1] || '?'}] → [${ev.clause_idx}]`;
             default:
@@ -750,6 +738,8 @@ class ProofInspector {
                 return 'deletion';
             case 'Transfer':
                 return 'transfer';
+            case 'Input':
+                return 'input';
             case 'Demodulation':
                 return 'simplification';
             default:

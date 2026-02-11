@@ -231,24 +231,25 @@ Each rule is a separate module with common interface:
 ### PyO3 Bindings
 
 The `python_bindings.rs` module exposes:
-- `ProofState`: Main proof state management
+- `ProofAtlas`: Main proof state management
 - `ClauseInfo`: Clause inspection
 - Graph export for ML training
 
 ### Workflow
 
 ```python
-from proofatlas import ProofState
+from proofatlas import ProofAtlas
 
-state = ProofState()
+state = ProofAtlas()
 state.add_clauses_from_tptp(content, tptp_root, timeout)
 state.set_literal_selection("21")
 
-proof_found, status = state.run_saturation(
+proof_found, status = state.prove(
     max_clauses=10000,
     timeout=60.0,
     age_weight_ratio=0.167,
-    selector="age_weight",
+    encoder=None,
+    scorer=None,
     weights_path=None,
 )
 

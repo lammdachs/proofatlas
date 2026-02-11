@@ -51,6 +51,8 @@ pub struct ProofAtlas {
     profile: Option<SaturationProfile>,
     /// Start time of the proof search
     start_time: Option<Instant>,
+    /// Initial clauses to be added during init()
+    initial_clauses: Vec<Clause>,
 }
 
 impl ProofAtlas {
@@ -103,26 +105,6 @@ impl ProofAtlas {
         // Create clause manager
         let clause_manager = ClauseManager::new(interner, literal_selector);
 
-        // Build clause storage and N set
-        let mut clauses = Vec::new();
-        let mut new = Vec::new();
-
-        let mut clause_idx = 0;
-        for mut clause in initial_clauses.into_iter() {
-            // Orient equalities before adding
-            let mut oriented = clause.clone();
-            clause_manager.orient_equalities(&mut oriented);
-
-            clause.id = Some(clause_idx);
-
-            // Notify indices about added clause
-            index_registry.on_add(clause_idx, &oriented);
-
-            clauses.push(clause);
-            new.push(clause_idx);
-            clause_idx += 1;
-        }
-
         // Reset clause selector state and provide interner for symbol name resolution
         let mut clause_selector = clause_selector;
         clause_selector.reset();
@@ -137,16 +119,6 @@ impl ProofAtlas {
             Box::new(SuperpositionRule::new()),
         ];
 
-        // Build initial event log with input clauses
-        let mut event_log = Vec::new();
-        for idx in 0..clause_idx {
-            event_log.push(StateChange::Add(
-                clauses[idx].clone(),
-                "Input".into(),
-                vec![],
-            ));
-        }
-
         let profile = if config.enable_profiling {
             Some(SaturationProfile::default())
         } else {
@@ -154,11 +126,11 @@ impl ProofAtlas {
         };
 
         let state = SaturationState {
-            clauses,
+            clauses: Vec::new(),
             processed: indexmap::IndexSet::new(),
             unprocessed: indexmap::IndexSet::new(),
-            new,
-            event_log,
+            new: Vec::new(),
+            event_log: Vec::new(),
             current_iteration: 0,
             initial_clause_count,
         };
@@ -173,6 +145,7 @@ impl ProofAtlas {
             clause_selector,
             profile,
             start_time: None,
+            initial_clauses,
         }
     }
 
@@ -182,6 +155,15 @@ impl ProofAtlas {
     pub fn prove(mut self) -> (ProofResult, Option<SaturationProfile>, EventLog, Interner) {
         let start_time = Instant::now();
         self.start_time = Some(start_time);
+
+        if let Some(result) = self.init() {
+            return (
+                result,
+                self.profile,
+                self.state.event_log,
+                self.clause_manager.interner,
+            );
+        }
 
         let result = loop {
             if let Some(result) = self.step() {
@@ -219,13 +201,7 @@ impl ProofAtlas {
 
         // === Step 1: Process new clauses ===
         'simplify: while let Some(&clause_idx) = self.state.new.last() {
-            // 1a: Check empty clause immediately
-            if self.state.clauses[clause_idx].is_empty() {
-                let proof = self.state.extract_proof(clause_idx);
-                return Some(ProofResult::Proof(proof));
-            }
-
-            // 1b: Apply forward simplification rules
+            // 1a: Apply forward simplification rules
             let mut forward_change: Option<StateChange> = None;
             for rule in self.simplifying_inferences.iter() {
                 let rule_name = rule.name();
@@ -380,6 +356,20 @@ impl ProofAtlas {
         None // Continue
     }
 
+    /// Add initial clauses to the N set via `apply_change`.
+    ///
+    /// Returns `Some(result)` if an empty clause is found in the input.
+    /// Must be called exactly once before the first `step()`.
+    pub fn init(&mut self) -> Option<ProofResult> {
+        let initial_clauses = std::mem::take(&mut self.initial_clauses);
+        for clause in initial_clauses {
+            if let Some(result) = self.apply_change(StateChange::Add(clause, "Input".into(), vec![])) {
+                return Some(result);
+            }
+        }
+        None
+    }
+
     // =========================================================================
     // Private helper methods
     // =========================================================================
@@ -391,19 +381,26 @@ impl ProofAtlas {
     fn apply_change(&mut self, change: StateChange) -> Option<ProofResult> {
         match &change {
             StateChange::Add(clause, _rule_name, _premises) => {
-                if clause.literals.len() > self.config.max_clause_size {
+                let is_input = matches!(&_rule_name as &str, "Input");
+
+                // Never silently drop input clauses
+                if !is_input && clause.literals.len() > self.config.max_clause_size {
                     return None;
                 }
 
                 let new_idx = self.state.clauses.len();
                 let mut clause_with_id = clause.clone();
                 clause_with_id.id = Some(new_idx);
-                clause_with_id.age = self.state.current_iteration;
-                clause_with_id.role = crate::logic::ClauseRole::Derived;
+                if !is_input {
+                    clause_with_id.age = self.state.current_iteration;
+                    clause_with_id.role = crate::logic::ClauseRole::Derived;
+                }
 
                 let mut oriented = clause.clone();
                 self.clause_manager.orient_equalities(&mut oriented);
                 self.index_registry.on_add(new_idx, &oriented);
+
+                let is_empty = clause_with_id.is_empty();
 
                 self.state.clauses.push(clause_with_id.clone());
                 self.state.new.push(new_idx);
@@ -417,39 +414,47 @@ impl ProofAtlas {
                     ));
                 }
 
+                // Empty clause → proof found
+                if is_empty {
+                    return Some(ProofResult::Proof(self.state.extract_proof(new_idx)));
+                }
+
                 if let Some(p) = self.profile.as_mut() {
                     p.clauses_added += 1;
                 }
 
-                // Check limits after every Add
-                let num_clauses = self.state.clauses.len();
+                // Skip resource limit checks for input clauses
+                if !is_input {
+                    // Check limits after every Add
+                    let num_clauses = self.state.clauses.len();
 
-                // max_clauses: every Add (integer comparison, free)
-                if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
-                    return Some(ProofResult::ResourceLimit(
-                        self.state.build_proof_steps(),
-                        self.state.clauses.clone(),
-                    ));
-                }
-
-                // timeout + memory: every 100th Add (amortize syscall cost)
-                if num_clauses % 100 == 0 {
-                    if let Some(start) = self.start_time {
-                        if start.elapsed() > self.config.timeout {
-                            return Some(ProofResult::ResourceLimit(
-                                self.state.build_proof_steps(),
-                                self.state.clauses.clone(),
-                            ));
-                        }
+                    // max_clauses: every Add (integer comparison, free)
+                    if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
+                        return Some(ProofResult::ResourceLimit(
+                            self.state.build_proof_steps(),
+                            self.state.clauses.clone(),
+                        ));
                     }
 
-                    if let Some(limit_mb) = self.config.memory_limit {
-                        if let Some(rss) = crate::config::process_memory_mb() {
-                            if rss >= limit_mb {
+                    // timeout + memory: every 100th Add (amortize syscall cost)
+                    if num_clauses % 100 == 0 {
+                        if let Some(start) = self.start_time {
+                            if start.elapsed() > self.config.timeout {
                                 return Some(ProofResult::ResourceLimit(
                                     self.state.build_proof_steps(),
                                     self.state.clauses.clone(),
                                 ));
+                            }
+                        }
+
+                        if let Some(limit_mb) = self.config.memory_limit {
+                            if let Some(rss) = crate::config::process_memory_mb() {
+                                if rss >= limit_mb {
+                                    return Some(ProofResult::ResourceLimit(
+                                        self.state.build_proof_steps(),
+                                        self.state.clauses.clone(),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -485,6 +490,8 @@ impl ProofAtlas {
                     self.clause_manager.orient_equalities(&mut oriented);
                     self.index_registry.on_add(new_idx, &oriented);
 
+                    let is_empty = clause_with_id.is_empty();
+
                     self.state.clauses.push(clause_with_id.clone());
                     self.state.new.push(new_idx);
 
@@ -498,6 +505,11 @@ impl ProofAtlas {
                     };
                     let logged = StateChange::Simplify(idx, Some(clause_with_id), rule_name, premises);
                     self.state.event_log.push(logged);
+
+                    // Empty replacement clause → proof found
+                    if is_empty {
+                        return Some(ProofResult::Proof(self.state.extract_proof(new_idx)));
+                    }
 
                     // Check limits after adding replacement
                     let num_clauses = self.state.clauses.len();

@@ -39,7 +39,7 @@ def to_torch_tensors(graph, device: str = "cpu") -> Dict[str, "torch.Tensor"]:
             - 'num_edges': int
 
     Example:
-        >>> state = ProofState()
+        >>> state = ProofAtlas()
         >>> clause_ids = state.add_clauses_from_tptp("cnf(test, axiom, p(X)).")
         >>> graph = state.clause_to_graph(clause_ids[0])
         >>> tensors = to_torch_tensors(graph)

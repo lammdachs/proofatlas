@@ -191,10 +191,10 @@ class TestRustIntegration:
 
     def test_extract_structured_trace(self):
         """Test that extract_structured_trace produces valid JSON."""
-        from proofatlas import ProofState
+        from proofatlas import ProofAtlas
 
         # Create a simple proof
-        state = ProofState()
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(ax1, axiom, p(X) | q(X)).
             cnf(ax2, axiom, ~p(a)).
@@ -202,7 +202,7 @@ class TestRustIntegration:
         """)
 
         # Run saturation to find proof
-        proof_found, status, _, _ = state.run_saturation(timeout=10.0, max_iterations=1000)
+        proof_found, status = state.prove(timeout=10.0, max_iterations=1000)
 
         if proof_found:
             # Extract structured trace
@@ -224,16 +224,16 @@ class TestRustIntegration:
 
     def test_roundtrip_conversion(self):
         """Test that structured JSON can be converted back to graphs/strings."""
-        from proofatlas import ProofState
+        from proofatlas import ProofAtlas
         from proofatlas.ml.structured import clause_to_string, clause_to_graph
 
-        state = ProofState()
+        state = ProofAtlas()
         state.add_clauses_from_tptp("""
             cnf(mult_assoc, axiom, mult(mult(X, Y), Z) = mult(X, mult(Y, Z))).
             cnf(identity, axiom, mult(X, e) = X).
         """)
 
-        proof_found, status, _, _ = state.run_saturation(timeout=10.0, max_iterations=1000)
+        proof_found, status = state.prove(timeout=10.0, max_iterations=1000)
 
         if proof_found:
             trace_json = state.extract_structured_trace(1.0)

@@ -41,10 +41,10 @@ pip install proofatlas
 ## Quick Start
 
 ```python
-from proofatlas import ProofState, saturate_step
+from proofatlas import ProofAtlas, saturate_step
 
 # Create a proof state
-state = ProofState()
+state = ProofAtlas()
 
 # Add a simple problem
 state.add_clauses_from_tptp("""
@@ -69,9 +69,9 @@ while True:
 ### Basic Propositional Logic
 
 ```python
-from proofatlas import ProofState
+from proofatlas import ProofAtlas
 
-state = ProofState()
+state = ProofAtlas()
 
 # Modus ponens: From P and P→Q, derive Q
 state.add_clauses_from_tptp("""
@@ -100,7 +100,7 @@ while state.num_unprocessed() > 0:
 
 ```python
 # Equality reasoning is always enabled via superposition
-state = ProofState()
+state = ProofAtlas()
 
 # Prove transitivity of equality
 state.add_clauses_from_tptp("""
@@ -116,10 +116,10 @@ cnf(goal, negated_conjecture, a != c).
 
 ```python
 # Step through proof manually
-state = ProofState()
+state = ProofAtlas()
 state.add_clauses_from_tptp("...")
 
-while state.num_unprocessed() > 0:
+while state.statistics()["unprocessed"] > 0:
     # Select next clause
     given_id = state.select_given_clause()
     
@@ -140,23 +140,20 @@ while state.num_unprocessed() > 0:
 
 ### Core Classes
 
-#### ProofState
+#### ProofAtlas
 
 The main class for managing proof search.
 
 **Methods:**
 - `add_clauses_from_tptp(content: str) -> List[int]` - Parse and add TPTP clauses
-- `num_clauses() -> int` - Total number of clauses
-- `num_processed() -> int` - Number of processed clauses
-- `num_unprocessed() -> int` - Number of unprocessed clauses
+- `statistics() -> Dict[str, int]` - Get search statistics (total, processed, unprocessed, etc.)
 - `contains_empty_clause() -> bool` - Check if proof found
 - `select_given_clause(strategy="age") -> Optional[int]` - Select next clause
 - `generate_inferences(clause_id: int) -> List[InferenceResult]` - Generate inferences
 - `add_inference(inference: InferenceResult) -> Optional[int]` - Add new clause
 - `process_clause(clause_id: int)` - Mark clause as processed
 - `get_clause_info(clause_id: int) -> ClauseInfo` - Get clause details
-- `get_statistics() -> Dict[str, int]` - Get search statistics
-- `get_proof_trace() -> List[ProofStep]` - Get proof derivation
+- `proof_steps() -> List[ProofStep]` - Get proof derivation
 
 **Configuration:**
 - `set_literal_selection(strategy: str)` - Set literal selection ("0"=all, "20"=maximal, "21"=unique)
@@ -206,7 +203,7 @@ state.select_given_clause(strategy="smallest") # Smallest clause first
 ```python
 # Get detailed proof trace
 if state.contains_empty_clause():
-    for step in state.get_proof_trace():
+    for step in state.proof_steps():
         print(f"[{step.clause_id}] {step.clause_string}")
         if step.parent_ids:
             print(f"  Derived from {step.parent_ids} by {step.rule_name}")
@@ -216,7 +213,7 @@ if state.contains_empty_clause():
 
 ```python
 # Monitor proof search progress
-stats = state.get_statistics()
+stats = state.statistics()
 print(f"Total clauses: {stats['total']}")
 print(f"Processed: {stats['processed']}")
 print(f"In queue: {stats['unprocessed']}")

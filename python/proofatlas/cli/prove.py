@@ -168,7 +168,7 @@ def main():
     if tptp_root.exists():
         include_dirs.insert(0, str(tptp_root))
 
-    from proofatlas import ProofState
+    from proofatlas import ProofAtlas
 
     try:
         with open(args.problem) as f:
@@ -177,7 +177,7 @@ def main():
         print(f"Error reading file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    state = ProofState()
+    state = ProofAtlas()
 
     start = time.time()
     try:
@@ -196,7 +196,7 @@ def main():
         print(f"Parse error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    num_clauses = state.num_clauses()
+    num_clauses = state.statistics()["total"]
     parse_time = time.time() - start
 
     print(f"Parsed {num_clauses} clauses from '{args.problem}'")
@@ -216,7 +216,7 @@ def main():
     remaining_timeout = max(0.1, timeout - parse_time)
 
     try:
-        proof_found, status, profile_json, _ = state.run_saturation(
+        proof_found, status = state.prove(
             timeout=remaining_timeout,
             max_iterations=max_iterations if max_iterations > 0 else None,
             literal_selection=literal_selection,
@@ -238,14 +238,14 @@ def main():
     elif status == "saturated":
         print(f"✗ SATURATED in {elapsed:.3f}s")
         print(f"  No proof found - the formula may be satisfiable")
-        print(f"  Final clauses: {state.num_clauses()}")
+        print(f"  Final clauses: {state.statistics()['total']}")
     elif status == "resource_limit":
         print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
         print(f"  Exceeded clause or iteration limit")
-        print(f"  Final clauses: {state.num_clauses()}")
+        print(f"  Final clauses: {state.statistics()['total']}")
     else:
         print(f"✗ {status.upper()} in {elapsed:.3f}s")
-        print(f"  Final clauses: {state.num_clauses()}")
+        print(f"  Final clauses: {state.statistics()['total']}")
 
     # Export to JSON if requested
     if args.json_output:
@@ -259,9 +259,10 @@ def main():
             "result": {
                 "status": "proof" if proof_found else status,
                 "time_seconds": elapsed,
-                "final_clauses": state.num_clauses(),
+                "final_clauses": state.statistics()["total"],
             },
         }
+        profile_json = state.profile_json()
         if profile_json is not None:
             result_data["profile"] = json.loads(profile_json)
         try:

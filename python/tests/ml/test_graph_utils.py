@@ -10,7 +10,13 @@ Tests are organized by user workflow:
 """
 
 import pytest
-from proofatlas import ProofState
+
+# This module tests graph_utils functions that operate on Rust ClauseGraphData objects.
+# Those objects are no longer exposed in the Python API (clause_to_graph removed).
+# Python-side graph conversion is tested in test_graph_export.py instead.
+pytestmark = pytest.mark.skip(reason="Tests depend on removed Rust clause_to_graph API")
+
+from proofatlas import ProofAtlas
 
 # Try to import PyTorch
 try:
@@ -44,7 +50,7 @@ class TestBasicConversion:
 
     def test_to_torch_tensors_basic(self):
         """Test basic conversion to PyTorch tensors"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -60,7 +66,7 @@ class TestBasicConversion:
 
     def test_tensor_shapes_and_dtypes(self):
         """Test that tensor shapes and dtypes are correct"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -82,7 +88,7 @@ class TestBasicConversion:
 
     def test_device_placement_cpu(self):
         """Test tensor device placement on CPU"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -95,7 +101,7 @@ class TestBasicConversion:
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_device_placement_cuda(self):
         """Test CUDA device placement"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -120,7 +126,7 @@ class TestGraphBatching:
 
     def test_batch_single_graph(self):
         """Test batching a single graph"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -134,7 +140,7 @@ class TestGraphBatching:
 
     def test_batch_multiple_graphs(self):
         """Test batching multiple graphs together"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = """
         cnf(c1, axiom, p(X)).
         cnf(c2, axiom, q(Y)).
@@ -153,7 +159,7 @@ class TestGraphBatching:
 
     def test_batch_with_labels(self):
         """Test batching with classification labels"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = """
         cnf(c1, axiom, p(X)).
         cnf(c2, axiom, q(Y)).
@@ -171,7 +177,7 @@ class TestGraphBatching:
 
     def test_batch_assignment_correct(self):
         """Test that batch indices correctly track graph membership"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = """
         cnf(c1, axiom, p(X)).
         cnf(c2, axiom, q(Y, a)).
@@ -192,7 +198,7 @@ class TestGraphBatching:
 
     def test_batch_different_sizes(self):
         """Test batching graphs of different sizes"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = """
         cnf(c1, axiom, p(X)).
         cnf(c2, axiom, (p(X) | q(Y))).
@@ -214,7 +220,7 @@ class TestGraphBatching:
 
     def test_batch_labels_mismatch_raises_error(self):
         """Test that label count mismatch raises error"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = """
         cnf(c1, axiom, p(X)).
         cnf(c2, axiom, q(Y)).
@@ -242,7 +248,7 @@ class TestAdvancedFormats:
 
     def test_sparse_coo_format(self):
         """Test COO (coordinate) format sparse adjacency"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -255,7 +261,7 @@ class TestAdvancedFormats:
 
     def test_sparse_csr_format(self):
         """Test CSR (compressed sparse row) format for fast computation"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -268,7 +274,7 @@ class TestAdvancedFormats:
 
     def test_sparse_format_validation(self):
         """Test that invalid sparse format raises error"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -377,7 +383,7 @@ class TestUtilityFunctions:
 
     def test_node_type_masks_creation(self):
         """Test creation of boolean masks for each node type"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X, a))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -395,7 +401,7 @@ class TestUtilityFunctions:
 
     def test_node_type_masks_are_boolean(self):
         """Test that masks are boolean tensors"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -409,7 +415,7 @@ class TestUtilityFunctions:
 
     def test_node_type_masks_select_correctly(self):
         """Test that masks select correct node types"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X, a))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -427,7 +433,7 @@ class TestUtilityFunctions:
 
     def test_node_type_mask_usage(self):
         """Test using masks to filter node features"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X, a))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -445,7 +451,7 @@ class TestUtilityFunctions:
 
     def test_graph_statistics_basic(self):
         """Test basic statistics computation"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(X))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -459,7 +465,7 @@ class TestUtilityFunctions:
 
     def test_graph_statistics_node_type_counts(self):
         """Test node type counts in statistics"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(f(X), a))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -484,7 +490,7 @@ class TestUtilityFunctions:
 
     def test_graph_statistics_depth(self):
         """Test max depth computation in statistics"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, p(f(g(X))))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 
@@ -496,7 +502,7 @@ class TestUtilityFunctions:
 
     def test_graph_statistics_usage_for_debugging(self):
         """Test using statistics for debugging and analysis"""
-        state = ProofState()
+        state = ProofAtlas()
         tptp = "cnf(test, axiom, (p(X) | q(Y) | r(f(Z))))."
         clause_ids = state.add_clauses_from_tptp(tptp)
 

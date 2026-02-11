@@ -28,7 +28,7 @@ proofatlas/
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
 │   │       ├── state.rs        # SaturationState, StateChange, EventLog, traits
-│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/step()/saturate()
+│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/init()/step()/saturate()
 │   │       ├── trace.rs        # EventLogReplayer, extract_proof_from_events
 │   │       ├── profile.rs      # SaturationProfile
 │   │       └── json.rs         # JSON serialization types
@@ -211,8 +211,9 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 ### Architecture
 
 The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that orchestrates saturation:
-- `ProofAtlas::new()` initializes all components from initial clauses and config
-- `ProofAtlas::prove()` runs the saturation loop to completion
+- `ProofAtlas::new()` initializes all components (does not add clauses to state)
+- `ProofAtlas::init()` adds initial clauses to N via `apply_change` (detects empty clause in input)
+- `ProofAtlas::prove()` calls `init()` then runs the saturation loop to completion
 - `ProofAtlas::step()` executes a single iteration (useful for debugging/visualization)
 
 **ClauseManager** (`logic/clause_manager.rs`): Centralizes clause-level operations:
