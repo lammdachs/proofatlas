@@ -13,55 +13,20 @@
     "binary": ".vampire/vampire"
   },
 
-  "default_preset": "time_sel21",
+  "default_preset": "time",
 
   "presets": {
-    "time_sel0": {
-      "description": "10s with selection 0 (all literals)",
-      "time_limit": 10,
-      "selection": 0,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
-    "time_sel20": {
-      "description": "10s with selection 20 (all maximal literals)",
-      "time_limit": 10,
-      "selection": 20,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
-    "time_sel21": {
-      "description": "10s with selection 21 (unique maximal, else neg max-weight, else all maximal)",
+    "time": {
+      "description": "10s",
       "time_limit": 10,
       "selection": 21,
       "avatar": "off",
       "saturation_algorithm": "otter"
     },
-
-    "age_weight_sel0": {
-      "description": "128 activations with selection 0",
+    "age_weight": {
+      "description": "256 activations",
       "time_limit": 600,
-      "activation_limit": 128,
-      "selection": 0,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
-    "age_weight_sel20": {
-      "description": "128 activations with selection 20",
-      "time_limit": 600,
-      "activation_limit": 128,
-      "selection": 20,
-      "avatar": "off",
-      "saturation_algorithm": "otter"
-    },
-
-    "age_weight_sel21": {
-      "description": "128 activations with selection 21",
-      "time_limit": 600,
-      "activation_limit": 128,
+      "activation_limit": 256,
       "selection": 21,
       "avatar": "off",
       "saturation_algorithm": "otter"

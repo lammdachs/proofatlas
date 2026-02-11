@@ -318,7 +318,7 @@ class TestProofDataset:
 
     def test_dataset_with_json_traces(self, tmp_path):
         """Test loading JSON trace files."""
-        from proofatlas.ml.training import ProofDataset
+        from proofatlas.ml.datasets import ProofDataset
 
         # Create sample traces (must include selection_states)
         trace1 = {

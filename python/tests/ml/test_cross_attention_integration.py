@@ -90,7 +90,7 @@ class TestStateBatchThroughModel:
 
     def test_state_batch_through_model(self):
         from proofatlas.ml.structured import clause_to_graph, batch_graphs
-        from proofatlas.ml.training import collate_proof_batch
+        from proofatlas.ml.datasets import collate_proof_batch
 
         # Build synthetic batch
         clauses = []

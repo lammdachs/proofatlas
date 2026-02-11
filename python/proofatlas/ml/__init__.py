@@ -18,21 +18,28 @@ from .graph_utils import (
     compute_graph_statistics,
 )
 
-from .training import (
-    # Loss functions
+from .losses import (
     info_nce_loss,
     info_nce_loss_per_proof,
     margin_ranking_loss,
-    # Datasets
+    compute_loss,
+)
+
+from .datasets import (
     ProofDataset,
+    DynamicBatchSampler,
     collate_proof_batch,
     collate_tokenized_batch,
-    # Training
+)
+
+from .logger import JSONLogger
+
+from .export import export_model
+
+from .training import (
     run_training,
     load_trace_files,
     save_trace,
-    # Utilities
-    JSONLogger,
     save_model,
     load_model,
 )
@@ -85,14 +92,18 @@ __all__ = [
     "info_nce_loss",
     "info_nce_loss_per_proof",
     "margin_ranking_loss",
+    "compute_loss",
     # Datasets
     "ProofDataset",
+    "DynamicBatchSampler",
     "collate_proof_batch",
     "collate_tokenized_batch",
     # Training
     "run_training",
     "load_trace_files",
     "save_trace",
+    # Export
+    "export_model",
     # Utilities
     "JSONLogger",
     "save_model",

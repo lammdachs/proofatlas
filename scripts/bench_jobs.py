@@ -25,16 +25,16 @@ def log(msg: str):
     print(f"[{timestamp}] {msg}")
 
 
-def get_job_file(base_dir: Path) -> Path:
-    return base_dir / JOB_FILE
+def get_job_file(base_dir: Path, prefix: str = "bench") -> Path:
+    return base_dir / f".data/{prefix}_job.json"
 
 
-def get_log_file(base_dir: Path) -> Path:
-    return base_dir / LOG_FILE
+def get_log_file(base_dir: Path, prefix: str = "bench") -> Path:
+    return base_dir / f".data/{prefix}.log"
 
 
-def get_pid_file(base_dir: Path) -> Path:
-    return base_dir / PID_FILE
+def get_pid_file(base_dir: Path, prefix: str = "bench") -> Path:
+    return base_dir / f".data/{prefix}_pids.txt"
 
 
 def register_pid(base_dir: Path, pid: int):

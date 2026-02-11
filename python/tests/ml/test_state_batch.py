@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from proofatlas.ml.structured import clause_to_graph, batch_graphs
-from proofatlas.ml.training import collate_proof_batch
+from proofatlas.ml.datasets import collate_proof_batch
 
 
 def _make_clause(predicate="p", args_type="Variable", args_name="X", label=0, age=0, role="derived"):

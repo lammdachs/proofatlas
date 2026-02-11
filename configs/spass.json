@@ -11,16 +11,10 @@
     "no_sel0": "SPASS does not support selecting all literals (Vampire sel0)"
   },
 
-  "default_preset": "time_sel21",
+  "default_preset": "time",
 
   "presets": {
-    "time_sel20": {
-      "description": "10s with Select=0 (all maximal, like Vampire sel20)",
-      "TimeLimit": 10,
-      "Select": 0
-    },
-
-    "time_sel21": {
+    "time": {
       "description": "10s with Select=1 (prefer negative, like Vampire sel21)",
       "TimeLimit": 10,
       "Select": 1

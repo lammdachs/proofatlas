@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from proofatlas.ml.training import (
+from proofatlas.ml.losses import (
     info_nce_loss,
     margin_ranking_loss,
     info_nce_loss_per_proof,
