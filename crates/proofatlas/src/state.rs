@@ -149,8 +149,8 @@ pub struct SaturationState {
 }
 
 impl SaturationState {
-    /// Extract a proof by backward traversal from the empty clause.
-    pub fn extract_proof(&self, empty_clause_idx: usize) -> Vec<ProofStep> {
+    /// Extract a proof by backward traversal from the given clause index.
+    pub fn extract_proof(&self, clause_idx: usize) -> Vec<ProofStep> {
         let mut derivation_map: HashMap<usize, (String, Vec<Position>)> = HashMap::new();
         for event in &self.event_log {
             match event {
@@ -170,7 +170,7 @@ impl SaturationState {
 
         let mut proof_clause_indices = Vec::new();
         let mut visited = HashSet::new();
-        let mut to_visit = vec![empty_clause_idx];
+        let mut to_visit = vec![clause_idx];
 
         while let Some(idx) = to_visit.pop() {
             if !visited.insert(idx) {
@@ -201,31 +201,4 @@ impl SaturationState {
             .collect()
     }
 
-    /// Build proof steps from event log.
-    pub fn build_proof_steps(&self) -> Vec<ProofStep> {
-        self.event_log
-            .iter()
-            .filter_map(|event| {
-                match event {
-                    StateChange::Add(clause, rule_name, premises) => {
-                        clause.id.map(|idx| ProofStep {
-                            clause_idx: idx,
-                            rule_name: rule_name.clone(),
-                            premises: premises.clone(),
-                            conclusion: clause.clone(),
-                        })
-                    }
-                    StateChange::Simplify(_, Some(clause), rule_name, premises) => {
-                        clause.id.map(|idx| ProofStep {
-                            clause_idx: idx,
-                            rule_name: rule_name.clone(),
-                            premises: premises.clone(),
-                            conclusion: clause.clone(),
-                        })
-                    }
-                    _ => None,
-                }
-            })
-            .collect()
-    }
 }

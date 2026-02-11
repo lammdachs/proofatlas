@@ -323,9 +323,8 @@ async function initializeWasm() {
 
 // Proof Inspector class — iteration-based, matching the paper's given-clause algorithm
 class ProofInspector {
-    constructor(trace, allClauses) {
+    constructor(trace) {
         this.trace = trace;
-        this.allClauses = allClauses;
         this.currentStep = 0;
         this.currentEventIdx = -1; // -1 = pre-iteration state
 
@@ -334,11 +333,8 @@ class ProofInspector {
         this.unprocessedClauses = new Set();
         this.processedClauses = new Set();
 
-        // Build clause lookup from all_clauses and trace events
+        // Build clause lookup from trace events
         this.clauseMap = new Map();
-        if (allClauses) {
-            allClauses.forEach(c => this.clauseMap.set(c.id, c));
-        }
         if (trace && trace.initial_clauses) {
             trace.initial_clauses.forEach(c => this.clauseMap.set(c.id, c));
         }
@@ -928,12 +924,12 @@ function showResult(result) {
     const clausesTitle = document.getElementById('clauses-title');
     const proofInspectorDiv = document.getElementById('proof-inspector');
 
-    if ((result.proof && result.proof.length > 0) || (result.all_clauses && result.all_clauses.length > 0) || result.trace) {
+    if ((result.proof && result.proof.length > 0) || result.trace) {
         clausesContainer.classList.remove('hidden');
 
         // Initialize proof inspector if we have trace data
         if (result.trace) {
-            proofInspector = new ProofInspector(result.trace, result.all_clauses);
+            proofInspector = new ProofInspector(result.trace);
         }
 
         // Set up radio button handlers
@@ -967,12 +963,6 @@ function handleClauseViewChange(e) {
         clauseList.classList.remove('hidden');
         proofInspectorDiv.classList.add('hidden');
         displayClauses(result.proof || [], false);
-    } else if (e.target.value === 'all') {
-        const proofClauseIds = new Set((result.proof || []).map(step => step.id));
-        clausesTitle.textContent = 'All Clauses';
-        clauseList.classList.remove('hidden');
-        proofInspectorDiv.classList.add('hidden');
-        displayClauses(result.all_clauses || [], true, proofClauseIds);
     } else if (e.target.value === 'stepper') {
         clausesTitle.textContent = 'Inspector';
         clauseList.classList.add('hidden');

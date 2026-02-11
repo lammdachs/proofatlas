@@ -215,7 +215,7 @@ The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that 
 - `ProofAtlas::init()` adds initial clauses to N via `apply_change` (detects empty clause in input)
 - `ProofAtlas::prove(&mut self) -> ProofResult` calls `init()` then runs the saturation loop to completion. The prover is retained after proving — all state (clauses, event log, profile, interner) is accessible via accessor methods.
 - `ProofAtlas::step()` executes a single iteration (useful for debugging/visualization)
-- Accessor methods: `interner()`, `event_log()`, `clauses()`, `profile()`, `extract_proof(idx)`, `build_proof_steps()`
+- Accessor methods: `interner()`, `event_log()`, `clauses()`, `profile()`, `extract_proof(idx)`
 - `ProofResult` is a simple enum: `Proof { empty_clause_idx }`, `Saturated`, `ResourceLimit` — no cloned data, all state stays on the prover
 
 **ClauseManager** (`logic/clause_manager.rs`): Centralizes clause-level operations:

@@ -73,15 +73,9 @@ fn test_with_duplicate_clause() {
             }
         }
         ProofResult::Saturated => {
-            let clauses = prover.clauses();
-            let steps = prover.build_proof_steps();
-            println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
-            for (i, c) in clauses.iter().enumerate() {
+            println!("SATURATED with {} clauses", prover.clauses().len());
+            for (i, c) in prover.clauses().iter().enumerate() {
                 println!("  [{}] {}", i, c);
-            }
-            println!("Steps:");
-            for step in &steps {
-                println!("  [{:?}] {} <- {:?}", step.rule_name, step.conclusion, proofatlas::clause_indices(&step.premises));
             }
         }
         ProofResult::ResourceLimit => {
@@ -128,12 +122,7 @@ fn test_with_precloned_clauses() {
             println!("PROOF FOUND!");
         }
         ProofResult::Saturated => {
-            let steps = prover.build_proof_steps();
-            let clauses = prover.clauses();
-            println!("SATURATED with {} clauses, {} steps", clauses.len(), steps.len());
-            for step in &steps {
-                println!("  [{}] idx={}", step.rule_name, step.clause_idx);
-            }
+            println!("SATURATED with {} clauses", prover.clauses().len());
         }
         _ => {}
     }

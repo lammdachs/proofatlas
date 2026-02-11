@@ -198,14 +198,9 @@ impl ProofAtlas {
     /// Get profiling data (None if profiling was not enabled).
     pub fn profile(&self) -> Option<&SaturationProfile> { self.profile.as_ref() }
 
-    /// Extract proof steps by backward traversal from the empty clause.
-    pub fn extract_proof(&self, empty_clause_idx: usize) -> Vec<ProofStep> {
-        self.state.extract_proof(empty_clause_idx)
-    }
-
-    /// Build all proof steps from the event log.
-    pub fn build_proof_steps(&self) -> Vec<ProofStep> {
-        self.state.build_proof_steps()
+    /// Extract proof steps by backward traversal from the given clause index.
+    pub fn extract_proof(&self, clause_idx: usize) -> Vec<ProofStep> {
+        self.state.extract_proof(clause_idx)
     }
 
     /// Execute one step of the saturation loop.

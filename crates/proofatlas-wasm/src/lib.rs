@@ -32,7 +32,6 @@ pub struct ProverResult {
     pub status: String, // "proof_found", "saturated", "timeout", "error"
     pub message: String,
     pub proof: Option<Vec<ProofStep>>,
-    pub all_clauses: Option<Vec<ProofStep>>, // All generated clauses
     pub statistics: ProverStatistics,
     pub trace: Option<serde_json::Value>, // Structured SaturationTrace as JSON
     pub profile: Option<serde_json::Value>, // Profiling data
@@ -152,46 +151,18 @@ impl ProofAtlasWasm {
         // Build result
         let prover_result = match result {
             ProofResult::Proof { empty_clause_idx } => {
-                // Proof found — extract proof steps from the prover
+                // Proof found — extract proof steps by backward traversal
                 let proof_steps = prover.extract_proof(empty_clause_idx);
-                let all_steps = convert_steps(&proof_steps, interner);
-
-                // Extract the proof path - trace back from empty clause
-                let mut proof_indices = std::collections::HashSet::new();
-                let mut to_visit = vec![empty_clause_idx];
-
-                // Build index mapping: step.id -> step
-                let id_to_step: std::collections::HashMap<usize, &ProofStep> =
-                    all_steps.iter().map(|s| (s.id, s)).collect();
-
-                while let Some(current_id) = to_visit.pop() {
-                    if proof_indices.insert(current_id) {
-                        if let Some(step) = id_to_step.get(&current_id) {
-                            for &parent_id in &step.parents {
-                                if !proof_indices.contains(&parent_id) {
-                                    to_visit.push(parent_id);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Build proof path
-                let mut proof_path: Vec<ProofStep> = all_steps.iter()
-                    .filter(|step| proof_indices.contains(&step.id))
-                    .cloned()
-                    .collect();
-                proof_path.sort_by_key(|step| step.id);
+                let proof_path = convert_steps(&proof_steps, interner);
 
                 ProverResult {
                     success: true,
                     status: "proof_found".to_string(),
                     message: format!("Proof found with {} steps", proof_path.len()),
                     proof: Some(proof_path),
-                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
-                        generated_clauses: proof_steps.len(),
+                        generated_clauses: prover.clauses().len(),
                         final_clauses: proof_steps.len(),
                         time_ms,
                     },
@@ -204,19 +175,16 @@ impl ProofAtlasWasm {
                     ProofResult::Saturated => ("saturated", "Saturated without finding a proof - the formula may be satisfiable"),
                     _ => ("resource_limit", "Resource limit reached"),
                 };
-                let steps = prover.build_proof_steps();
-                let final_clauses_count = prover.clauses().len();
-                let all_steps = convert_steps(&steps, interner);
+                let total_clauses = prover.clauses().len();
                 ProverResult {
                     success: false,
                     status: status.to_string(),
                     message: message.to_string(),
                     proof: None,
-                    all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
-                        generated_clauses: steps.len(),
-                        final_clauses: final_clauses_count,
+                        generated_clauses: total_clauses,
+                        final_clauses: total_clauses,
                         time_ms,
                     },
                     trace: if include_trace { Some(events_to_js_value(sat_trace, interner)) } else { None },
