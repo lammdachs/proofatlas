@@ -19,8 +19,11 @@ fn main() {
     };
 
     let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::default());
-    let prover = ProofAtlas::new(parsed.formula.clauses, config, selector, parsed.interner);
-    let (result, _, events, interner) = prover.prove();
+    let mut prover = ProofAtlas::new(parsed.formula.clauses, config, selector, parsed.interner);
+    let result = prover.prove();
+
+    let events = prover.event_log();
+    let interner = prover.interner();
 
     // Dump all events
     println!("=== RAW EVENT LOG ({} events) ===", events.len());
@@ -29,11 +32,11 @@ fn main() {
             StateChange::Add(clause, rule, premises) => {
                 let prem: Vec<usize> = premises.iter().map(|p| p.clause).collect();
                 println!("{:3}: Add(id={:?}, rule={}, premises={:?}, clause={})",
-                    i, clause.id, rule, prem, clause.display(&interner));
+                    i, clause.id, rule, prem, clause.display(interner));
             }
             StateChange::Simplify(idx, repl, rule, premises) => {
                 let prem: Vec<usize> = premises.iter().map(|p| p.clause).collect();
-                let repl_info = repl.as_ref().map(|c| format!("Some(id={:?}, {})", c.id, c.display(&interner)));
+                let repl_info = repl.as_ref().map(|c| format!("Some(id={:?}, {})", c.id, c.display(interner)));
                 println!("{:3}: Simplify(idx={}, repl={}, rule={}, premises={:?})",
                     i, idx, repl_info.unwrap_or("None".into()), rule, prem);
             }
@@ -47,9 +50,9 @@ fn main() {
     }
 
     let status = match &result {
-        ProofResult::Proof(_) => "proof",
-        ProofResult::Saturated(..) => "saturated",
-        ProofResult::ResourceLimit(..) => "resource_limit",
+        ProofResult::Proof { .. } => "proof",
+        ProofResult::Saturated => "saturated",
+        ProofResult::ResourceLimit => "resource_limit",
     };
     println!("\nResult: {}", status);
 
@@ -59,11 +62,11 @@ fn main() {
     // First pass: collect clauses
     let mut clauses: HashMap<usize, String> = HashMap::new();
     let mut initial_clause_count = 0;
-    for event in &events {
+    for event in events {
         match event {
             StateChange::Add(clause, rule_name, _) => {
                 if let Some(idx) = clause.id {
-                    clauses.insert(idx, clause.display(&interner).to_string());
+                    clauses.insert(idx, clause.display(interner).to_string());
                     if rule_name == "Input" {
                         initial_clause_count = initial_clause_count.max(idx + 1);
                     }
@@ -71,7 +74,7 @@ fn main() {
             }
             StateChange::Simplify(_, Some(clause), _, _) => {
                 if let Some(idx) = clause.id {
-                    clauses.insert(idx, clause.display(&interner).to_string());
+                    clauses.insert(idx, clause.display(interner).to_string());
                 }
             }
             _ => {}
@@ -113,7 +116,7 @@ fn main() {
         }
     };
 
-    for event in &events {
+    for event in events {
         match event {
             StateChange::Add(clause, rule_name, premises) => {
                 if let Some(idx) = clause.id {

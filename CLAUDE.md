@@ -213,8 +213,10 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that orchestrates saturation:
 - `ProofAtlas::new()` initializes all components (does not add clauses to state)
 - `ProofAtlas::init()` adds initial clauses to N via `apply_change` (detects empty clause in input)
-- `ProofAtlas::prove()` calls `init()` then runs the saturation loop to completion
+- `ProofAtlas::prove(&mut self) -> ProofResult` calls `init()` then runs the saturation loop to completion. The prover is retained after proving — all state (clauses, event log, profile, interner) is accessible via accessor methods.
 - `ProofAtlas::step()` executes a single iteration (useful for debugging/visualization)
+- Accessor methods: `interner()`, `event_log()`, `clauses()`, `profile()`, `extract_proof(idx)`, `build_proof_steps()`
+- `ProofResult` is a simple enum: `Proof { empty_clause_idx }`, `Saturated`, `ResourceLimit` — no cloned data, all state stays on the prover
 
 **ClauseManager** (`logic/clause_manager.rs`): Centralizes clause-level operations:
 - Symbol interning (`Interner`)
@@ -272,7 +274,7 @@ Literals have a flat structure with `predicate`, `args`, and `polarity` directly
 `Position` (`logic/core/position.rs`) identifies a location within the clause store: a clause index plus a path into that clause's structure (literal index, then term path). Used in `StateChange` premises and throughout the system to reference inference sites.
 
 ### Profiling
-`ProverConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `prove()` returns `(ProofResult, Option<SaturationProfile>, EventLog, Interner)` with timing and counting data for every phase:
+`ProverConfig::enable_profiling` (default `false`) enables structured profiling of the saturation loop. When enabled, `prover.profile()` returns `Some(&SaturationProfile)` after `prove()` with timing and counting data for every phase:
 
 - **Phase timings**: forward simplification, clause selection, inference generation, inference addition
 - **Sub-phase timings**: forward/backward demodulation, forward/backward subsumption

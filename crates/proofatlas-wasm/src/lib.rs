@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
     parse_tptp, ProverConfig, ProofResult, ProofAtlas, LiteralSelectionStrategy,
-    Clause, Literal, Interner, AgeWeightSelector, ClauseSelector, EventLog, StateChange,
+    Clause, Literal, Interner, AgeWeightSelector, ClauseSelector, StateChange,
 };
 use std::time::Duration;
 
@@ -120,8 +120,8 @@ impl ProofAtlasWasm {
         };
 
         // Run saturation
-        let prover = ProofAtlas::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
-        let (result, profile, sat_trace, interner) = prover.prove();
+        let mut prover = ProofAtlas::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
+        let result = prover.prove();
 
         web_sys::console::log_1(&"Saturation completed".into());
 
@@ -132,6 +132,10 @@ impl ProofAtlasWasm {
             .now();
 
         let time_ms = (end_time - start_time) as u32;
+
+        let interner = prover.interner();
+        let sat_trace = prover.event_log();
+        let profile = prover.profile();
 
         // Helper to convert proof steps to WASM ProofStep
         let convert_steps = |steps: &[proofatlas::ProofStep], interner: &proofatlas::Interner| -> Vec<ProofStep> {
@@ -145,35 +149,16 @@ impl ProofAtlasWasm {
             }).collect()
         };
 
-        // Helper to build result for non-proof cases
-        let build_incomplete_result = |status: &str, message: &str, steps: &[proofatlas::ProofStep], final_clauses_count: usize, interner: &proofatlas::Interner| {
-            let all_steps = convert_steps(steps, interner);
-            ProverResult {
-                success: false,
-                status: status.to_string(),
-                message: message.to_string(),
-                proof: None,
-                all_clauses: Some(all_steps),
-                statistics: ProverStatistics {
-                    initial_clauses,
-                    generated_clauses: steps.len(),
-                    final_clauses: final_clauses_count,
-                    time_ms,
-                },
-                trace: if include_trace { Some(events_to_js_value(&sat_trace, &interner)) } else { None },
-                profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
-            }
-        };
-
         // Build result
         let prover_result = match result {
-            ProofResult::Proof(proof) => {
-                // Proof found
-                let all_steps = convert_steps(&proof.steps, &interner);
+            ProofResult::Proof { empty_clause_idx } => {
+                // Proof found — extract proof steps from the prover
+                let proof_steps = prover.extract_proof(empty_clause_idx);
+                let all_steps = convert_steps(&proof_steps, interner);
 
                 // Extract the proof path - trace back from empty clause
                 let mut proof_indices = std::collections::HashSet::new();
-                let mut to_visit = vec![proof.empty_clause_idx];
+                let mut to_visit = vec![empty_clause_idx];
 
                 // Build index mapping: step.id -> step
                 let id_to_step: std::collections::HashMap<usize, &ProofStep> =
@@ -206,28 +191,38 @@ impl ProofAtlasWasm {
                     all_clauses: Some(all_steps),
                     statistics: ProverStatistics {
                         initial_clauses,
-                        generated_clauses: proof.steps.len(),
-                        final_clauses: proof.steps.len(),
+                        generated_clauses: proof_steps.len(),
+                        final_clauses: proof_steps.len(),
                         time_ms,
                     },
-                    trace: if include_trace { Some(events_to_js_value(&sat_trace, &interner)) } else { None },
-                    profile: profile.as_ref().and_then(|p| serde_json::to_value(p).ok()),
+                    trace: if include_trace { Some(events_to_js_value(sat_trace, interner)) } else { None },
+                    profile: profile.and_then(|p| serde_json::to_value(p).ok()),
                 }
             }
-            ProofResult::Saturated(steps, clauses) => build_incomplete_result(
-                "saturated",
-                "Saturated without finding a proof - the formula may be satisfiable",
-                &steps,
-                clauses.len(),
-                &interner,
-            ),
-            ProofResult::ResourceLimit(steps, clauses) => build_incomplete_result(
-                "resource_limit",
-                "Resource limit reached",
-                &steps,
-                clauses.len(),
-                &interner,
-            ),
+            ProofResult::Saturated | ProofResult::ResourceLimit => {
+                let (status, message) = match result {
+                    ProofResult::Saturated => ("saturated", "Saturated without finding a proof - the formula may be satisfiable"),
+                    _ => ("resource_limit", "Resource limit reached"),
+                };
+                let steps = prover.build_proof_steps();
+                let final_clauses_count = prover.clauses().len();
+                let all_steps = convert_steps(&steps, interner);
+                ProverResult {
+                    success: false,
+                    status: status.to_string(),
+                    message: message.to_string(),
+                    proof: None,
+                    all_clauses: Some(all_steps),
+                    statistics: ProverStatistics {
+                        initial_clauses,
+                        generated_clauses: steps.len(),
+                        final_clauses: final_clauses_count,
+                        time_ms,
+                    },
+                    trace: if include_trace { Some(events_to_js_value(sat_trace, interner)) } else { None },
+                    profile: profile.and_then(|p| serde_json::to_value(p).ok()),
+                }
+            }
         };
 
         // Convert to JS value (use json_compatible to serialize Maps as plain objects)
@@ -247,7 +242,7 @@ impl ProofAtlasWasm {
     }
 }
 
-/// Convert a EventLog into the flat event format expected by the JS ProofInspector.
+/// Convert an event log slice into the flat event format expected by the JS ProofInspector.
 ///
 /// This replays the event log to reconstruct the iteration structure that the JS UI expects.
 ///
@@ -262,7 +257,7 @@ impl ProofAtlasWasm {
 ///   }]
 /// }
 /// ```
-fn events_to_js_value(events: &EventLog, interner: &Interner) -> serde_json::Value {
+fn events_to_js_value(events: &[StateChange], interner: &Interner) -> serde_json::Value {
     use serde_json::json;
     use std::collections::HashMap;
 

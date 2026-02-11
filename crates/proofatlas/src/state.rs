@@ -3,10 +3,9 @@
 //! This module consolidates all state-related types: clause sets, event log,
 //! proof representation, inference traits, and derivation tracking.
 
-use crate::logic::{Clause, Interner, Position};
+use crate::logic::{Clause, Position};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
-use crate::json::{ProofJson, ProofResultJson, ClauseJson};
 use indexmap::IndexSet;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -22,22 +21,6 @@ pub struct ProofStep {
     pub rule_name: String,
     pub premises: Vec<Position>,
     pub conclusion: Clause,
-}
-
-/// A proof is a sequence of inference steps
-#[derive(Debug, Clone)]
-pub struct Proof {
-    pub steps: Vec<ProofStep>,
-    pub empty_clause_idx: usize,
-    /// All clauses generated during saturation (for ML training data extraction)
-    pub all_clauses: Vec<Clause>,
-}
-
-impl Proof {
-    /// Convert to JSON representation
-    pub fn to_json(&self, _interner: &Interner) -> ProofJson {
-        self.into()
-    }
 }
 
 // =============================================================================
@@ -126,40 +109,18 @@ pub trait GeneratingInference: Send + Sync {
 // ProofResult
 // =============================================================================
 
-/// Result of saturation
+/// Result of saturation.
+///
+/// After `prove()`, all data (clauses, event log, proof steps) remains accessible
+/// on the `ProofAtlas` instance. This enum only carries the outcome status.
 #[derive(Debug, Clone)]
 pub enum ProofResult {
     /// Empty clause derived - proof found
-    Proof(Proof),
+    Proof { empty_clause_idx: usize },
     /// Saturated without finding empty clause
-    Saturated(Vec<ProofStep>, Vec<Clause>),
+    Saturated,
     /// Resource limit reached
-    ResourceLimit(Vec<ProofStep>, Vec<Clause>),
-}
-
-impl ProofResult {
-    /// Convert to JSON representation
-    pub fn to_json(&self, time_seconds: f64, interner: &Interner) -> ProofResultJson {
-        match self {
-            ProofResult::Proof(proof) => ProofResultJson::Proof {
-                proof: proof.to_json(interner),
-                time_seconds,
-            },
-            ProofResult::Saturated(steps, clauses) => ProofResultJson::Saturated {
-                final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
-                proof_steps: steps.iter().map(|s| s.into()).collect(),
-                time_seconds,
-            },
-            ProofResult::ResourceLimit(steps, clauses) => {
-                ProofResultJson::ResourceLimit {
-                    reason: "Resource limit exceeded".to_string(),
-                    final_clauses: clauses.iter().map(|c| ClauseJson::from_clause(c, interner)).collect(),
-                    proof_steps: steps.iter().map(|s| s.into()).collect(),
-                    time_seconds,
-                }
-            }
-        }
-    }
+    ResourceLimit,
 }
 
 // =============================================================================
@@ -189,7 +150,7 @@ pub struct SaturationState {
 
 impl SaturationState {
     /// Extract a proof by backward traversal from the empty clause.
-    pub fn extract_proof(&self, empty_clause_idx: usize) -> Proof {
+    pub fn extract_proof(&self, empty_clause_idx: usize) -> Vec<ProofStep> {
         let mut derivation_map: HashMap<usize, (String, Vec<Position>)> = HashMap::new();
         for event in &self.event_log {
             match event {
@@ -223,7 +184,7 @@ impl SaturationState {
 
         proof_clause_indices.sort();
 
-        let steps = proof_clause_indices
+        proof_clause_indices
             .iter()
             .map(|&idx| {
                 let (rule_name, premises) = derivation_map
@@ -237,13 +198,7 @@ impl SaturationState {
                     conclusion: self.clauses[idx].clone(),
                 }
             })
-            .collect();
-
-        Proof {
-            steps,
-            empty_clause_idx,
-            all_clauses: self.clauses.clone(),
-        }
+            .collect()
     }
 
     /// Build proof steps from event log.

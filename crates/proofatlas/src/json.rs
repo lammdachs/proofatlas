@@ -1,7 +1,7 @@
 //! JSON serialization types for proof data
 
 use crate::logic::{Clause, Interner, Literal, Term};
-use crate::state::{clause_indices, Proof, ProofStep};
+use crate::state::{clause_indices, ProofStep};
 use serde::{Deserialize, Serialize};
 
 /// JSON representation of a term
@@ -246,15 +246,6 @@ impl From<&ProofStep> for ProofStepJson {
 pub struct ProofJson {
     pub steps: Vec<ProofStepJson>,
     pub empty_clause_idx: usize,
-}
-
-impl From<&Proof> for ProofJson {
-    fn from(proof: &Proof) -> Self {
-        ProofJson {
-            steps: proof.steps.iter().map(|s| s.into()).collect(),
-            empty_clause_idx: proof.empty_clause_idx,
-        }
-    }
 }
 
 /// JSON representation of a saturation result

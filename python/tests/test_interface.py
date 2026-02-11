@@ -19,10 +19,10 @@ def test_add_clauses_from_tptp():
 
 
 def test_add_clauses_invalid_tptp():
-    """Test that invalid TPTP raises an error"""
+    """Test that malformed cnf() statement raises a parse error"""
     state = ProofAtlas()
     with pytest.raises(Exception):
-        state.add_clauses_from_tptp("not valid tptp at all {{{")
+        state.add_clauses_from_tptp("cnf(bad, axiom, |||).")
 
 
 def test_prove_finds_proof():
@@ -130,8 +130,8 @@ def test_proof_steps():
         assert isinstance(step.parent_ids, list)
         assert isinstance(step.rule_name, str)
 
-    # Input clauses should have rule "input"
-    input_steps = [s for s in steps if s.rule_name == "input"]
+    # Input clauses should have rule "Input"
+    input_steps = [s for s in steps if s.rule_name == "Input"]
     assert len(input_steps) > 0
 
 

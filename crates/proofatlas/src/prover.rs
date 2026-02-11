@@ -8,9 +8,9 @@
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::{CNFFormula, Clause, Interner};
 use crate::state::{
-    EventLog, GeneratingInference,
+    GeneratingInference,
     ProofResult, SaturationState, SimplifyingInference,
-    StateChange,
+    StateChange, ProofStep,
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
 use crate::profile::SaturationProfile;
@@ -149,20 +149,16 @@ impl ProofAtlas {
         }
     }
 
-    /// Run saturation to completion, consuming the prover.
+    /// Run saturation to completion.
     ///
-    /// Returns the proof result, optional profiling data, event log, and interner.
-    pub fn prove(mut self) -> (ProofResult, Option<SaturationProfile>, EventLog, Interner) {
+    /// After completion, all data (clauses, event log, profile, interner) remains
+    /// accessible on the prover via accessor methods.
+    pub fn prove(&mut self) -> ProofResult {
         let start_time = Instant::now();
         self.start_time = Some(start_time);
 
         if let Some(result) = self.init() {
-            return (
-                result,
-                self.profile,
-                self.state.event_log,
-                self.clause_manager.interner,
-            );
+            return result;
         }
 
         let result = loop {
@@ -183,12 +179,33 @@ impl ProofAtlas {
             }
         }
 
-        (
-            result,
-            self.profile,
-            self.state.event_log,
-            self.clause_manager.interner,
-        )
+        result
+    }
+
+    // =========================================================================
+    // Public accessors (available after prove())
+    // =========================================================================
+
+    /// Get the interner (symbol name resolution).
+    pub fn interner(&self) -> &Interner { &self.clause_manager.interner }
+
+    /// Get the event log (all state changes during saturation).
+    pub fn event_log(&self) -> &[StateChange] { &self.state.event_log }
+
+    /// Get all clauses generated during saturation.
+    pub fn clauses(&self) -> &[Clause] { &self.state.clauses }
+
+    /// Get profiling data (None if profiling was not enabled).
+    pub fn profile(&self) -> Option<&SaturationProfile> { self.profile.as_ref() }
+
+    /// Extract proof steps by backward traversal from the empty clause.
+    pub fn extract_proof(&self, empty_clause_idx: usize) -> Vec<ProofStep> {
+        self.state.extract_proof(empty_clause_idx)
+    }
+
+    /// Build all proof steps from the event log.
+    pub fn build_proof_steps(&self) -> Vec<ProofStep> {
+        self.state.build_proof_steps()
     }
 
     /// Execute one step of the saturation loop.
@@ -272,9 +289,7 @@ impl ProofAtlas {
 
         // === Step 2: Check saturation ===
         if self.state.unprocessed.is_empty() {
-            let steps = self.state.build_proof_steps();
-            let clauses = self.state.clauses.clone();
-            return Some(ProofResult::Saturated(steps, clauses));
+            return Some(ProofResult::Saturated);
         }
 
         // Track max sizes
@@ -296,10 +311,7 @@ impl ProofAtlas {
         // so the prover exits promptly after a long-blocking select().
         if let Some(start) = self.start_time {
             if start.elapsed() > self.config.timeout {
-                return Some(ProofResult::ResourceLimit(
-                    self.state.build_proof_steps(),
-                    self.state.clauses.clone(),
-                ));
+                return Some(ProofResult::ResourceLimit);
             }
         }
 
@@ -308,16 +320,12 @@ impl ProofAtlas {
         let given_idx = match self.select_given_clause() {
             Some(idx) => idx,
             None if self.state.unprocessed.is_empty() => {
-                let steps = self.state.build_proof_steps();
-                let clauses = self.state.clauses.clone();
-                return Some(ProofResult::Saturated(steps, clauses));
+                return Some(ProofResult::Saturated);
             }
             None => {
                 // Selector returned None with clauses still available — selector error
                 // (e.g., scoring server died). Report as resource limit.
-                let steps = self.state.build_proof_steps();
-                let clauses = self.state.clauses.clone();
-                return Some(ProofResult::ResourceLimit(steps, clauses));
+                return Some(ProofResult::ResourceLimit);
             }
         };
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
@@ -377,7 +385,7 @@ impl ProofAtlas {
     /// Apply a single StateChange, update internal state, record to event log,
     /// and check resource limits.
     ///
-    /// Returns `Some(ProofResult::ResourceLimit(..))` if a limit is exceeded.
+    /// Returns `Some(ProofResult::ResourceLimit)` if a limit is exceeded.
     fn apply_change(&mut self, change: StateChange) -> Option<ProofResult> {
         match &change {
             StateChange::Add(clause, _rule_name, _premises) => {
@@ -411,7 +419,7 @@ impl ProofAtlas {
 
                 // Empty clause → proof found
                 if is_empty {
-                    return Some(ProofResult::Proof(self.state.extract_proof(new_idx)));
+                    return Some(ProofResult::Proof { empty_clause_idx: new_idx });
                 }
 
                 if let Some(p) = self.profile.as_mut() {
@@ -423,30 +431,21 @@ impl ProofAtlas {
 
                 // max_clauses: every Add (integer comparison, free)
                 if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
-                    return Some(ProofResult::ResourceLimit(
-                        self.state.build_proof_steps(),
-                        self.state.clauses.clone(),
-                    ));
+                    return Some(ProofResult::ResourceLimit);
                 }
 
                 // timeout + memory: every 100th Add (amortize syscall cost)
                 if num_clauses % 100 == 0 {
                     if let Some(start) = self.start_time {
                         if start.elapsed() > self.config.timeout {
-                            return Some(ProofResult::ResourceLimit(
-                                self.state.build_proof_steps(),
-                                self.state.clauses.clone(),
-                            ));
+                            return Some(ProofResult::ResourceLimit);
                         }
                     }
 
                     if let Some(limit_mb) = self.config.memory_limit {
                         if let Some(rss) = crate::config::process_memory_mb() {
                             if rss >= limit_mb {
-                                return Some(ProofResult::ResourceLimit(
-                                    self.state.build_proof_steps(),
-                                    self.state.clauses.clone(),
-                                ));
+                                return Some(ProofResult::ResourceLimit);
                             }
                         }
                     }
@@ -500,33 +499,24 @@ impl ProofAtlas {
 
                     // Empty replacement clause → proof found
                     if is_empty {
-                        return Some(ProofResult::Proof(self.state.extract_proof(new_idx)));
+                        return Some(ProofResult::Proof { empty_clause_idx: new_idx });
                     }
 
                     // Check limits after adding replacement
                     let num_clauses = self.state.clauses.len();
                     if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
-                        return Some(ProofResult::ResourceLimit(
-                            self.state.build_proof_steps(),
-                            self.state.clauses.clone(),
-                        ));
+                        return Some(ProofResult::ResourceLimit);
                     }
                     if num_clauses % 100 == 0 {
                         if let Some(start) = self.start_time {
                             if start.elapsed() > self.config.timeout {
-                                return Some(ProofResult::ResourceLimit(
-                                    self.state.build_proof_steps(),
-                                    self.state.clauses.clone(),
-                                ));
+                                return Some(ProofResult::ResourceLimit);
                             }
                         }
                         if let Some(limit_mb) = self.config.memory_limit {
                             if let Some(rss) = crate::config::process_memory_mb() {
                                 if rss >= limit_mb {
-                                    return Some(ProofResult::ResourceLimit(
-                                        self.state.build_proof_steps(),
-                                        self.state.clauses.clone(),
-                                    ));
+                                    return Some(ProofResult::ResourceLimit);
                                 }
                             }
                         }
@@ -563,10 +553,7 @@ impl ProofAtlas {
                 if self.config.max_iterations > 0
                     && self.state.current_iteration >= self.config.max_iterations
                 {
-                    return Some(ProofResult::ResourceLimit(
-                        self.state.build_proof_steps(),
-                        self.state.clauses.clone(),
-                    ));
+                    return Some(ProofResult::ResourceLimit);
                 }
             }
         }
@@ -614,13 +601,14 @@ impl ProofAtlas {
     }
 }
 
-/// Run saturation on a CNF formula
+/// Run saturation on a CNF formula, returning the prover with all state intact.
 pub fn saturate(
     formula: CNFFormula,
     config: ProverConfig,
     clause_selector: Box<dyn ClauseSelector>,
     interner: Interner,
-) -> (ProofResult, Option<SaturationProfile>, EventLog, Interner) {
-    let prover = ProofAtlas::new(formula.clauses, config, clause_selector, interner);
-    prover.prove()
+) -> (ProofResult, ProofAtlas) {
+    let mut prover = ProofAtlas::new(formula.clauses, config, clause_selector, interner);
+    let result = prover.prove();
+    (result, prover)
 }

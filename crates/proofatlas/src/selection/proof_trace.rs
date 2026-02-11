@@ -1,6 +1,6 @@
 //! Extract training data from completed proofs
 
-use crate::state::Proof;
+use crate::state::ProofStep;
 use crate::state::clause_indices;
 use std::collections::HashSet;
 
@@ -13,13 +13,13 @@ pub struct TrainingExample {
     pub label: u8,
 }
 
-/// Extract training data from a proof
-pub fn extract_training_data(proof: &Proof) -> Vec<TrainingExample> {
+/// Extract training data from proof steps
+pub fn extract_training_data(steps: &[ProofStep], empty_clause_idx: usize) -> Vec<TrainingExample> {
     // Find all clauses that are part of the proof derivation
-    let proof_clauses = extract_proof_dag(proof);
+    let proof_clauses = extract_proof_dag(steps, empty_clause_idx);
 
     // All proof steps are real derivations (no trace-only events to filter)
-    let all_clauses: HashSet<usize> = proof.steps.iter().map(|s| s.clause_idx).collect();
+    let all_clauses: HashSet<usize> = steps.iter().map(|s| s.clause_idx).collect();
 
     // Create training examples
     let mut examples = Vec::new();
@@ -35,9 +35,9 @@ pub fn extract_training_data(proof: &Proof) -> Vec<TrainingExample> {
 
 /// Extract the set of clause indices that are part of the proof DAG
 /// (clauses that led to the empty clause)
-fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
+fn extract_proof_dag(steps: &[ProofStep], empty_clause_idx: usize) -> HashSet<usize> {
     let mut proof_clauses = HashSet::new();
-    let mut to_visit = vec![proof.empty_clause_idx];
+    let mut to_visit = vec![empty_clause_idx];
 
     // Backward search from empty clause
     while let Some(clause_idx) = to_visit.pop() {
@@ -47,7 +47,7 @@ fn extract_proof_dag(proof: &Proof) -> HashSet<usize> {
         proof_clauses.insert(clause_idx);
 
         // Find the step that derived this clause
-        if let Some(step) = proof.steps.iter().find(|s| s.clause_idx == clause_idx) {
+        if let Some(step) = steps.iter().find(|s| s.clause_idx == clause_idx) {
             // Add premises (parent clauses) to the search
             to_visit.extend(clause_indices(&step.premises));
         }
@@ -68,9 +68,9 @@ pub struct ProofStatistics {
 }
 
 /// Compute statistics about a proof
-pub fn compute_proof_statistics(proof: &Proof) -> ProofStatistics {
-    let proof_clauses = extract_proof_dag(proof);
-    let total_clauses = proof.steps.len();
+pub fn compute_proof_statistics(steps: &[ProofStep], empty_clause_idx: usize) -> ProofStatistics {
+    let proof_clauses = extract_proof_dag(steps, empty_clause_idx);
+    let total_clauses = steps.len();
     let proof_clause_count = proof_clauses.len();
 
     ProofStatistics {
@@ -84,7 +84,6 @@ pub fn compute_proof_statistics(proof: &Proof) -> ProofStatistics {
 mod tests {
     use super::*;
     use crate::logic::{Clause, Position};
-    use crate::state::ProofStep;
 
     fn make_step(clause_idx: usize, premises: Vec<usize>) -> ProofStep {
         let positions: Vec<Position> = premises.iter().map(|&p| Position::clause(p)).collect();
@@ -116,13 +115,7 @@ mod tests {
             make_step(2, vec![0, 1]),
         ];
 
-        let proof = Proof {
-            steps,
-            empty_clause_idx: 2,
-            all_clauses: vec![],  // Not used for proof DAG extraction
-        };
-
-        let proof_clauses = extract_proof_dag(&proof);
+        let proof_clauses = extract_proof_dag(&steps, 2);
 
         // All clauses should be in the proof
         assert_eq!(proof_clauses.len(), 3);
@@ -146,13 +139,7 @@ mod tests {
             make_step(3, vec![0, 1]),    // Uses 0 and 1, not 2
         ];
 
-        let proof = Proof {
-            steps,
-            empty_clause_idx: 3,
-            all_clauses: vec![],  // Not used for this test
-        };
-
-        let examples = extract_training_data(&proof);
+        let examples = extract_training_data(&steps, 3);
 
         // Should have 4 examples
         assert_eq!(examples.len(), 4);
@@ -177,13 +164,7 @@ mod tests {
             make_step(3, vec![0, 1]),    // Empty clause
         ];
 
-        let proof = Proof {
-            steps,
-            empty_clause_idx: 3,
-            all_clauses: vec![],  // Not used for statistics
-        };
-
-        let stats = compute_proof_statistics(&proof);
+        let stats = compute_proof_statistics(&steps, 3);
 
         assert_eq!(stats.total_clauses, 4);
         assert_eq!(stats.proof_clauses, 3); // 0, 1, 3 (not 2)
@@ -209,13 +190,7 @@ mod tests {
             make_step(6, vec![5]),       // Empty clause
         ];
 
-        let proof = Proof {
-            steps,
-            empty_clause_idx: 6,
-            all_clauses: vec![],  // Not used for proof DAG
-        };
-
-        let proof_clauses = extract_proof_dag(&proof);
+        let proof_clauses = extract_proof_dag(&steps, 6);
 
         // Should include: 0, 1, 2, 3, 5, 6 (not 4)
         assert_eq!(proof_clauses.len(), 6);

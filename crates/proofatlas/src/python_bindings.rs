@@ -6,26 +6,27 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::logic::{Clause, Interner};
-use crate::state::{clause_indices, StateChange as RustStateChange};
+use crate::prover::ProofAtlas;
+use crate::state::{clause_indices, ProofResult, StateChange as RustStateChange};
 use crate::parser::parse_tptp;
 use crate::config::LiteralSelectionStrategy;
 
-/// Python-accessible prover
-#[pyclass(name = "ProofAtlas")]
-pub struct ProofState {
-    /// Symbol interner for resolving symbol names
+/// Python-accessible prover — thin wrapper around ProofAtlas.
+///
+/// Pre-prove: holds initial clauses and interner from parsing.
+/// Post-prove: retains the ProofAtlas instance and delegates all queries to it.
+#[pyclass(name = "ProofAtlas", unsendable)]
+pub struct PyProofAtlas {
+    /// Pre-prove state: initial clauses from add_clauses_from_tptp
+    initial_clauses: Vec<Clause>,
+    /// Pre-prove state: interner from parsing
     interner: Interner,
-    /// All clauses (processed and unprocessed)
-    clauses: Vec<Clause>,
-    /// Indices of processed clauses
-    processed: HashSet<usize>,
-    /// Proof trace
-    proof_trace: Vec<ProofStep>,
-    /// Index of the empty clause that completed the proof (if any)
-    empty_clause_idx: Option<usize>,
-    /// Full event log from last saturation (for selection state extraction)
-    event_log: Vec<RustStateChange>,
-    /// Profile JSON from last saturation
+
+    /// Post-prove state: the retained prover instance
+    prover: Option<ProofAtlas>,
+    /// Post-prove state: the saturation result
+    result: Option<ProofResult>,
+    /// Profile JSON (serialized once after prove())
     profile_json: Option<String>,
 }
 
@@ -43,18 +44,47 @@ pub struct ProofStep {
     pub rule_name: String,
 }
 
+impl PyProofAtlas {
+    /// Get the interner (works pre- and post-prove)
+    fn interner(&self) -> &Interner {
+        self.prover.as_ref()
+            .map(|p| p.interner())
+            .unwrap_or(&self.interner)
+    }
+
+    /// Get the clauses (works pre- and post-prove)
+    fn clauses(&self) -> &[Clause] {
+        self.prover.as_ref()
+            .map(|p| p.clauses())
+            .unwrap_or(&self.initial_clauses)
+    }
+
+    /// Get the event log (post-prove only)
+    fn event_log(&self) -> &[RustStateChange] {
+        self.prover.as_ref()
+            .map(|p| p.event_log())
+            .unwrap_or(&[])
+    }
+
+    /// Get the empty clause index (post-prove, proof case only)
+    fn empty_clause_idx(&self) -> Option<usize> {
+        match &self.result {
+            Some(ProofResult::Proof { empty_clause_idx }) => Some(*empty_clause_idx),
+            _ => None,
+        }
+    }
+}
+
 #[pymethods]
-impl ProofState {
+impl PyProofAtlas {
     /// Create empty proof state
     #[new]
     pub fn new() -> Self {
-        ProofState {
+        PyProofAtlas {
+            initial_clauses: Vec::new(),
             interner: Interner::new(),
-            clauses: Vec::new(),
-            processed: HashSet::new(),
-            proof_trace: Vec::new(),
-            empty_clause_idx: None,
-            event_log: Vec::new(),
+            prover: None,
+            result: None,
             profile_json: None,
         }
     }
@@ -97,10 +127,10 @@ impl ProofState {
 
         let mut ids = Vec::new();
         for mut clause in cnf.clauses {
-            let id = self.clauses.len();
+            let id = self.initial_clauses.len();
             clause.id = Some(id);
             ids.push(id);
-            self.clauses.push(clause);
+            self.initial_clauses.push(clause);
         }
 
         Ok(ids)
@@ -138,11 +168,8 @@ impl ProofState {
         enable_profiling: Option<bool>,
         socket_path: Option<String>,
     ) -> PyResult<(bool, String)> {
-        use crate::prover::ProofAtlas;
         use crate::config::ProverConfig;
-        use crate::state::ProofResult;
         use crate::selection::AgeWeightSelector;
-        use std::time::Duration;
 
         // Create clause selector based on encoder type
         let model_name = match (encoder.as_deref(), scorer.as_deref()) {
@@ -261,81 +288,35 @@ impl ProofState {
             enable_profiling: enable_profiling.unwrap_or(false),
         };
 
-        // Create prover from current clauses
-        let initial_clauses: Vec<Clause> = self.clauses.clone();
-        let interner = self.interner.clone();
-        let prover = ProofAtlas::new(initial_clauses, config, clause_selector, interner);
+        // Create prover from current clauses — move initial_clauses/interner into prover
+        let clauses = std::mem::take(&mut self.initial_clauses);
+        let interner = std::mem::take(&mut self.interner);
+        let mut prover = ProofAtlas::new(clauses, config, clause_selector, interner);
 
-        // Run saturation in a thread with larger stack to handle deep recursion
-        let (result, profile, sat_trace, returned_interner) = std::thread::Builder::new()
+        // Run saturation in a thread with larger stack, move prover in and back out
+        let (prover, result) = std::thread::Builder::new()
             .stack_size(128 * 1024 * 1024)  // 128MB stack
-            .spawn(move || prover.prove())
+            .spawn(move || {
+                let result = prover.prove();
+                (prover, result)
+            })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?
             .join()
             .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
 
-        // Update interner with new symbols created during saturation
-        self.interner = returned_interner;
-
         // Serialize profile to JSON if present
-        self.profile_json = profile
-            .map(|p| serde_json::to_string(&p))
-            .transpose()
-            .map_err(|e| PyValueError::new_err(format!("Profile serialization failed: {}", e)))?;
+        self.profile_json = prover.profile()
+            .map(|p| serde_json::to_string(p).ok())
+            .flatten();
 
-        // Copy back the results
-        let (proof_found, status, final_clauses, proof_steps, empty_idx) = match result {
-            ProofResult::Proof(proof) => {
-                let idx = proof.empty_clause_idx;
-                (true, "proof", proof.all_clauses, proof.steps, Some(idx))
-            }
-            ProofResult::Saturated(steps, clauses) => (false, "saturated", clauses, steps, None),
-            ProofResult::ResourceLimit(steps, clauses) => (false, "resource_limit", clauses, steps, None),
+        let (proof_found, status) = match &result {
+            ProofResult::Proof { .. } => (true, "proof"),
+            ProofResult::Saturated => (false, "saturated"),
+            ProofResult::ResourceLimit => (false, "resource_limit"),
         };
-        self.empty_clause_idx = empty_idx;
 
-        // Update our state with the results
-        self.clauses = final_clauses;
-        self.processed.clear();
-
-        // Rebuild processed from the proof steps
-        for step in &proof_steps {
-            self.processed.insert(step.clause_idx);
-        }
-
-        // Rebuild proof trace from the full event log so all_steps() returns
-        // ALL clauses (not just proof-relevant ones).
-        self.proof_trace.clear();
-        for event in &sat_trace {
-            match event {
-                RustStateChange::Add(clause, rule_name, premises) => {
-                    if let Some(idx) = clause.id {
-                        let clause_string = clause.display(&self.interner).to_string();
-                        self.proof_trace.push(ProofStep {
-                            clause_id: idx,
-                            parent_ids: clause_indices(premises),
-                            rule_name: rule_name.clone(),
-                            clause_string,
-                        });
-                    }
-                }
-                RustStateChange::Simplify(_, Some(clause), rule_name, premises) => {
-                    if let Some(idx) = clause.id {
-                        let clause_string = clause.display(&self.interner).to_string();
-                        self.proof_trace.push(ProofStep {
-                            clause_id: idx,
-                            parent_ids: clause_indices(premises),
-                            rule_name: rule_name.clone(),
-                            clause_string,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Store event log for later extraction (selection states, etc.)
-        self.event_log = sat_trace;
+        self.result = Some(result);
+        self.prover = Some(prover);
 
         // Clean up auto-launched server socket
         if let Some(ref path) = auto_socket_path {
@@ -356,30 +337,33 @@ impl ProofState {
     ///
     /// Returns the serialized Vec<StateChange> used by the web trace converter.
     pub fn trace_json(&self) -> PyResult<Option<String>> {
-        if self.event_log.is_empty() {
+        let events = self.event_log();
+        if events.is_empty() {
             return Ok(None);
         }
-        let json = serde_json::to_string(&self.event_log)
+        let json = serde_json::to_string(events)
             .map_err(|e| PyValueError::new_err(format!("Trace serialization failed: {}", e)))?;
         Ok(Some(json))
     }
 
     /// Get statistics
     pub fn statistics(&self) -> HashMap<String, usize> {
+        let clauses = self.clauses();
         let mut stats = HashMap::new();
-        stats.insert("total".to_string(), self.clauses.len());
-        stats.insert("processed".to_string(), self.processed.len());
+        stats.insert("total".to_string(), clauses.len());
+
+        // processed count from prover state if available
+        let processed_count = self.prover.as_ref()
+            .map(|p| p.state.processed.len())
+            .unwrap_or(0);
+        stats.insert("processed".to_string(), processed_count);
 
         // Count empty clauses
-        let empty_count = self.clauses.iter().filter(|c| c.is_empty()).count();
+        let empty_count = clauses.iter().filter(|c| c.is_empty()).count();
         stats.insert("empty_clauses".to_string(), empty_count);
 
         // Count unit clauses
-        let unit_count = self
-            .clauses
-            .iter()
-            .filter(|c| c.literals.len() == 1)
-            .count();
+        let unit_count = clauses.iter().filter(|c| c.literals.len() == 1).count();
         stats.insert("unit_clauses".to_string(), unit_count);
 
         stats
@@ -388,48 +372,61 @@ impl ProofState {
     /// Get all proof steps from the last saturation run.
     /// Returns every step including all derivations.
     pub fn all_steps(&self) -> Vec<ProofStep> {
-        self.proof_trace.clone()
+        let interner = self.interner();
+        let events = self.event_log();
+        let mut steps = Vec::new();
+        for event in events {
+            match event {
+                RustStateChange::Add(clause, rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        steps.push(ProofStep {
+                            clause_id: idx,
+                            clause_string: clause.display(interner).to_string(),
+                            parent_ids: clause_indices(premises),
+                            rule_name: rule_name.clone(),
+                        });
+                    }
+                }
+                RustStateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        steps.push(ProofStep {
+                            clause_id: idx,
+                            clause_string: clause.display(interner).to_string(),
+                            parent_ids: clause_indices(premises),
+                            rule_name: rule_name.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        steps
     }
 
     /// Get minimal proof trace (only steps in the proof DAG).
     pub fn proof_steps(&self) -> Vec<ProofStep> {
-        // Use stored empty clause index from proof extraction (avoids picking wrong
-        // empty clause when multiple exist)
-        let empty_clause_id = self.empty_clause_idx;
+        let empty_id = match self.empty_clause_idx() {
+            Some(idx) => idx,
+            None => return Vec::new(),
+        };
 
-        if let Some(empty_id) = empty_clause_id {
-            // Build proof trace backwards from empty clause
-            let mut trace = Vec::new();
-            let mut to_visit = vec![empty_id];
-            let mut visited = HashSet::new();
+        let prover = match &self.prover {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
 
-            while let Some(current_id) = to_visit.pop() {
-                if visited.contains(&current_id) {
-                    continue;
-                }
-                visited.insert(current_id);
+        // Use extract_proof on the prover to get proof steps
+        let rust_steps = prover.extract_proof(empty_id);
+        let interner = prover.interner();
 
-                // Find this clause in proof trace
-                if let Some(step) = self.proof_trace.iter().find(|s| s.clause_id == current_id) {
-                    trace.push(step.clone());
-                    to_visit.extend(&step.parent_ids);
-                } else {
-                    // Input clause
-                    trace.push(ProofStep {
-                        clause_id: current_id,
-                        clause_string: self.clauses[current_id].display(&self.interner).to_string(),
-                        parent_ids: Vec::new(),
-                        rule_name: "input".to_string(),
-                    });
-                }
+        rust_steps.iter().map(|step| {
+            ProofStep {
+                clause_id: step.clause_idx,
+                clause_string: step.conclusion.display(interner).to_string(),
+                parent_ids: clause_indices(&step.premises),
+                rule_name: step.rule_name.clone(),
             }
-
-            // Reverse to get forward trace
-            trace.reverse();
-            trace
-        } else {
-            Vec::new()
-        }
+        }).collect()
     }
 
     /// Extract training data in structured JSON format (model-independent)
@@ -438,23 +435,34 @@ impl ProofState {
     /// to graphs or strings at training time.
     pub fn extract_structured_trace(&self, time_seconds: f64) -> PyResult<String> {
         use crate::json::{TraceJson, TrainingClauseJson};
-        use std::collections::BTreeSet;
+
+        let interner = self.interner();
+        let clauses = self.clauses();
+        let events = self.event_log();
 
         // Build proof clause set
         let proof_clauses: HashSet<usize> = self.get_proof_clause_set();
 
-        // Build derivation info map from proof trace
+        // Build derivation info map from event log
         let mut derivation_info: HashMap<usize, (Vec<usize>, String)> = HashMap::new();
-        for step in &self.proof_trace {
-            derivation_info.insert(
-                step.clause_id,
-                (step.parent_ids.clone(), step.rule_name.clone()),
-            );
+        for event in events {
+            match event {
+                RustStateChange::Add(clause, rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_info.insert(idx, (clause_indices(premises), rule_name.clone()));
+                    }
+                }
+                RustStateChange::Simplify(_, Some(clause), rule_name, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_info.insert(idx, (clause_indices(premises), rule_name.clone()));
+                    }
+                }
+                _ => {}
+            }
         }
 
         // Build structured clauses with derivation info
-        let clauses: Vec<TrainingClauseJson> = self
-            .clauses
+        let training_clauses: Vec<TrainingClauseJson> = clauses
             .iter()
             .enumerate()
             .map(|(idx, clause)| {
@@ -463,7 +471,7 @@ impl ProofState {
                     .get(&idx)
                     .cloned()
                     .unwrap_or_else(|| (vec![], "input".to_string()));
-                TrainingClauseJson::from_clause(clause, &self.interner, in_proof, parents, rule)
+                TrainingClauseJson::from_clause(clause, interner, in_proof, parents, rule)
             })
             .collect();
 
@@ -471,9 +479,9 @@ impl ProofState {
         let selection_states = self.build_selection_states();
 
         let trace = TraceJson {
-            proof_found: self.empty_clause_idx.is_some(),
+            proof_found: self.empty_clause_idx().is_some(),
             time_seconds,
-            clauses,
+            clauses: training_clauses,
             selection_states,
         };
 
@@ -482,13 +490,33 @@ impl ProofState {
     }
 }
 
-impl ProofState {
+impl PyProofAtlas {
     /// Get the set of clause indices in the proof DAG
     fn get_proof_clause_set(&self) -> HashSet<usize> {
-        let empty_id = match self.empty_clause_idx {
+        let empty_id = match self.empty_clause_idx() {
             Some(idx) => idx,
             None => return HashSet::new(),
         };
+
+        let events = self.event_log();
+
+        // Build derivation map from event log
+        let mut derivation_map: HashMap<usize, Vec<usize>> = HashMap::new();
+        for event in events {
+            match event {
+                RustStateChange::Add(clause, _, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_map.insert(idx, clause_indices(premises));
+                    }
+                }
+                RustStateChange::Simplify(_, Some(clause), _, premises) => {
+                    if let Some(idx) = clause.id {
+                        derivation_map.insert(idx, clause_indices(premises));
+                    }
+                }
+                _ => {}
+            }
+        }
 
         let mut proof_clauses = HashSet::new();
         let mut to_visit = vec![empty_id];
@@ -499,8 +527,8 @@ impl ProofState {
             }
             proof_clauses.insert(current_id);
 
-            if let Some(step) = self.proof_trace.iter().find(|s| s.clause_id == current_id) {
-                to_visit.extend(&step.parent_ids);
+            if let Some(parents) = derivation_map.get(&current_id) {
+                to_visit.extend(parents);
             }
         }
 
@@ -511,12 +539,13 @@ impl ProofState {
     fn build_selection_states(&self) -> Vec<crate::json::SelectionStateJson> {
         use std::collections::BTreeSet;
 
+        let events = self.event_log();
         let mut n: BTreeSet<usize> = BTreeSet::new();
         let mut u: BTreeSet<usize> = BTreeSet::new();
         let mut p: BTreeSet<usize> = BTreeSet::new();
         let mut states = Vec::new();
 
-        for event in &self.event_log {
+        for event in events {
             match event {
                 RustStateChange::Add(clause, _, _) => {
                     if let Some(idx) = clause.id {
@@ -624,7 +653,7 @@ fn start_scoring_server(
 
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<ProofState>()?;
+    m.add_class::<PyProofAtlas>()?;
     m.add_class::<ProofStep>()?;
     #[cfg(feature = "ml")]
     m.add_function(wrap_pyfunction!(start_scoring_server, m)?)?;

@@ -16,10 +16,10 @@ fn test_simple_resolution() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        ProofResult::Proof(_) => {
+        ProofResult::Proof { .. } => {
             // Expected - proof found
         }
         _ => panic!("Expected proof, got {:?}", result),
@@ -34,10 +34,10 @@ fn test_equality_reflexivity() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        ProofResult::Proof(_) => {
+        ProofResult::Proof { .. } => {
             // Expected - contradiction found
         }
         _ => panic!("Expected proof, got {:?}", result),
@@ -54,13 +54,13 @@ fn test_satisfiable_formula() {
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let mut config = ProverConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
-    let (result, _, _, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
 
     match result {
-        ProofResult::Saturated(_, _) => {
+        ProofResult::Saturated => {
             // Expected - no contradiction, formula is satisfiable
         }
-        ProofResult::Proof(_) => {
+        ProofResult::Proof { .. } => {
             panic!("Unexpected proof for satisfiable formula");
         }
         _ => {
