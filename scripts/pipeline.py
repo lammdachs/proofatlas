@@ -32,7 +32,8 @@ from pathlib import Path
 # Add package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-PIPELINE_PREFIX = "pipeline"
+DEFAULT_PREFIX = "pipeline"
+PIPELINE_PREFIX = DEFAULT_PREFIX  # May be overridden by --job-prefix
 
 
 def log(msg: str):
@@ -237,43 +238,59 @@ def sync_all_run_results(base_dir: Path):
 
 
 def push_results(base_dir: Path, configs: list[str]) -> bool:
-    """Git add, pull, commit, push web/data/. Returns True if pushed successfully."""
+    """Git add, pull, commit, push web/data/. Returns True if pushed successfully.
+
+    Uses file locking to prevent race conditions on shared storage.
+    """
+    import fcntl
+
     sync_all_run_results(base_dir)
 
-    subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
+    lock_file = base_dir / ".data" / "git.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-    commit_msg = f"[skip ci] Update results: {', '.join(configs)}"
-    result = subprocess.run(
-        ["git", "commit", "-m", commit_msg],
-        cwd=str(base_dir), capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        if "nothing to commit" in result.stdout + result.stderr:
-            log("No new results to commit")
+    try:
+        with open(lock_file, "w") as lock_fd:
+            # Acquire exclusive lock (blocking)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+            subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
+
+            commit_msg = f"[skip ci] Update results: {', '.join(configs)}"
+            result = subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                if "nothing to commit" in result.stdout + result.stderr:
+                    log("No new results to commit")
+                    return True
+                log(f"Git commit failed: {result.stderr.strip()}")
+                return False
+
+            # Pull with rebase to incorporate any remote changes
+            pull = subprocess.run(
+                ["git", "pull", "--rebase"],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if pull.returncode != 0:
+                log(f"Git pull --rebase failed: {pull.stderr.strip()}")
+                log("Commit is local — will retry on next push interval")
+                return False
+
+            push = subprocess.run(
+                ["git", "push"],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if push.returncode != 0:
+                log(f"Git push failed: {push.stderr.strip()}")
+                return False
+
+            log(f"Pushed results for: {', '.join(configs)}")
             return True
-        log(f"Git commit failed: {result.stderr.strip()}")
+    except OSError as e:
+        log(f"Failed to acquire git lock: {e}")
         return False
-
-    # Pull with rebase to incorporate any remote changes
-    pull = subprocess.run(
-        ["git", "pull", "--rebase"],
-        cwd=str(base_dir), capture_output=True, text=True,
-    )
-    if pull.returncode != 0:
-        log(f"Git pull --rebase failed: {pull.stderr.strip()}")
-        log("Commit is local — will retry on next push interval")
-        return False
-
-    push = subprocess.run(
-        ["git", "push"],
-        cwd=str(base_dir), capture_output=True, text=True,
-    )
-    if push.returncode != 0:
-        log(f"Git push failed: {push.stderr.strip()}")
-        return False
-
-    log(f"Pushed results for: {', '.join(configs)}")
-    return True
 
 
 def maybe_push(base_dir: Path, unpushed: list[str], last_push_time: float,
@@ -295,7 +312,12 @@ def maybe_push(base_dir: Path, unpushed: list[str], last_push_time: float,
 
 
 def upload_weights(base_dir: Path, configs: list[str]):
-    """Upload trained weights for completed configs to a rolling GitHub release."""
+    """Upload trained weights for completed configs to a rolling GitHub release.
+
+    Uses file locking for release creation to prevent race conditions on shared storage.
+    """
+    import fcntl
+
     weights_dir = base_dir / ".weights"
     if not weights_dir.exists():
         log("No .weights/ directory — skipping weight upload")
@@ -309,30 +331,41 @@ def upload_weights(base_dir: Path, configs: list[str]):
         f"Configs: {', '.join(configs)}"
     )
 
-    # Ensure the tag and release exist
-    check = subprocess.run(
-        ["gh", "release", "view", tag],
-        cwd=str(base_dir), capture_output=True, text=True,
-    )
-    if check.returncode != 0:
-        log("Creating weights release...")
-        result = subprocess.run(
-            ["gh", "release", "create", tag,
-             "--title", release_name,
-             "--notes", release_body,
-             "--latest=false"],
-            cwd=str(base_dir), capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            log(f"Failed to create release: {result.stderr.strip()}")
-            return
-    else:
-        # Update release notes
-        subprocess.run(
-            ["gh", "release", "edit", tag,
-             "--notes", release_body],
-            cwd=str(base_dir), capture_output=True, text=True,
-        )
+    lock_file = base_dir / ".data" / "gh_release.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Lock only for release creation/check to avoid race condition
+    try:
+        with open(lock_file, "w") as lock_fd:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+            # Ensure the tag and release exist
+            check = subprocess.run(
+                ["gh", "release", "view", tag],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if check.returncode != 0:
+                log("Creating weights release...")
+                result = subprocess.run(
+                    ["gh", "release", "create", tag,
+                     "--title", release_name,
+                     "--notes", release_body,
+                     "--latest=false"],
+                    cwd=str(base_dir), capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    log(f"Failed to create release: {result.stderr.strip()}")
+                    return
+            else:
+                # Update release notes
+                subprocess.run(
+                    ["gh", "release", "edit", tag,
+                     "--notes", release_body],
+                    cwd=str(base_dir), capture_output=True, text=True,
+                )
+    except OSError as e:
+        log(f"Failed to acquire release lock: {e}")
+        return
 
     # Collect weight files for completed configs
     assets = []
@@ -503,6 +536,8 @@ def main():
                        help="Check pipeline status")
     parser.add_argument("--kill", action="store_true",
                        help="Stop pipeline")
+    parser.add_argument("--job-prefix", type=str, default=DEFAULT_PREFIX,
+                       help="Prefix for job/log files (for multi-node setups)")
 
     # Pass-through training flags
     parser.add_argument("--use-cuda", action="store_true",
@@ -528,6 +563,10 @@ def main():
 
     args = parser.parse_args()
     base_dir = find_project_root()
+
+    # Set job prefix for multi-node setups
+    global PIPELINE_PREFIX
+    PIPELINE_PREFIX = args.job_prefix
 
     # Handle --status and --kill
     if args.status:
