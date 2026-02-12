@@ -294,6 +294,84 @@ def maybe_push(base_dir: Path, unpushed: list[str], last_push_time: float,
         return unpushed, last_push_time
 
 
+def upload_weights(base_dir: Path, configs: list[str]):
+    """Upload trained weights for completed configs to a rolling GitHub release."""
+    weights_dir = base_dir / ".weights"
+    if not weights_dir.exists():
+        log("No .weights/ directory — skipping weight upload")
+        return
+
+    tag = "weights"
+    release_name = "Model Weights"
+    release_body = (
+        f"Rolling backup of trained model weights.\n\n"
+        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Configs: {', '.join(configs)}"
+    )
+
+    # Ensure the tag and release exist
+    check = subprocess.run(
+        ["gh", "release", "view", tag],
+        cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        log("Creating weights release...")
+        result = subprocess.run(
+            ["gh", "release", "create", tag,
+             "--title", release_name,
+             "--notes", release_body,
+             "--latest=false"],
+            cwd=str(base_dir), capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            log(f"Failed to create release: {result.stderr.strip()}")
+            return
+    else:
+        # Update release notes
+        subprocess.run(
+            ["gh", "release", "edit", tag,
+             "--notes", release_body],
+            cwd=str(base_dir), capture_output=True, text=True,
+        )
+
+    # Collect weight files for completed configs
+    assets = []
+    for config_name in configs:
+        pt_file = weights_dir / f"{config_name}.pt"
+        if pt_file.exists():
+            assets.append(str(pt_file))
+        # Also upload tokenizer dirs (sentence models)
+        tok_dir = weights_dir / f"{config_name}_tokenizer"
+        if tok_dir.is_dir():
+            # Tar the tokenizer dir for upload
+            tar_path = weights_dir / f"{config_name}_tokenizer.tar.gz"
+            subprocess.run(
+                ["tar", "czf", str(tar_path), "-C", str(weights_dir), f"{config_name}_tokenizer"],
+                capture_output=True,
+            )
+            if tar_path.exists():
+                assets.append(str(tar_path))
+
+    if not assets:
+        log("No weight files found for completed configs")
+        return
+
+    # Upload with --clobber to overwrite existing assets
+    cmd = ["gh", "release", "upload", tag, "--clobber"] + assets
+    result = subprocess.run(
+        cmd, cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        log(f"Weight upload failed: {result.stderr.strip()}")
+    else:
+        log(f"Uploaded weights: {', '.join(Path(a).name for a in assets)}")
+
+    # Clean up any temp tarballs
+    for config_name in configs:
+        tar_path = weights_dir / f"{config_name}_tokenizer.tar.gz"
+        tar_path.unlink(missing_ok=True)
+
+
 def run_pipeline(configs: list[str], args, base_dir: Path):
     """Run train→bench for each config, pushing results incrementally."""
     total_steps = len(configs)
@@ -397,6 +475,12 @@ def run_pipeline(configs: list[str], args, base_dir: Path):
     unpushed, last_push_time = maybe_push(
         base_dir, unpushed, last_push_time, push_interval, force=True,
     )
+
+    # Upload weights for completed configs
+    if completed:
+        print(f"PIPELINE:0:0:weights:uploading")
+        sys.stdout.flush()
+        upload_weights(base_dir, completed)
 
     # --- Summary ---
     print(f"\n{'='*60}")
