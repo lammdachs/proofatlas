@@ -193,34 +193,6 @@ def test_statistics():
     assert "empty_clauses" in stats
 
 
-@pytest.mark.skip(reason="Depends on removed extract_structured_trace API")
-def test_extract_structured_trace():
-    """Test extract_structured_trace() returns valid JSON"""
-    state = ProofAtlas()
-    state.add_clauses_from_tptp("""
-    cnf(c1, axiom, p(a)).
-    cnf(c2, axiom, ~p(a)).
-    """)
-
-    proof_found, _ = state.prove(timeout=10.0)
-    assert proof_found
-
-    trace_json = state.extract_structured_trace(1.0)
-    trace = json.loads(trace_json)
-
-    assert trace["proof_found"] is True
-    assert "time_seconds" in trace
-    assert "clauses" in trace
-    assert len(trace["clauses"]) > 0
-
-    # Check clause structure
-    for clause in trace["clauses"]:
-        assert "literals" in clause
-        assert "label" in clause
-        assert "age" in clause
-        assert "role" in clause
-
-
 def test_profile_json():
     """Test profile_json() accessor"""
     state = ProofAtlas()

@@ -91,63 +91,6 @@ class TestGCNEncodeWithScorers:
         assert not torch.isnan(scores).any()
 
 
-class TestStateBatchThroughModel:
-    """Test collate_proof_batch results through model pipeline."""
-
-    @pytest.mark.skip(reason="Depends on removed clause_to_graph API")
-    def test_state_batch_through_model(self):
-        from proofatlas.ml.structured import clause_to_graph, batch_graphs
-        from proofatlas.ml.datasets import collate_proof_batch
-
-        # Build synthetic pre-sampled batch item
-        clauses = []
-        for i in range(6):
-            clauses.append({
-                "literals": [{"polarity": True, "atom": {"predicate": f"p{i}", "args": [{"type": "Variable", "name": f"X{i}"}]}}],
-                "label": 1 if i < 2 else 0,
-                "age": i,
-                "role": "axiom" if i < 2 else "derived",
-            })
-
-        graphs = [clause_to_graph(c) for c in clauses]
-        labels = [c["label"] for c in clauses]
-
-        u_indices = [0, 1, 2]
-        p_indices = [3, 4, 5]
-        item = {
-            "u_graphs": [graphs[i] for i in u_indices],
-            "p_graphs": [graphs[i] for i in p_indices],
-            "u_labels": [labels[i] for i in u_indices],
-            "problem": "test",
-        }
-
-        batch_result = collate_proof_batch([item])
-        assert batch_result is not None
-
-        # Create model and run encode + score pipeline
-        model = ClauseGCN(hidden_dim=64, num_layers=2, scorer_type="attention")
-
-        u_emb = model.encode(
-            batch_result["u_node_features"],
-            batch_result["u_adj"],
-            batch_result["u_pool_matrix"],
-            batch_result.get("u_clause_features"),
-        )
-
-        p_emb = None
-        if "p_node_features" in batch_result:
-            p_emb = model.encode(
-                batch_result["p_node_features"],
-                batch_result["p_adj"],
-                batch_result["p_pool_matrix"],
-                batch_result.get("p_clause_features"),
-            )
-
-        scores = model.scorer(u_emb, p_emb)
-        assert scores.shape[0] == u_emb.shape[0]
-        assert not torch.isnan(scores).any()
-
-
 class TestFeaturesWithCrossAttention:
     """Test ClauseFeatures with attention scorer."""
 
