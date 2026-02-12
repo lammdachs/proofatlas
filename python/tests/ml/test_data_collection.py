@@ -5,6 +5,7 @@ import pytest
 from proofatlas import ProofAtlas
 
 
+@pytest.mark.skip(reason="Depends on removed extract_structured_trace/clause_to_graph API")
 class TestStructuredTrace:
     """Test extract_structured_trace() output"""
 

@@ -142,11 +142,17 @@ def _make_valid_inputs(num_nodes: int, num_clauses: int):
 
     pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
 
-    # Clause features: [age (0-1), role (0-4), size (>=1)]
-    clause_features = torch.zeros(num_clauses, 3)
-    clause_features[:, 0] = torch.rand(num_clauses)
-    clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
-    clause_features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+    # Clause features: 9D
+    clause_features = torch.zeros(num_clauses, 9)
+    clause_features[:, 0] = torch.rand(num_clauses)                       # age
+    clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()   # role
+    clause_features[:, 2] = torch.randint(0, 7, (num_clauses,)).float()   # rule
+    clause_features[:, 3] = torch.randint(1, 20, (num_clauses,)).float()  # size
+    clause_features[:, 4] = torch.randint(0, 10, (num_clauses,)).float()  # depth
+    clause_features[:, 5] = torch.randint(1, 30, (num_clauses,)).float()  # symbol_count
+    clause_features[:, 6] = torch.randint(1, 15, (num_clauses,)).float()  # distinct_symbols
+    clause_features[:, 7] = torch.randint(0, 10, (num_clauses,)).float()  # variable_count
+    clause_features[:, 8] = torch.randint(0, 5, (num_clauses,)).float()   # distinct_vars
 
     return node_features, adj, pool_matrix, clause_features
 

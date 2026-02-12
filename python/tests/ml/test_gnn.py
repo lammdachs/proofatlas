@@ -28,11 +28,17 @@ def make_node_features(num_nodes: int) -> torch.Tensor:
 
 
 def make_clause_features(num_clauses: int) -> torch.Tensor:
-    """Create valid clause features: [age (0-1), role (0-4), size (>=1)]."""
-    features = torch.zeros(num_clauses, 3)
-    features[:, 0] = torch.rand(num_clauses)
-    features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
-    features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+    """Create valid clause features: [age, role, rule, size, depth, sym_count, distinct_sym, var_count, distinct_var]."""
+    features = torch.zeros(num_clauses, 9)
+    features[:, 0] = torch.rand(num_clauses)                       # age (0-1)
+    features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()   # role (0-4)
+    features[:, 2] = torch.randint(0, 7, (num_clauses,)).float()   # rule (0-6)
+    features[:, 3] = torch.randint(1, 20, (num_clauses,)).float()  # size
+    features[:, 4] = torch.randint(0, 10, (num_clauses,)).float()  # depth
+    features[:, 5] = torch.randint(1, 30, (num_clauses,)).float()  # symbol_count
+    features[:, 6] = torch.randint(1, 15, (num_clauses,)).float()  # distinct_symbols
+    features[:, 7] = torch.randint(0, 10, (num_clauses,)).float()  # variable_count
+    features[:, 8] = torch.randint(0, 5, (num_clauses,)).float()   # distinct_vars
     return features
 
 
@@ -247,22 +253,27 @@ class TestClauseGCN:
 
     @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
     def test_node_info_names(self):
-        """node_info='names' with node_names should produce valid scores."""
+        """node_info='names' with node_names should produce valid embeddings via encode()."""
         model = ClauseGCN(hidden_dim=64, num_layers=2, node_info="names")
         node_features = make_node_features(10)
         adj = make_adj(10)
         pool_matrix = torch.ones(3, 10) / 10
         clause_features = make_clause_features(3)
-        # node_names required for 'names' mode - provide synthetic names
         node_names = ["p", "q", "f", "X", "a", "CLAUSE", "LIT", "VAR", "g", "b"]
 
-        scores = model(node_features, adj, pool_matrix, clause_features, node_names=node_names)
+        # encode() uses MiniLM for real symbol embeddings (training path)
+        emb = model.encode(node_features, adj, pool_matrix, clause_features, node_names=node_names)
+        assert emb.shape == (3, 64)
+        assert not torch.isnan(emb).any()
+
+        # forward() uses zero symbol embeddings (TorchScript/Rust path)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (3,)
         assert not torch.isnan(scores).any()
 
     @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
     def test_node_info_both(self):
-        """node_info='both' should produce valid scores."""
+        """node_info='both' should produce valid embeddings via encode()."""
         model = ClauseGCN(hidden_dim=64, num_layers=2, node_info="both")
         node_features = make_node_features(10)
         adj = make_adj(10)
@@ -270,7 +281,13 @@ class TestClauseGCN:
         clause_features = make_clause_features(3)
         node_names = ["p", "q", "f", "X", "a", "CLAUSE", "LIT", "VAR", "g", "b"]
 
-        scores = model(node_features, adj, pool_matrix, clause_features, node_names=node_names)
+        # encode() uses MiniLM for real symbol embeddings (training path)
+        emb = model.encode(node_features, adj, pool_matrix, clause_features, node_names=node_names)
+        assert emb.shape == (3, 64)
+        assert not torch.isnan(emb).any()
+
+        # forward() uses zero symbol embeddings (TorchScript/Rust path)
+        scores = model(node_features, adj, pool_matrix, clause_features)
         assert scores.shape == (3,)
         assert not torch.isnan(scores).any()
 

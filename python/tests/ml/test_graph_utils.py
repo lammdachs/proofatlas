@@ -29,11 +29,11 @@ except ImportError:
 from proofatlas.ml import graph_utils
 
 
-# Skip all tests if PyTorch not available
-pytestmark = pytest.mark.skipif(
-    not TORCH_AVAILABLE,
-    reason="PyTorch not installed"
-)
+# Skip all tests: clause_to_graph API was removed, PyTorch also required
+pytestmark = [
+    pytest.mark.skip(reason="Tests depend on removed Rust clause_to_graph API"),
+    pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not installed"),
+]
 
 
 # ============================================================================

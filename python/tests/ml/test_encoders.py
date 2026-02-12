@@ -21,11 +21,17 @@ def make_node_features(num_nodes: int) -> torch.Tensor:
 
 
 def make_clause_features(num_clauses: int) -> torch.Tensor:
-    """Create valid clause features: [age (0-1), role (0-4), size (>=1)]."""
-    features = torch.zeros(num_clauses, 3)
-    features[:, 0] = torch.rand(num_clauses)
-    features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
-    features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+    """Create valid 9D clause features."""
+    features = torch.zeros(num_clauses, 9)
+    features[:, 0] = torch.rand(num_clauses)                       # age
+    features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()   # role
+    features[:, 2] = torch.randint(0, 7, (num_clauses,)).float()   # rule
+    features[:, 3] = torch.randint(1, 20, (num_clauses,)).float()  # size
+    features[:, 4] = torch.randint(0, 10, (num_clauses,)).float()  # depth
+    features[:, 5] = torch.randint(1, 30, (num_clauses,)).float()  # symbol_count
+    features[:, 6] = torch.randint(1, 15, (num_clauses,)).float()  # distinct_symbols
+    features[:, 7] = torch.randint(0, 10, (num_clauses,)).float()  # variable_count
+    features[:, 8] = torch.randint(0, 5, (num_clauses,)).float()   # distinct_vars
     return features
 
 

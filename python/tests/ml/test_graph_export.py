@@ -4,8 +4,15 @@
 import json
 import pytest
 import numpy as np
+
+try:
+    from proofatlas.ml.structured import clause_to_graph, clause_to_string
+except ImportError:
+    pytestmark = pytest.mark.skip(reason="Depends on removed clause_to_graph API")
+    clause_to_graph = None
+    clause_to_string = None
+
 from proofatlas import ProofAtlas
-from proofatlas.ml.structured import clause_to_graph, clause_to_string
 
 
 def _get_trace_clauses(tptp: str):

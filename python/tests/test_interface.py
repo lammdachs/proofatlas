@@ -193,6 +193,7 @@ def test_statistics():
     assert "empty_clauses" in stats
 
 
+@pytest.mark.skip(reason="Depends on removed extract_structured_trace API")
 def test_extract_structured_trace():
     """Test extract_structured_trace() returns valid JSON"""
     state = ProofAtlas()

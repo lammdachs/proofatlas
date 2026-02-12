@@ -88,6 +88,7 @@ class TestClauseToString:
         assert result == "[]"
 
 
+@pytest.mark.skip(reason="Depends on removed clause_to_graph API")
 class TestClauseToGraph:
     """Test structured clause to graph tensor conversion."""
 
@@ -149,6 +150,7 @@ class TestClausesConversion:
         assert results[0] == "mult(X, Y) = Z"
         assert results[1] == "p(X) | ~q(X, c)"
 
+    @pytest.mark.skip(reason="Depends on removed clauses_to_graphs API")
     def test_clauses_to_graphs(self, sample_clause, sample_multi_literal_clause):
         from proofatlas.ml.structured import clauses_to_graphs
 
@@ -160,6 +162,7 @@ class TestClausesConversion:
         assert all("x" in r for r in results)
 
 
+@pytest.mark.skip(reason="Depends on removed clause_to_graph API")
 class TestBatchGraphs:
     """Test graph batching."""
 
@@ -186,6 +189,7 @@ class TestBatchGraphs:
         assert torch.equal(batched["y"], torch.tensor([1.0, 0.0]))
 
 
+@pytest.mark.skip(reason="Depends on removed extract_structured_trace/clause_to_graph API")
 class TestRustIntegration:
     """Test integration with Rust extract_structured_trace."""
 
@@ -252,6 +256,7 @@ class TestRustIntegration:
                 assert g["num_edges"] >= 0
 
 
+@pytest.mark.skip(reason="Depends on removed clause_to_graph API")
 class TestPoolValues:
     """Test pool matrix normalization."""
 
@@ -313,6 +318,7 @@ class TestPoolValues:
         assert len(combined) == g1["num_nodes"] + g2["num_nodes"]
 
 
+@pytest.mark.skip(reason="Depends on removed ProofDataset API")
 class TestProofDataset:
     """Test the ProofDataset class."""
 

@@ -526,17 +526,15 @@ class ClauseGCN(nn.Module):
         adj: torch.Tensor,
         pool_matrix: torch.Tensor,
         clause_features: torch.Tensor = None,
-        node_names: list = None,
     ) -> torch.Tensor:
         """
+        Forward pass for TorchScript export and Rust inference.
+
         Args:
             node_features: [total_nodes, 3] raw node features (type, arity, arg_pos)
             adj: Normalized adjacency matrix [total_nodes, total_nodes]
             pool_matrix: [num_clauses, total_nodes] for pooling nodes to clauses
             clause_features: [num_clauses, 9] raw clause features
-                            Optional for backwards compatibility
-            node_names: List of symbol name strings for each node.
-                       Required when node_info is "names" or "both".
 
         Returns:
             Scores [num_clauses]
@@ -548,9 +546,12 @@ class ClauseGCN(nn.Module):
         if self.node_info == "features":
             x = self.node_embedding(node_features)
         else:
-            sym_emb = None
-            if node_names is not None:
-                sym_emb = self.symbol_embedding.precompute(node_names, node_features.device)
+            # Zero symbol embeddings for TorchScript path (MiniLM not available).
+            # Training uses encode() which computes real symbol embeddings.
+            sym_emb = torch.zeros(
+                node_features.size(0), SymbolEmbedding.MINILM_DIM,
+                device=node_features.device,
+            )
             x = self.node_projection(node_features, sym_emb)
 
         # GCN message passing

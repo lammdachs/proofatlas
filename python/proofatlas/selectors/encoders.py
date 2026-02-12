@@ -218,10 +218,16 @@ class ClauseSelector(nn.Module):
 
         dummy_pool_matrix = torch.ones(num_clauses, num_nodes) / num_nodes
 
-        dummy_clause_features = torch.zeros(num_clauses, 3)
-        dummy_clause_features[:, 0] = torch.rand(num_clauses)
-        dummy_clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()
-        dummy_clause_features[:, 2] = torch.randint(1, 10, (num_clauses,)).float()
+        dummy_clause_features = torch.zeros(num_clauses, 9)
+        dummy_clause_features[:, 0] = torch.rand(num_clauses)                       # age
+        dummy_clause_features[:, 1] = torch.randint(0, 5, (num_clauses,)).float()   # role
+        dummy_clause_features[:, 2] = torch.randint(0, 7, (num_clauses,)).float()   # rule
+        dummy_clause_features[:, 3] = torch.randint(1, 20, (num_clauses,)).float()  # size
+        dummy_clause_features[:, 4] = torch.randint(0, 10, (num_clauses,)).float()  # depth
+        dummy_clause_features[:, 5] = torch.randint(1, 30, (num_clauses,)).float()  # symbol_count
+        dummy_clause_features[:, 6] = torch.randint(1, 15, (num_clauses,)).float()  # distinct_symbols
+        dummy_clause_features[:, 7] = torch.randint(0, 10, (num_clauses,)).float()  # variable_count
+        dummy_clause_features[:, 8] = torch.randint(0, 5, (num_clauses,)).float()   # distinct_vars
 
         with torch.no_grad():
             traced = torch.jit.trace(
