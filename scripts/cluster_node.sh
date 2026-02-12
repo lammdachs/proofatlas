@@ -63,14 +63,17 @@ case "$1" in
         esac
         if [ "$NODE" = "1" ]; then
             echo "=== Phase 1: Traces ==="
+            rm -f .data/traces/.complete
             proofatlas-bench --config age_weight --trace --foreground --cpu-workers "$WORKERS"
+            touch .data/traces/.complete
+            echo "Trace collection complete, sentinel created"
         else
             echo "=== Phase 1: Waiting for traces ==="
-            while [ ! -d .data/traces ] || [ -z "$(ls -A .data/traces 2>/dev/null)" ]; do
-                echo "Waiting for node 1 to collect traces..."
+            while [ ! -f .data/traces/.complete ]; do
+                echo "Waiting for node 1 to complete trace collection..."
                 sleep 30
             done
-            echo "Traces found, proceeding"
+            echo "Traces complete, proceeding"
         fi
         echo "=== Phase 2: Pipeline ==="
         proofatlas-pipeline --configs $CONFIGS --job-prefix "$(node_prefix $NODE)" \
@@ -93,14 +96,17 @@ nohup bash -c "
     set -e
     if [ '$NODE' = '1' ]; then
         echo \"[\$(date +%H:%M:%S)] Phase 1: Collecting traces (workers=$WORKERS)\"
+        rm -f .data/traces/.complete
         proofatlas-bench --config age_weight --trace --foreground --cpu-workers $WORKERS
+        touch .data/traces/.complete
+        echo \"[\$(date +%H:%M:%S)] Trace collection complete, sentinel created\"
     else
         echo \"[\$(date +%H:%M:%S)] Phase 1: Waiting for traces from node 1\"
-        while [ ! -d .data/traces ] || [ -z \"\$(ls -A .data/traces 2>/dev/null)\" ]; do
+        while [ ! -f .data/traces/.complete ]; do
             echo \"[\$(date +%H:%M:%S)] Waiting...\"
             sleep 30
         done
-        echo \"[\$(date +%H:%M:%S)] Traces found\"
+        echo \"[\$(date +%H:%M:%S)] Traces complete\"
     fi
 
     echo \"[\$(date +%H:%M:%S)] Phase 2: Launching pipeline ($CONFIGS)\"
