@@ -294,6 +294,39 @@ pub struct BatchClauseGraph {
 }
 
 impl GraphBuilder {
+    /// Collect node names for all clauses in the same traversal order as `build_from_clauses`.
+    ///
+    /// Returns a flat list of symbol names: structural sentinels ("CLAUSE", "LIT", "VAR")
+    /// for clause/literal/variable nodes, and the actual symbol name for
+    /// predicate/function/constant nodes. Used by the `node_info="names"` GCN mode.
+    pub fn collect_node_names(clauses: &[&Clause], interner: &Interner) -> Vec<String> {
+        let mut names = Vec::new();
+        for clause in clauses {
+            names.push("CLAUSE".to_string());
+            for literal in &clause.literals {
+                names.push("LIT".to_string());
+                names.push(literal.predicate.name(interner).to_string());
+                for term in &literal.args {
+                    Self::collect_term_names(term, interner, &mut names);
+                }
+            }
+        }
+        names
+    }
+
+    fn collect_term_names(term: &Term, interner: &Interner, names: &mut Vec<String>) {
+        match term {
+            Term::Variable(_) => names.push("VAR".to_string()),
+            Term::Constant(c) => names.push(c.name(interner).to_string()),
+            Term::Function(func, args) => {
+                names.push(func.name(interner).to_string());
+                for arg in args {
+                    Self::collect_term_names(arg, interner, names);
+                }
+            }
+        }
+    }
+
     /// Build a combined graph from multiple clauses for batch inference
     ///
     /// This builds directly into batch arrays without intermediate ClauseGraph
@@ -605,6 +638,56 @@ mod tests {
 
         // Check role feature (Axiom = 0.0)
         assert_eq!(axiom_graph.node_features[0][FEAT_ROLE], 0.0);
+    }
+
+    #[test]
+    fn test_collect_node_names_matches_batch() {
+        let mut interner = Interner::new();
+
+        // Build two clauses: P(x) and Q(f(a, b))
+        let x_id = interner.intern_variable("x");
+        let a_id = interner.intern_constant("a");
+        let b_id = interner.intern_constant("b");
+        let f_id = interner.intern_function("f");
+        let p_id = interner.intern_predicate("P");
+        let q_id = interner.intern_predicate("Q");
+
+        let x = Term::Variable(Variable { id: x_id });
+        let a = Term::Constant(Constant { id: a_id });
+        let b = Term::Constant(Constant { id: b_id });
+        let f_ab = Term::Function(
+            FunctionSymbol { id: f_id, arity: 2 },
+            vec![a, b],
+        );
+
+        let clause1 = Clause::new(vec![Literal::positive(
+            PredicateSymbol { id: p_id, arity: 1 },
+            vec![x],
+        )]);
+        let clause2 = Clause::new(vec![Literal::positive(
+            PredicateSymbol { id: q_id, arity: 1 },
+            vec![f_ab],
+        )]);
+
+        let clauses: Vec<&Clause> = vec![&clause1, &clause2];
+        let batch = GraphBuilder::build_from_clauses(&clauses);
+        let names = GraphBuilder::collect_node_names(&clauses, &interner);
+
+        assert_eq!(names.len(), batch.num_nodes);
+
+        // Clause 1: CLAUSE, LIT, P, VAR
+        assert_eq!(names[0], "CLAUSE");
+        assert_eq!(names[1], "LIT");
+        assert_eq!(names[2], "P");
+        assert_eq!(names[3], "VAR");
+
+        // Clause 2: CLAUSE, LIT, Q, f, a, b
+        assert_eq!(names[4], "CLAUSE");
+        assert_eq!(names[5], "LIT");
+        assert_eq!(names[6], "Q");
+        assert_eq!(names[7], "f");
+        assert_eq!(names[8], "a");
+        assert_eq!(names[9], "b");
     }
 
     #[test]

@@ -7,6 +7,7 @@
     "gcn_attention",
     "gcn_mlp",
     "gcn_transformer",
+    "sentence_attention",
     "sentence_mlp"
   ]
 }

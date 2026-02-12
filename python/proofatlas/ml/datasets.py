@@ -107,6 +107,7 @@ def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
         clause_features = npz["clause_features"]
         labels = npz["labels"]
         num_clauses = len(labels)
+        node_names = list(npz["node_names"]) if "node_names" in npz else None
 
         def _extract_clause_graph(i):
             n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
@@ -123,13 +124,16 @@ def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
             else:
                 edge_index = np.zeros((2, 0), dtype=np.int64)
 
-            return {
+            result = {
                 "x": x,
                 "edge_index": edge_index,
                 "num_nodes": num_nodes,
                 "num_edges": num_edges,
                 "clause_features": clause_features[i].copy(),
             }
+            if node_names is not None:
+                result["node_names"] = node_names[n_start:n_end]
+            return result
 
         u_graphs = [_extract_clause_graph(i) for i in range(num_u)]
         u_labels = [int(labels[i]) for i in range(num_u)]
@@ -426,6 +430,8 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
         "labels": u_batched["y"],
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
     }
+    if "node_names" in u_batched:
+        result["u_node_names"] = u_batched["node_names"]
 
     # Batch P graphs (no labels needed)
     if all_p_graphs:
@@ -434,5 +440,7 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
         result["p_adj"] = p_batched["adj"]
         result["p_pool_matrix"] = p_batched["pool_matrix"]
         result["p_clause_features"] = p_batched.get("clause_features")
+        if "node_names" in p_batched:
+            result["p_node_names"] = p_batched["node_names"]
 
     return result

@@ -170,6 +170,7 @@ def batch_graphs(
     all_x = []
     all_edges = []
     all_clause_features = []
+    all_node_names = []
     batch_indices = []
 
     node_offset = 0
@@ -181,6 +182,8 @@ def batch_graphs(
 
         if 'clause_features' in g:
             all_clause_features.append(g['clause_features'])
+        if 'node_names' in g:
+            all_node_names.extend(g['node_names'])
 
         node_offset += g['num_nodes']
 
@@ -239,6 +242,9 @@ def batch_graphs(
         cf_np = np.stack(all_clause_features, axis=0)
         result['clause_features'] = torch.tensor(cf_np, dtype=torch.float32, device=device)
         del cf_np
+
+    if all_node_names:
+        result['node_names'] = all_node_names  # flat Python list, not tensor
 
     if labels is not None:
         result['y'] = torch.tensor(labels, dtype=torch.float, device=device)

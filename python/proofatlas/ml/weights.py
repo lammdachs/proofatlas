@@ -11,7 +11,7 @@ from typing import Optional
 STRING_ENCODERS = {"sentence"}
 
 # Encoders that use graph input (node features, adjacency, pooling)
-GRAPH_ENCODERS = {"gcn", "gat", "graphsage"}
+GRAPH_ENCODERS = {"gcn", "gcn_struct", "gcn_symbol"}
 
 # Encoders that use only clause-level features (no structure or text)
 FEATURES_ENCODERS = {"features"}

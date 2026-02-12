@@ -498,6 +498,10 @@ impl PyProofAtlas {
         let clause_refs: Vec<&Clause> = clauses.iter().collect();
         let batch_graph = GraphBuilder::build_from_clauses(&clause_refs);
 
+        // Node names for symbol embedding (node_info="names"/"both" GCN modes)
+        let node_names = GraphBuilder::collect_node_names(&clause_refs, interner);
+        debug_assert_eq!(node_names.len(), batch_graph.num_nodes);
+
         // node_features [total_nodes, 3]
         let node_feat_2d: Vec<Vec<f32>> = batch_graph.node_features.iter()
             .map(|nf| nf.to_vec())
@@ -635,6 +639,11 @@ impl PyProofAtlas {
         graph_dict.set_item("state_p_indices", &state_p_indices_arr)?;
         graph_dict.set_item("proof_found", &proof_found_arr)?;
         graph_dict.set_item("time_seconds", &time_arr)?;
+
+        // Node names for symbol embedding
+        let py_node_names = pyo3::types::PyList::new(py, &node_names)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create node_names: {}", e)))?;
+        graph_dict.set_item("node_names", py_node_names)?;
 
         // --- Build sentence dict ---
         let sentence_dict = PyDict::new(py);

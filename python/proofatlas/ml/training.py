@@ -118,6 +118,9 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
         clause_features = graph_dict["clause_features"]
         labels = graph_dict["labels"]
 
+        # Node names for symbol embedding (node_info="names"/"both")
+        node_names = graph_dict.get("node_names")  # list of strings, or None
+
         # Sentence data
         clause_strings = sentence_dict.get("clause_strings")
         sent_labels = sentence_dict["labels"]
@@ -138,6 +141,7 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
             all_nf = []
             all_es = []
             all_ed = []
+            all_names = []
             s_node_off = [0]
             s_edge_off = [0]
             node_cursor = 0
@@ -154,6 +158,8 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
                 if nedges > 0:
                     all_es.append(edge_src[es:ee].astype(np.int64) - ns + node_cursor)
                     all_ed.append(edge_dst[es:ee].astype(np.int64) - ns + node_cursor)
+                if node_names is not None:
+                    all_names.extend(node_names[ns:ne])
 
                 node_cursor += nn
                 s_node_off.append(node_cursor)
@@ -163,8 +169,7 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
             ces = np.concatenate(all_es) if all_es else np.zeros(0, dtype=np.int64)
             ced = np.concatenate(all_ed) if all_ed else np.zeros(0, dtype=np.int64)
 
-            np.savez_compressed(
-                problem_dir / f"{si}.graph.npz",
+            save_kwargs = dict(
                 node_features=cnf,
                 edge_src=ces,
                 edge_dst=ced,
@@ -174,6 +179,10 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
                 labels=labels[all_idx],
                 num_u=np.array(num_u, dtype=np.int64),
             )
+            if all_names:
+                save_kwargs["node_names"] = np.array(all_names, dtype=object)
+
+            np.savez_compressed(problem_dir / f"{si}.graph.npz", **save_kwargs)
 
             # --- Sentence per-state file ---
             if clause_strings is not None:
@@ -278,8 +287,9 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
         u_cf = batch.get("u_clause_features")
         if u_cf is not None:
             u_cf = u_cf.to(device)
+        u_node_names = batch.get("u_node_names")
 
-        u_emb = model.encode(u_x, u_adj, u_pool, u_cf)
+        u_emb = model.encode(u_x, u_adj, u_pool, u_cf, node_names=u_node_names)
 
         p_emb = None
         if "p_node_features" in batch:
@@ -289,7 +299,8 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
             p_cf = batch.get("p_clause_features")
             if p_cf is not None:
                 p_cf = p_cf.to(device)
-            p_emb = model.encode(p_x, p_adj, p_pool, p_cf)
+            p_node_names = batch.get("p_node_names")
+            p_emb = model.encode(p_x, p_adj, p_pool, p_cf, node_names=p_node_names)
 
         return model.scorer(u_emb, p_emb)
 
@@ -581,6 +592,9 @@ def _run_training_inner(
         scorer_num_heads=scorer_config.get("num_heads", 4),
         scorer_num_layers=scorer_config.get("num_layers", 2),
         freeze_encoder=emb_config.get("freeze_encoder", False),
+        node_info=emb_config.get("node_info", "features"),
+        use_clause_features=emb_config.get("use_clause_features", True),
+        sin_dim=emb_config.get("sin_dim", 8),
     )
 
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]

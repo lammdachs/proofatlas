@@ -77,12 +77,12 @@
     },
 
     "features_att": {
-      "description": "Features + MLP",
+      "description": "Features + Attention",
       "timeout": 300,
       "max_iterations": 256,
       "literal_selection": 21,
       "encoder": "features",
-      "scorer": "encoder",
+      "scorer": "attention",
       "traces": "age_weight",
       "memory_limit": 4096
     },
@@ -93,6 +93,94 @@
       "max_iterations": 256,
       "literal_selection": 21,
       "encoder": "features",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_struct_mlp": {
+      "description": "GCN (structural) + MLP",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_struct_attention": {
+      "description": "GCN (structural) + Attention",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_struct_transformer": {
+      "description": "GCN (structural) + Transformer",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_symbol_mlp": {
+      "description": "GCN (symbol) + MLP",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_symbol",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_symbol_attention": {
+      "description": "GCN (symbol) + Attention",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_symbol",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "gcn_symbol_transformer": {
+      "description": "GCN (symbol) + Transformer",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_symbol",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "sentence_attention": {
+      "description": "Sentence + Attention",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "sentence",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 4096
+    },
+
+    "sentence_transformer": {
+      "description": "Sentence + Transformer",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "sentence",
       "scorer": "transformer",
       "traces": "age_weight",
       "memory_limit": 4096

@@ -31,6 +31,8 @@ import os
 # Limit torch/MKL threads before any imports that load libtorch.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
+# Suppress noisy tokenizer parallelism warning in forked workers.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import argparse
 import json

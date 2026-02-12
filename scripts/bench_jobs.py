@@ -295,10 +295,16 @@ def daemonize(log_file_path: Path):
     os.close(write_fd)
 
     # Close stdin and redirect stdout/stderr to log file early
-    # so any errors during startup are captured
+    # so any errors during startup are captured.
+    # Use os.dup2 to redirect the OS-level file descriptors (fd 1/2),
+    # not just Python's sys.stdout/stderr — C extensions (libtorch,
+    # tokenizers) write directly to fd 1/2, bypassing Python.
     sys.stdin.close()
     os.close(0)
-    sys.stdout = open(log_file_path, "w")
+    log_file = open(log_file_path, "w")
+    os.dup2(log_file.fileno(), 1)
+    os.dup2(log_file.fileno(), 2)
+    sys.stdout = log_file
     sys.stderr = sys.stdout
 
     return (True, 0)
