@@ -176,11 +176,132 @@ def update_child_pid(job_file: Path, child_pid: int):
         pass
 
 
+def sync_all_run_results(base_dir: Path):
+    """Combine per-problem JSONs from .data/runs/ into single files in web/data/runs/."""
+    runs_src = base_dir / ".data" / "runs"
+    runs_dst = base_dir / "web" / "data" / "runs"
+    runs_dst.mkdir(parents=True, exist_ok=True)
+
+    if not runs_src.exists():
+        log("No .data/runs/ directory found — skipping run sync")
+        return
+
+    index_entries = []
+
+    for prover_dir in sorted(runs_src.iterdir()):
+        if not prover_dir.is_dir():
+            continue
+        prover = prover_dir.name
+
+        for config_dir in sorted(prover_dir.iterdir()):
+            if not config_dir.is_dir():
+                continue
+            preset = config_dir.name
+            run_key = f"{prover}_{preset}"
+
+            results = []
+            for problem_file in sorted(config_dir.glob("*.json")):
+                try:
+                    with open(problem_file) as f:
+                        data = json.load(f)
+                    results.append({
+                        "problem": data.get("problem", problem_file.stem + ".p"),
+                        "status": data.get("status", "unknown"),
+                        "time_s": data.get("time_s", 0),
+                        "timestamp": data.get("timestamp", ""),
+                    })
+                except (json.JSONDecodeError, IOError):
+                    continue
+
+            if not results:
+                continue
+
+            combined = {
+                "prover": prover,
+                "preset": preset,
+                "results": results,
+            }
+
+            out_path = runs_dst / f"{run_key}.json"
+            with open(out_path, "w") as f:
+                json.dump(combined, f, separators=(",", ":"))
+
+            index_entries.append(run_key)
+            log(f"[{run_key}] Wrote {len(results)} results to web/data/runs/")
+
+    # Write index
+    with open(runs_dst / "index.json", "w") as f:
+        json.dump({"runs": sorted(index_entries)}, f, indent=2)
+
+    log(f"Run index: {len(index_entries)} configs")
+
+
+def push_results(base_dir: Path, configs: list[str]) -> bool:
+    """Git add, pull, commit, push web/data/. Returns True if pushed successfully."""
+    sync_all_run_results(base_dir)
+
+    subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
+
+    commit_msg = f"[skip ci] Update results: {', '.join(configs)}"
+    result = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        if "nothing to commit" in result.stdout + result.stderr:
+            log("No new results to commit")
+            return True
+        log(f"Git commit failed: {result.stderr.strip()}")
+        return False
+
+    # Pull with rebase to incorporate any remote changes
+    pull = subprocess.run(
+        ["git", "pull", "--rebase"],
+        cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if pull.returncode != 0:
+        log(f"Git pull --rebase failed: {pull.stderr.strip()}")
+        log("Commit is local — will retry on next push interval")
+        return False
+
+    push = subprocess.run(
+        ["git", "push"],
+        cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if push.returncode != 0:
+        log(f"Git push failed: {push.stderr.strip()}")
+        return False
+
+    log(f"Pushed results for: {', '.join(configs)}")
+    return True
+
+
+def maybe_push(base_dir: Path, unpushed: list[str], last_push_time: float,
+               push_interval: float, force: bool = False) -> tuple[list[str], float]:
+    """Push if enough time has elapsed or force=True. Returns (remaining_unpushed, new_last_push_time)."""
+    if not unpushed:
+        return unpushed, last_push_time
+    if not force and (time.time() - last_push_time) < push_interval:
+        return unpushed, last_push_time
+
+    print(f"PIPELINE:0:0:push:pushing")
+    sys.stdout.flush()
+
+    if push_results(base_dir, unpushed):
+        return [], time.time()
+    else:
+        # Keep unpushed list so next push attempt includes them
+        return unpushed, last_push_time
+
+
 def run_pipeline(configs: list[str], args, base_dir: Path):
-    """Run train→bench for each config, then push results."""
+    """Run train→bench for each config, pushing results incrementally."""
     total_steps = len(configs)
     completed = []
     failed = []
+    unpushed = []
+    last_push_time = time.time()
+    push_interval = args.push_interval
     job_file = base_dir / f".data/{PIPELINE_PREFIX}_job.json"
 
     for step, config_name in enumerate(configs, 1):
@@ -264,35 +385,18 @@ def run_pipeline(configs: list[str], args, base_dir: Path):
 
         log(f"[{config_name}] Evaluation complete")
         completed.append(config_name)
+        unpushed.append(config_name)
         sys.stdout.flush()
 
-    # --- Push results ---
-    if completed:
-        print(f"\nPIPELINE:{total_steps}:{total_steps}:push:pushing")
-        sys.stdout.flush()
-
-        log(f"Pushing results for: {', '.join(completed)}")
-
-        subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
-        commit_msg = f"[skip ci] Update results: {', '.join(completed)}"
-        result = subprocess.run(
-            ["git", "commit", "-m", commit_msg],
-            cwd=str(base_dir), capture_output=True, text=True,
+        # Push if enough time has elapsed
+        unpushed, last_push_time = maybe_push(
+            base_dir, unpushed, last_push_time, push_interval,
         )
-        if result.returncode == 0:
-            push_result = subprocess.run(
-                ["git", "push"], cwd=str(base_dir),
-                capture_output=True, text=True,
-            )
-            if push_result.returncode == 0:
-                log("Results pushed successfully")
-            else:
-                log(f"Git push failed: {push_result.stderr.strip()}")
-        else:
-            if "nothing to commit" in result.stdout or "nothing to commit" in result.stderr:
-                log("No new results to commit")
-            else:
-                log(f"Git commit failed: {result.stderr.strip()}")
+
+    # Final push for any remaining results
+    unpushed, last_push_time = maybe_push(
+        base_dir, unpushed, last_push_time, push_interval, force=True,
+    )
 
     # --- Summary ---
     print(f"\n{'='*60}")
@@ -333,6 +437,10 @@ def main():
     # Pass-through bench flags
     parser.add_argument("--rerun", action="store_true",
                        help="Re-evaluate cached bench results")
+
+    # Push control
+    parser.add_argument("--push-interval", type=int, default=300,
+                       help="Seconds between result pushes (default: 300 = 5 min)")
 
     args = parser.parse_args()
     base_dir = find_project_root()

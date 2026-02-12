@@ -1,0 +1,10 @@
+{
+  "runs": [
+    "proofatlas_age_weight",
+    "proofatlas_features_attention",
+    "proofatlas_gcn_attention",
+    "proofatlas_gcn_mlp",
+    "proofatlas_gcn_transformer",
+    "proofatlas_time"
+  ]
+}

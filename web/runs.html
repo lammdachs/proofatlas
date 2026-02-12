@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Runs - ProofAtlas</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .runs-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-width: 120px;
+        }
+
+        .stat-card .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+
+        .stat-card .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+
+        .stat-card.proof .stat-value { color: #27ae60; }
+        .stat-card.saturated .stat-value { color: #3498db; }
+        .stat-card.resource-limit .stat-value { color: #f39c12; }
+        .stat-card.error .stat-value { color: #e74c3c; }
+
+        .filters-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .filters-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        .filter-btn {
+            padding: 6px 12px;
+            border: 2px solid #dee2e6;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            border-color: #3498db;
+        }
+
+        .filter-btn.active {
+            background: #3498db;
+            border-color: #3498db;
+            color: white;
+        }
+
+        .filter-btn.status-proof.active { background: #27ae60; border-color: #27ae60; }
+        .filter-btn.status-saturated.active { background: #3498db; border-color: #3498db; }
+        .filter-btn.status-resource_limit.active { background: #f39c12; border-color: #f39c12; }
+        .filter-btn.status-error.active { background: #e74c3c; border-color: #e74c3c; }
+
+        .problems-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .problems-table th,
+        .problems-table td {
+            padding: 10px 15px;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .problems-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .problems-table th:hover {
+            background: #e9ecef;
+        }
+
+        .problems-table th .sort-arrow {
+            margin-left: 4px;
+            opacity: 0.3;
+        }
+
+        .problems-table th.sorted .sort-arrow {
+            opacity: 1;
+        }
+
+        .problems-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .problems-table .time-col {
+            text-align: right;
+            font-family: monospace;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-badge.proof { background: #d4edda; color: #155724; }
+        .status-badge.saturated { background: #d1ecf1; color: #0c5460; }
+        .status-badge.resource_limit { background: #fff3cd; color: #856404; }
+        .status-badge.error { background: #f8d7da; color: #721c24; }
+        .status-badge.unknown { background: #e2e3e5; color: #383d41; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .table-info {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="hero" style="padding: 20px;">
+            <h1>Runs</h1>
+            <p class="tagline">Per-problem benchmark results</p>
+            <nav class="main-nav">
+                <a href="index.html">Home</a>
+                <a href="results.html">Results</a>
+                <a href="runs.html">Runs</a>
+                <a href="training.html">Training</a>
+                <a href="docs.html">Docs</a>
+                <a href="https://github.com/lexpk/proofatlas">GitHub</a>
+            </nav>
+        </header>
+
+        <div class="runs-container">
+            <div id="loading" class="loading">Loading run data...</div>
+
+            <div id="content" style="display: none;">
+                <div class="stats-row" id="stats-row"></div>
+
+                <div class="filters-section">
+                    <div class="filters-row">
+                        <div class="filter-group" id="config-filters">
+                            <label>Config:</label>
+                        </div>
+                    </div>
+                    <div class="filters-row" style="margin-top: 10px;">
+                        <div class="filter-group" id="status-filters">
+                            <label>Status:</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="table-section">
+                    <div class="table-info" id="table-info"></div>
+                    <table class="problems-table" id="problems-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="problem" class="sorted">Problem <span class="sort-arrow">&#9650;</span></th>
+                                <th data-sort="status">Status <span class="sort-arrow">&#9650;</span></th>
+                                <th data-sort="time_s">Time <span class="sort-arrow">&#9650;</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="problems-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="no-data" class="no-data" style="display: none;">
+                <h3>No Run Data Available</h3>
+                <p>Run benchmarks and sync results:</p>
+                <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; text-align: left; display: inline-block;">
+proofatlas-bench --config age_weight
+proofatlas-pipeline  # or manually sync</pre>
+            </div>
+        </div>
+
+        <footer>
+            <p class="footer-links">
+                <a href="index.html">Home</a> |
+                <a href="results.html">Results</a> |
+                <a href="runs.html">Runs</a> |
+                <a href="training.html">Training</a> |
+                <a href="docs.html">Docs</a> |
+                <a href="https://github.com/lexpk/proofatlas">GitHub</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let runIndex = [];
+        let currentData = null;
+        let currentConfig = null;
+        let sortCol = 'problem';
+        let sortAsc = true;
+        let statusFilters = new Set(['proof', 'saturated', 'resource_limit', 'error', 'unknown']);
+
+        async function loadIndex() {
+            try {
+                const resp = await fetch('data/runs/index.json');
+                if (!resp.ok) { showNoData(); return; }
+                const index = await resp.json();
+                runIndex = index.runs || [];
+                if (runIndex.length === 0) { showNoData(); return; }
+
+                setupConfigButtons();
+
+                // Check URL hash for deep link
+                const hash = location.hash.slice(1);
+                const initial = runIndex.includes(hash) ? hash : runIndex[0];
+                loadConfig(initial);
+            } catch (e) {
+                console.error('Failed to load index:', e);
+                showNoData();
+            }
+        }
+
+        function setupConfigButtons() {
+            const container = document.getElementById('config-filters');
+            runIndex.forEach(name => {
+                const btn = document.createElement('button');
+                btn.className = 'filter-btn';
+                btn.dataset.config = name;
+                btn.textContent = name;
+                btn.addEventListener('click', () => loadConfig(name));
+                container.appendChild(btn);
+            });
+        }
+
+        function setupStatusButtons(statuses) {
+            const container = document.getElementById('status-filters');
+            // Clear old buttons (keep label)
+            while (container.children.length > 1) container.removeChild(container.lastChild);
+
+            statuses.forEach(s => {
+                const btn = document.createElement('button');
+                btn.className = `filter-btn status-${s}` + (statusFilters.has(s) ? ' active' : '');
+                btn.dataset.status = s;
+                btn.textContent = s.replace('_', ' ');
+                btn.addEventListener('click', () => {
+                    if (statusFilters.has(s)) {
+                        statusFilters.delete(s);
+                        btn.classList.remove('active');
+                    } else {
+                        statusFilters.add(s);
+                        btn.classList.add('active');
+                    }
+                    renderTable();
+                });
+                container.appendChild(btn);
+            });
+        }
+
+        async function loadConfig(name) {
+            currentConfig = name;
+            location.hash = name;
+
+            // Highlight active config button
+            document.querySelectorAll('[data-config]').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.config === name);
+            });
+
+            try {
+                const resp = await fetch(`data/runs/${name}.json`);
+                if (!resp.ok) return;
+                currentData = await resp.json();
+
+                // Discover statuses present in data
+                const statuses = [...new Set(currentData.results.map(r => r.status))].sort();
+                statusFilters = new Set(statuses);
+                setupStatusButtons(statuses);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+
+                updateStats();
+                renderTable();
+            } catch (e) {
+                console.error(`Failed to load ${name}:`, e);
+            }
+        }
+
+        function updateStats() {
+            if (!currentData) return;
+            const results = currentData.results;
+            const counts = {};
+            results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+            const total = results.length;
+            const proof = counts.proof || 0;
+            const saturated = counts.saturated || 0;
+            const rl = counts.resource_limit || 0;
+            const error = counts.error || 0;
+
+            document.getElementById('stats-row').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${total.toLocaleString()}</div>
+                    <div class="stat-label">Attempted</div>
+                </div>
+                <div class="stat-card proof">
+                    <div class="stat-value">${proof.toLocaleString()}</div>
+                    <div class="stat-label">Proof</div>
+                </div>
+                <div class="stat-card saturated">
+                    <div class="stat-value">${saturated.toLocaleString()}</div>
+                    <div class="stat-label">Saturated</div>
+                </div>
+                <div class="stat-card resource-limit">
+                    <div class="stat-value">${rl.toLocaleString()}</div>
+                    <div class="stat-label">Resource Limit</div>
+                </div>
+                <div class="stat-card error">
+                    <div class="stat-value">${error.toLocaleString()}</div>
+                    <div class="stat-label">Error</div>
+                </div>
+            `;
+        }
+
+        function renderTable() {
+            if (!currentData) return;
+
+            let rows = currentData.results.filter(r => statusFilters.has(r.status));
+
+            // Sort
+            rows.sort((a, b) => {
+                let va = a[sortCol], vb = b[sortCol];
+                if (sortCol === 'time_s') {
+                    va = va || 0; vb = vb || 0;
+                    return sortAsc ? va - vb : vb - va;
+                }
+                va = String(va || ''); vb = String(vb || '');
+                return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+            });
+
+            document.getElementById('table-info').textContent =
+                `Showing ${rows.length} of ${currentData.results.length} problems`;
+
+            const tbody = document.getElementById('problems-tbody');
+            tbody.innerHTML = rows.map(r => `
+                <tr>
+                    <td>${r.problem}</td>
+                    <td><span class="status-badge ${r.status}">${r.status.replace('_', ' ')}</span></td>
+                    <td class="time-col">${r.time_s != null ? r.time_s.toFixed(3) + 's' : '-'}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Column sorting
+        document.querySelectorAll('[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.sort;
+                if (sortCol === col) {
+                    sortAsc = !sortAsc;
+                } else {
+                    sortCol = col;
+                    sortAsc = true;
+                }
+                // Update header styles
+                document.querySelectorAll('[data-sort]').forEach(h => h.classList.remove('sorted'));
+                th.classList.add('sorted');
+                th.querySelector('.sort-arrow').innerHTML = sortAsc ? '&#9650;' : '&#9660;';
+                renderTable();
+            });
+        });
+
+        function showNoData() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('no-data').style.display = 'block';
+        }
+
+        loadIndex();
+    </script>
+</body>
+</html>
