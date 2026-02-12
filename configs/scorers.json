@@ -14,7 +14,7 @@
     "transformer": {
       "type": "transformer",
       "hidden_dim": 64,
-      "num_layers": 2,
+      "num_layers": 4,
       "num_heads": 4
     }
   }

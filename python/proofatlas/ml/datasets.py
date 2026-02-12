@@ -298,11 +298,14 @@ class ProofBatchDataset(IterableDataset):
             else:
                 proof_bytes = _estimate_graph_bytes(item)
 
-            if buffer_bytes + proof_bytes > self.max_batch_bytes and buffer:
-                batch = self._collate(buffer)
-                if batch is not None:
-                    yield batch
-                buffer, buffer_bytes = [], 0
+            if buffer_bytes + proof_bytes > self.max_batch_bytes:
+                if buffer:
+                    batch = self._collate(buffer)
+                    if batch is not None:
+                        yield batch
+                    buffer, buffer_bytes = [], 0
+                if proof_bytes > self.max_batch_bytes:
+                    continue  # drop oversized item
 
             buffer.append(item)
             buffer_bytes += proof_bytes

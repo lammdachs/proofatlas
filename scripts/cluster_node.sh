@@ -2,18 +2,18 @@
 set -e
 
 # Per-node IJCAR experiment runner for 2-node cluster with shared storage.
-# Node 1 collects traces, then both nodes run their pipeline configs.
+# Traces must already exist (collected via proofatlas-bench --config age_weight --trace).
 #
 # Usage:
-#   scripts/cluster_node.sh 1               # Node 1: collect traces + 8 configs
-#   scripts/cluster_node.sh 2               # Node 2: wait for traces + 7 configs
+#   scripts/cluster_node.sh 1               # Node 1: 9 configs (GPU)
+#   scripts/cluster_node.sh 2               # Node 2: 6 configs (CPU)
 #   scripts/cluster_node.sh --status [N]    # Check status (optionally for node N)
 #   scripts/cluster_node.sh --kill [N]      # Stop jobs (optionally for node N)
 #   scripts/cluster_node.sh --foreground 1  # Run in foreground (no daemon)
 
 WORKERS=60
 GPU_WORKERS=4
-BATCH_SIZE=16M
+BATCH_SIZE=64K
 
 # Node-specific files to avoid conflicts on shared storage
 node_log() { echo ".data/cluster_node$1.log"; }
@@ -21,8 +21,8 @@ node_pid() { echo ".data/cluster_node$1.pid"; }
 node_prefix() { echo "node$1"; }
 
 case "$1" in
-    1) NODE=1; CONFIGS="gcn_mlp gcn_attention gcn_transformer gcn_struct_mlp gcn_struct_attention gcn_struct_transformer gcn_symbol_mlp gcn_symbol_attention" ;;
-    2) NODE=2; CONFIGS="gcn_symbol_transformer features_mlp features_attention features_transformer sentence_mlp sentence_attention sentence_transformer" ;;
+    1) NODE=1; CONFIGS="gcn_transformer gcn_struct_transformer gcn_symbol_transformer features_transformer sentence_mlp sentence_attention sentence_transformer"; GPU_ARGS="--use-cuda --gpu-workers $GPU_WORKERS" ;;
+    2) NODE=2; CONFIGS="gcn_mlp gcn_attention gcn_struct_mlp gcn_struct_attention gcn_symbol_mlp gcn_symbol_attention features_mlp features_attention"; GPU_ARGS="" ;;
     --status)
         NODES="${2:-1 2}"
         for N in $NODES; do
@@ -30,7 +30,7 @@ case "$1" in
             LOG=$(node_log $N)
             echo "=== Node $N ==="
             if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-                echo "Trace collection running (PID: $(cat "$PIDFILE"))"
+                echo "Running (PID: $(cat "$PIDFILE"))"
                 echo "  Log: tail -f $LOG"
                 tail -3 "$LOG" 2>/dev/null | sed 's/^/  /'
             else
@@ -61,27 +61,12 @@ case "$1" in
     --foreground)
         shift
         case "$1" in
-            1) NODE=1; CONFIGS="gcn_mlp gcn_attention gcn_transformer gcn_struct_mlp gcn_struct_attention gcn_struct_transformer gcn_symbol_mlp gcn_symbol_attention" ;;
-            2) NODE=2; CONFIGS="gcn_symbol_transformer features_mlp features_attention features_transformer sentence_mlp sentence_attention sentence_transformer" ;;
+            1) NODE=1; CONFIGS="gcn_transformer gcn_struct_transformer gcn_symbol_transformer features_transformer sentence_mlp sentence_attention sentence_transformer"; GPU_ARGS="--use-cuda --gpu-workers $GPU_WORKERS" ;;
+            2) NODE=2; CONFIGS="gcn_mlp gcn_attention gcn_struct_mlp gcn_struct_attention gcn_symbol_mlp gcn_symbol_attention features_mlp features_attention"; GPU_ARGS="" ;;
             *) echo "Usage: $0 --foreground <1|2>"; exit 1 ;;
         esac
-        if [ "$NODE" = "1" ]; then
-            echo "=== Phase 1: Traces ==="
-            rm -f .data/traces/.complete
-            proofatlas-bench --config age_weight --trace --foreground --cpu-workers "$WORKERS"
-            touch .data/traces/.complete
-            echo "Trace collection complete, sentinel created"
-        else
-            echo "=== Phase 1: Waiting for traces ==="
-            while [ ! -f .data/traces/.complete ]; do
-                echo "Waiting for node 1 to complete trace collection..."
-                sleep 30
-            done
-            echo "Traces complete, proceeding"
-        fi
-        echo "=== Phase 2: Pipeline ==="
         proofatlas-pipeline --configs $CONFIGS --job-prefix "$(node_prefix $NODE)" \
-            --use-cuda --gpu-workers "$GPU_WORKERS" --cpu-workers "$WORKERS" --batch-size "$BATCH_SIZE"
+            $GPU_ARGS --cpu-workers "$WORKERS" --batch-size "$BATCH_SIZE"
         exit 0
         ;;
     *)
@@ -108,24 +93,9 @@ setsid bash -c "
     }
     trap cleanup TERM INT QUIT
 
-    if [ '$NODE' = '1' ]; then
-        echo \"[\$(date +%H:%M:%S)] Phase 1: Collecting traces (workers=$WORKERS)\"
-        rm -f .data/traces/.complete
-        proofatlas-bench --config age_weight --trace --foreground --cpu-workers $WORKERS
-        touch .data/traces/.complete
-        echo \"[\$(date +%H:%M:%S)] Trace collection complete, sentinel created\"
-    else
-        echo \"[\$(date +%H:%M:%S)] Phase 1: Waiting for traces from node 1\"
-        while [ ! -f .data/traces/.complete ]; do
-            echo \"[\$(date +%H:%M:%S)] Waiting...\"
-            sleep 30
-        done
-        echo \"[\$(date +%H:%M:%S)] Traces complete\"
-    fi
-
-    echo \"[\$(date +%H:%M:%S)] Phase 2: Launching pipeline ($CONFIGS)\"
+    echo \"[\$(date +%H:%M:%S)] Launching pipeline ($CONFIGS)\"
     proofatlas-pipeline --configs $CONFIGS --job-prefix $PREFIX \
-        --use-cuda --gpu-workers $GPU_WORKERS --cpu-workers $WORKERS --batch-size $BATCH_SIZE
+        $GPU_ARGS --cpu-workers $WORKERS --batch-size $BATCH_SIZE
 
     echo \"[\$(date +%H:%M:%S)] Done. Pipeline daemonized.\"
     rm -f $PIDFILE

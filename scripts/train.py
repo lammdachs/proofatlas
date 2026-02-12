@@ -295,14 +295,18 @@ def handle_kill(base_dir):
     # Clear job file first to prevent respawns
     job_file_path.unlink(missing_ok=True)
 
-    # Kill main process
+    # Kill main process and its process group (DDP/DataLoader workers)
     pid = job.get("pid")
     if pid:
         try:
-            os.kill(pid, signal.SIGKILL)
-            log(f"Killed training process (PID: {pid})")
+            os.killpg(pid, signal.SIGKILL)
+            log(f"Killed training process group (PGID: {pid})")
         except (OSError, ProcessLookupError):
-            log(f"Training process (PID: {pid}) already stopped")
+            try:
+                os.kill(pid, signal.SIGKILL)
+                log(f"Killed training process (PID: {pid})")
+            except (OSError, ProcessLookupError):
+                log(f"Training process (PID: {pid}) already stopped")
 
     # Kill tracked sub-processes
     killed = kill_tracked_pids(base_dir)
@@ -312,6 +316,29 @@ def handle_kill(base_dir):
     # Clean up PID file
     pid_file = get_pid_file(base_dir, prefix=TRAIN_PREFIX)
     pid_file.unlink(missing_ok=True)
+
+
+def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem_names,
+                      web_data_dir, cpu_workers, world_size, max_batch_bytes,
+                      accumulate_batches, max_epochs):
+    """DDP worker function at module level so it can be pickled by mp.spawn."""
+    from proofatlas.ml.training import run_training
+
+    run_training(
+        preset=preset,
+        trace_dir=trace_dir,
+        weights_dir=weights_dir,
+        configs_dir=configs_dir,
+        problem_names=problem_names,
+        web_data_dir=web_data_dir,
+        log_file=sys.stdout,
+        cpu_workers=cpu_workers,
+        rank=rank,
+        world_size=world_size,
+        max_batch_bytes=max_batch_bytes,
+        accumulate_batches=accumulate_batches,
+        max_epochs=max_epochs,
+    )
 
 
 def run_training_job(args, base_dir, preset, problems, tptp_config):
@@ -347,27 +374,18 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     if args.gpu_workers > 1:
         import torch.multiprocessing as mp
 
-        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
         os.environ["MASTER_PORT"] = "29500"
 
-        def train_worker(rank):
-            run_training(
-                preset=preset,
-                trace_dir=trace_dir,
-                weights_dir=weights_dir,
-                configs_dir=base_dir / "configs",
-                problem_names=problem_names,
-                web_data_dir=base_dir / "web" / "data",
-                log_file=sys.stdout,
-                cpu_workers=args.cpu_workers,
-                rank=rank,
-                world_size=args.gpu_workers,
-                max_batch_bytes=max_batch_bytes,
-                accumulate_batches=accumulate_batches,
-                max_epochs=args.max_epochs,
-            )
-
-        mp.spawn(train_worker, nprocs=args.gpu_workers, join=True)
+        mp.spawn(
+            _ddp_train_worker,
+            args=(preset, trace_dir, weights_dir, base_dir / "configs",
+                  problem_names, base_dir / "web" / "data", args.cpu_workers,
+                  args.gpu_workers, max_batch_bytes, accumulate_batches,
+                  args.max_epochs),
+            nprocs=args.gpu_workers,
+            join=True,
+        )
     else:
         weights_path = run_training(
             preset=preset,

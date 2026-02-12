@@ -250,17 +250,21 @@ class SymbolEmbedding(nn.Module):
             ids_tensor = torch.tensor(sentinel_ids, device=device)
             result[sentinel_indices] = self.sentinel_embeddings(ids_tensor)
 
-        # Real symbol embeddings via MiniLM
+        # Real symbol embeddings via MiniLM (deduplicated to avoid redundant encoding)
         if real_names:
+            unique_names = list(dict.fromkeys(real_names))
             inputs = self._tokenizer(
-                real_names, padding=True, truncation=True, return_tensors="pt"
+                unique_names, padding=True, truncation=True, return_tensors="pt"
             )
             inputs = {k: v.to(device) for k, v in inputs.items()}
             outputs = self._encoder(**inputs)
             # Mean pool over tokens
             mask = inputs["attention_mask"].unsqueeze(-1).float()
-            embeddings = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
-            result[real_indices] = embeddings
+            unique_emb = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+            # Scatter unique embeddings back to all positions
+            name_to_idx = {n: i for i, n in enumerate(unique_names)}
+            scatter_idx = torch.tensor([name_to_idx[n] for n in real_names], device=device)
+            result[real_indices] = unique_emb[scatter_idx]
 
         return result
 

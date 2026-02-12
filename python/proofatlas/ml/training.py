@@ -15,6 +15,9 @@ from typing import List, Optional, Any
 
 import torch
 import torch.nn as nn
+import torch.multiprocessing
+
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 from ..selectors import create_model
 from .config import TrainingConfig
@@ -502,23 +505,16 @@ def _run_training_inner(
     problems = {f.parent.name for f in trace_files}
     log_msg(f"Found {len(trace_files)} state files from {len(problems)} problems")
 
-    # Validate trace files
-    valid_files = scan_trace_files(trace_files)
-    if not valid_files:
-        raise ValueError("No valid traces found (all filtered or empty)")
-    valid_problems = {f.parent.name for f in valid_files}
-    log_msg(f"Validated {len(valid_files)} states from {len(valid_problems)} problems")
-
     # Problem-level split: group by problem, split problems, then flatten
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    problem_list = sorted(valid_problems)
+    problem_list = sorted(problems)
     random.shuffle(problem_list)
     n_val_problems = int(len(problem_list) * val_ratio)
     val_problem_set = set(problem_list[:n_val_problems])
 
-    train_files = [f for f in valid_files if f.parent.name not in val_problem_set]
-    val_files = [f for f in valid_files if f.parent.name in val_problem_set]
+    train_files = [f for f in trace_files if f.parent.name not in val_problem_set]
+    val_files = [f for f in trace_files if f.parent.name in val_problem_set]
     log_msg(f"Training {model_name}: {len(train_files)} train states, {len(val_files)} val states")
 
     # Resolve batch size and accumulation: CLI overrides > config
@@ -562,10 +558,12 @@ def _run_training_inner(
 
     # DataLoader: batch_size=None because IterableDataset yields complete batches
     # collate_fn passes through the single batch dict from each yield
+    # With DDP, each rank creates its own DataLoader, so divide workers accordingly
+    loader_workers = max(1, cpu_workers // world_size) if world_size > 1 else cpu_workers
     train_loader = DataLoader(
         train_ds,
         batch_size=None,
-        num_workers=cpu_workers,
+        num_workers=loader_workers,
         pin_memory=(device.type == "cuda"),
     )
     val_loader = None
@@ -573,7 +571,7 @@ def _run_training_inner(
         val_loader = DataLoader(
             val_ds,
             batch_size=None,
-            num_workers=cpu_workers,
+            num_workers=loader_workers,
             pin_memory=(device.type == "cuda"),
         )
 
@@ -664,7 +662,10 @@ def _run_training_inner(
     margin = config.get("margin", 0.1)
     gradient_clip = config.get("gradient_clip", 1.0)
 
+    log_every_steps = config.get("log_every_steps", 100)
+
     for epoch in range(1, max_epochs + 1):
+        log_msg(f"Epoch {epoch}/{max_epochs} starting...")
         model.train()
         train_loss = 0
         num_batches = 0
@@ -694,6 +695,11 @@ def _run_training_inner(
 
             train_loss += loss.item() * (accumulate_steps if accumulate_steps > 1 else 1)
             num_batches += 1
+
+            # Intra-epoch progress
+            if is_main and num_batches % log_every_steps == 0:
+                avg_loss = train_loss / num_batches
+                log_msg(f"  Epoch {epoch}/{max_epochs} step {num_batches} | loss={avg_loss:.4f}")
 
             # Step optimizer after accumulating gradients
             if accumulate_steps <= 1 or (step + 1) % accumulate_steps == 0:

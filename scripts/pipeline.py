@@ -138,14 +138,18 @@ def handle_kill(base_dir: Path):
     # Clear job file first
     job_file.unlink(missing_ok=True)
 
-    # Kill child process if tracked
+    # Kill child process group (includes DataLoader/DDP workers)
     child_pid = job.get("child_pid")
     if child_pid:
         try:
-            os.kill(child_pid, signal.SIGKILL)
-            log(f"Killed child process (PID: {child_pid})")
+            os.killpg(child_pid, signal.SIGKILL)
+            log(f"Killed child process group (PGID: {child_pid})")
         except (OSError, ProcessLookupError):
-            pass
+            # Fall back to killing individual process
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
 
     # Kill main daemon process
     pid = job.get("pid")
@@ -449,6 +453,7 @@ def run_pipeline(configs: list[str], args, base_dir: Path):
             train_cmd,
             stdout=sys.stdout, stderr=sys.stderr,
             cwd=str(base_dir),
+            start_new_session=True,
         )
         update_child_pid(job_file, proc.pid)
         rc = proc.wait()
@@ -484,6 +489,7 @@ def run_pipeline(configs: list[str], args, base_dir: Path):
             bench_cmd,
             stdout=sys.stdout, stderr=sys.stderr,
             cwd=str(base_dir),
+            start_new_session=True,
         )
         update_child_pid(job_file, proc.pid)
         rc = proc.wait()
@@ -651,6 +657,14 @@ def main():
         sig_name = sig_names.get(signum, f"signal {signum}")
         print(f"\nRECEIVED {sig_name} - exiting")
         sys.stdout.flush()
+        # Kill child process group (train/bench and their workers)
+        try:
+            with open(job_file) as f:
+                child_pid = json.load(f).get("child_pid")
+            if child_pid:
+                os.killpg(child_pid, signal.SIGKILL)
+        except Exception:
+            pass
         job_file.unlink(missing_ok=True)
         clear_pids(base_dir)
         sys.stdout.close()
