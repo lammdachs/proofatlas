@@ -90,7 +90,7 @@ jobs:
           source .venv/bin/activate
           uv pip install maturin
           maturin develop
-          python -c "from proofatlas import ProofState; print('OK')"
+          python -c "from proofatlas import ProofAtlas; print('OK')"
 
   # Tier 2: Selective tests based on changes (always run on schedule)
   rust-core-tests:
