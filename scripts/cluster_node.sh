@@ -47,7 +47,11 @@ case "$1" in
             PIDFILE=$(node_pid $N)
             echo "=== Node $N ==="
             if [ -f "$PIDFILE" ]; then
-                kill "$(cat "$PIDFILE")" 2>/dev/null && echo "Killed trace collection"
+                PID=$(cat "$PIDFILE")
+                # Kill entire process group (negative PID)
+                kill -TERM -"$PID" 2>/dev/null && echo "Killed process group $PID"
+                # Also kill by PID in case process group kill failed
+                kill -TERM "$PID" 2>/dev/null || true
                 rm -f "$PIDFILE"
             fi
             proofatlas-pipeline --kill --job-prefix "$(node_prefix $N)" 2>/dev/null || true
@@ -90,10 +94,20 @@ LOG=$(node_log $NODE)
 PIDFILE=$(node_pid $NODE)
 PREFIX=$(node_prefix $NODE)
 
-# Daemonize: re-exec in background with nohup
+# Daemonize: run in new process group for clean kill
 mkdir -p .data
-nohup bash -c "
+setsid bash -c "
     set -e
+    # Trap signals to clean up child processes
+    cleanup() {
+        echo \"[\$(date +%H:%M:%S)] Received signal, cleaning up...\"
+        # Kill all children in our process group
+        kill -TERM 0 2>/dev/null || true
+        rm -f $PIDFILE
+        exit 0
+    }
+    trap cleanup TERM INT QUIT
+
     if [ '$NODE' = '1' ]; then
         echo \"[\$(date +%H:%M:%S)] Phase 1: Collecting traces (workers=$WORKERS)\"
         rm -f .data/traces/.complete
