@@ -100,8 +100,9 @@ pytest python/tests/ -v                  # Python tests (no env vars needed)
 ### Training & Benchmarking
 
 ```bash
-python scripts/train.py --config gcn_mlp       # Train ML model (separate step)
-python scripts/train.py --config gcn_mlp --use-cuda  # Train on GPU
+proofatlas-train --config gcn_mlp                    # Train ML model
+proofatlas-train --config gcn_mlp --use-cuda         # Train on GPU
+proofatlas-train --config gcn_mlp --max-epochs 4     # Short test run
 
 proofatlas-bench                              # Run all presets
 proofatlas-bench --config gcn_mlp              # Run specific preset (requires trained weights)

@@ -1,0 +1,63 @@
+{
+  "generated": "2026-02-12T08:54:06.659708",
+  "name": "features_transformer",
+  "start_time": "2026-02-12T08:54:06.659716",
+  "end_time": "2026-02-12T08:54:36.172601",
+  "total_time_seconds": 30.39666223526001,
+  "termination_reason": "completed",
+  "best_epoch": 3,
+  "best_val_loss": 2.8397711761101343,
+  "model": {
+    "type": "features",
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "input_dim": 8,
+    "scorer_type": "transformer"
+  },
+  "training": {
+    "batch_size": "512.0K",
+    "accumulate_steps": 1,
+    "learning_rate": 0.0003,
+    "max_epochs": 4,
+    "optimizer": "adamw",
+    "weight_decay": 0.0001,
+    "margin": 0.1,
+    "cpu_workers": 2,
+    "gpu_workers": 1
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 3.529460831016947,
+      "val_loss": 3.285602097134841,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 2,
+      "train_loss": 3.222282379992234,
+      "val_loss": 3.094193450088591,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 3,
+      "train_loss": 3.1015750081609785,
+      "val_loss": 2.8397711761101343,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 4,
+      "train_loss": 3.1601830173959136,
+      "val_loss": 2.9984055039692015,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    }
+  ],
+  "evaluations": []
+}

@@ -13,6 +13,9 @@ STRING_ENCODERS = {"sentence"}
 # Encoders that use graph input (node features, adjacency, pooling)
 GRAPH_ENCODERS = {"gcn", "gat", "graphsage"}
 
+# Encoders that use only clause-level features (no structure or text)
+FEATURES_ENCODERS = {"features"}
+
 
 def get_model_name(preset: dict) -> str:
     """Get model file name from preset config.
@@ -39,6 +42,8 @@ def get_encoder_type(preset: dict) -> Optional[str]:
         return "string"
     elif encoder in GRAPH_ENCODERS:
         return "graph"
+    elif encoder in FEATURES_ENCODERS:
+        return "features"
     else:
         raise ValueError(f"Unknown encoder: {encoder}")
 
@@ -65,7 +70,7 @@ def find_weights(weights_dir: Path, preset: dict) -> Optional[Path]:
     model_name = get_model_name(preset)
     encoder_type = get_encoder_type(preset)
 
-    if encoder_type == "graph":
+    if encoder_type in ("graph", "features"):
         model_path = weights_dir / f"{model_name}.pt"
         if model_path.exists():
             return weights_dir

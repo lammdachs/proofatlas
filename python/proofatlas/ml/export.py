@@ -43,8 +43,16 @@ def export_model(
     model.cpu()
     trace_device = torch.device("cpu")
 
+    is_features_model = config.get("embedding", {}).get("type") == "features"
+
     if is_sentence_model:
         model.export_torchscript(str(weights_path), save_tokenizer=True)
+    elif is_features_model:
+        # Features-only model: trace with clause features input
+        num_clauses = 3
+        example_features = torch.randn(num_clauses, 9, device=trace_device)
+        traced = torch.jit.trace(model, (example_features,), check_trace=False)
+        traced.save(str(weights_path))
     else:
         # GNN models: trace with example inputs (must match Rust call signature)
         # Script GraphNorm modules before tracing — their forward() uses
@@ -58,7 +66,7 @@ def export_model(
         example_x = torch.randn(num_nodes, config.get("input_dim", 13), device=trace_device)
         example_adj = torch.eye(num_nodes, device=trace_device).to_sparse()
         example_pool = (torch.ones(num_clauses, num_nodes, device=trace_device) / num_nodes).to_sparse()
-        example_clause_features = torch.randn(num_clauses, 3, device=trace_device)
+        example_clause_features = torch.randn(num_clauses, 9, device=trace_device)
 
         if needs_adj:
             traced = torch.jit.trace(model, (example_x, example_adj, example_pool, example_clause_features), check_trace=False)

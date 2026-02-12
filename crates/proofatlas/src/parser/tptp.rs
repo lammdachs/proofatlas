@@ -363,12 +363,24 @@ fn parse_content(
     })
 }
 
-/// Strip block comments (/* ... */) from input, preserving line structure
+/// Strip block comments (/* ... */) from input, preserving line structure.
+/// Respects TPTP line comments (% ...) — a `/*` inside a line comment is not
+/// treated as a block comment start.
 fn strip_block_comments(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
+    let mut in_line_comment = false;
+
     while let Some(c) = chars.next() {
-        if c == '/' && chars.peek() == Some(&'*') {
+        if c == '\n' {
+            in_line_comment = false;
+            result.push(c);
+        } else if in_line_comment {
+            result.push(c);
+        } else if c == '%' {
+            in_line_comment = true;
+            result.push(c);
+        } else if c == '/' && chars.peek() == Some(&'*') {
             chars.next(); // consume '*'
             // Skip until closing */
             loop {
@@ -1384,6 +1396,19 @@ mod tests {
         // Block comment containing a period
         let result = parse_tptp(
             "/* comment with a period. and more. */\ncnf(test, axiom, p(a)).",
+            &[], None, None,
+        ).unwrap();
+        assert_eq!(result.formula.clauses.len(), 1);
+    }
+
+    #[test]
+    fn test_block_comment_syntax_in_line_comment() {
+        // A /* inside a % line comment must NOT start a block comment.
+        // This is the pattern that broke PUZ035-3.p / PUZ035-4.p.
+        let result = parse_tptp(
+            "% knave/knave/* ; knave/knight/not(*) ;\n\
+             % more comments\n\
+             cnf(test, axiom, p(a)).",
             &[], None, None,
         ).unwrap();
         assert_eq!(result.formula.clauses.len(), 1);

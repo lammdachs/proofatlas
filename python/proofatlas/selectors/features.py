@@ -92,8 +92,10 @@ class ClauseFeatures(nn.Module):
         cos_enc = torch.cos(scaled)
         return torch.stack([sin_enc, cos_enc], dim=-1).flatten(-2)
 
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
+    def encode(self, features: torch.Tensor) -> torch.Tensor:
         """
+        Encode clause features to embeddings without scoring.
+
         Args:
             features: [num_clauses, 9] raw clause features
                 [0] age (normalized 0-1)
@@ -107,7 +109,7 @@ class ClauseFeatures(nn.Module):
                 [8] rule (int 0-6)
 
         Returns:
-            Scores [num_clauses]
+            Embeddings [num_clauses, hidden_dim]
         """
         # Continuous features: sinusoidal encode each
         continuous = []
@@ -128,6 +130,15 @@ class ClauseFeatures(nn.Module):
 
         # Concatenate and project
         x = torch.cat([continuous_enc, role_onehot, rule_onehot], dim=-1)
-        x = self.projection(x)
+        return self.projection(x)
 
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            features: [num_clauses, 9] raw clause features
+
+        Returns:
+            Scores [num_clauses]
+        """
+        x = self.encode(features)
         return self.scorer(x).view(-1)

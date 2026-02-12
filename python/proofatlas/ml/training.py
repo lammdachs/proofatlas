@@ -146,16 +146,18 @@ def _edge_list_to(edge_list, device):
     return edge_list.to(device)
 
 
-def _forward_pass(model, batch, device, is_sentence_model):
+def _forward_pass(model, batch, device, is_sentence_model, is_features_model=False):
     """Run forward pass through model, returning scores.
 
-    Handles both sentence and GNN model types, encoding U and P sets separately.
+    Handles sentence, GNN, and features-only model types, encoding U and P
+    sets separately.
 
     Args:
         model: The clause selection model
         batch: Collated batch dict from dataloader
         device: Torch device for computation
         is_sentence_model: Whether this is a sentence transformer model
+        is_features_model: Whether this is a features-only model
 
     Returns:
         scores tensor on device
@@ -170,6 +172,16 @@ def _forward_pass(model, batch, device, is_sentence_model):
             p_ids = batch["p_input_ids"].to(device)
             p_mask = batch["p_attention_mask"].to(device)
             p_emb = model.encode_tokens(p_ids, p_mask)
+
+        return model.scorer(u_emb, p_emb)
+    elif is_features_model:
+        u_cf = batch["u_clause_features"].to(device)
+        u_emb = model.encode(u_cf)
+
+        p_emb = None
+        if batch.get("p_clause_features") is not None:
+            p_cf = batch["p_clause_features"].to(device)
+            p_emb = model.encode(p_cf)
 
         return model.scorer(u_emb, p_emb)
     else:
@@ -215,6 +227,7 @@ def run_training(
     max_batch_bytes: Optional[int] = None,
     accumulate_batches: Optional[int] = None,
     force_cpu: bool = False,
+    max_epochs: Optional[int] = None,
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -295,6 +308,7 @@ def run_training(
             max_batch_bytes=max_batch_bytes,
             accumulate_batches=accumulate_batches,
             start_time=start_time,
+            max_epochs_override=max_epochs,
         )
     finally:
         if use_ddp:
@@ -321,6 +335,7 @@ def _run_training_inner(
     max_batch_bytes,
     accumulate_batches,
     start_time,
+    max_epochs_override=None,
 ):
     """Inner training loop, separated for clean DDP cleanup."""
     import random
@@ -370,6 +385,7 @@ def _run_training_inner(
     if embedding_type == "string":
         output_type = "tokenized"
     else:
+        # Both "graph" and "features" use graph.npz traces
         output_type = "graph"
 
     model_name = get_model_name(preset)
@@ -476,6 +492,7 @@ def _run_training_inner(
 
     needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
     is_sentence_model = model_type == "sentence"
+    is_features_model = model_type == "features"
     model = model.to(device)
 
     # DDP wrapping
@@ -500,7 +517,7 @@ def _run_training_inner(
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_type}")
 
-    max_epochs = config.get("max_epochs", 100)
+    max_epochs = max_epochs_override if max_epochs_override is not None else config.get("max_epochs", 100)
 
     # Initialize web logger for live updates (rank 0 only)
     web_logger = None
@@ -561,7 +578,7 @@ def _run_training_inner(
 
             with ctx:
                 raw_model = model.module if use_ddp else model
-                scores = _forward_pass(raw_model, batch, device, is_sentence_model)
+                scores = _forward_pass(raw_model, batch, device, is_sentence_model, is_features_model)
 
                 loss = compute_loss(scores, labels, proof_ids, loss_type, temperature, margin)
                 if accumulate_steps > 1:
@@ -600,7 +617,7 @@ def _run_training_inner(
                         val_proof_ids = val_proof_ids.to(device)
 
                     raw_model = model.module if use_ddp else model
-                    scores = _forward_pass(raw_model, batch, device, is_sentence_model)
+                    scores = _forward_pass(raw_model, batch, device, is_sentence_model, is_features_model)
 
                     val_loss += compute_loss(scores, labels, val_proof_ids, loss_type, temperature, margin).item()
                     num_val_batches += 1

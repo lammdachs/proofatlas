@@ -1,7 +1,7 @@
 {
-  "generated": "2026-02-11T12:45:07.777826",
+  "generated": "2026-02-12T08:32:04.235296",
   "name": "gcn_mlp",
-  "start_time": "2026-02-11T12:45:07.777833",
+  "start_time": "2026-02-12T08:32:04.235306",
   "end_time": null,
   "total_time_seconds": null,
   "termination_reason": null,
@@ -18,11 +18,11 @@
     "batch_size": "8.0M",
     "accumulate_steps": 1,
     "learning_rate": 0.0003,
-    "max_epochs": 100,
+    "max_epochs": 3,
     "optimizer": "adamw",
     "weight_decay": 0.0001,
     "margin": 0.1,
-    "cpu_workers": 0,
+    "cpu_workers": 2,
     "gpu_workers": 1
   },
   "epochs": [],

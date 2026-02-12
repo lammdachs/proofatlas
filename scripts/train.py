@@ -361,6 +361,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
                 world_size=args.gpu_workers,
                 max_batch_bytes=max_batch_bytes,
                 accumulate_batches=accumulate_batches,
+                max_epochs=args.max_epochs,
             )
 
         mp.spawn(train_worker, nprocs=args.gpu_workers, join=True)
@@ -377,6 +378,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             max_batch_bytes=max_batch_bytes,
             accumulate_batches=accumulate_batches,
             force_cpu=not args.use_cuda,
+            max_epochs=args.max_epochs,
         )
 
     log(f"Training complete! Weights saved to: {weights_dir}")
@@ -412,6 +414,8 @@ def main():
                             "Supports suffixes: K, M, G (e.g., 16M, 512K, 2G)")
     parser.add_argument("--accumulate-batches", type=int, default=None,
                        help="Gradient accumulation steps (default: from config)")
+    parser.add_argument("--max-epochs", type=int, default=None,
+                       help="Override max training epochs (default: from config)")
 
     args = parser.parse_args()
     base_dir = find_project_root()
