@@ -76,7 +76,7 @@
       "memory_limit": 4096
     },
 
-    "features_att": {
+    "features_attention": {
       "description": "Features + Attention",
       "timeout": 300,
       "max_iterations": 256,
