@@ -3,17 +3,17 @@
 Train ML models for ProofAtlas clause selection.
 
 USAGE:
-    python scripts/train.py --config gcn_mlp              # Train model
-    python scripts/train.py --config gcn_mlp --use-cuda    # Train on GPU
-    python scripts/train.py --config gcn_mlp --daemon       # Train in background
-    python scripts/train.py --status                        # Check job status
-    python scripts/train.py --kill                          # Stop training job
+    proofatlas-train --config gcn_mlp              # Train model (daemonizes)
+    proofatlas-train --config gcn_mlp --use-cuda   # Train on GPU
+    proofatlas-train --config gcn_mlp --foreground  # Run in foreground (for pipeline/debugging)
+    proofatlas-train --status                       # Check job status
+    proofatlas-train --kill                         # Stop training job
 
     # Worker pipeline flags:
-    python scripts/train.py --config gcn_mlp --cpu-workers 4       # Parallel batch prep
-    python scripts/train.py --config gcn_mlp --gpu-workers 2       # Multi-GPU DDP
-    python scripts/train.py --config gcn_mlp --batch-size 16M      # Max batch tensor bytes
-    python scripts/train.py --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
+    proofatlas-train --config gcn_mlp --cpu-workers 4       # Parallel batch prep
+    proofatlas-train --config gcn_mlp --gpu-workers 2       # Multi-GPU DDP
+    proofatlas-train --config gcn_mlp --batch-size 16M      # Max batch tensor bytes
+    proofatlas-train --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
 
 This script:
 1. Trains the model (requires pre-collected .npz traces)
@@ -34,6 +34,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import argparse
 import json
+import signal
 import subprocess
 import sys
 import time
@@ -331,7 +332,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
         trace_dir = base_dir / ".data" / "traces" / trace_preset
 
     # Check that traces exist
-    if not trace_dir.exists() or not any(trace_dir.glob("*.npz")):
+    if not trace_dir.exists() or not any(trace_dir.glob("**/*.npz")):
         log(f"Error: No .npz trace files found in {trace_dir}")
         log(f"Collect traces first with: proofatlas-bench --config age_weight --trace")
         sys.exit(1)
@@ -397,8 +398,8 @@ def main():
                        help="Directory containing training traces (overrides auto-collection)")
     parser.add_argument("--weights-dir",
                        help="Where to save trained weights (default: .weights/)")
-    parser.add_argument("--daemon", action="store_true",
-                       help="Run training in background (survives SSH disconnect)")
+    parser.add_argument("--foreground", action="store_true",
+                       help="Run in foreground (skip daemonization, for pipeline/debugging)")
     parser.add_argument("--status", action="store_true",
                        help="Show status of running training job")
     parser.add_argument("--kill", action="store_true",
@@ -470,42 +471,71 @@ def main():
         log(f"Found existing weights: {existing_weights}")
         log("Will overwrite with new training run")
 
-    if args.daemon:
-        from bench_jobs import daemonize, get_log_file, save_job_status
-
-        log_file_path = get_log_file(base_dir, prefix=TRAIN_PREFIX)
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        is_daemon, grandchild_pid = daemonize(log_file_path)
-
-        if not is_daemon:
-            # Parent process: save job status and exit
-            job_file = base_dir / f".data/{TRAIN_PREFIX}_job.json"
-            job_file.parent.mkdir(parents=True, exist_ok=True)
-            job = {
-                "pid": grandchild_pid,
-                "config": args.config,
-                "start_time": datetime.now().isoformat(),
-                "log_file": str(log_file_path),
-            }
-            with open(job_file, "w") as f:
-                json.dump(job, f, indent=2)
-
-            log(f"Training started in background (PID: {grandchild_pid})")
-            log(f"  Log: {log_file_path}")
-            log(f"  Status: python scripts/train.py --status")
-            log(f"  Stop:   python scripts/train.py --kill")
-            return
-
-        # Daemon process: run training
+    if args.foreground:
+        # Foreground mode: run directly (for pipeline use and debugging)
         run_training_job(args, base_dir, preset, problems, tptp_config)
+        return
 
+    # Daemon mode (default): daemonize like bench.py
+    from bench_jobs import daemonize, get_log_file
+
+    log_file_path = get_log_file(base_dir, prefix=TRAIN_PREFIX)
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    is_daemon, grandchild_pid = daemonize(log_file_path)
+
+    if not is_daemon:
+        # Parent process: save job status and exit
+        job_file = base_dir / f".data/{TRAIN_PREFIX}_job.json"
+        job_file.parent.mkdir(parents=True, exist_ok=True)
+        job = {
+            "pid": grandchild_pid,
+            "config": args.config,
+            "start_time": datetime.now().isoformat(),
+            "log_file": str(log_file_path),
+        }
+        with open(job_file, "w") as f:
+            json.dump(job, f, indent=2)
+
+        log(f"Training started in background (PID: {grandchild_pid})")
+        log(f"  Log: tail -f {log_file_path}")
+        log(f"  Status: proofatlas-train --status")
+        log(f"  Stop:   proofatlas-train --kill")
+        return
+
+    # --- Daemon process from here ---
+
+    # Set up signal handlers to log unexpected termination
+    from bench_jobs import clear_pids
+
+    def signal_handler(signum, frame):
+        sig_names = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT",
+                     signal.SIGQUIT: "SIGQUIT", signal.SIGABRT: "SIGABRT"}
+        sig_name = sig_names.get(signum, f"signal {signum}")
+        print(f"\nRECEIVED {sig_name} - exiting")
+        sys.stdout.flush()
+        job_file = base_dir / f".data/{TRAIN_PREFIX}_job.json"
+        job_file.unlink(missing_ok=True)
+        clear_pids(base_dir)
+        sys.stdout.close()
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+
+    try:
+        run_training_job(args, base_dir, preset, problems, tptp_config)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
         # Clean up job file on completion
         job_file = base_dir / f".data/{TRAIN_PREFIX}_job.json"
         job_file.unlink(missing_ok=True)
-    else:
-        # Foreground mode
-        run_training_job(args, base_dir, preset, problems, tptp_config)
+        sys.stdout.close()
+    os._exit(0)
 
 
 if __name__ == "__main__":

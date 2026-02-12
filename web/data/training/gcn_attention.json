@@ -1,7 +1,7 @@
 {
-  "generated": "2026-02-12T08:58:33.656387",
+  "generated": "2026-02-12T09:49:07.075865",
   "name": "gcn_attention",
-  "start_time": "2026-02-12T08:58:33.656396",
+  "start_time": "2026-02-12T09:49:07.075875",
   "end_time": null,
   "total_time_seconds": null,
   "termination_reason": null,
@@ -25,6 +25,15 @@
     "cpu_workers": 2,
     "gpu_workers": 1
   },
-  "epochs": [],
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 3.3045387415354717,
+      "val_loss": 3.524507125395557,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    }
+  ],
   "evaluations": []
 }

@@ -676,6 +676,8 @@ def main():
                        help="Stop running job")
     parser.add_argument("--list", action="store_true",
                        help="List available configs and exit")
+    parser.add_argument("--foreground", action="store_true",
+                       help="Run in foreground (skip daemonization, for pipeline/debugging)")
 
     args = parser.parse_args()
     base_dir = find_project_root()
@@ -698,11 +700,12 @@ def main():
             print("No job file found. Killing any orphaned processes...")
         return
 
-    existing = get_job_status(base_dir)
-    if existing:
-        print(f"Error: Job already running (PID: {existing['pid']})")
-        print("Use --status or --kill")
-        sys.exit(1)
+    if not args.foreground:
+        existing = get_job_status(base_dir)
+        if existing:
+            print(f"Error: Job already running (PID: {existing['pid']})")
+            print("Use --status or --kill")
+            sys.exit(1)
 
     # Load configs
     tptp_config = load_config(base_dir / "configs" / "tptp.json")
@@ -827,50 +830,52 @@ def main():
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Daemonize
-    is_daemon, grandchild_pid = daemonize(log_file_path)
-    if not is_daemon:
-        time.sleep(0.1)
-        prover_names = sorted(set(r["prover"] for r in runs))
-        print(f"Started job (PID: {grandchild_pid})")
-        print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
-        print("Use --status to check, --kill to stop")
-        return
+    # Daemonize (unless --foreground)
+    if not args.foreground:
+        is_daemon, grandchild_pid = daemonize(log_file_path)
+        if not is_daemon:
+            time.sleep(0.1)
+            prover_names = sorted(set(r["prover"] for r in runs))
+            print(f"Started job (PID: {grandchild_pid})")
+            print(f"Provers: {', '.join(prover_names)}, Configs: {len(runs)}, Problems: {len(problems)}")
+            print(f"Log: tail -f {log_file_path}")
+            print("Use --status to check, --kill to stop")
+            return
 
-    # --- Daemon process from here ---
+        # --- Daemon process from here ---
 
-    # Log startup info
-    print(f"Benchmark daemon started (PID: {os.getpid()})")
-    print(f"Working directory: {base_dir}")
-    print(f"Configs: {len(runs)}, Problems: {len(problems)}")
-    print(f"Backend: {'cuda (' + str(gpu_workers) + ' GPUs)' if use_cuda_eval else 'cpu'}")
-    sys.stdout.flush()
-
-    # Clear any stale PID tracking and save job status
-    clear_pids(base_dir)
-    try:
-        save_job_status(base_dir, os.getpid(), sys.argv, len(runs))
-        print(f"Job file saved: {get_job_file(base_dir)}")
-    except Exception as e:
-        print(f"WARNING: Failed to save job status: {e}")
-        print("Use 'ps aux | grep proofatlas' to find this process")
-    sys.stdout.flush()
-
-    # Set up signal handlers to log unexpected termination
-    def signal_handler(signum, frame):
-        sig_names = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT",
-                     signal.SIGQUIT: "SIGQUIT", signal.SIGABRT: "SIGABRT"}
-        sig_name = sig_names.get(signum, f"signal {signum}")
-        print(f"\nRECEIVED {sig_name} - exiting")
+        # Log startup info
+        print(f"Benchmark daemon started (PID: {os.getpid()})")
+        print(f"Working directory: {base_dir}")
+        print(f"Configs: {len(runs)}, Problems: {len(problems)}")
+        print(f"Backend: {'cuda (' + str(gpu_workers) + ' GPUs)' if use_cuda_eval else 'cpu'}")
         sys.stdout.flush()
-        clear_pids(base_dir)
-        clear_job_status(base_dir)
-        sys.stdout.close()
-        os._exit(128 + signum)
 
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGQUIT, signal_handler)
+        # Clear any stale PID tracking and save job status
+        clear_pids(base_dir)
+        try:
+            save_job_status(base_dir, os.getpid(), sys.argv, len(runs))
+            print(f"Job file saved: {get_job_file(base_dir)}")
+        except Exception as e:
+            print(f"WARNING: Failed to save job status: {e}")
+            print("Use 'ps aux | grep proofatlas' to find this process")
+        sys.stdout.flush()
+
+        # Set up signal handlers to log unexpected termination
+        def signal_handler(signum, frame):
+            sig_names = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT",
+                         signal.SIGQUIT: "SIGQUIT", signal.SIGABRT: "SIGABRT"}
+            sig_name = sig_names.get(signum, f"signal {signum}")
+            print(f"\nRECEIVED {sig_name} - exiting")
+            sys.stdout.flush()
+            clear_pids(base_dir)
+            clear_job_status(base_dir)
+            sys.stdout.close()
+            os._exit(128 + signum)
+
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGQUIT, signal_handler)
 
     num_runs = len(runs)
 
@@ -912,7 +917,7 @@ def main():
                     weights_path = existing_weights
                 else:
                     log(f"[{preset_name}] ERROR: No weights found in {weights_dir}")
-                    log(f"[{preset_name}] Train first with: python scripts/train.py --config {preset_name}")
+                    log(f"[{preset_name}] Train first with: proofatlas-train --config {preset_name}")
                     sys.stdout.flush()
                     continue
                 sys.stdout.flush()
@@ -951,10 +956,13 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        clear_pids(base_dir)
-        clear_job_status(base_dir)
-        sys.stdout.close()
-    os._exit(0)
+        if not args.foreground:
+            clear_pids(base_dir)
+            clear_job_status(base_dir)
+            sys.stdout.close()
+
+    if not args.foreground:
+        os._exit(0)
 
 
 if __name__ == "__main__":
