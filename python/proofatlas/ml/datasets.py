@@ -3,12 +3,13 @@
 Provides ProofBatchDataset (IterableDataset) that produces complete batch
 tensors in workers, and collate functions for graph/tokenized formats.
 
-Trace files are .npz (numpy compressed archives) produced by Rust's
-extract_tensor_trace(). Each worker does: load .npz, sample state, slice
-arrays, collate into batch, yield.
+Trace files are per-state .npz files in PROBLEM/ subdirectories:
+  traces/age_weight/AGT002+1/0.graph.npz   (one state's U+P clause data)
+Each worker loads one per-state file directly — no state sampling needed.
 """
 
 import random
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -19,17 +20,15 @@ from torch.utils.data import IterableDataset
 
 
 def _scan_trace(trace_file: Path) -> Optional[int]:
-    """Quick scan to validate a trace and return its clause count.
+    """Quick scan to validate a per-state trace and return its clause count.
 
     Returns clause count if valid, None if trace should be skipped.
     """
     try:
         with np.load(trace_file, allow_pickle=True) as data:
-            if not bool(data["proof_found"][0]):
-                return None
-            if "state_selected" not in data or len(data["state_selected"]) == 0:
-                return None
             if "labels" not in data:
+                return None
+            if "num_u" not in data or int(data["num_u"]) == 0:
                 return None
             return len(data["labels"])
     except Exception:
@@ -85,129 +84,99 @@ def _estimate_tokenized_bytes(item: dict) -> int:
 
 
 def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
-    """Load .npz trace, sample a random selection state, return pre-sampled graph data.
+    """Load a per-state .npz trace and return pre-sampled graph data.
 
-    Returns U/P clause subsets with per-clause graph dicts ready for batch_graphs().
+    The file already contains only U+P clauses for one state. First num_u
+    clauses are U, the rest are P.
     """
     try:
-        data = dict(np.load(trace_file, allow_pickle=True))
+        npz = np.load(trace_file, allow_pickle=True)
     except Exception:
         return None
 
-    if not bool(data["proof_found"][0]):
-        return None
-    if len(data.get("state_selected", [])) == 0:
-        return None
+    try:
+        num_u = int(npz["num_u"])
+        if num_u == 0:
+            return None
 
-    node_features = data["node_features"]       # [total_nodes, 3]
-    edge_src = data["edge_src"]                  # [total_edges]
-    edge_dst = data["edge_dst"]                  # [total_edges]
-    node_offsets = data["node_offsets"]           # [num_clauses + 1]
-    edge_offsets = data["edge_offsets"]           # [num_clauses + 1]
-    clause_features = data["clause_features"]    # [num_clauses, 9]
-    labels = data["labels"]                      # [num_clauses]
+        node_features = npz["node_features"]
+        edge_src = npz["edge_src"]
+        edge_dst = npz["edge_dst"]
+        node_offsets = npz["node_offsets"]
+        edge_offsets = npz["edge_offsets"]
+        clause_features = npz["clause_features"]
+        labels = npz["labels"]
+        num_clauses = len(labels)
 
-    state_selected = data["state_selected"]
-    state_u_offsets = data["state_u_offsets"]
-    state_u_indices = data["state_u_indices"]
-    state_p_offsets = data["state_p_offsets"]
-    state_p_indices = data["state_p_indices"]
+        def _extract_clause_graph(i):
+            n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
+            e_start, e_end = int(edge_offsets[i]), int(edge_offsets[i + 1])
 
-    num_states = len(state_selected)
-    si = random.randrange(num_states)
+            x = node_features[n_start:n_end].copy()
+            num_nodes = n_end - n_start
+            num_edges = e_end - e_start
 
-    # Get U and P clause indices for this state
-    u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
-    p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
-    u_indices = state_u_indices[u_start:u_end].astype(np.int64)
-    p_indices = state_p_indices[p_start:p_end].astype(np.int64)
+            if num_edges > 0:
+                src = edge_src[e_start:e_end].astype(np.int64) - n_start
+                dst = edge_dst[e_start:e_end].astype(np.int64) - n_start
+                edge_index = np.stack([src, dst])
+            else:
+                edge_index = np.zeros((2, 0), dtype=np.int64)
 
-    if len(u_indices) == 0:
-        return None
+            return {
+                "x": x,
+                "edge_index": edge_index,
+                "num_nodes": num_nodes,
+                "num_edges": num_edges,
+                "clause_features": clause_features[i].copy(),
+            }
 
-    def _extract_clause_graph(idx):
-        """Extract per-clause graph dict from flat arrays."""
-        i = int(idx)
-        n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
-        e_start, e_end = int(edge_offsets[i]), int(edge_offsets[i + 1])
+        u_graphs = [_extract_clause_graph(i) for i in range(num_u)]
+        u_labels = [int(labels[i]) for i in range(num_u)]
+        p_graphs = [_extract_clause_graph(i) for i in range(num_u, num_clauses)]
 
-        x = node_features[n_start:n_end].copy()
-        num_nodes = n_end - n_start
-        num_edges = e_end - e_start
-
-        if num_edges > 0:
-            src = edge_src[e_start:e_end].astype(np.int64) - n_start
-            dst = edge_dst[e_start:e_end].astype(np.int64) - n_start
-            edge_index = np.stack([src, dst])
-        else:
-            edge_index = np.zeros((2, 0), dtype=np.int64)
+        # Problem name from parent directory
+        problem = trace_file.parent.name
 
         return {
-            "x": x,
-            "edge_index": edge_index,
-            "num_nodes": num_nodes,
-            "num_edges": num_edges,
-            "clause_features": clause_features[i].copy(),
+            "u_graphs": u_graphs,
+            "p_graphs": p_graphs,
+            "u_labels": u_labels,
+            "problem": problem,
         }
-
-    u_graphs = [_extract_clause_graph(idx) for idx in u_indices]
-    u_labels = [int(labels[int(idx)]) for idx in u_indices]
-
-    p_graphs = [_extract_clause_graph(idx) for idx in p_indices]
-
-    return {
-        "u_graphs": u_graphs,
-        "p_graphs": p_graphs,
-        "u_labels": u_labels,
-        "problem": trace_file.name.rsplit(".", 2)[0],
-    }
+    finally:
+        npz.close()
 
 
 def _load_and_presample_tokenized(trace_file: Path) -> Optional[Dict]:
-    """Load .npz trace, sample a random selection state, return pre-sampled tokenized data."""
+    """Load a per-state sentence .npz trace and return pre-sampled tokenized data."""
     try:
         data = dict(np.load(trace_file, allow_pickle=True))
     except Exception:
         return None
 
-    if not bool(data["proof_found"][0]):
-        return None
-    if len(data.get("state_selected", [])) == 0:
-        return None
-
-    clause_strings = data["clause_strings"]    # [num_clauses] object array
-    labels = data["labels"]                    # [num_clauses]
-
-    state_selected = data["state_selected"]
-    state_u_offsets = data["state_u_offsets"]
-    state_u_indices = data["state_u_indices"]
-    state_p_offsets = data["state_p_offsets"]
-    state_p_indices = data["state_p_indices"]
-
-    num_states = len(state_selected)
-    si = random.randrange(num_states)
-
-    u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
-    p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
-    u_indices = state_u_indices[u_start:u_end].astype(np.int64)
-    p_indices = state_p_indices[p_start:p_end].astype(np.int64)
-
-    if len(u_indices) == 0:
+    num_u = int(data.get("num_u", 0))
+    if num_u == 0:
         return None
 
-    u_strings = [str(clause_strings[int(idx)]) for idx in u_indices]
-    u_labels = [int(labels[int(idx)]) for idx in u_indices]
-    p_strings = [str(clause_strings[int(idx)]) for idx in p_indices]
+    clause_strings = data["clause_strings"]
+    labels = data["labels"]
+    num_clauses = len(labels)
+
+    u_strings = [str(clause_strings[i]) for i in range(num_u)]
+    u_labels = [int(labels[i]) for i in range(num_u)]
+    p_strings = [str(clause_strings[i]) for i in range(num_u, num_clauses)]
 
     # Pre-tokenize
     tokenizer = _get_tokenizer()
 
     u_encoded = tokenizer(u_strings, padding=True, truncation=True, return_tensors="pt")
+    problem = trace_file.parent.name
     result = {
         "u_input_ids": u_encoded["input_ids"],
         "u_attention_mask": u_encoded["attention_mask"],
         "u_labels": u_labels,
-        "problem": trace_file.name.rsplit(".", 2)[0],
+        "problem": problem,
     }
 
     if p_strings:
@@ -234,14 +203,16 @@ def _get_tokenizer():
 class ProofBatchDataset(IterableDataset):
     """IterableDataset that produces complete batch tensors with exact byte measurement.
 
-    Each worker loads .npz traces, samples selection states, collates per-proof,
-    measures actual tensor bytes, and yields complete batches.
+    Each worker loads per-state .npz traces, collates per-proof, measures actual
+    tensor bytes, and yields complete batches.
 
     Args:
-        files: List of trace file paths (.graph.npz or .sentence.npz)
+        files: List of per-state trace file paths (PROBLEM/idx.graph.npz)
         output_type: "graph" for GNN models, "tokenized" for sentence models
         max_batch_bytes: Maximum collated tensor bytes per batch
         shuffle: Whether to shuffle files each epoch
+        states_per_problem: Number of random states to sample per problem per epoch.
+            If None, use all states. Default 1 preserves prior training dynamics.
     """
 
     def __init__(
@@ -250,24 +221,43 @@ class ProofBatchDataset(IterableDataset):
         output_type: str = "graph",
         max_batch_bytes: int = 16 * 1024 * 1024,  # 16 MB default
         shuffle: bool = True,
+        states_per_problem: Optional[int] = 1,
     ):
         self.files = list(files)
         self.output_type = output_type
         self.max_batch_bytes = max_batch_bytes
         self.shuffle = shuffle
+        self.states_per_problem = states_per_problem
 
         if not self.files:
             raise ValueError("No trace files provided")
 
-    def _shard_files(self, worker_info):
+        # Group files by problem (parent directory)
+        self._problem_groups: Dict[str, List[Path]] = defaultdict(list)
+        for f in self.files:
+            self._problem_groups[f.parent.name].append(f)
+
+    def _sample_files(self) -> List[Path]:
+        """Sample states_per_problem files per problem."""
+        if self.states_per_problem is None:
+            return list(self.files)
+        sampled = []
+        for files in self._problem_groups.values():
+            if len(files) <= self.states_per_problem:
+                sampled.extend(files)
+            else:
+                sampled.extend(random.sample(files, self.states_per_problem))
+        return sampled
+
+    def _shard_files(self, worker_info, files):
         """Shard files across DataLoader workers."""
         if worker_info is None:
-            return list(self.files)
-        per_worker = len(self.files) // worker_info.num_workers
-        remainder = len(self.files) % worker_info.num_workers
+            return files
+        per_worker = len(files) // worker_info.num_workers
+        remainder = len(files) % worker_info.num_workers
         start = worker_info.id * per_worker + min(worker_info.id, remainder)
         end = start + per_worker + (1 if worker_info.id < remainder else 0)
-        return list(self.files[start:end])
+        return files[start:end]
 
     def _load_and_presample(self, f: Path) -> Optional[Dict]:
         """Load and presample a single trace file."""
@@ -285,9 +275,10 @@ class ProofBatchDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        files = self._shard_files(worker_info)
+        files = self._sample_files()
         if self.shuffle:
             random.shuffle(files)
+        files = self._shard_files(worker_info, files)
 
         buffer = []
         buffer_bytes = 0
@@ -321,6 +312,11 @@ class ProofBatchDataset(IterableDataset):
     def num_files(self) -> int:
         """Number of trace files in this dataset."""
         return len(self.files)
+
+    @property
+    def num_problems(self) -> int:
+        """Number of distinct problems in this dataset."""
+        return len(self._problem_groups)
 
 
 def scan_trace_files(files: List[Path], max_workers: int = 4) -> List[Path]:

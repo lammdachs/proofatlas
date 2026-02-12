@@ -82,7 +82,12 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
 
 
 def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
-    """Save tensor trace data as .npz files.
+    """Save tensor trace data as per-state .npz files.
+
+    Splits the full-problem trace (all clauses + all states) into per-state
+    files, each containing only the U+P clauses for that state.
+
+    Layout: traces_dir/preset/PROBLEM/idx.{graph,sentence}.npz
 
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
@@ -94,11 +99,91 @@ def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
     import numpy as np
 
     try:
-        preset_dir = Path(traces_dir) / preset
-        preset_dir.mkdir(parents=True, exist_ok=True)
         stem = Path(problem).stem
-        np.savez_compressed(preset_dir / f"{stem}.graph.npz", **graph_dict)
-        np.savez_compressed(preset_dir / f"{stem}.sentence.npz", **sentence_dict)
+        problem_dir = Path(traces_dir) / preset / stem
+        problem_dir.mkdir(parents=True, exist_ok=True)
+
+        # Extract state arrays from graph_dict
+        state_u_offsets = graph_dict["state_u_offsets"]
+        state_p_offsets = graph_dict["state_p_offsets"]
+        state_u_indices = graph_dict["state_u_indices"]
+        state_p_indices = graph_dict["state_p_indices"]
+        num_states = len(graph_dict["state_selected"])
+
+        node_features = graph_dict["node_features"]
+        edge_src = graph_dict["edge_src"]
+        edge_dst = graph_dict["edge_dst"]
+        node_offsets = graph_dict["node_offsets"]
+        edge_offsets = graph_dict["edge_offsets"]
+        clause_features = graph_dict["clause_features"]
+        labels = graph_dict["labels"]
+
+        # Sentence data
+        clause_strings = sentence_dict.get("clause_strings")
+        sent_labels = sentence_dict["labels"]
+
+        for si in range(num_states):
+            u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
+            p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
+            u_idx = state_u_indices[u_start:u_end].astype(np.int64)
+            p_idx = state_p_indices[p_start:p_end].astype(np.int64)
+
+            if len(u_idx) == 0:
+                continue
+
+            all_idx = np.concatenate([u_idx, p_idx])
+            num_u = len(u_idx)
+
+            # --- Graph per-state file ---
+            all_nf = []
+            all_es = []
+            all_ed = []
+            s_node_off = [0]
+            s_edge_off = [0]
+            node_cursor = 0
+
+            for idx in all_idx:
+                i = int(idx)
+                ns, ne = int(node_offsets[i]), int(node_offsets[i + 1])
+                es, ee = int(edge_offsets[i]), int(edge_offsets[i + 1])
+                nn = ne - ns
+                nedges = ee - es
+
+                if nn > 0:
+                    all_nf.append(node_features[ns:ne])
+                if nedges > 0:
+                    all_es.append(edge_src[es:ee].astype(np.int64) - ns + node_cursor)
+                    all_ed.append(edge_dst[es:ee].astype(np.int64) - ns + node_cursor)
+
+                node_cursor += nn
+                s_node_off.append(node_cursor)
+                s_edge_off.append(s_edge_off[-1] + nedges)
+
+            cnf = np.concatenate(all_nf) if all_nf else np.zeros((0, node_features.shape[1]), dtype=node_features.dtype)
+            ces = np.concatenate(all_es) if all_es else np.zeros(0, dtype=np.int64)
+            ced = np.concatenate(all_ed) if all_ed else np.zeros(0, dtype=np.int64)
+
+            np.savez_compressed(
+                problem_dir / f"{si}.graph.npz",
+                node_features=cnf,
+                edge_src=ces,
+                edge_dst=ced,
+                node_offsets=np.array(s_node_off, dtype=np.int64),
+                edge_offsets=np.array(s_edge_off, dtype=np.int64),
+                clause_features=clause_features[all_idx],
+                labels=labels[all_idx],
+                num_u=np.array(num_u, dtype=np.int64),
+            )
+
+            # --- Sentence per-state file ---
+            if clause_strings is not None:
+                s_strings = np.array([clause_strings[int(i)] for i in all_idx], dtype=object)
+                np.savez_compressed(
+                    problem_dir / f"{si}.sentence.npz",
+                    clause_strings=s_strings,
+                    labels=sent_labels[all_idx],
+                    num_u=np.array(num_u, dtype=np.int64),
+                )
     except Exception:
         pass
 
@@ -109,7 +194,9 @@ def load_trace_files(
     encoder_type: str = "graph",
     problem_names: Optional[set] = None,
 ) -> List[Path]:
-    """Get list of trace files for a preset.
+    """Get list of per-state trace files for a preset.
+
+    Globs PROBLEM/idx.{graph,sentence}.npz in subdirectories.
 
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
@@ -118,17 +205,17 @@ def load_trace_files(
         problem_names: Optional set of problem names to include. If None, loads all.
 
     Returns:
-        List of trace file paths.
+        List of per-state trace file paths.
     """
     preset_dir = Path(traces_dir) / preset
     if not preset_dir.exists():
         return []
 
     suffix = "sentence.npz" if encoder_type == "string" else "graph.npz"
-    trace_files = sorted(preset_dir.glob(f"*.{suffix}"))
+    trace_files = sorted(preset_dir.glob(f"**/*.{suffix}"))
     if problem_names is not None:
-        # Strip the double suffix (.graph.npz or .sentence.npz) to get the problem stem
-        trace_files = [f for f in trace_files if f.name.rsplit(".", 2)[0] in problem_names]
+        # Parent directory name is the problem stem
+        trace_files = [f for f in trace_files if f.parent.name in problem_names]
 
     return trace_files
 
@@ -390,32 +477,38 @@ def _run_training_inner(
 
     model_name = get_model_name(preset)
 
-    # Get trace files (.npz format)
+    # Get per-state trace files (.npz in PROBLEM/ subdirectories)
     trace_dir = Path(trace_dir)
     suffix = "sentence.npz" if embedding_type == "string" else "graph.npz"
-    trace_files = sorted(trace_dir.glob(f"*.{suffix}"))
+    trace_files = sorted(trace_dir.glob(f"**/*.{suffix}"))
     if problem_names is not None:
-        trace_files = [f for f in trace_files if f.name.rsplit(".", 2)[0] in problem_names]
+        trace_files = [f for f in trace_files if f.parent.name in problem_names]
 
     if not trace_files:
-        raise ValueError(f"No trace files found in {trace_dir} (looking for *.{suffix})")
+        raise ValueError(f"No trace files found in {trace_dir} (looking for **/*.{suffix})")
 
-    log_msg(f"Found {len(trace_files)} trace files")
+    # Count distinct problems (parent directories)
+    problems = {f.parent.name for f in trace_files}
+    log_msg(f"Found {len(trace_files)} state files from {len(problems)} problems")
 
     # Validate trace files
     valid_files = scan_trace_files(trace_files)
     if not valid_files:
         raise ValueError("No valid traces found (all filtered or empty)")
-    log_msg(f"Validated {len(valid_files)} traces")
+    valid_problems = {f.parent.name for f in valid_files}
+    log_msg(f"Validated {len(valid_files)} states from {len(valid_problems)} problems")
 
-    # Problem-level split
+    # Problem-level split: group by problem, split problems, then flatten
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    random.shuffle(valid_files)
-    n_val = int(len(valid_files) * val_ratio)
-    val_files = valid_files[:n_val]
-    train_files = valid_files[n_val:]
-    log_msg(f"Training {model_name}: {len(train_files)} train, {len(val_files)} val traces")
+    problem_list = sorted(valid_problems)
+    random.shuffle(problem_list)
+    n_val_problems = int(len(problem_list) * val_ratio)
+    val_problem_set = set(problem_list[:n_val_problems])
+
+    train_files = [f for f in valid_files if f.parent.name not in val_problem_set]
+    val_files = [f for f in valid_files if f.parent.name in val_problem_set]
+    log_msg(f"Training {model_name}: {len(train_files)} train states, {len(val_files)} val states")
 
     # Resolve batch size and accumulation: CLI overrides > config
     is_sentence_model_type = (embedding_type == "string")
@@ -454,7 +547,7 @@ def _run_training_inner(
             shuffle=False,
         )
 
-    log_msg(f"Train: {train_ds.num_files} traces, Val: {val_ds.num_files if val_ds else 0} traces")
+    log_msg(f"Train: {train_ds.num_problems} problems ({train_ds.num_files} states), Val: {val_ds.num_problems if val_ds else 0} problems")
 
     # DataLoader: batch_size=None because IterableDataset yields complete batches
     # collate_fn passes through the single batch dict from each yield
