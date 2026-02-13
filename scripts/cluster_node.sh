@@ -11,6 +11,8 @@ set -e
 #   scripts/cluster_node.sh --kill [N]      # Stop jobs (optionally for node N)
 #   scripts/cluster_node.sh --foreground 1  # Run in foreground (no daemon)
 
+ulimit -n 65536
+
 WORKERS=60
 GPU_WORKERS=4
 BATCH_SIZE=64K
