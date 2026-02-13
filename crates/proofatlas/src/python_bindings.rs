@@ -722,7 +722,7 @@ impl PyMiniLMBackend {
     fn new(model_path: String, tokenizer_path: String, use_cuda: bool) -> PyResult<Self> {
         let model = crate::selection::MiniLMEncoderModel::new(&model_path, &tokenizer_path, use_cuda)
             .map_err(|e| PyValueError::new_err(e))?;
-        let backend = crate::selection::Backend::new(vec![Box::new(model)]);
+        let backend = crate::selection::Backend::from_models(vec![Box::new(model)]);
         let handle = backend.handle();
         Ok(PyMiniLMBackend {
             handle,
@@ -740,7 +740,7 @@ impl PyMiniLMBackend {
         }
         let resp = self
             .handle
-            .submit_sync(0, "minilm".to_string(), Box::new(strings))
+            .submit_sync(0, "minilm".to_string(), Box::new(strings), false)
             .expect("MiniLM backend submission failed");
         *resp.data.downcast::<Vec<Vec<f32>>>().expect("unexpected response type")
     }

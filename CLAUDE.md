@@ -57,7 +57,8 @@ proofatlas/
 │   ├── setup.py                # One-command project setup
 │   ├── bench.py                # Benchmark orchestration, scoring server mgmt, CLI/daemon
 │   ├── bench_jobs.py           # Job/daemon management, PID tracking, status display
-│   ├── bench_provers.py        # Prover execution (proofatlas, vampire, spass)
+│   ├── bench_provers.py        # Prover execution with ProofAtlasPool (persistent workers)
+│   ├── run_all.py              # Full experiment orchestration (traces → train → eval → push)
 │   ├── train.py                # Standalone ML model training (extracted from bench.py)
 │   ├── export.py               # Export results for web display
 │   └── setup_*.py              # Setup TPTP, Vampire, SPASS
@@ -318,8 +319,10 @@ Prover --> ChannelSink --(mpsc)--> Data Processing Thread --> BackendHandle --> 
                                     softmax sampling)
 ```
 
-- **`Backend`** (`selection/backend.rs`): Model-agnostic compute service. Worker thread with 16 MiB stack processes batched model requests. Detached on drop; exits when all `BackendHandle` senders are dropped.
-- **`BackendHandle`**: Cheaply cloneable, wraps `mpsc::Sender<BackendRequest>`. `submit_sync()` for blocking request-response.
+- **`Backend`** (`selection/backend.rs`): Model-agnostic compute service with **lazy model loading**. Receives `ModelSpec` (model_id + factory closure) and loads models on first request using the requester's `use_cuda` device hint. Worker thread with 16 MiB stack. `Backend::new(specs)` for lazy loading, `Backend::from_models(models)` for backward compat.
+- **`ModelSpec`**: Lazy model specification — `model_id` + `factory: Box<dyn FnOnce(bool) -> Result<Box<dyn Model>, String>>`. Factory called with `use_cuda` from first request for that model_id.
+- **`BackendHandle`**: Cheaply cloneable, wraps `mpsc::Sender<BackendRequest>`. `submit_sync(id, model_id, data, use_cuda)` for blocking request-response with per-request device hint.
+- **`DataProcessor`** implementations (`selection/pipeline/processors.rs`): 9 processors for all (encoder, scorer) combinations. Each specifies `embed_cuda`/`score_cuda` per request. GCN/features encoders request CPU; sentence encoders follow `use_cuda`.
 - **`EmbedScoreModel`** (`selection/pipeline.rs`): Backend `Model` wrapping `ClauseEmbedder + EmbeddingScorer`. Receives `Arc<Clause>`, returns `f32` scores.
 - **`ChannelSink`** (`selection/pipeline.rs`): `ProverSink` impl. On `select()`, sends `Select` signal and blocks for response. Owns data processing thread (joined on drop).
 - **Data processing thread**: Receives `ProverSignal`s. On `Transfer`: submits clause to Backend, caches score. On `Select`: softmax-samples from cached scores.

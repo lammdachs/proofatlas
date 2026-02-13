@@ -1,19 +1,23 @@
 //! Configuration-specific data processors.
 //!
 //! Each (encoder, scorer) combination gets its own processor that knows
-//! exactly what data to extract, what to cache, and how to score:
+//! exactly what data to extract, what to cache, and how to score.
 //!
-//! | Encoder   | Scorer      | Processor               | Cache          |
-//! |-----------|-------------|-------------------------|----------------|
-//! | gcn       | mlp         | GcnScoreProcessor       | f32 scores     |
-//! | gcn       | attention   | GcnEmbeddingProcessor   | Vec<f32> embs  |
-//! | gcn       | transformer | GcnEmbeddingProcessor   | Vec<f32> embs  |
-//! | sentence  | mlp         | SentenceScoreProcessor  | f32 scores     |
-//! | sentence  | attention   | SentenceEmbeddingProcessor | Vec<f32> embs |
-//! | sentence  | transformer | SentenceEmbeddingProcessor | Vec<f32> embs |
-//! | features  | mlp         | FeaturesScoreProcessor  | f32 scores     |
-//! | features  | attention   | FeaturesEmbeddingProcessor | Vec<f32> embs |
-//! | features  | transformer | FeaturesEmbeddingProcessor | Vec<f32> embs |
+//! Processors specify per-request device preferences via `use_cuda` on
+//! `BackendHandle::submit_sync`. The Backend lazily loads models on the
+//! requested device on first use.
+//!
+//! | Encoder   | Scorer      | Processor               | Cache          | Embed device | Score device |
+//! |-----------|-------------|-------------------------|----------------|-------------|--------------|
+//! | gcn       | mlp         | GcnScoreProcessor       | f32 scores     | CPU         | (fused)      |
+//! | gcn       | attention   | GcnEmbeddingProcessor   | Vec<f32> embs  | CPU         | use_cuda     |
+//! | gcn       | transformer | GcnEmbeddingProcessor   | Vec<f32> embs  | CPU         | use_cuda     |
+//! | sentence  | mlp         | SentenceScoreProcessor  | f32 scores     | use_cuda    | (fused)      |
+//! | sentence  | attention   | SentenceEmbeddingProcessor | Vec<f32> embs | use_cuda  | use_cuda     |
+//! | sentence  | transformer | SentenceEmbeddingProcessor | Vec<f32> embs | use_cuda  | use_cuda     |
+//! | features  | mlp         | FeaturesScoreProcessor  | f32 scores     | CPU         | (fused)      |
+//! | features  | attention   | FeaturesEmbeddingProcessor | Vec<f32> embs | CPU       | use_cuda     |
+//! | features  | transformer | FeaturesEmbeddingProcessor | Vec<f32> embs | CPU       | use_cuda     |
 
 use std::sync::Arc;
 
@@ -32,8 +36,11 @@ use super::{softmax_sample, softmax_sample_vec, DataProcessor};
 ///
 /// Caches pre-softmax f32 scores. On transfer, submits `Arc<Clause>` to the
 /// backend's `embed_score` model and caches the returned score.
+///
+/// Device: GCN encoding is lightweight → always CPU.
 pub struct GcnScoreProcessor {
     backend: BackendHandle,
+    embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     temperature: f32,
     rng_state: u64,
@@ -41,9 +48,10 @@ pub struct GcnScoreProcessor {
 }
 
 impl GcnScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool) -> Self {
         Self {
             backend,
+            embed_cuda,
             scores: IndexMap::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
@@ -56,7 +64,7 @@ impl DataProcessor for GcnScoreProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new(clause);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
                 self.scores.insert(idx, score);
@@ -92,8 +100,13 @@ impl DataProcessor for GcnScoreProcessor {
 ///
 /// Caches Vec<f32> embeddings separately for U and P. On select, submits all
 /// U+P embeddings to the backend's `score_context` model for re-scoring.
+///
+/// Device: GCN encoder on `embed_cuda` (typically CPU),
+/// attention/transformer scorer on `score_cuda` (typically GPU).
 pub struct GcnEmbeddingProcessor {
     backend: BackendHandle,
+    embed_cuda: bool,
+    score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
     temperature: f32,
@@ -102,9 +115,11 @@ pub struct GcnEmbeddingProcessor {
 }
 
 impl GcnEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
         Self {
             backend,
+            embed_cuda,
+            score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
             temperature,
@@ -118,7 +133,7 @@ impl DataProcessor for GcnEmbeddingProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new(clause);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
                 self.u_embeddings.insert(idx, emb);
@@ -152,7 +167,7 @@ impl DataProcessor for GcnEmbeddingProcessor {
 
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new((u_embs, p_embs));
-        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data) {
+        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data, self.score_cuda) {
             Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
             Err(_) => vec![0.0; u_indices.len()],
         };
@@ -172,9 +187,12 @@ impl DataProcessor for GcnEmbeddingProcessor {
 /// Score processor for sentence + MLP configurations.
 ///
 /// Like GcnScoreProcessor but converts clauses to strings before submitting.
+///
+/// Device: Sentence encoding (MiniLM 33M params) → follows `embed_cuda`.
 pub struct SentenceScoreProcessor {
     backend: BackendHandle,
     interner: Arc<Interner>,
+    embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     temperature: f32,
     rng_state: u64,
@@ -182,10 +200,11 @@ pub struct SentenceScoreProcessor {
 }
 
 impl SentenceScoreProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool) -> Self {
         Self {
             backend,
             interner,
+            embed_cuda,
             scores: IndexMap::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
@@ -199,7 +218,7 @@ impl DataProcessor for SentenceScoreProcessor {
         self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
                 self.scores.insert(idx, score);
@@ -232,9 +251,13 @@ impl DataProcessor for SentenceScoreProcessor {
 /// Embedding processor for sentence + attention/transformer configurations.
 ///
 /// Like GcnEmbeddingProcessor but converts clauses to strings before submitting.
+///
+/// Device: Both sentence encoder and scorer follow `use_cuda`.
 pub struct SentenceEmbeddingProcessor {
     backend: BackendHandle,
     interner: Arc<Interner>,
+    embed_cuda: bool,
+    score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
     temperature: f32,
@@ -243,10 +266,12 @@ pub struct SentenceEmbeddingProcessor {
 }
 
 impl SentenceEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
         Self {
             backend,
             interner,
+            embed_cuda,
+            score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
             temperature,
@@ -261,7 +286,7 @@ impl DataProcessor for SentenceEmbeddingProcessor {
         self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
                 self.u_embeddings.insert(idx, emb);
@@ -294,7 +319,7 @@ impl DataProcessor for SentenceEmbeddingProcessor {
 
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new((u_embs, p_embs));
-        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data) {
+        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data, self.score_cuda) {
             Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
             Err(_) => vec![0.0; u_indices.len()],
         };
@@ -314,8 +339,11 @@ impl DataProcessor for SentenceEmbeddingProcessor {
 /// Score processor for features + MLP configurations.
 ///
 /// Extracts 9 clause features and submits them as Vec<f32>.
+///
+/// Device: Features encoding is lightweight → follows `embed_cuda` (typically CPU).
 pub struct FeaturesScoreProcessor {
     backend: BackendHandle,
+    embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     temperature: f32,
     rng_state: u64,
@@ -323,9 +351,10 @@ pub struct FeaturesScoreProcessor {
 }
 
 impl FeaturesScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool) -> Self {
         Self {
             backend,
+            embed_cuda,
             scores: IndexMap::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
@@ -339,7 +368,7 @@ impl DataProcessor for FeaturesScoreProcessor {
         self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
                 self.scores.insert(idx, score);
@@ -372,8 +401,13 @@ impl DataProcessor for FeaturesScoreProcessor {
 /// Embedding processor for features + attention/transformer configurations.
 ///
 /// Extracts 9 clause features, submits to backend for embedding, caches embeddings.
+///
+/// Device: Features encoder on `embed_cuda` (typically CPU),
+/// attention/transformer scorer on `score_cuda` (typically GPU).
 pub struct FeaturesEmbeddingProcessor {
     backend: BackendHandle,
+    embed_cuda: bool,
+    score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
     temperature: f32,
@@ -382,9 +416,11 @@ pub struct FeaturesEmbeddingProcessor {
 }
 
 impl FeaturesEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
         Self {
             backend,
+            embed_cuda,
+            score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
             temperature,
@@ -399,7 +435,7 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
         self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data) {
+        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
             Ok(resp) => {
                 let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
                 self.u_embeddings.insert(idx, emb);
@@ -432,7 +468,7 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
 
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new((u_embs, p_embs));
-        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data) {
+        let scores = match self.backend.submit_sync(self.request_id, "score_context".to_string(), data, self.score_cuda) {
             Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
             Err(_) => vec![0.0; u_indices.len()],
         };

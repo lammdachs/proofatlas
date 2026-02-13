@@ -61,7 +61,7 @@ pub use network::remote::{RemoteSelector, RemoteSelectorSink};
 pub use network::server::ScoringServer;
 
 // Pipeline re-exports
-pub use pipeline::backend::{Backend, BackendHandle, BackendRequest, BackendResponse, Model};
+pub use pipeline::backend::{Backend, BackendHandle, BackendRequest, BackendResponse, Model, ModelSpec};
 pub use pipeline::{
     ChannelSink, ContextScoreModel, DataProcessor, EmbedModel, EmbedScoreModel, ProverSignal,
     create_ml_pipeline, create_pipeline,

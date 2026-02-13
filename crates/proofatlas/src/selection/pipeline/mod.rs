@@ -477,10 +477,10 @@ pub fn create_ml_pipeline(
     temperature: f32,
 ) -> ChannelSink {
     let model = EmbedScoreModel::new(embedder, scorer);
-    let backend = self::backend::Backend::new(vec![Box::new(model)]);
+    let backend = self::backend::Backend::from_models(vec![Box::new(model)]);
     let handle = backend.handle();
     // Backend is dropped here; worker thread detached but alive via handle.
-    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature));
+    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature, false));
     create_pipeline(processor, "ml_pipeline".to_string())
 }
 
@@ -624,10 +624,10 @@ mod tests {
     fn test_pipeline_with_processor() {
         // Test the processor-based factory function
         let model = EmbedScoreModel::new(Box::new(MockEmbedder), Box::new(MockScorer));
-        let backend = super::backend::Backend::new(vec![Box::new(model)]);
+        let backend = super::backend::Backend::from_models(vec![Box::new(model)]);
         let handle = backend.handle();
 
-        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0));
+        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0, false));
         let mut sink = create_pipeline(processor, "test".to_string());
 
         sink.on_transfer(5, &make_clause(2));

@@ -4,8 +4,12 @@ Handles running ProofAtlas, Vampire, and SPASS on individual problems.
 Depends on `proofatlas` (Rust bindings) and `bench_jobs.register_pid`.
 """
 
+import multiprocessing
 import os
+import queue as queue_mod
+import signal
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -363,3 +367,198 @@ def run_single_problem(args, socket_path=None):
         traceback.print_exc()
         sys.stdout.flush()
         return ("error", BenchResult(problem=problem.name, status="error", time_s=0))
+
+
+# ===========================================================================
+# Persistent ProofAtlas worker pool — reuses ProofAtlas across problems
+# ===========================================================================
+
+
+def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
+                       use_cuda: bool = False, socket_path: str = None) -> dict:
+    """Build ProofAtlas constructor kwargs from a preset config."""
+    ml = _get_ml()
+    is_learned = ml.is_learned_selector(preset)
+
+    kwargs = {
+        "timeout": float(preset.get("timeout", 10)),
+        "literal_selection": preset.get("literal_selection", 21),
+        "memory_limit": preset.get("memory_limit"),
+        "include_dir": str(tptp_root),
+    }
+
+    max_iterations = preset.get("max_iterations", 0)
+    if max_iterations > 0:
+        kwargs["max_iterations"] = max_iterations
+
+    encoder = preset.get("encoder") if is_learned else None
+    if encoder:
+        kwargs["encoder"] = encoder
+        kwargs["scorer"] = preset["scorer"]
+        kwargs["weights_path"] = weights_path
+        kwargs["use_cuda"] = use_cuda
+        if socket_path:
+            kwargs["socket_path"] = socket_path
+    else:
+        kwargs["age_weight_ratio"] = float(preset.get("age_weight_ratio", 0.5))
+
+    return kwargs
+
+
+def _atlas_worker_loop(task_queue, result_queue, atlas_kwargs, base_dir_str,
+                       collect_trace, trace_preset):
+    """Persistent worker: create ProofAtlas once, solve problems in a loop."""
+    # Block CUDA unless the atlas needs in-process GPU (use_cuda without socket_path).
+    # When using a scoring server (socket_path set), the server handles GPU;
+    # workers must not initialize CUDA to avoid fork-inherited context corruption.
+    if not atlas_kwargs.get("use_cuda") or atlas_kwargs.get("socket_path"):
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+    except (AttributeError, OSError):
+        pass
+
+    from proofatlas import ProofAtlas
+    atlas = ProofAtlas(**atlas_kwargs)
+    base_dir = Path(base_dir_str)
+
+    while True:
+        task = task_queue.get()
+        if task is None:
+            break
+
+        problem_str = task
+        problem = Path(problem_str)
+        start = time.time()
+        try:
+            prover = atlas.prove(str(problem))
+            elapsed = time.time() - start
+            status = prover.status
+
+            if collect_trace and prover.proof_found and trace_preset:
+                try:
+                    traces_dir = str(base_dir / ".data" / "traces")
+                    prover.save_trace(traces_dir, trace_preset, problem.name, elapsed)
+                except Exception:
+                    pass
+
+            result_queue.put((problem.name, status, elapsed))
+        except Exception as e:
+            elapsed = time.time() - start
+            err_msg = str(e).lower()
+            if "timed out" in err_msg or "memory limit" in err_msg:
+                result_queue.put((problem.name, "resource_limit", elapsed))
+            else:
+                result_queue.put((problem.name, "error", elapsed))
+
+
+class AtlasWorker:
+    """A persistent worker process holding one ProofAtlas instance.
+
+    Thread-safe: multiple threads may call submit() concurrently
+    (a lock serializes access to the underlying queues).
+    """
+
+    def __init__(self, atlas_kwargs, base_dir, collect_trace, trace_preset):
+        self.atlas_kwargs = atlas_kwargs
+        self.base_dir_str = str(base_dir)
+        self.collect_trace = collect_trace
+        self.trace_preset = trace_preset
+        self.task_queue = multiprocessing.Queue()
+        self.result_queue = multiprocessing.Queue()
+        self._lock = threading.Lock()
+        self.proc = None
+
+    def start(self):
+        self.proc = multiprocessing.Process(
+            target=_atlas_worker_loop,
+            args=(self.task_queue, self.result_queue, self.atlas_kwargs,
+                  self.base_dir_str, self.collect_trace, self.trace_preset),
+        )
+        self.proc.start()
+
+    def submit(self, problem_path, timeout):
+        """Submit a problem and block until result. Returns BenchResult.
+
+        Thread-safe — only one caller at a time per worker.
+        """
+        with self._lock:
+            self.task_queue.put(str(problem_path))
+            deadline = time.time() + timeout
+
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    name, status, elapsed = self.result_queue.get(
+                        timeout=min(remaining, 2.0),
+                    )
+                    return BenchResult(problem=name, status=status, time_s=elapsed)
+                except queue_mod.Empty:
+                    if not self.proc.is_alive():
+                        break
+
+            # Timeout or crash — restart worker for next problem
+            problem_name = Path(problem_path).name
+            elapsed = time.time() - (deadline - timeout)
+            if self.proc.is_alive():
+                self.proc.kill()
+            self.proc.join(timeout=5)
+            self._drain_queues()
+            self.start()
+            return BenchResult(problem=problem_name, status="resource_limit", time_s=elapsed)
+
+    def _drain_queues(self):
+        for q in (self.task_queue, self.result_queue):
+            try:
+                while True:
+                    q.get_nowait()
+            except Exception:
+                pass
+
+    def shutdown(self):
+        if self.proc and self.proc.is_alive():
+            self.task_queue.put(None)
+            self.proc.join(timeout=10)
+            if self.proc.is_alive():
+                self.proc.kill()
+                self.proc.join()
+        for q in (self.task_queue, self.result_queue):
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
+
+
+class ProofAtlasPool:
+    """Pool of persistent ProofAtlas workers.
+
+    Each worker creates a ProofAtlas once and reuses it across problems,
+    avoiding per-problem model loading overhead. Workers are automatically
+    restarted on crash or timeout.
+    """
+
+    def __init__(self, n_workers, preset, base_dir, tptp_root,
+                 weights_path=None, use_cuda=False, socket_paths=None,
+                 collect_trace=False, trace_preset=None):
+        timeout = preset.get("timeout", 10)
+        self.process_timeout = max(timeout * 3, timeout + 60)
+
+        self.workers = []
+        for i in range(n_workers):
+            sp = socket_paths[i % len(socket_paths)] if socket_paths else None
+            kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda, sp)
+            worker = AtlasWorker(kwargs, base_dir, collect_trace, trace_preset)
+            self.workers.append(worker)
+
+    def start(self):
+        for w in self.workers:
+            w.start()
+
+    def shutdown(self):
+        for w in self.workers:
+            w.shutdown()

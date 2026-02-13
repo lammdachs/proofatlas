@@ -565,50 +565,137 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
 
         collect_trace = collect_traces and (prover == "proofatlas")
 
-        # Prepare work items
-        work_items = [
-            (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
-            for problem in problems
-        ]
+        if prover == "proofatlas":
+            # Persistent worker pool — reuses ProofAtlas (and ML model) across problems
+            from bench_provers import ProofAtlasPool
 
-        if n_jobs > 1:
-            # Parallel execution — each thread spawns a subprocess via run_proofatlas()
-            from concurrent.futures import ThreadPoolExecutor, as_completed
+            pool = ProofAtlasPool(
+                n_workers=n_jobs, preset=preset, base_dir=base_dir,
+                tptp_root=tptp_root, weights_path=weights_path,
+                use_cuda=use_cuda, socket_paths=socket_paths or None,
+                collect_trace=collect_trace, trace_preset=trace_preset,
+            )
+            pool.start()
 
-            with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                futures = {executor.submit(run_single_problem, item, socket_path=socket_paths[i % len(socket_paths)] if socket_paths else None): i for i, item in enumerate(work_items)}
-                completed = 0
+            try:
+                if n_jobs > 1:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    import threading
 
-                for future in as_completed(futures):
-                    completed += 1
-                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                   completed_count=completed)
-                    try:
-                        status, result = future.result()
-                        _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
-                    except Exception as e:
-                        print(f"ERROR: {e}")
-                        stats["error"] += 1
+                    problem_iter = iter(enumerate(problems, 1))
+                    iter_lock = threading.Lock()
+                    log_lock = threading.Lock()
+                    completed_count = [0]
+
+                    def _pool_worker_fn(worker_idx):
+                        worker = pool.workers[worker_idx]
+                        while True:
+                            with iter_lock:
+                                try:
+                                    i, problem = next(problem_iter)
+                                except StopIteration:
+                                    return
+
+                            existing = load_run_result(base_dir, prover, preset_name, problem)
+                            if existing and not rerun:
+                                with log_lock:
+                                    completed_count[0] += 1
+                                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                                   completed_count=completed_count[0])
+                                    _log_result(existing, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=True)
+                                continue
+
+                            try:
+                                result = worker.submit(problem, pool.process_timeout)
+                                if result.status == "timeout":
+                                    result.status = "resource_limit"
+                                save_run_result(base_dir, prover, preset_name, result)
+                            except Exception as e:
+                                result = BenchResult(problem=problem.name, status="error", time_s=0)
+                                print(f"ERROR: {e}")
+
+                            with log_lock:
+                                completed_count[0] += 1
+                                _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                               completed_count=completed_count[0])
+                                _log_result(result, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=False)
+
+                    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                        futures = [executor.submit(_pool_worker_fn, i) for i in range(n_jobs)]
+                        for f in as_completed(futures):
+                            try:
+                                f.result()
+                            except Exception as e:
+                                print(f"ERROR in pool worker: {e}")
+                                stats["error"] += 1
+                else:
+                    # Sequential execution with persistent worker
+                    for i, problem in enumerate(problems, 1):
+                        _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                       completed_count=i - 1)
+
+                        existing = load_run_result(base_dir, prover, preset_name, problem)
+                        if existing and not rerun:
+                            _log_result(existing, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=True)
+                            continue
+
+                        try:
+                            result = pool.workers[0].submit(problem, pool.process_timeout)
+                            if result.status == "timeout":
+                                result.status = "resource_limit"
+                            save_run_result(base_dir, prover, preset_name, result)
+                            _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=False)
+                        except Exception as e:
+                            print(f"ERROR processing {problem.name}: {e}")
+                            sys.stdout.flush()
+                            import traceback
+                            traceback.print_exc()
+                            sys.stdout.flush()
+            finally:
+                pool.shutdown()
+
         else:
-            # Sequential execution
-            for i, item in enumerate(work_items, 1):
-                _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                               completed_count=i - 1)
-                # Periodic garbage collection to prevent OOM
-                if i % 100 == 0:
-                    import gc
-                    gc.collect()
+            # External provers (Vampire, SPASS): subprocess per problem
+            work_items = [
+                (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
+                for problem in problems
+            ]
 
-                try:
-                    sp = socket_paths[(i - 1) % len(socket_paths)] if socket_paths else None
-                    status, result = run_single_problem(item, socket_path=sp)
-                    _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
-                except Exception as e:
-                    print(f"ERROR processing {item[0].name}: {e}")
-                    sys.stdout.flush()
-                    import traceback
-                    traceback.print_exc()
-                    sys.stdout.flush()
+            if n_jobs > 1:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                    futures = {executor.submit(run_single_problem, item, socket_path=socket_paths[i % len(socket_paths)] if socket_paths else None): i for i, item in enumerate(work_items)}
+                    completed = 0
+
+                    for future in as_completed(futures):
+                        completed += 1
+                        _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                       completed_count=completed)
+                        try:
+                            status, result = future.result()
+                            _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                        except Exception as e:
+                            print(f"ERROR: {e}")
+                            stats["error"] += 1
+            else:
+                for i, item in enumerate(work_items, 1):
+                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
+                                   completed_count=i - 1)
+                    if i % 100 == 0:
+                        import gc
+                        gc.collect()
+
+                    try:
+                        sp = socket_paths[(i - 1) % len(socket_paths)] if socket_paths else None
+                        status, result = run_single_problem(item, socket_path=sp)
+                        _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                    except Exception as e:
+                        print(f"ERROR processing {item[0].name}: {e}")
+                        sys.stdout.flush()
+                        import traceback
+                        traceback.print_exc()
+                        sys.stdout.flush()
 
         # Print summary (individual results saved to .data/runs/)
         # Note: skip count is separate (skipped problems are also counted in their status)
