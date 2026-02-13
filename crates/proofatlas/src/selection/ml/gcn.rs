@@ -16,7 +16,7 @@ use crate::logic::Clause;
 use super::graph::GraphBuilder;
 
 #[cfg(feature = "ml")]
-use super::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
+use crate::selection::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 
 /// GCN embedder using PyTorch for inference
 ///
@@ -713,7 +713,11 @@ mod tests {
             vec![b.clone()],
         )]);
 
-        let clauses = vec![clause1, clause2, clause3];
+        let clauses: Vec<std::sync::Arc<Clause>> = vec![
+            std::sync::Arc::new(clause1),
+            std::sync::Arc::new(clause2),
+            std::sync::Arc::new(clause3),
+        ];
         let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
         // First selection should populate cache

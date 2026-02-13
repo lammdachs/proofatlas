@@ -39,6 +39,15 @@ pub trait ClauseEmbedder: Send {
     /// Get the name of this embedder
     fn name(&self) -> &str;
 
+    /// Compute embeddings from pre-serialized text strings.
+    ///
+    /// Used by the pipeline architecture where clause→string conversion
+    /// happens in the data processing thread (not the model worker).
+    /// Default: unimplemented (only sentence embedders need this).
+    fn embed_texts(&self, _texts: &[&str]) -> Vec<Vec<f32>> {
+        unimplemented!("embed_texts not supported by this embedder")
+    }
+
     /// Provide the symbol interner for clause serialization.
     /// Embedders that need symbol names (e.g., sentence transformers) should
     /// store this and use it during `embed_batch`.
@@ -165,7 +174,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> CachingSelector<E, S> {
 }
 
 impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E, S> {
-    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Arc<Clause>]) -> Option<usize> {
         if unprocessed.is_empty() {
             return None;
         }
@@ -190,7 +199,7 @@ impl<E: ClauseEmbedder, S: EmbeddingScorer> ClauseSelector for CachingSelector<E
         if !uncached_indices.is_empty() {
             let uncached_clauses: Vec<&Clause> = uncached_indices
                 .iter()
-                .map(|&idx| &clauses[idx])
+                .map(|&idx| clauses[idx].as_ref())
                 .collect();
 
             let t0 = Instant::now();
@@ -366,10 +375,10 @@ mod tests {
         let scorer = TestScorer;
         let mut selector = CachingSelector::new(embedder, scorer);
 
-        let clauses = vec![
-            make_clause(1, &mut interner),
-            make_clause(2, &mut interner),
-            make_clause(3, &mut interner),
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_clause(1, &mut interner)),
+            Arc::new(make_clause(2, &mut interner)),
+            Arc::new(make_clause(3, &mut interner)),
         ];
         let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
@@ -416,10 +425,10 @@ mod tests {
         let scorer = TestContextScorer;
         let mut selector = CachingSelector::new(embedder, scorer);
 
-        let clauses = vec![
-            make_clause(1, &mut interner),
-            make_clause(2, &mut interner),
-            make_clause(3, &mut interner),
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_clause(1, &mut interner)),
+            Arc::new(make_clause(2, &mut interner)),
+            Arc::new(make_clause(3, &mut interner)),
         ];
 
         // First: process clause 0 so it's in P
@@ -445,9 +454,9 @@ mod tests {
         let scorer = TestScorer; // uses_context() = false
         let mut selector = CachingSelector::new(embedder, scorer);
 
-        let clauses = vec![
-            make_clause(1, &mut interner),
-            make_clause(2, &mut interner),
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_clause(1, &mut interner)),
+            Arc::new(make_clause(2, &mut interner)),
         ];
 
         // Process clause 0

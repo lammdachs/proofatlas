@@ -1,6 +1,6 @@
 use proofatlas::{
-    parse_tptp_file, AgeWeightSelector, ClauseSelector, LiteralSelectionStrategy,
-    ProverConfig, ProofResult, ProofAtlas, StateChange,
+    parse_tptp_file, AgeWeightSink, ProverSink, LiteralSelectionStrategy,
+    ProverConfig, ProofResult, Prover, StateChange,
 };
 use std::collections::{HashMap, BTreeSet};
 use std::time::Duration;
@@ -18,8 +18,8 @@ fn main() {
         ..Default::default()
     };
 
-    let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::default());
-    let mut prover = ProofAtlas::new(parsed.formula.clauses, config, selector, parsed.interner);
+    let sink: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
+    let mut prover = Prover::new(parsed.formula.clauses, config, sink, parsed.interner);
     let result = prover.prove();
 
     let events = prover.event_log();
@@ -263,12 +263,12 @@ fn main() {
             }
             StateChange::Simplify(clause_idx, replacement, _, _) => {
                 // Remove from whichever set
-                if n.last() == Some(clause_idx) {
+                if n.last() == Some(&clause_idx) {
                     n.pop();
-                } else if u.remove(clause_idx) {
+                } else if u.remove(&clause_idx) {
                     // removed from U
                 } else {
-                    p.remove(clause_idx);
+                    p.remove(&clause_idx);
                 }
                 // Add replacement to N if any
                 if let Some(repl) = replacement {
@@ -278,7 +278,7 @@ fn main() {
                 }
             }
             StateChange::Transfer(idx) => {
-                if n.last() == Some(idx) {
+                if n.last() == Some(&idx) {
                     n.pop();
                 }
                 u.insert(*idx);

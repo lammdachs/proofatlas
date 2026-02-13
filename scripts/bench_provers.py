@@ -40,67 +40,55 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     from proofatlas import ProofAtlas
 
     timeout = preset.get("timeout", 10)
-
-    try:
-        with open(problem) as f:
-            content = f.read()
-    except Exception:
-        return BenchResult(problem=problem.name, status="error", time_s=0)
-
-    # Start timer before parsing (CNF conversion counts against timeout)
-    start = time.time()
-
-    state = ProofAtlas()
-    try:
-        # Pass timeout and memory limit to parsing to prevent CNF conversion hangs/OOM
-        memory_limit = preset.get("memory_limit")  # None means no limit
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
-    except Exception as e:
-        elapsed = time.time() - start
-        # Timeout or memory limit during CNF conversion
-        if "timed out" in str(e).lower() or "memory limit" in str(e).lower():
-            return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
-        return BenchResult(problem=problem.name, status="error", time_s=elapsed)
-
+    memory_limit = preset.get("memory_limit")
     literal_selection = preset.get("literal_selection", 21)
-
-    max_iterations = preset.get("max_iterations", 0)  # 0 means no limit
+    max_iterations = preset.get("max_iterations", 0)
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
     age_weight_ratio = preset.get("age_weight_ratio", 0.5)
     encoder = preset.get("encoder") if is_learned else None
     scorer = preset.get("scorer") if is_learned else None
 
-    # Remaining time after parsing
-    elapsed_parsing = time.time() - start
-    remaining_timeout = max(0.1, timeout - elapsed_parsing)
+    # Build ProofAtlas orchestrator with all configuration
+    atlas_kwargs = {
+        "timeout": float(timeout),
+        "literal_selection": literal_selection,
+        "memory_limit": memory_limit,
+        "include_dir": str(tptp_root),
+    }
+    if max_iterations > 0:
+        atlas_kwargs["max_iterations"] = max_iterations
+    if encoder:
+        atlas_kwargs["encoder"] = encoder
+        atlas_kwargs["scorer"] = scorer
+        atlas_kwargs["weights_path"] = weights_path
+        atlas_kwargs["use_cuda"] = use_cuda
+        if socket_path:
+            atlas_kwargs["socket_path"] = socket_path
+    else:
+        atlas_kwargs["age_weight_ratio"] = float(age_weight_ratio)
 
+    start = time.time()
     try:
-        proof_found, status = state.prove(
-            timeout=float(remaining_timeout),
-            max_iterations=max_iterations if max_iterations > 0 else None,
-            literal_selection=literal_selection,
-            age_weight_ratio=float(age_weight_ratio) if not is_learned else None,
-            encoder=encoder,
-            scorer=scorer,
-            weights_path=weights_path,
-            memory_limit=memory_limit,
-            use_cuda=use_cuda,
-            socket_path=socket_path,
-        )
+        atlas = ProofAtlas(**atlas_kwargs)
+        prover = atlas.prove(str(problem))
     except Exception as e:
         elapsed = time.time() - start
+        err_msg = str(e).lower()
+        if "timed out" in err_msg or "memory limit" in err_msg:
+            return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
         # When using a scoring server, connection/communication failures are
         # resource issues (server died/restarting), not problem-level errors.
         status = "resource_limit" if socket_path else "error"
         return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
     elapsed = time.time() - start
+    status = prover.status
 
     # Collect trace for training
-    if collect_trace and proof_found and trace_preset:
+    if collect_trace and prover.proof_found and trace_preset:
         try:
-            graph_dict, sentence_dict = state.extract_tensor_trace(elapsed)
+            graph_dict, sentence_dict = prover.extract_tensor_trace(elapsed)
             _get_ml().save_tensor_trace(base_dir / ".data" / "traces", trace_preset, problem.name, graph_dict, sentence_dict)
         except Exception:
             pass

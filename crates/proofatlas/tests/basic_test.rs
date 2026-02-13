@@ -1,9 +1,9 @@
 //! Integration tests for the theorem prover
 
-use proofatlas::{parse_tptp, saturate, AgeWeightSelector, ClauseSelector, ProverConfig, ProofResult};
+use proofatlas::{parse_tptp, saturate, AgeWeightSink, ProverSink, ProverConfig, ProofResult};
 
-fn create_selector() -> Box<dyn ClauseSelector> {
-    Box::new(AgeWeightSelector::default())
+fn create_sink() -> Box<dyn ProverSink> {
+    Box::new(AgeWeightSink::new(0.5))
 }
 
 #[test]
@@ -16,7 +16,7 @@ fn test_simple_resolution() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
     match result {
         ProofResult::Proof { .. } => {
@@ -34,7 +34,7 @@ fn test_equality_reflexivity() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
     match result {
         ProofResult::Proof { .. } => {
@@ -54,7 +54,7 @@ fn test_satisfiable_formula() {
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let mut config = ProverConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
-    let (result, _) = saturate(parsed.formula, config, create_selector(), parsed.interner);
+    let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
     match result {
         ProofResult::Saturated => {

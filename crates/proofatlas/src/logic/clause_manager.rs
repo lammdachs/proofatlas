@@ -9,7 +9,7 @@ use super::literal_selection::LiteralSelector;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
-use crate::time_compat::Instant;
+use super::time_compat::Instant;
 
 /// Centralized clause management combining the symbol interner, literal
 /// selection strategy, and term ordering.

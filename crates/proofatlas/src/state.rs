@@ -9,6 +9,7 @@ use crate::index::IndexRegistry;
 use indexmap::IndexSet;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 // =============================================================================
 // Proof
@@ -133,7 +134,7 @@ pub enum ProofResult {
 /// The saturation algorithm lives in `ProofAtlas`.
 pub struct SaturationState {
     /// Storage for all clauses, indexed by clause ID
-    pub clauses: Vec<Clause>,
+    pub clauses: Vec<Arc<Clause>>,
     /// Set P: Processed/active clauses (used for generating inferences)
     pub processed: IndexSet<usize>,
     /// Set U: Unprocessed/passive clauses (awaiting selection)
@@ -195,7 +196,7 @@ impl SaturationState {
                     clause_idx: idx,
                     rule_name,
                     premises,
-                    conclusion: self.clauses[idx].clone(),
+                    conclusion: (*self.clauses[idx]).clone(),
                 }
             })
             .collect()

@@ -19,7 +19,8 @@ ML MODELS:
         python scripts/train.py --config gcn_mlp
         proofatlas-bench --config gcn_mlp
 
-    For ML presets, a scoring server is auto-launched during evaluation.
+    CPU workers use an in-process pipeline (no external server needed).
+    GPU workers (--gpu-workers N) use scoring server subprocesses per GPU.
 
 OUTPUT:
     .data/runs/proofatlas/<preset>/     - Per-problem results
@@ -500,41 +501,25 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
 
-    # Start scoring server(s) for ML selectors
+    # Start scoring server(s) for GPU ML inference.
+    # CPU workers use the in-process pipeline (no server needed).
     server_procs = []
     socket_paths = []
     stderr_logs = []
     ml = _get_ml()
 
-    if prover == "proofatlas" and ml.is_learned_selector(preset) and weights_path:
+    if prover == "proofatlas" and ml.is_learned_selector(preset) and weights_path and gpu_workers > 0:
         model_label = f"{preset['encoder']}_{preset['scorer']}"
-
-        if gpu_workers > 0:
-            # Multi-GPU: one server per GPU
-            print(f"\nStarting {gpu_workers} scoring server(s) for {model_label}...")
-            for i in range(gpu_workers):
-                sp = f"/tmp/proofatlas-scoring-{os.getpid()}-{i}.sock"
-                proc, stderr_path = _start_scoring_server_subprocess(
-                    encoder=preset["encoder"],
-                    scorer=preset["scorer"],
-                    weights_path=weights_path,
-                    socket_path=sp,
-                    use_cuda=True,
-                    gpu_id=i,
-                )
-                server_procs.append(proc)
-                socket_paths.append(sp)
-                stderr_logs.append(stderr_path)
-        else:
-            # CPU: single server
-            print(f"\nStarting scoring server for {model_label}...")
-            sp = f"/tmp/proofatlas-scoring-{os.getpid()}.sock"
+        print(f"\nStarting {gpu_workers} scoring server(s) for {model_label}...")
+        for i in range(gpu_workers):
+            sp = f"/tmp/proofatlas-scoring-{os.getpid()}-{i}.sock"
             proc, stderr_path = _start_scoring_server_subprocess(
                 encoder=preset["encoder"],
                 scorer=preset["scorer"],
                 weights_path=weights_path,
                 socket_path=sp,
-                use_cuda=False,
+                use_cuda=True,
+                gpu_id=i,
             )
             server_procs.append(proc)
             socket_paths.append(sp)
@@ -567,10 +552,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                     Path(log_path).unlink(missing_ok=True)
                 return stats
 
-        if len(socket_paths) == 1:
-            print(f"Scoring server ready at {socket_paths[0]}")
-        else:
-            print(f"All {len(socket_paths)} scoring servers ready")
+        print(f"All {len(socket_paths)} scoring servers ready")
 
     try:
         if prover == "proofatlas":

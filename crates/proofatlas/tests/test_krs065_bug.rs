@@ -1,8 +1,8 @@
 //! Test for KRS065+1 bug: saturation loop not generating inferences with duplicates
 
 use proofatlas::{
-    parse_tptp, saturate, AgeWeightSelector, ClauseSelector,
-    ProverConfig, ProofResult, ProofAtlas,
+    parse_tptp, saturate, AgeWeightSink, ProverSink,
+    ProverConfig, ProofResult, Prover,
 };
 
 #[test]
@@ -20,7 +20,7 @@ fn test_simple_resolution_proof() {
     }
 
     let config = ProverConfig::default();
-    let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
+    let selector: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
 
     let (result, prover) = saturate(parsed.formula, config, selector, parsed.interner);
 
@@ -60,7 +60,7 @@ fn test_with_duplicate_clause() {
     }
 
     let config = ProverConfig::default();
-    let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
+    let selector: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
 
     let (result, prover) = saturate(parsed.formula, config, selector, parsed.interner);
 
@@ -112,9 +112,9 @@ fn test_with_precloned_clauses() {
     println!("Cloned {} clauses", cloned_clauses.len());
 
     let config = ProverConfig::default();
-    let selector: Box<dyn ClauseSelector> = Box::new(AgeWeightSelector::new(0.5));
+    let selector: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
 
-    let mut prover = ProofAtlas::new(cloned_clauses, config, selector, parsed.interner);
+    let mut prover = Prover::new(cloned_clauses, config, selector, parsed.interner);
     let result = prover.prove();
 
     match &result {

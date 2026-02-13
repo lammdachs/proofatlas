@@ -22,20 +22,16 @@
 //! - [`GcnSelector`] (feature-gated): GCN graph neural network
 //! - [`SentenceSelector`] (feature-gated): sentence transformer
 
+// Core (top-level)
 pub mod age_weight;
 pub mod cached;
 pub mod clause;
-#[cfg(feature = "ml")]
-pub mod gcn;
-pub mod graph;
-pub mod proof_trace;
-pub mod protocol;
-#[cfg(unix)]
-pub mod remote;
-#[cfg(feature = "ml")]
-pub mod sentence;
-#[cfg(feature = "ml")]
-pub mod server;
+
+// Subgroups
+pub mod ml;
+pub mod network;
+pub mod pipeline;
+pub mod training;
 
 // Literal selection re-exports (from logic module)
 pub use crate::logic::literal_selection::{
@@ -44,29 +40,36 @@ pub use crate::logic::literal_selection::{
 };
 
 // Clause selection re-exports
-pub use age_weight::{AgeWeightSelector, FIFOSelector, WeightSelector};
+pub use age_weight::{AgeWeightSelector, AgeWeightSink, FIFOSelector, WeightSelector};
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
-pub use clause::{ClauseSelector, SelectorStats};
+pub use clause::{ClauseSelector, ProverSink, SelectorStats};
 #[cfg(feature = "ml")]
-pub use gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
+pub use ml::gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
 #[cfg(feature = "ml")]
-pub use gcn::{
+pub use ml::gcn::{
     load_gcn_cross_attention_selector, load_gcn_embedder, load_gcn_encoder_scorer,
     GcnCrossAttentionSelector, GcnEncoder, TorchScriptScorer,
 };
 #[cfg(feature = "ml")]
-pub use sentence::{
+pub use ml::sentence::{
     load_sentence_embedder, load_sentence_selector, PassThroughScorer, SentenceEmbedder,
     SentenceSelector,
 };
 #[cfg(unix)]
-pub use remote::RemoteSelector;
+pub use network::remote::{RemoteSelector, RemoteSelectorSink};
 #[cfg(feature = "ml")]
-pub use server::ScoringServer;
+pub use network::server::ScoringServer;
+
+// Pipeline re-exports
+pub use pipeline::backend::{Backend, BackendHandle, BackendRequest, BackendResponse, Model};
+pub use pipeline::{
+    ChannelSink, EmbedScoreModel, Preprocessor, ProverSignal,
+    create_ml_pipeline, create_pipeline_with_handle, identity_preprocessor,
+};
 
 // Graph/ML re-exports
-pub use graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};
-pub use proof_trace::{
+pub use ml::graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};
+pub use training::proof_trace::{
     compute_proof_statistics, extract_training_data,
     ProofStatistics, TrainingExample,
 };

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[cfg(feature = "ml")]
-use super::cached::{ClauseEmbedder, EmbeddingScorer};
+use crate::selection::cached::{ClauseEmbedder, EmbeddingScorer};
 #[cfg(feature = "ml")]
 use super::protocol::{
     read_message, write_message, ScoringRequest, ScoringResponse,

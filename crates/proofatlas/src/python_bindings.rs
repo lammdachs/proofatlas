@@ -7,29 +7,10 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::logic::{Clause, Interner};
-use crate::prover::ProofAtlas;
+use crate::prover::Prover;
+use crate::atlas::ProofAtlas;
 use crate::state::{clause_indices, ProofResult, StateChange as RustStateChange};
-use crate::parser::parse_tptp;
 use crate::config::LiteralSelectionStrategy;
-
-/// Python-accessible prover — thin wrapper around ProofAtlas.
-///
-/// Pre-prove: holds initial clauses and interner from parsing.
-/// Post-prove: retains the ProofAtlas instance and delegates all queries to it.
-#[pyclass(name = "ProofAtlas", unsendable)]
-pub struct PyProofAtlas {
-    /// Pre-prove state: initial clauses from add_clauses_from_tptp
-    initial_clauses: Vec<Clause>,
-    /// Pre-prove state: interner from parsing
-    interner: Interner,
-
-    /// Post-prove state: the retained prover instance
-    prover: Option<ProofAtlas>,
-    /// Post-prove state: the saturation result
-    result: Option<ProofResult>,
-    /// Profile JSON (serialized once after prove())
-    profile_json: Option<String>,
-}
 
 /// Single step in proof trace
 #[pyclass]
@@ -45,126 +26,42 @@ pub struct ProofStep {
     pub rule_name: String,
 }
 
-impl PyProofAtlas {
-    /// Get the interner (works pre- and post-prove)
-    fn interner(&self) -> &Interner {
-        self.prover.as_ref()
-            .map(|p| p.interner())
-            .unwrap_or(&self.interner)
-    }
+// =============================================================================
+// PyOrchestrator — Python-facing "ProofAtlas" class
+// =============================================================================
 
-    /// Get the clauses (works pre- and post-prove)
-    fn clauses(&self) -> &[Clause] {
-        self.prover.as_ref()
-            .map(|p| p.clauses())
-            .unwrap_or(&self.initial_clauses)
-    }
-
-    /// Get the event log (post-prove only)
-    fn event_log(&self) -> &[RustStateChange] {
-        self.prover.as_ref()
-            .map(|p| p.event_log())
-            .unwrap_or(&[])
-    }
-
-    /// Get the empty clause index (post-prove, proof case only)
-    fn empty_clause_idx(&self) -> Option<usize> {
-        match &self.result {
-            Some(ProofResult::Proof { empty_clause_idx }) => Some(*empty_clause_idx),
-            _ => None,
-        }
-    }
+/// Python-accessible orchestrator — wraps Rust ProofAtlas.
+///
+/// Created once with config, reused across multiple problems.
+/// Each `prove()` call returns a `Prover` with the result.
+#[pyclass(name = "ProofAtlas", unsendable)]
+pub struct PyOrchestrator {
+    atlas: ProofAtlas,
+    /// Initial clause count from the last prove() call
+    initial_count: Option<usize>,
 }
 
 #[pymethods]
-impl PyProofAtlas {
-    /// Create empty proof state
-    #[new]
-    pub fn new() -> Self {
-        PyProofAtlas {
-            initial_clauses: Vec::new(),
-            interner: Interner::new(),
-            prover: None,
-            result: None,
-            profile_json: None,
-        }
-    }
-
-    /// Parse TPTP content and add clauses, return clause IDs
+impl PyOrchestrator {
+    /// Create a new ProofAtlas orchestrator.
     ///
     /// Args:
-    ///     content: TPTP file content as string
-    ///     include_dir: Optional directory to search for included files (e.g., TPTP root)
-    ///     timeout: Optional timeout in seconds for CNF conversion (prevents hangs on complex formulas)
-    ///     memory_limit: Optional memory limit in MB (checked via process RSS during CNF conversion)
-    #[pyo3(signature = (content, include_dir=None, timeout=None, memory_limit=None))]
-    pub fn add_clauses_from_tptp(
-        &mut self,
-        content: &str,
-        include_dir: Option<&str>,
-        timeout: Option<f64>,
-        memory_limit: Option<usize>,
-    ) -> PyResult<Vec<usize>> {
-        let timeout_instant = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
-        let include_dirs: Vec<String> = include_dir.into_iter().map(|s| s.to_string()).collect();
-        let content_owned = content.to_string();
-
-        // Run parsing in a thread with larger stack to handle deeply nested formulas.
-        // Default Python thread stack is too small for formulas with depth > 2000.
-        // Poll the join handle so Ctrl+C works during parsing.
-        let handle = std::thread::Builder::new()
-            .stack_size(128 * 1024 * 1024)  // 128MB stack
-            .spawn(move || {
-                let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
-                parse_tptp(&content_owned, &include_refs, timeout_instant, memory_limit)
-            })
-            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
-
-        let parsed = loop {
-            if handle.is_finished() {
-                break handle.join()
-                    .map_err(|_| PyValueError::new_err("Parser thread panicked"))?
-                    .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
-            }
-            Python::with_gil(|py| py.check_signals())?;
-            std::thread::sleep(Duration::from_millis(50));
-        };
-
-        // Extract interner and formula from parsed problem
-        self.interner = parsed.interner;
-        let cnf = parsed.formula;
-
-        let mut ids = Vec::new();
-        for mut clause in cnf.clauses {
-            let id = self.initial_clauses.len();
-            clause.id = Some(id);
-            ids.push(id);
-            self.initial_clauses.push(clause);
-        }
-
-        Ok(ids)
-    }
-
-    /// Run full saturation using the Rust saturation engine
-    ///
-    /// Args:
-    ///     timeout: Optional timeout in seconds
-    ///     max_iterations: Maximum number of saturation steps (0 or None = no limit)
+    ///     timeout: Timeout in seconds (default: 300)
+    ///     max_iterations: Maximum saturation steps (0 = no limit)
     ///     literal_selection: Literal selection strategy: 0/20/21/22 (default: 0)
-    ///     age_weight_ratio: Age probability for age-weight clause selector (default: 0.5)
+    ///     age_weight_ratio: Age probability for age-weight selector (default: 0.5)
     ///     encoder: Encoder name: None (default, uses age_weight), "gcn", "gat", "graphsage", or "sentence"
-    ///     scorer: Name of the scorer. Model file is "{encoder}_{scorer}.pt" (e.g., "gcn_mlp").
+    ///     scorer: Scorer name (e.g., "mlp", "attention")
     ///     weights_path: Path to model weights directory
-    ///     memory_limit: Memory limit for clause storage in MB
-    ///     enable_profiling: Enable structured profiling (default: false).
-    ///     socket_path: Path to scoring server Unix socket. If set, uses RemoteSelector.
-    ///                  If None with an ML encoder, auto-launches a local scoring server.
-    ///
-    /// Returns:
-    ///     Tuple of (proof_found: bool, status: str)
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, socket_path=None))]
-    pub fn prove(
-        &mut self,
+    ///     memory_limit: Memory limit in MB
+    ///     use_cuda: Whether to use CUDA (default: false)
+    ///     enable_profiling: Enable structured profiling (default: false)
+    ///     socket_path: Path to scoring server Unix socket
+    ///     include_dir: Directory for resolving TPTP include() directives
+    ///     max_clause_size: Maximum clause size (default: 100)
+    #[new]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, socket_path=None, include_dir=None, max_clause_size=None))]
+    pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
         literal_selection: Option<u32>,
@@ -176,106 +73,9 @@ impl PyProofAtlas {
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
         socket_path: Option<String>,
-    ) -> PyResult<(bool, String)> {
-        use crate::config::ProverConfig;
-        use crate::selection::AgeWeightSelector;
-
-        // Create clause selector based on encoder type
-        let model_name = match (encoder.as_deref(), scorer.as_deref()) {
-            (Some(enc), Some(sc)) => Some(format!("{}_{}", enc, sc)),
-            (Some(_), None) => return Err(PyValueError::new_err("scorer required when encoder is set")),
-            _ => None,
-        };
-
-        // Keep auto-launched server handle alive until saturation completes
-        #[cfg(feature = "ml")]
-        let _server_handle: Option<std::thread::JoinHandle<()>> = None;
-        #[cfg(feature = "ml")]
-        let mut _server_handle = _server_handle;
-        let auto_socket_path: Option<String>;
-
-        let clause_selector: Box<dyn crate::selection::ClauseSelector> = match encoder.as_deref() {
-            None => {
-                auto_socket_path = None;
-                // No encoder = heuristic selector
-                let ratio = age_weight_ratio.unwrap_or(0.5);
-                Box::new(AgeWeightSelector::new(ratio))
-            }
-            #[cfg(feature = "ml")]
-            Some(enc @ ("gcn" | "gat" | "graphsage" | "sentence")) => {
-                if let Some(ref path) = socket_path {
-                    // Connect to existing scoring server
-                    auto_socket_path = None;
-                    let selector = crate::selection::RemoteSelector::connect(path)
-                        .map_err(|e| PyValueError::new_err(e))?;
-                    Box::new(selector)
-                } else {
-                    // Auto-launch a local scoring server
-                    let weights_dir = if let Some(path) = weights_path.as_ref() {
-                        std::path::PathBuf::from(path)
-                    } else {
-                        std::path::PathBuf::from(".weights")
-                    };
-                    let name = model_name.as_deref().unwrap();
-
-                    let (embedder, scorer_box): (Box<dyn crate::selection::cached::ClauseEmbedder>, Box<dyn crate::selection::cached::EmbeddingScorer>) = if enc == "sentence" {
-                        let model_path = weights_dir.join(format!("{}.pt", name));
-                        let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", name));
-                        if !model_path.exists() {
-                            return Err(PyValueError::new_err(format!(
-                                "Model not found at {}",
-                                model_path.display()
-                            )));
-                        }
-                        let emb = crate::selection::load_sentence_embedder(
-                            &model_path,
-                            &tokenizer_path,
-                            use_cuda.unwrap_or(true),
-                        ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-                        (Box::new(emb), Box::new(crate::selection::PassThroughScorer))
-                    } else {
-                        let model_path = weights_dir.join(format!("{}.pt", name));
-                        if !model_path.exists() {
-                            return Err(PyValueError::new_err(format!(
-                                "Model not found at {}",
-                                model_path.display()
-                            )));
-                        }
-                        let emb = crate::selection::load_gcn_embedder(
-                            &model_path,
-                            use_cuda.unwrap_or(true),
-                        ).map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-                        (Box::new(emb), Box::new(crate::selection::GcnScorer))
-                    };
-
-                    let sock_path = format!("/tmp/proofatlas-scoring-{}.sock", std::process::id());
-                    let server = crate::selection::ScoringServer::new(
-                        embedder,
-                        scorer_box,
-                        sock_path.clone(),
-                    );
-                    _server_handle = Some(server.spawn());
-                    std::thread::sleep(Duration::from_millis(50));
-
-                    auto_socket_path = Some(sock_path.clone());
-                    let selector = crate::selection::RemoteSelector::connect(&sock_path)
-                        .map_err(|e| PyValueError::new_err(e))?;
-                    Box::new(selector)
-                }
-            }
-            Some(other) => {
-                #[cfg(feature = "ml")]
-                let available = "None, 'gcn', 'gat', 'graphsage', or 'sentence'";
-                #[cfg(not(feature = "ml"))]
-                let available = "None (ML features not enabled)";
-                return Err(PyValueError::new_err(format!(
-                    "Unknown encoder: '{}'. Use {}",
-                    other, available
-                )));
-            }
-        };
-
-        // Build config
+        include_dir: Option<String>,
+        max_clause_size: Option<usize>,
+    ) -> PyResult<Self> {
         let timeout_dur = timeout
             .map(|s| Duration::from_secs_f64(s))
             .unwrap_or(Duration::from_secs(300));
@@ -287,78 +87,247 @@ impl PyProofAtlas {
             _ => LiteralSelectionStrategy::Sel0,
         };
 
-        let config = ProverConfig {
+        let config = crate::config::ProverConfig {
             max_clauses: 0,
             max_iterations: max_iterations.unwrap_or(0),
-            max_clause_size: 100,
+            max_clause_size: max_clause_size.unwrap_or(100),
             timeout: timeout_dur,
             literal_selection: lit_sel,
             memory_limit,
             enable_profiling: enable_profiling.unwrap_or(false),
         };
 
-        // Create prover from current clauses — move initial_clauses/interner into prover
-        let clauses = std::mem::take(&mut self.initial_clauses);
-        let interner = std::mem::take(&mut self.interner);
-        let mut prover = ProofAtlas::new(clauses, config, clause_selector, interner);
+        let mut builder = ProofAtlas::builder(config);
 
-        // Run saturation in a thread with larger stack, move prover in and back out.
-        // Poll the join handle so we can check for Python signals (Ctrl+C) between polls.
-        let cancel = prover.cancel.clone();
+        if let Some(dir) = include_dir {
+            builder = builder.include_dir(dir);
+        }
+
+        if let Some(enc) = encoder {
+            builder = builder.encoder(enc);
+        }
+        if let Some(sc) = scorer {
+            builder = builder.scorer(sc);
+        }
+        if let Some(path) = weights_path {
+            builder = builder.weights_path(path);
+        }
+        if let Some(cuda) = use_cuda {
+            builder = builder.use_cuda(cuda);
+        }
+        if let Some(ratio) = age_weight_ratio {
+            builder = builder.age_weight_ratio(ratio);
+        }
+        if let Some(path) = socket_path {
+            builder = builder.socket_path(path);
+        }
+
+        let atlas = builder.build()
+            .map_err(|e| PyValueError::new_err(e))?;
+
+        Ok(PyOrchestrator {
+            atlas,
+            initial_count: None,
+        })
+    }
+
+    /// Prove a TPTP file.
+    ///
+    /// Args:
+    ///     path: Path to TPTP problem file
+    ///     timeout: Override timeout in seconds (currently unused, set on constructor)
+    ///     memory_limit: Override memory limit in MB (currently unused, set on constructor)
+    ///
+    /// Returns:
+    ///     Prover object with result, proof steps, and statistics
+    #[pyo3(signature = (path, timeout=None, memory_limit=None))]
+    pub fn prove(&mut self, path: &str, timeout: Option<f64>, memory_limit: Option<usize>) -> PyResult<PyProver> {
+        let _ = (timeout, memory_limit);
+        let parsed = self.parse_file_threaded(path)?;
+        self.run_prover(parsed)
+    }
+
+    /// Prove TPTP content from a string.
+    ///
+    /// Args:
+    ///     content: TPTP content as string
+    ///     timeout: Override timeout in seconds (currently unused, set on constructor)
+    ///     memory_limit: Override memory limit in MB (currently unused, set on constructor)
+    ///
+    /// Returns:
+    ///     Prover object with result, proof steps, and statistics
+    #[pyo3(signature = (content, timeout=None, memory_limit=None))]
+    pub fn prove_string(&mut self, content: &str, timeout: Option<f64>, memory_limit: Option<usize>) -> PyResult<PyProver> {
+        let _ = (timeout, memory_limit);
+        let parsed = self.parse_string_threaded(content)?;
+        self.run_prover(parsed)
+    }
+}
+
+impl PyOrchestrator {
+    /// Parse in a large-stack thread, polling for Python signals.
+    fn parse_file_threaded(&self, path: &str) -> PyResult<crate::parser::ParsedProblem> {
+        let include_dirs: Vec<String> = self.atlas.include_dirs().to_vec();
+        let config = self.atlas.config().clone();
+        let path_owned = path.to_string();
+
         let handle = std::thread::Builder::new()
-            .stack_size(128 * 1024 * 1024)  // 128MB stack
+            .stack_size(128 * 1024 * 1024)
             .spawn(move || {
+                use crate::parser::parse_tptp_file;
+                let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
+                let timeout_instant = Some(Instant::now() + config.timeout);
+                parse_tptp_file(&path_owned, &include_refs, timeout_instant, config.memory_limit)
+            })
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
+
+        self.poll_result_thread(handle)
+    }
+
+    /// Parse string content in a large-stack thread, polling for Python signals.
+    fn parse_string_threaded(&self, content: &str) -> PyResult<crate::parser::ParsedProblem> {
+        let include_dirs: Vec<String> = self.atlas.include_dirs().to_vec();
+        let config = self.atlas.config().clone();
+        let content_owned = content.to_string();
+
+        let handle = std::thread::Builder::new()
+            .stack_size(128 * 1024 * 1024)
+            .spawn(move || {
+                use crate::parser::parse_tptp;
+                let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
+                let timeout_instant = Some(Instant::now() + config.timeout);
+                parse_tptp(&content_owned, &include_refs, timeout_instant, config.memory_limit)
+            })
+            .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
+
+        self.poll_result_thread(handle)
+    }
+
+    /// Poll a thread returning Result<T, String> for completion, checking Python signals.
+    fn poll_result_thread<T>(&self, handle: std::thread::JoinHandle<Result<T, String>>) -> PyResult<T> {
+        loop {
+            if handle.is_finished() {
+                return handle.join()
+                    .map_err(|_| PyValueError::new_err("Thread panicked"))?
+                    .map_err(|e| PyValueError::new_err(e));
+            }
+            Python::with_gil(|py| py.check_signals())?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Create sink, build prover, and run saturation in a large-stack thread.
+    fn run_prover(&mut self, parsed: crate::parser::ParsedProblem) -> PyResult<PyProver> {
+        let sink = self.atlas.create_sink(&parsed.interner)
+            .map_err(|e| PyValueError::new_err(e))?;
+
+        let config = self.atlas.config().clone();
+        let clauses = parsed.formula.clauses;
+        let interner = parsed.interner;
+
+        // Run saturation in a large-stack thread
+        let handle = std::thread::Builder::new()
+            .stack_size(128 * 1024 * 1024)
+            .spawn(move || {
+                let mut prover = Prover::new(clauses, config, sink, interner);
                 let result = prover.prove();
-                (prover, result)
+                (result, prover)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn saturation thread: {}", e)))?;
 
-        let (prover, result) = loop {
+        let (result, prover) = loop {
             if handle.is_finished() {
                 break handle.join()
                     .map_err(|_| PyValueError::new_err("Saturation thread panicked (possible stack overflow)"))?;
             }
-            // Check for Python signals (KeyboardInterrupt from Ctrl+C)
-            Python::with_gil(|py| py.check_signals())
-                .map_err(|e| {
-                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                    e
-                })?;
+            Python::with_gil(|py| py.check_signals())?;
             std::thread::sleep(Duration::from_millis(50));
         };
 
-        // Serialize profile to JSON if present
-        self.profile_json = prover.profile()
-            .map(|p| serde_json::to_string(p).ok())
-            .flatten();
+        let initial_count = prover.state.initial_clause_count;
+        self.initial_count = Some(initial_count);
 
-        let (proof_found, status) = match &result {
-            ProofResult::Proof { .. } => (true, "proof"),
-            ProofResult::Saturated => (false, "saturated"),
-            ProofResult::ResourceLimit => (false, "resource_limit"),
-        };
+        let profile_json = prover.profile()
+            .and_then(|p| serde_json::to_string(p).ok());
 
-        self.result = Some(result);
-        self.prover = Some(prover);
+        Ok(PyProver {
+            prover,
+            result,
+            initial_count,
+            profile_json,
+        })
+    }
+}
 
-        // Clean up auto-launched server socket
-        if let Some(ref path) = auto_socket_path {
-            let _ = std::fs::remove_file(path);
-        }
+// =============================================================================
+// PyProver — holds prover state after prove()
+// =============================================================================
 
-        Ok((proof_found, status.to_string()))
+/// Python-accessible prover result — holds the Prover and ProofResult.
+///
+/// Created by ProofAtlas.prove() / prove_string(). Provides access to
+/// proof steps, statistics, traces, and profiling data.
+#[pyclass(name = "Prover", unsendable)]
+pub struct PyProver {
+    prover: Prover,
+    result: ProofResult,
+    initial_count: usize,
+    profile_json: Option<String>,
+}
+
+impl PyProver {
+    fn interner(&self) -> &Interner {
+        self.prover.interner()
     }
 
-    /// Get profile JSON from the last prove() call.
+    fn clauses(&self) -> &[std::sync::Arc<Clause>] {
+        self.prover.clauses()
+    }
+
+    fn event_log(&self) -> &[RustStateChange] {
+        self.prover.event_log()
+    }
+
+    fn empty_clause_idx(&self) -> Option<usize> {
+        match &self.result {
+            ProofResult::Proof { empty_clause_idx } => Some(*empty_clause_idx),
+            _ => None,
+        }
+    }
+}
+
+#[pymethods]
+impl PyProver {
+    /// Whether a proof was found.
+    #[getter]
+    pub fn proof_found(&self) -> bool {
+        matches!(self.result, ProofResult::Proof { .. })
+    }
+
+    /// Status string: "proof", "saturated", or "resource_limit".
+    #[getter]
+    pub fn status(&self) -> String {
+        match &self.result {
+            ProofResult::Proof { .. } => "proof".to_string(),
+            ProofResult::Saturated => "saturated".to_string(),
+            ProofResult::ResourceLimit => "resource_limit".to_string(),
+        }
+    }
+
+    /// Number of initial clauses (from parsing).
+    #[getter]
+    pub fn initial_count(&self) -> usize {
+        self.initial_count
+    }
+
+    /// Get profile JSON from the proof run.
     ///
     /// Returns None if profiling was not enabled.
     pub fn profile_json(&self) -> Option<String> {
         self.profile_json.clone()
     }
 
-    /// Get the raw event log from the last prove() call as JSON.
-    ///
-    /// Returns the serialized Vec<StateChange> used by the web trace converter.
+    /// Get the raw event log as JSON.
     pub fn trace_json(&self) -> PyResult<Option<String>> {
         let events = self.event_log();
         if events.is_empty() {
@@ -369,31 +338,18 @@ impl PyProofAtlas {
         Ok(Some(json))
     }
 
-    /// Get statistics
+    /// Get statistics.
     pub fn statistics(&self) -> HashMap<String, usize> {
-        let clauses = self.clauses();
         let mut stats = HashMap::new();
+        let clauses = self.clauses();
         stats.insert("total".to_string(), clauses.len());
-
-        // processed count from prover state if available
-        let processed_count = self.prover.as_ref()
-            .map(|p| p.state.processed.len())
-            .unwrap_or(0);
-        stats.insert("processed".to_string(), processed_count);
-
-        // Count empty clauses
-        let empty_count = clauses.iter().filter(|c| c.is_empty()).count();
-        stats.insert("empty_clauses".to_string(), empty_count);
-
-        // Count unit clauses
-        let unit_count = clauses.iter().filter(|c| c.literals.len() == 1).count();
-        stats.insert("unit_clauses".to_string(), unit_count);
-
+        stats.insert("processed".to_string(), self.prover.state.processed.len());
+        stats.insert("empty_clauses".to_string(), clauses.iter().filter(|c| c.is_empty()).count());
+        stats.insert("unit_clauses".to_string(), clauses.iter().filter(|c| c.literals.len() == 1).count());
         stats
     }
 
-    /// Get all proof steps from the last saturation run.
-    /// Returns every step including all derivations.
+    /// Get all proof steps from the saturation run.
     pub fn all_steps(&self) -> Vec<ProofStep> {
         let interner = self.interner();
         let events = self.event_log();
@@ -433,14 +389,8 @@ impl PyProofAtlas {
             None => return Vec::new(),
         };
 
-        let prover = match &self.prover {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-
-        // Use extract_proof on the prover to get proof steps
-        let rust_steps = prover.extract_proof(empty_id);
-        let interner = prover.interner();
+        let rust_steps = self.prover.extract_proof(empty_id);
+        let interner = self.interner();
 
         rust_steps.iter().map(|step| {
             ProofStep {
@@ -456,18 +406,11 @@ impl PyProofAtlas {
     ///
     /// Returns a tuple of two Python dicts (graph_dict, sentence_dict), each containing
     /// numpy arrays ready to be saved as .npz files.
-    ///
-    /// The graph dict uses `GraphBuilder::build_from_clauses()` — the same function
-    /// used at inference time by the scoring server — as the single source of truth
-    /// for clause→graph conversion.
-    ///
-    /// The sentence dict uses `clause.display(interner)` — the same method used at
-    /// inference time by the sentence encoder.
     pub fn extract_tensor_trace<'py>(&self, py: Python<'py>, time_seconds: f64)
         -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)>
     {
         use numpy::{PyArray1, PyArray2};
-        use crate::selection::graph::GraphBuilder;
+        use crate::selection::ml::graph::GraphBuilder;
 
         let interner = self.interner();
         let clauses = self.clauses();
@@ -495,21 +438,18 @@ impl PyProofAtlas {
         }
 
         // --- Graph data via GraphBuilder::build_from_clauses ---
-        let clause_refs: Vec<&Clause> = clauses.iter().collect();
+        let clause_refs: Vec<&Clause> = clauses.iter().map(|c| c.as_ref()).collect();
         let batch_graph = GraphBuilder::build_from_clauses(&clause_refs);
 
-        // Node names for symbol embedding (node_info="names"/"both" GCN modes)
         let node_names = GraphBuilder::collect_node_names(&clause_refs, interner);
         debug_assert_eq!(node_names.len(), batch_graph.num_nodes);
 
-        // node_features [total_nodes, 3]
         let node_feat_2d: Vec<Vec<f32>> = batch_graph.node_features.iter()
             .map(|nf| nf.to_vec())
             .collect();
         let node_features = PyArray2::from_vec2(py, &node_feat_2d)
             .map_err(|e| PyValueError::new_err(format!("Failed to create node_features: {}", e)))?;
 
-        // edge_src, edge_dst [total_edges]
         let total_edges = batch_graph.edge_indices.len();
         let mut edge_src = Vec::with_capacity(total_edges);
         let mut edge_dst = Vec::with_capacity(total_edges);
@@ -520,7 +460,6 @@ impl PyProofAtlas {
         let edge_src_arr = PyArray1::from_vec(py, edge_src);
         let edge_dst_arr = PyArray1::from_vec(py, edge_dst);
 
-        // node_offsets [num_clauses + 1] and edge_offsets [num_clauses + 1]
         let mut node_offsets = Vec::with_capacity(num_clauses + 1);
         let mut edge_offsets = Vec::with_capacity(num_clauses + 1);
         node_offsets.push(0i64);
@@ -544,10 +483,9 @@ impl PyProofAtlas {
                 "equality_resolution" => 4.0,
                 "equality_factoring" => 5.0,
                 "demodulation" => 6.0,
-                _ => 0.0, // Unknown rules default to input
+                _ => 0.0,
             };
 
-            // Compute term statistics (reusing logic from json.rs::term_stats)
             let mut depth: usize = 0;
             let mut symbol_count: usize = 0;
             let mut variable_count: usize = 0;
@@ -558,7 +496,7 @@ impl PyProofAtlas {
                 symbol_count += 1;
                 distinct_symbols.insert(lit.predicate.id.0 as u64 | (1u64 << 32));
                 for arg in &lit.args {
-                    let (d, sc, vc) = Self::term_stats(arg, &mut distinct_symbols, &mut distinct_variables);
+                    let (d, sc, vc) = term_stats(arg, &mut distinct_symbols, &mut distinct_variables);
                     depth = depth.max(d);
                     symbol_count += sc;
                     variable_count += vc;
@@ -566,15 +504,15 @@ impl PyProofAtlas {
             }
 
             clause_features_2d.push(vec![
-                clause.age as f32,                  // [0] age
-                clause.role.to_feature_value(),     // [1] role
-                rule_id,                            // [2] rule
-                clause.literals.len() as f32,       // [3] size
-                depth as f32,                       // [4] depth
-                symbol_count as f32,                // [5] symbol_count
-                distinct_symbols.len() as f32,      // [6] distinct_symbols
-                variable_count as f32,              // [7] variable_count
-                distinct_variables.len() as f32,    // [8] distinct_vars
+                clause.age as f32,
+                clause.role.to_feature_value(),
+                rule_id,
+                clause.literals.len() as f32,
+                depth as f32,
+                symbol_count as f32,
+                distinct_symbols.len() as f32,
+                variable_count as f32,
+                distinct_variables.len() as f32,
             ]);
         }
         let clause_features = PyArray2::from_vec2(py, &clause_features_2d)
@@ -640,14 +578,12 @@ impl PyProofAtlas {
         graph_dict.set_item("proof_found", &proof_found_arr)?;
         graph_dict.set_item("time_seconds", &time_arr)?;
 
-        // Node names for symbol embedding
         let py_node_names = pyo3::types::PyList::new(py, &node_names)
             .map_err(|e| PyValueError::new_err(format!("Failed to create node_names: {}", e)))?;
         graph_dict.set_item("node_names", py_node_names)?;
 
         // --- Build sentence dict ---
         let sentence_dict = PyDict::new(py);
-        // clause_strings as Python list of strings
         let py_strings = pyo3::types::PyList::new(py, &clause_strings)
             .map_err(|e| PyValueError::new_err(format!("Failed to create clause_strings: {}", e)))?;
         sentence_dict.set_item("clause_strings", py_strings)?;
@@ -665,7 +601,7 @@ impl PyProofAtlas {
     }
 }
 
-impl PyProofAtlas {
+impl PyProver {
     /// Get the set of clause indices in the proof DAG
     fn get_proof_clause_set(&self) -> HashSet<usize> {
         let empty_id = match self.empty_clause_idx() {
@@ -675,7 +611,6 @@ impl PyProofAtlas {
 
         let events = self.event_log();
 
-        // Build derivation map from event log
         let mut derivation_map: HashMap<usize, Vec<usize>> = HashMap::new();
         for event in events {
             match event {
@@ -710,8 +645,7 @@ impl PyProofAtlas {
         proof_clauses
     }
 
-    /// Replay event log to build selection state snapshots (U/P at each Activate)
-    /// Returns raw tuples: (selected, u_indices, p_indices)
+    /// Replay event log to build selection state snapshots
     fn build_selection_states_raw(&self) -> Vec<(usize, Vec<usize>, Vec<usize>)> {
         use std::collections::BTreeSet;
 
@@ -743,7 +677,6 @@ impl PyProofAtlas {
                     u.insert(*clause_idx);
                 }
                 RustStateChange::Activate(clause_idx) => {
-                    // Snapshot U and P before moving the selected clause
                     states.push((
                         *clause_idx,
                         u.iter().copied().collect(),
@@ -757,53 +690,41 @@ impl PyProofAtlas {
 
         states
     }
+}
 
-    /// Recursively compute term statistics.
-    /// Returns (depth, symbol_count, variable_count).
-    fn term_stats(
-        term: &crate::logic::Term,
-        distinct_symbols: &mut HashSet<u64>,
-        distinct_variables: &mut HashSet<u64>,
-    ) -> (usize, usize, usize) {
-        use crate::logic::Term;
-        match term {
-            Term::Variable(v) => {
-                distinct_variables.insert(v.id.0 as u64);
-                (0, 0, 1)
+/// Recursively compute term statistics.
+fn term_stats(
+    term: &crate::logic::Term,
+    distinct_symbols: &mut HashSet<u64>,
+    distinct_variables: &mut HashSet<u64>,
+) -> (usize, usize, usize) {
+    use crate::logic::Term;
+    match term {
+        Term::Variable(v) => {
+            distinct_variables.insert(v.id.0 as u64);
+            (0, 0, 1)
+        }
+        Term::Constant(c) => {
+            distinct_symbols.insert(c.id.0 as u64 | (2u64 << 32));
+            (0, 1, 0)
+        }
+        Term::Function(f, args) => {
+            distinct_symbols.insert(f.id.0 as u64 | (3u64 << 32));
+            let mut max_depth = 0usize;
+            let mut sc = 1usize;
+            let mut vc = 0usize;
+            for arg in args {
+                let (d, s, v) = term_stats(arg, distinct_symbols, distinct_variables);
+                max_depth = max_depth.max(d);
+                sc += s;
+                vc += v;
             }
-            Term::Constant(c) => {
-                distinct_symbols.insert(c.id.0 as u64 | (2u64 << 32));
-                (0, 1, 0)
-            }
-            Term::Function(f, args) => {
-                distinct_symbols.insert(f.id.0 as u64 | (3u64 << 32));
-                let mut max_depth = 0usize;
-                let mut sc = 1usize;
-                let mut vc = 0usize;
-                for arg in args {
-                    let (d, s, v) = Self::term_stats(arg, distinct_symbols, distinct_variables);
-                    max_depth = max_depth.max(d);
-                    sc += s;
-                    vc += v;
-                }
-                (max_depth + 1, sc, vc)
-            }
+            (max_depth + 1, sc, vc)
         }
     }
 }
 
 /// Start a scoring server that blocks until the process is terminated.
-///
-/// Intended to be called from a subprocess (e.g., by bench.py).
-/// The server listens on the given Unix socket and serves scoring requests
-/// from worker processes.
-///
-/// Args:
-///     encoder: Encoder type ("gcn", "gat", "graphsage", or "sentence")
-///     scorer: Scorer name (used to locate model file as "{encoder}_{scorer}.pt")
-///     weights_path: Path to weights directory
-///     socket_path: Path for the Unix domain socket
-///     use_cuda: Whether to use CUDA (default: false)
 #[cfg(feature = "ml")]
 #[pyfunction]
 #[pyo3(signature = (encoder, scorer, weights_path, socket_path, use_cuda=None))]
@@ -855,14 +776,14 @@ fn start_scoring_server(
         socket_path.to_string(),
     );
 
-    // This blocks until the process is terminated
     server.run();
     Ok(())
 }
 
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyProofAtlas>()?;
+    m.add_class::<PyOrchestrator>()?;
+    m.add_class::<PyProver>()?;
     m.add_class::<ProofStep>()?;
     #[cfg(feature = "ml")]
     m.add_function(wrap_pyfunction!(start_scoring_server, m)?)?;

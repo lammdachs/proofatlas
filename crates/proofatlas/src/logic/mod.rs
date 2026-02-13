@@ -8,6 +8,7 @@ pub mod core;
 pub mod interner;
 pub mod literal_selection;
 pub mod ordering;
+pub mod time_compat;
 pub mod unification;
 
 // Re-export commonly used types

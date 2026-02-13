@@ -104,7 +104,36 @@ impl SentenceEmbedder {
 }
 
 #[cfg(feature = "ml")]
-impl super::cached::ClauseEmbedder for SentenceEmbedder {
+impl SentenceEmbedder {
+    /// Core implementation: embed pre-serialized text strings.
+    fn embed_strings(&self, clause_strings: &[&str]) -> Vec<Vec<f32>> {
+        if clause_strings.is_empty() {
+            return vec![];
+        }
+
+        let owned: Vec<String> = clause_strings.iter().map(|s| s.to_string()).collect();
+
+        // Tokenize
+        let (input_ids, attention_mask) = self.tokenize_clauses(&owned);
+
+        // Run inference - model outputs scores directly
+        let scores = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[input_ids, attention_mask])
+                .expect("Model forward failed")
+        });
+
+        // Convert scores to embeddings (1-dim per clause for caching)
+        let scores_cpu = scores.to_device(tch::Device::Cpu).view([-1]);
+        let scores_vec: Vec<f32> = Vec::<f32>::try_from(&scores_cpu)
+            .expect("Failed to convert tensor to Vec<f32>");
+
+        scores_vec.iter().map(|&s| vec![s]).collect()
+    }
+}
+
+#[cfg(feature = "ml")]
+impl crate::selection::cached::ClauseEmbedder for SentenceEmbedder {
     fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
         if clauses.is_empty() {
             return vec![];
@@ -118,25 +147,12 @@ impl super::cached::ClauseEmbedder for SentenceEmbedder {
             clauses.iter().map(|c| c.to_string()).collect()
         };
 
-        // Tokenize
-        let (input_ids, attention_mask) = self.tokenize_clauses(&clause_strings);
+        let refs: Vec<&str> = clause_strings.iter().map(|s| s.as_str()).collect();
+        self.embed_strings(&refs)
+    }
 
-        // Run inference - model outputs scores directly
-        let scores = tch::no_grad(|| {
-            self.model
-                .forward_ts(&[input_ids, attention_mask])
-                .expect("Model forward failed")
-        });
-
-        // Convert scores to embeddings (1-dim per clause for caching)
-        // The CachingSelector will use these as "embeddings" and pass them to the scorer
-        // Since our TorchScript model already includes the scorer, we return the scores
-        // wrapped as 1-element embeddings
-        let scores_cpu = scores.to_device(tch::Device::Cpu).view([-1]);
-        let scores_vec: Vec<f32> = Vec::<f32>::try_from(&scores_cpu)
-            .expect("Failed to convert tensor to Vec<f32>");
-
-        scores_vec.iter().map(|&s| vec![s]).collect()
+    fn embed_texts(&self, texts: &[&str]) -> Vec<Vec<f32>> {
+        self.embed_strings(texts)
     }
 
     fn embedding_dim(&self) -> usize {
@@ -159,7 +175,7 @@ impl super::cached::ClauseEmbedder for SentenceEmbedder {
 pub struct PassThroughScorer;
 
 #[cfg(feature = "ml")]
-impl super::cached::EmbeddingScorer for PassThroughScorer {
+impl crate::selection::cached::EmbeddingScorer for PassThroughScorer {
     fn score_batch(&self, embeddings: &[&[f32]]) -> Vec<f32> {
         // Embeddings are already scores (1-element each)
         embeddings.iter().map(|e| e[0]).collect()
@@ -172,7 +188,7 @@ impl super::cached::EmbeddingScorer for PassThroughScorer {
 
 /// Sentence selector with GPU acceleration
 #[cfg(feature = "ml")]
-pub type SentenceSelector = super::cached::CachingSelector<SentenceEmbedder, PassThroughScorer>;
+pub type SentenceSelector = crate::selection::cached::CachingSelector<SentenceEmbedder, PassThroughScorer>;
 
 /// Load sentence selector
 #[cfg(feature = "ml")]
@@ -183,7 +199,7 @@ pub fn load_sentence_selector<P: AsRef<Path>>(
 ) -> Result<SentenceSelector, String> {
     let embedder = SentenceEmbedder::new(&model_path, &tokenizer_path, use_cuda)?;
     let scorer = PassThroughScorer;
-    Ok(super::cached::CachingSelector::new(embedder, scorer))
+    Ok(crate::selection::cached::CachingSelector::new(embedder, scorer))
 }
 
 /// Load a standalone sentence embedder (for use with ScoringServer).

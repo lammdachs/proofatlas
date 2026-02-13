@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use indexmap::IndexSet;
 
-use super::clause::{ClauseSelector, SelectorStats};
+use crate::selection::clause::{ClauseSelector, SelectorStats};
 use super::protocol::{
     read_message, write_message, InternedSymbols, ScoringRequest, ScoringResponse,
 };
@@ -199,7 +199,7 @@ impl RemoteSelector {
 }
 
 impl ClauseSelector for RemoteSelector {
-    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Arc<Clause>]) -> Option<usize> {
         if unprocessed.is_empty() || self.dead {
             return None;
         }
@@ -235,7 +235,7 @@ impl ClauseSelector for RemoteSelector {
 
             let uncached: Vec<(usize, Clause)> = uncached_indices
                 .iter()
-                .map(|&idx| (idx, clauses[idx].clone()))
+                .map(|&idx| (idx, (*clauses[idx]).clone()))
                 .collect();
 
             let req = ScoringRequest::Score {
@@ -390,13 +390,78 @@ impl Drop for RemoteSelector {
     }
 }
 
+// =============================================================================
+// RemoteSelectorSink — ProverSink adapter wrapping RemoteSelector
+// =============================================================================
+
+use crate::selection::clause::ProverSink;
+
+/// Adapter wrapping `RemoteSelector` as a `ProverSink`.
+///
+/// Maintains its own clause storage and unprocessed set to satisfy the
+/// `RemoteSelector::select()` interface which expects `&[Arc<Clause>]`.
+pub struct RemoteSelectorSink {
+    inner: RemoteSelector,
+    /// Mirror of U (insertion-ordered)
+    unprocessed: IndexSet<usize>,
+    /// Clause storage indexed by clause_idx
+    clauses: Vec<Arc<Clause>>,
+}
+
+impl RemoteSelectorSink {
+    pub fn new(inner: RemoteSelector) -> Self {
+        Self {
+            inner,
+            unprocessed: IndexSet::new(),
+            clauses: Vec::new(),
+        }
+    }
+}
+
+impl ProverSink for RemoteSelectorSink {
+    fn on_transfer(&mut self, clause_idx: usize, clause: &Arc<Clause>) {
+        self.unprocessed.insert(clause_idx);
+        // Grow clauses vec to accommodate index
+        if clause_idx >= self.clauses.len() {
+            self.clauses.resize(clause_idx + 1, Arc::new(Clause::new(vec![])));
+        }
+        self.clauses[clause_idx] = Arc::clone(clause);
+    }
+
+    fn on_activate(&mut self, clause_idx: usize) {
+        self.inner.on_clause_processed(clause_idx);
+    }
+
+    fn on_simplify(&mut self, clause_idx: usize) {
+        self.unprocessed.shift_remove(&clause_idx);
+    }
+
+    fn select(&mut self) -> Option<usize> {
+        self.inner.select(&mut self.unprocessed, &self.clauses)
+    }
+
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+        self.unprocessed.clear();
+        self.clauses.clear();
+    }
+
+    fn stats(&self) -> Option<crate::selection::clause::SelectorStats> {
+        self.inner.stats()
+    }
+}
+
 #[cfg(test)]
 #[cfg(feature = "ml")]
 mod tests {
     use super::*;
     use crate::logic::{Constant, Literal, PredicateSymbol, Term};
     use crate::selection::cached::{ClauseEmbedder, EmbeddingScorer};
-    use crate::selection::server::ScoringServer;
+    use crate::selection::network::server::ScoringServer;
     use std::thread;
     use std::time::Duration;
 
@@ -468,10 +533,10 @@ mod tests {
 
         // Create test data
         let mut interner = Interner::new();
-        let clauses = vec![
-            make_clause(1, &mut interner),
-            make_clause(2, &mut interner),
-            make_clause(3, &mut interner),
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_clause(1, &mut interner)),
+            Arc::new(make_clause(2, &mut interner)),
+            Arc::new(make_clause(3, &mut interner)),
         ];
 
         // Set interner

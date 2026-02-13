@@ -1,9 +1,12 @@
-//! ProofAtlas prover: orchestrates saturation-based theorem proving.
+//! Prover: orchestrates saturation-based theorem proving.
 //!
-//! The `ProofAtlas` struct combines clause management, inference rules, and
+//! The `Prover` struct combines clause management, inference rules, and
 //! selection strategies to implement the given-clause saturation algorithm.
 //!
 //! Use `prove()` to run to completion, or `step()` for incremental execution.
+
+pub mod profile;
+pub mod trace;
 
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::{CNFFormula, Clause, Interner};
@@ -13,7 +16,7 @@ use crate::state::{
     StateChange, ProofStep,
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
-use crate::profile::SaturationProfile;
+use self::profile::SaturationProfile;
 use crate::index::{IndexKind, IndexRegistry, SelectedLiteralIndex};
 use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
 use std::sync::Arc;
@@ -23,17 +26,18 @@ use crate::generating::{
     EqualityResolutionRule, EqualityFactoringRule,
 };
 use crate::selection::{
-    ClauseSelector, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
     SelectUniqueMaximalOrNegOrMaximal,
 };
-use crate::time_compat::Instant;
+use crate::selection::clause::ProverSink;
+use crate::logic::time_compat::Instant;
 use std::collections::HashSet;
 
-/// ProofAtlas prover: orchestrates saturation-based theorem proving.
+/// Per-problem saturation engine.
 ///
 /// Combines clause management, simplifying/generating inference rules,
 /// index registry, and clause selection into the given-clause algorithm.
-pub struct ProofAtlas {
+pub struct Prover {
     /// Prover configuration (limits, timeouts, etc.)
     pub config: ProverConfig,
     /// Centralized clause management (interner, literal selector, term ordering)
@@ -46,8 +50,8 @@ pub struct ProofAtlas {
     generating_inferences: Vec<Box<dyn GeneratingInference>>,
     /// Central registry for shared indices
     index_registry: IndexRegistry,
-    /// Clause selection strategy
-    clause_selector: Box<dyn ClauseSelector>,
+    /// Clause selection sink (signal-based interface)
+    sink: Box<dyn ProverSink>,
     /// Profiling data (None if profiling disabled)
     profile: Option<SaturationProfile>,
     /// Start time of the proof search
@@ -58,18 +62,18 @@ pub struct ProofAtlas {
     pub cancel: Arc<AtomicBool>,
 }
 
-impl ProofAtlas {
-    /// Create a new ProofAtlas prover from initial clauses.
+impl Prover {
+    /// Create a new Prover from initial clauses.
     ///
     /// # Arguments
     /// * `initial_clauses` - The initial clause set
     /// * `config` - Prover configuration
-    /// * `clause_selector` - Clause selection strategy
+    /// * `sink` - Clause selection sink (signal-based interface)
     /// * `interner` - Symbol interner for resolving symbol names
     pub fn new(
         initial_clauses: Vec<Clause>,
         config: ProverConfig,
-        clause_selector: Box<dyn ClauseSelector>,
+        sink: Box<dyn ProverSink>,
         interner: Interner,
     ) -> Self {
         let initial_clause_count = initial_clauses.len();
@@ -111,10 +115,9 @@ impl ProofAtlas {
         clause_manager.memory_limit = config.memory_limit;
         clause_manager.baseline_rss_mb = crate::config::process_memory_mb().unwrap_or(0);
 
-        // Reset clause selector state and provide interner for symbol name resolution
-        let mut clause_selector = clause_selector;
-        clause_selector.reset();
-        clause_selector.set_interner(Arc::new(clause_manager.interner.clone()));
+        // Reset sink state
+        let mut sink = sink;
+        sink.reset();
 
         // Initialize generating rules
         let generating_inferences: Vec<Box<dyn GeneratingInference>> = vec![
@@ -144,14 +147,14 @@ impl ProofAtlas {
         let cancel = Arc::new(AtomicBool::new(false));
         clause_manager.cancel = cancel.clone();
 
-        ProofAtlas {
+        Prover {
             config,
             clause_manager,
             state,
             simplifying_inferences,
             generating_inferences,
             index_registry,
-            clause_selector,
+            sink,
             profile,
             start_time: None,
             initial_clauses,
@@ -182,8 +185,8 @@ impl ProofAtlas {
         // Finalize profile
         if let Some(p) = self.profile.as_mut() {
             p.total_time = start_time.elapsed();
-            p.selector_name = self.clause_selector.name().to_string();
-            if let Some(stats) = self.clause_selector.stats() {
+            p.selector_name = self.sink.name().to_string();
+            if let Some(stats) = self.sink.stats() {
                 p.selector_cache_hits = stats.cache_hits;
                 p.selector_cache_misses = stats.cache_misses;
                 p.selector_embed_time = stats.embed_time;
@@ -205,7 +208,7 @@ impl ProofAtlas {
     pub fn event_log(&self) -> &[StateChange] { &self.state.event_log }
 
     /// Get all clauses generated during saturation.
-    pub fn clauses(&self) -> &[Clause] { &self.state.clauses }
+    pub fn clauses(&self) -> &[Arc<Clause>] { &self.state.clauses }
 
     /// Get profiling data (None if profiling was not enabled).
     pub fn profile(&self) -> Option<&SaturationProfile> { self.profile.as_ref() }
@@ -347,7 +350,6 @@ impl ProofAtlas {
         }
 
         // === Step 4: Activate given clause (transfer from U to P) ===
-        self.clause_selector.on_clause_processed(given_idx);
         if let Some(result) = self.apply_change(StateChange::Activate(given_idx)) {
             return Some(result);
         }
@@ -420,7 +422,7 @@ impl ProofAtlas {
 
                 let is_empty = clause_with_id.is_empty();
 
-                self.state.clauses.push(clause_with_id.clone());
+                self.state.clauses.push(Arc::new(clause_with_id.clone()));
                 self.state.new.push(new_idx);
 
                 // Re-construct with updated clause (includes id)
@@ -479,9 +481,11 @@ impl ProofAtlas {
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
                     self.index_registry.on_delete(clause_idx, clause);
+                    self.sink.on_simplify(clause_idx);
                 } else if self.state.processed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
                     self.index_registry.on_delete(clause_idx, clause);
+                    self.sink.on_simplify(clause_idx);
                 }
 
                 // If there's a replacement clause, add it to N
@@ -504,7 +508,7 @@ impl ProofAtlas {
 
                     let is_empty = clause_with_id.is_empty();
 
-                    self.state.clauses.push(clause_with_id.clone());
+                    self.state.clauses.push(Arc::new(clause_with_id.clone()));
                     self.state.new.push(new_idx);
 
                     if let Some(p) = self.profile.as_mut() {
@@ -553,14 +557,16 @@ impl ProofAtlas {
                 }
                 self.state.unprocessed.insert(clause_idx);
                 self.index_registry.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
+                self.sink.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(change);
             }
             StateChange::Activate(clause_idx) => {
                 let clause_idx = *clause_idx;
-                // U → P (selector already removed from U)
+                // U → P
                 self.state.unprocessed.shift_remove(&clause_idx);
                 self.state.processed.insert(clause_idx);
                 self.index_registry.on_activate(clause_idx, &self.state.clauses[clause_idx]);
+                self.sink.on_activate(clause_idx);
                 self.state.event_log.push(change);
 
                 // Increment iteration count at activation (given clause selection)
@@ -577,10 +583,9 @@ impl ProofAtlas {
         None
     }
 
-    /// Select the next given clause using the configured selector
+    /// Select the next given clause using the configured sink
     fn select_given_clause(&mut self) -> Option<usize> {
-        self.clause_selector
-            .select(&mut self.state.unprocessed, &self.state.clauses)
+        self.sink.select()
     }
 
     /// Generate all inferences with the given clause
@@ -622,10 +627,10 @@ impl ProofAtlas {
 pub fn saturate(
     formula: CNFFormula,
     config: ProverConfig,
-    clause_selector: Box<dyn ClauseSelector>,
+    sink: Box<dyn ProverSink>,
     interner: Interner,
-) -> (ProofResult, ProofAtlas) {
-    let mut prover = ProofAtlas::new(formula.clauses, config, clause_selector, interner);
+) -> (ProofResult, Prover) {
+    let mut prover = Prover::new(formula.clauses, config, sink, interner);
     let result = prover.prove();
     (result, prover)
 }

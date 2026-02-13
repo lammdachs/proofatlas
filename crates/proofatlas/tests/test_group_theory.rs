@@ -1,13 +1,13 @@
 //! End-to-end tests for group theory problems
 
 use proofatlas::{
-    parse_tptp_file, AgeWeightSelector, ClauseSelector, LiteralSelectionStrategy,
-    ProverConfig, ProofResult, ProofAtlas,
+    parse_tptp_file, AgeWeightSink, ProverSink, LiteralSelectionStrategy,
+    ProverConfig, ProofResult, Prover,
 };
 use std::time::Duration;
 
-fn create_selector() -> Box<dyn ClauseSelector> {
-    Box::new(AgeWeightSelector::default())
+fn create_sink() -> Box<dyn ProverSink> {
+    Box::new(AgeWeightSink::new(0.5))
 }
 
 /// Run a group theory problem and return the result
@@ -22,7 +22,7 @@ fn run_group_problem(problem_file: &str, timeout_secs: u64) -> ProofResult {
         ..Default::default()
     };
 
-    let mut prover = ProofAtlas::new(parsed.formula.clauses, config, create_selector(), parsed.interner);
+    let mut prover = Prover::new(parsed.formula.clauses, config, create_sink(), parsed.interner);
     prover.prove()
 }
 

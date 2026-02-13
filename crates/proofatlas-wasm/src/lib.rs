@@ -1,8 +1,8 @@
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
-    parse_tptp, ProverConfig, ProofResult, ProofAtlas, LiteralSelectionStrategy,
-    Clause, Literal, Interner, AgeWeightSelector, ClauseSelector, StateChange,
+    parse_tptp, ProverConfig, ProofResult, Prover, LiteralSelectionStrategy,
+    Clause, Literal, Interner, AgeWeightSink, ProverSink, StateChange,
 };
 use std::time::Duration;
 
@@ -104,9 +104,9 @@ impl ProofAtlasWasm {
 
         web_sys::console::log_1(&"Config created, creating clause selector...".into());
 
-        // Create clause selector based on options
+        // Create clause selection sink based on options
         // Note: ML selectors (gcn, sentence) require libtorch which is not available in WASM
-        let clause_selector: Box<dyn ClauseSelector> = match options.selector_type.as_deref() {
+        let sink: Box<dyn ProverSink> = match options.selector_type.as_deref() {
             Some("gcn") | Some("sentence") => {
                 return Err(JsError::new("ML selectors (gcn, sentence) are not supported in WASM. Use age_weight instead."));
             }
@@ -114,12 +114,12 @@ impl ProofAtlasWasm {
                 // Default to age_weight selector (no model needed)
                 let ratio = options.age_weight_ratio.unwrap_or(0.5);
                 web_sys::console::log_1(&format!("Using AgeWeight selector with ratio {}", ratio).into());
-                Box::new(AgeWeightSelector::new(ratio))
+                Box::new(AgeWeightSink::new(ratio))
             }
         };
 
         // Run saturation
-        let mut prover = ProofAtlas::new(cnf.formula.clauses, config, clause_selector, cnf.interner);
+        let mut prover = Prover::new(cnf.formula.clauses, config, sink, cnf.interner);
         let result = prover.prove();
 
         web_sys::console::log_1(&"Saturation completed".into());

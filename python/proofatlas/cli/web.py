@@ -58,9 +58,7 @@ def check_ml_available() -> bool:
     """Check if ML selectors are available (tch-rs / libtorch)."""
     try:
         from proofatlas import ProofAtlas
-        state = ProofAtlas()
-        # Try creating with a graph embedding type - if tch-rs is available this won't error
-        # We just check that the module loads successfully
+        ProofAtlas()
         return True
     except Exception:
         return False
@@ -249,41 +247,41 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
     """
     from proofatlas import ProofAtlas
 
-    start = time.time()
-    state = ProofAtlas()
-    memory_limit = options.get("memory_limit")
-    state.add_clauses_from_tptp(tptp_input, include_dir=tptp_root, memory_limit=memory_limit)
-    initial_count = state.statistics()["total"]
-
-    # Build saturation kwargs — pass config keys directly,
-    # letting prove() use its own defaults for the rest
-    kwargs = {"enable_profiling": True}
+    # Build ProofAtlas orchestrator with all configuration
+    atlas_kwargs = {"enable_profiling": True}
+    if tptp_root:
+        atlas_kwargs["include_dir"] = tptp_root
 
     for key in ("timeout", "max_iterations", "literal_selection",
                 "age_weight_ratio", "encoder", "scorer"):
         if key in options:
-            kwargs[key] = options[key]
+            atlas_kwargs[key] = options[key]
 
+    memory_limit = options.get("memory_limit")
     if memory_limit is not None:
-        kwargs["memory_limit"] = memory_limit
+        atlas_kwargs["memory_limit"] = memory_limit
 
     # Resolve weights path relative to project root (CWD may differ)
     if project_root and options.get("encoder"):
         weights_dir = project_root / ".weights"
         if weights_dir.exists():
-            kwargs["weights_path"] = str(weights_dir)
+            atlas_kwargs["weights_path"] = str(weights_dir)
 
-    proof_found, status = state.prove(**kwargs)
+    start = time.time()
+    atlas = ProofAtlas(**atlas_kwargs)
+    prover = atlas.prove_string(tptp_input)
     elapsed_ms = int((time.time() - start) * 1000)
 
+    proof_found = prover.proof_found
+    status = prover.status
+
     # Get all steps and proof trace
-    all_steps_list = state.all_steps()
-    proof_steps_list = state.proof_steps() if proof_found else []
-    stats = state.statistics()
-    profile_json = state.profile_json()
+    all_steps_list = prover.all_steps()
+    proof_steps_list = prover.proof_steps() if proof_found else []
+    stats = prover.statistics()
+    profile_json = prover.profile_json()
 
     # Convert ProofStep objects to dicts matching WASM format
-    # All steps are now real derivations (no trace-only events to filter)
     def step_to_dict(s):
         return {
             "id": s.clause_id,
@@ -302,7 +300,7 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
 
     # Parse the structured saturation trace from Rust and convert to
     # the flat event format expected by the JS ProofInspector.
-    trace_json = state.trace_json()
+    trace_json = prover.trace_json()
     trace = _convert_trace(trace_json, all_clauses) if trace_json else None
 
     return {
@@ -312,7 +310,7 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
         "proof": [step_to_dict(s) for s in proof_steps_list] if proof_found else None,
         "all_clauses": all_clauses,
         "statistics": {
-            "initial_clauses": initial_count,
+            "initial_clauses": prover.initial_count,
             "generated_clauses": len(all_clauses),
             "final_clauses": stats["total"],
             "time_ms": elapsed_ms,

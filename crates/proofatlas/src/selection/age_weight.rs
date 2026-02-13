@@ -6,6 +6,7 @@
 
 use crate::logic::Clause;
 use indexmap::IndexSet;
+use std::sync::Arc;
 
 use super::ClauseSelector;
 
@@ -74,7 +75,7 @@ impl AgeWeightSelector {
     }
 
     /// Find the position of the lightest clause.
-    fn find_lightest(&self, unprocessed: &IndexSet<usize>, clauses: &[Clause]) -> usize {
+    fn find_lightest(&self, unprocessed: &IndexSet<usize>, clauses: &[Arc<Clause>]) -> usize {
         unprocessed
             .iter()
             .enumerate()
@@ -85,7 +86,7 @@ impl AgeWeightSelector {
 }
 
 impl ClauseSelector for AgeWeightSelector {
-    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Arc<Clause>]) -> Option<usize> {
         if unprocessed.is_empty() {
             return None;
         }
@@ -133,7 +134,7 @@ impl Default for FIFOSelector {
 }
 
 impl ClauseSelector for FIFOSelector {
-    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Arc<Clause>]) -> Option<usize> {
         self.0.select(unprocessed, clauses)
     }
 
@@ -166,7 +167,7 @@ impl Default for WeightSelector {
 }
 
 impl ClauseSelector for WeightSelector {
-    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Clause]) -> Option<usize> {
+    fn select(&mut self, unprocessed: &mut IndexSet<usize>, clauses: &[Arc<Clause>]) -> Option<usize> {
         self.0.select(unprocessed, clauses)
     }
 
@@ -179,10 +180,95 @@ impl ClauseSelector for WeightSelector {
     }
 }
 
+// =============================================================================
+// AgeWeightSink — ProverSink implementation
+// =============================================================================
+
+use indexmap::IndexMap;
+use super::clause::ProverSink;
+
+/// Age-weight heuristic as a `ProverSink`.
+///
+/// Tracks its own unprocessed set from prover signals. Caches clause weights
+/// at transfer time so `select()` requires no external state.
+pub struct AgeWeightSink {
+    age_probability: f64,
+    rng_state: u64,
+    /// Own view of U: insertion-ordered, stores (clause_idx → weight)
+    unprocessed: IndexMap<usize, usize>,
+}
+
+impl AgeWeightSink {
+    pub fn new(age_probability: f64) -> Self {
+        Self {
+            age_probability: age_probability.clamp(0.0, 1.0),
+            rng_state: 12345,
+            unprocessed: IndexMap::new(),
+        }
+    }
+
+    fn next_random(&mut self) -> f64 {
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
+        (self.rng_state >> 33) as f64 / (1u64 << 31) as f64
+    }
+}
+
+impl ProverSink for AgeWeightSink {
+    fn on_transfer(&mut self, clause_idx: usize, clause: &Arc<Clause>) {
+        let weight = AgeWeightSelector::clause_weight(clause);
+        self.unprocessed.insert(clause_idx, weight);
+    }
+
+    fn on_activate(&mut self, _clause_idx: usize) {
+        // Already removed from unprocessed during select()
+    }
+
+    fn on_simplify(&mut self, clause_idx: usize) {
+        self.unprocessed.shift_remove(&clause_idx);
+    }
+
+    fn select(&mut self) -> Option<usize> {
+        if self.unprocessed.is_empty() {
+            return None;
+        }
+
+        let r = self.next_random();
+        let pos = if r < self.age_probability {
+            // Oldest = first in insertion order
+            0
+        } else {
+            // Lightest
+            self.unprocessed
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, (_, &w))| w)
+                .map(|(pos, _)| pos)
+                .unwrap_or(0)
+        };
+
+        self.unprocessed
+            .shift_remove_index(pos)
+            .map(|(idx, _)| idx)
+    }
+
+    fn name(&self) -> &str {
+        "AgeWeight"
+    }
+
+    fn reset(&mut self) {
+        self.unprocessed.clear();
+        self.rng_state = 12345;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::logic::{FunctionSymbol, Interner, Literal, PredicateSymbol, Term, Variable};
+    use std::sync::Arc;
 
     struct TestContext {
         interner: Interner,
@@ -243,10 +329,10 @@ mod tests {
     fn test_age_selection() {
         let mut ctx = TestContext::new();
         let mut selector = AgeWeightSelector::new(1.0); // Always select by age
-        let clauses = vec![
-            make_clause(&mut ctx, "P", 3),
-            make_clause(&mut ctx, "Q", 1),
-            make_clause(&mut ctx, "R", 2),
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_clause(&mut ctx, "P", 3)),
+            Arc::new(make_clause(&mut ctx, "Q", 1)),
+            Arc::new(make_clause(&mut ctx, "R", 2)),
         ];
         let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
@@ -260,10 +346,10 @@ mod tests {
     fn test_weight_selection() {
         let mut ctx = TestContext::new();
         let mut selector = AgeWeightSelector::new(0.0); // Always select by weight
-        let clauses = vec![
-            make_heavy_clause(&mut ctx, 5), // Heavy: P(f(f(f(f(f(X)))))) = 1 + 6 = 7 symbols
-            make_clause(&mut ctx, "Q", 0),  // Light: Q() = 1 symbol
-            make_heavy_clause(&mut ctx, 2), // Medium: P(f(f(X))) = 1 + 3 = 4 symbols
+        let clauses: Vec<Arc<Clause>> = vec![
+            Arc::new(make_heavy_clause(&mut ctx, 5)), // Heavy: P(f(f(f(f(f(X)))))) = 1 + 6 = 7 symbols
+            Arc::new(make_clause(&mut ctx, "Q", 0)),  // Light: Q() = 1 symbol
+            Arc::new(make_heavy_clause(&mut ctx, 2)), // Medium: P(f(f(X))) = 1 + 3 = 4 symbols
         ];
         let mut unprocessed: IndexSet<usize> = (0..3).collect();
 
@@ -274,7 +360,7 @@ mod tests {
     #[test]
     fn test_empty_unprocessed() {
         let mut selector = AgeWeightSelector::default();
-        let clauses: Vec<Clause> = vec![];
+        let clauses: Vec<Arc<Clause>> = vec![];
         let mut unprocessed: IndexSet<usize> = IndexSet::new();
 
         assert_eq!(selector.select(&mut unprocessed, &clauses), None);

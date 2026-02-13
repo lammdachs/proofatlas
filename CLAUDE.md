@@ -20,18 +20,27 @@ proofatlas/
 │   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs
 │   │       │   ├── interner.rs # Symbol interning
 │   │       │   ├── literal_selection.rs  # LiteralSelector trait + impls
-│   │       │   └── clause_manager.rs     # ClauseManager: interner + selector + KBO
+│   │       │   ├── clause_manager.rs     # ClauseManager: interner + selector + KBO
+│   │       │   └── time_compat.rs        # WASM-compatible Instant
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
 │   │       ├── index/          # Index trait, IndexRegistry, SubsumptionChecker, SelectedLiteralIndex
-│   │       ├── selection/      # Clause selection, scoring server, graph building, proof trace (tch-rs ML)
+│   │       ├── prover/         # Saturation engine
+│   │       │   ├── mod.rs      # Prover struct with prove()/init()/step()/saturate()
+│   │       │   ├── profile.rs  # SaturationProfile
+│   │       │   └── trace.rs    # EventLogReplayer, extract_proof_from_events
+│   │       ├── selection/      # Clause selection strategies
+│   │       │   ├── clause.rs   # ProverSink, ClauseSelector traits
+│   │       │   ├── age_weight.rs # Heuristic age-weight selector
+│   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer, CachingSelector
+│   │       │   ├── ml/         # ML model implementations (gcn, sentence, graph)
+│   │       │   ├── pipeline/   # Backend compute service, ChannelSink, EmbedScoreModel
+│   │       │   ├── network/    # Protocol, RemoteSelector, ScoringServer
+│   │       │   └── training/   # Training data extraction (proof_trace)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
+│   │       ├── atlas.rs        # ProofAtlas orchestrator (reusable across problems)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
-│   │       ├── state.rs        # SaturationState, StateChange, EventLog, traits
-│   │       ├── prover.rs       # ProofAtlas: main prover struct with prove()/init()/step()/saturate()
-│   │       ├── trace.rs        # EventLogReplayer, extract_proof_from_events
-│   │       ├── profile.rs      # SaturationProfile
-│   │       └── json.rs         # JSON serialization types
+│   │       └── state.rs        # SaturationState, StateChange, EventLog, traits
 │   │
 │   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
 │
@@ -211,7 +220,7 @@ Tiered approach: duplicates → variants → units → small clauses → greedy
 
 ### Architecture
 
-The prover is organized around a central `ProofAtlas` struct (`prover.rs`) that orchestrates saturation:
+The prover is organized around a central `ProofAtlas` struct (`prover/mod.rs`) that orchestrates saturation:
 - `ProofAtlas::new()` initializes all components (does not add clauses to state)
 - `ProofAtlas::init()` adds initial clauses to N via `apply_change` (detects empty clause in input)
 - `ProofAtlas::prove(&mut self) -> ProofResult` calls `init()` then runs the saturation loop to completion. The prover is retained after proving — all state (clauses, event log, profile, interner) is accessible via accessor methods.
@@ -289,23 +298,55 @@ Zero overhead when disabled: all instrumentation is gated on `Option::None`, cos
 `SaturationProfile` implements `serde::Serialize` with `Duration` fields serialized as `f64` seconds. From Python, `run_saturation()` returns `(proof_found, status, profile_json, trace_json)`. Pass `enable_profiling=True` to populate the profile.
 
 ### Clause Selection
-Selectors implement `ClauseSelector` trait:
+
+Two trait hierarchies coexist:
+
+**`ProverSink`** (`selection/clause.rs`): Signal-based interface. The prover pushes lifecycle events (`on_transfer`, `on_activate`, `on_simplify`) and requests selection via `select()`. Implementations track their own internal state from signals.
+- `AgeWeightSink`: Heuristic age-weight ratio with internal `IndexMap<usize, usize>`
+- `ChannelSink`: Sends signals via `mpsc` channel to a data processing thread (pipelined ML inference)
+- `RemoteSelectorSink`: Adapter wrapping `RemoteSelector` for backward compatibility (GPU scoring servers)
+
+**`ClauseSelector`** (`selection/clause.rs`): Legacy poll-based interface. Receives `&mut IndexSet<usize>` and `&[Arc<Clause>]` at each selection.
 - `AgeWeightSelector`: Alternates FIFO and lightest with configurable ratio
-- `FIFOSelector`: Pure age-based (wraps AgeWeightSelector with age_probability=1.0)
-- `WeightSelector`: Pure weight-based (wraps AgeWeightSelector with age_probability=0.0)
 - `CachingSelector`: ML-based with embedding cache (in-process, used for tests)
-- `RemoteSelector`: ML-based via scoring server (production path for ML selectors)
+- `RemoteSelector`: ML-based via scoring server (used for GPU inference)
+
+### Pipelined ML Inference
+
+The primary ML inference path uses an in-process pipeline:
+
+```
+Prover --> ChannelSink --(mpsc)--> Data Processing Thread --> BackendHandle --> Backend
+                                   (embedding cache,           (GPU/CPU models)
+                                    softmax sampling)
+```
+
+- **`Backend`** (`selection/backend.rs`): Model-agnostic compute service. Worker thread with 16 MiB stack processes batched model requests. Detached on drop; exits when all `BackendHandle` senders are dropped.
+- **`BackendHandle`**: Cheaply cloneable, wraps `mpsc::Sender<BackendRequest>`. `submit_sync()` for blocking request-response.
+- **`EmbedScoreModel`** (`selection/pipeline.rs`): Backend `Model` wrapping `ClauseEmbedder + EmbeddingScorer`. Receives `Arc<Clause>`, returns `f32` scores.
+- **`ChannelSink`** (`selection/pipeline.rs`): `ProverSink` impl. On `select()`, sends `Select` signal and blocks for response. Owns data processing thread (joined on drop).
+- **Data processing thread**: Receives `ProverSignal`s. On `Transfer`: submits clause to Backend, caches score. On `Select`: softmax-samples from cached scores.
+- **Factory**: `create_ml_pipeline(embedder, scorer, temperature) -> ChannelSink`
+
+### Scoring Server (GPU only)
+
+For GPU-accelerated inference with multiple workers, a socket-based scoring server is still used:
+
+- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, 16 MiB stack per handler thread
+- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses (capped at 512/request), applies softmax sampling locally. Auto-reconnects on failure.
+- **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, length-prefixed bincode framing
+- **bench.py**: Only starts scoring servers when `--gpu-workers N` is set. CPU workers use the in-process pipeline.
 
 ## ML Architecture
 
-**Workflow**: Train in PyTorch → Export to TorchScript → Load in scoring server → Workers connect via Unix socket
+**Workflow**: Train in PyTorch --> Export to TorchScript --> Load in Backend (CPU) or ScoringServer (GPU)
 
 | Selector | Rust | PyTorch | Notes |
 |----------|------|---------|-------|
-| age_weight | ✓ | - | Heuristic, no training |
-| gcn | ✓ | ✓ | Graph Convolutional Network |
-| features | - | ✓ | 9D clause feature MLP |
-| sentence | ✓ | ✓ | Sentence transformer (MiniLM) |
+| age_weight | Y | - | Heuristic, no training |
+| gcn | Y | Y | Graph Convolutional Network |
+| features | - | Y | 9D clause feature MLP |
+| sentence | Y | Y | Sentence transformer (MiniLM) |
 
 **Scorer types** (all support `forward(u_emb, p_emb=None)`):
 - `mlp`: Simple feed-forward scorer
@@ -313,37 +354,13 @@ Selectors implement `ClauseSelector` trait:
 - `transformer`: Full transformer block with cross-attention
 - `cross_attention`: Dot-product cross-attention (ignores p_emb)
 
-### Scoring Server Architecture
-
-ML inference is decoupled from the prover via a scoring server:
-
-```
-Worker (CPU)                          Server (CPU/GPU)
-┌──────────────┐     Unix socket     ┌──────────────────┐
-│ ProofAtlas    │ ←────────────────→  │ ScoringServer     │
-│  └ Remote-    │  Init(interner)     │  ├ embedder       │
-│    Selector   │  Score(clauses,..)  │  ├ scorer         │
-│    ├ cache    │  Reset              │  └ per-connection  │
-│    └ sampling │  ←── Scores(f32[])  │    cache           │
-└──────────────┘                      └──────────────────┘
-```
-
-- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, 16 MiB stack per handler thread, crash handler for diagnostics
-- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses (capped at 512/request), receives scores, applies softmax sampling locally. Auto-reconnects on failure with exponential backoff.
-- **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, `InternedSymbols`, length-prefixed bincode framing
-- **Auto-launch**: `run_saturation(socket_path=None)` with ML encoder auto-starts a server thread
-- **Shared server**: `run_saturation(socket_path="/tmp/...")` connects to an existing server (used by bench.py for parallel evaluation)
-- **Robustness**: Server auto-restarts on crash (bench.py monitors), embed batches chunked to 512, handler threads use 16 MiB stack (libtorch sparse ops need it), SIGSEGV crash handler captures native backtrace
-
 **Training and evaluation are separate steps:**
 ```bash
 python scripts/train.py --config gcn_mlp       # Step 1: train model
 proofatlas-bench --config gcn_mlp               # Step 2: evaluate (requires weights)
 ```
 
-Selectors implement the `ClauseSelector` trait. The optional `stats()` method returns `SelectorStats` (cache hits/misses, embed/score time). `CachingSelector` and `RemoteSelector` track these automatically; `AgeWeightSelector` returns `None`.
-
-ML selectors use tch-rs (PyTorch C++ bindings) for GPU-accelerated inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch (CPU and CUDA if available) is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
+ML selectors use tch-rs (PyTorch C++ bindings) for inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
 
 ## Analysis Guidelines
 

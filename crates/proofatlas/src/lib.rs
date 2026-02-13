@@ -3,26 +3,24 @@
 //! This library provides a complete implementation of a theorem prover
 //! using the superposition calculus with equality.
 
+pub mod atlas;
 pub mod config;
 pub mod generating;
 pub mod index;
 pub mod logic;
 pub mod state;
 pub mod simplifying;
-pub mod json;
 pub mod parser;
 pub mod prover;
 pub mod selection;
-pub mod time_compat;
-pub mod trace;
-pub mod profile;
 
 #[cfg(feature = "python")]
 pub mod python_bindings;
 
-// Re-export ClauseManager and ProofAtlas
+// Re-export orchestrator and prover
+pub use atlas::ProofAtlas;
 pub use logic::clause_manager::ClauseManager;
-pub use prover::{ProofAtlas, saturate};
+pub use prover::{Prover, saturate};
 
 // Re-export commonly used types from logic
 pub use logic::{
@@ -41,10 +39,10 @@ pub use state::{
 pub use config::{LiteralSelectionStrategy, ProverConfig};
 
 // Re-export profile types
-pub use profile::SaturationProfile;
+pub use prover::profile::SaturationProfile;
 
 // Re-export trace types
-pub use trace::{extract_proof_from_events, EventLogReplayer};
+pub use prover::trace::{extract_proof_from_events, EventLogReplayer};
 
 // Re-export generating inference functions
 pub use generating::{
@@ -53,8 +51,9 @@ pub use generating::{
 
 // Re-export selection types
 pub use selection::{
-    AgeWeightSelector, ClauseSelector, FIFOSelector, LiteralSelector, SelectAll, SelectMaximal,
-    SelectNegMaxWeightOrMaximal, SelectUniqueMaximalOrNegOrMaximal, WeightSelector,
+    AgeWeightSelector, AgeWeightSink, ClauseSelector, FIFOSelector, LiteralSelector,
+    ProverSink, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
+    SelectUniqueMaximalOrNegOrMaximal, WeightSelector,
 };
 
 #[cfg(feature = "ml")]

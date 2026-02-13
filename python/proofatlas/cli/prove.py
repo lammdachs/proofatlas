@@ -170,36 +170,28 @@ def main():
 
     from proofatlas import ProofAtlas
 
+    # Build ProofAtlas orchestrator with all configuration
+    atlas_kwargs = {
+        "timeout": float(timeout),
+        "literal_selection": literal_selection,
+        "memory_limit": memory_limit,
+        "include_dir": str(tptp_root) if tptp_root.exists() else None,
+        "enable_profiling": args.profile,
+    }
+    if max_iterations > 0:
+        atlas_kwargs["max_iterations"] = max_iterations
+    if encoder:
+        atlas_kwargs["encoder"] = encoder
+        atlas_kwargs["scorer"] = scorer
+        atlas_kwargs["weights_path"] = str(weights_path) if weights_path else None
+    else:
+        atlas_kwargs["age_weight_ratio"] = age_weight_ratio
+
     try:
-        with open(args.problem) as f:
-            content = f.read()
+        atlas = ProofAtlas(**atlas_kwargs)
     except Exception as e:
-        print(f"Error reading file: {e}", file=sys.stderr)
+        print(f"Error creating prover: {e}", file=sys.stderr)
         sys.exit(1)
-
-    state = ProofAtlas()
-
-    start = time.time()
-    try:
-        state.add_clauses_from_tptp(content, str(tptp_root), timeout, memory_limit=memory_limit)
-    except Exception as e:
-        if "memory limit" in str(e).lower():
-            elapsed = time.time() - start
-            print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
-            print(f"  CNF conversion exceeded memory limit")
-            sys.exit(1)
-        if "timed out" in str(e).lower():
-            elapsed = time.time() - start
-            print(f"✗ TIMEOUT in {elapsed:.3f}s")
-            print(f"  CNF conversion timed out")
-            sys.exit(1)
-        print(f"Parse error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    num_clauses = state.statistics()["total"]
-    parse_time = time.time() - start
-
-    print(f"Parsed {num_clauses} clauses from '{args.problem}'")
 
     if args.verbose:
         if args.config:
@@ -213,39 +205,40 @@ def main():
     print(f"  Timeout: {timeout}s")
     print()
 
-    remaining_timeout = max(0.1, timeout - parse_time)
-
+    start = time.time()
     try:
-        proof_found, status = state.prove(
-            timeout=remaining_timeout,
-            max_iterations=max_iterations if max_iterations > 0 else None,
-            literal_selection=literal_selection,
-            age_weight_ratio=age_weight_ratio if not encoder else None,
-            encoder=encoder,
-            scorer=scorer,
-            weights_path=str(weights_path) if weights_path else None,
-            memory_limit=memory_limit,
-            enable_profiling=args.profile,
-        )
+        prover = atlas.prove(str(args.problem))
     except Exception as e:
-        print(f"Error during saturation: {e}", file=sys.stderr)
+        elapsed = time.time() - start
+        err_msg = str(e).lower()
+        if "memory limit" in err_msg:
+            print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
+            print(f"  CNF conversion exceeded memory limit")
+            sys.exit(1)
+        if "timed out" in err_msg:
+            print(f"✗ TIMEOUT in {elapsed:.3f}s")
+            print(f"  CNF conversion timed out")
+            sys.exit(1)
+        print(f"Error during proving: {e}", file=sys.stderr)
         sys.exit(1)
 
     elapsed = time.time() - start
+    proof_found = prover.proof_found
+    status = prover.status
 
     if proof_found:
         print(f"✓ THEOREM PROVED in {elapsed:.3f}s")
     elif status == "saturated":
         print(f"✗ SATURATED in {elapsed:.3f}s")
         print(f"  No proof found - the formula may be satisfiable")
-        print(f"  Final clauses: {state.statistics()['total']}")
+        print(f"  Final clauses: {prover.statistics()['total']}")
     elif status == "resource_limit":
         print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
         print(f"  Exceeded clause or iteration limit")
-        print(f"  Final clauses: {state.statistics()['total']}")
+        print(f"  Final clauses: {prover.statistics()['total']}")
     else:
         print(f"✗ {status.upper()} in {elapsed:.3f}s")
-        print(f"  Final clauses: {state.statistics()['total']}")
+        print(f"  Final clauses: {prover.statistics()['total']}")
 
     # Export to JSON if requested
     if args.json_output:
@@ -259,10 +252,10 @@ def main():
             "result": {
                 "status": "proof" if proof_found else status,
                 "time_seconds": elapsed,
-                "final_clauses": state.statistics()["total"],
+                "final_clauses": prover.statistics()["total"],
             },
         }
-        profile_json = state.profile_json()
+        profile_json = prover.profile_json()
         if profile_json is not None:
             result_data["profile"] = json.loads(profile_json)
         try:
