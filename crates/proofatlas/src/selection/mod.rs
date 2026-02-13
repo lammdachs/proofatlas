@@ -44,16 +44,16 @@ pub use age_weight::{AgeWeightSelector, AgeWeightSink, FIFOSelector, WeightSelec
 pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
 pub use clause::{ClauseSelector, ProverSink, SelectorStats};
 #[cfg(feature = "ml")]
-pub use ml::gcn::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
+pub use ml::gcn::{GcnEmbedder, GcnScorer};
 #[cfg(feature = "ml")]
 pub use ml::gcn::{
-    load_gcn_cross_attention_selector, load_gcn_embedder, load_gcn_encoder_scorer,
-    GcnCrossAttentionSelector, GcnEncoder, TorchScriptScorer,
+    load_gcn_embedder, load_gcn_encoder_scorer,
+    GcnEncoder, TorchScriptScorer,
 };
 #[cfg(feature = "ml")]
 pub use ml::sentence::{
-    load_sentence_embedder, load_sentence_selector, MiniLMEncoderModel, PassThroughScorer,
-    SentenceEmbedder, SentenceSelector, tokenize_batch,
+    load_sentence_embedder, MiniLMEncoderModel, PassThroughScorer,
+    SentenceEmbedder, tokenize_batch,
 };
 #[cfg(unix)]
 pub use network::remote::{RemoteSelector, RemoteSelectorSink};

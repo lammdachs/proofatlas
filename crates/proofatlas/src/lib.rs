@@ -24,10 +24,9 @@ pub use prover::{Prover, saturate};
 
 // Re-export commonly used types from logic
 pub use logic::{
-    Atom, CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal, Position,
+    CNFFormula, Clause, Constant, FunctionSymbol, Interner, KBOConfig, Literal, Position,
     PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO,
 };
-// Note: Atom is re-exported for FOF formula usage in parsers
 
 // Re-export state types
 pub use state::{
@@ -40,9 +39,6 @@ pub use config::{LiteralSelectionStrategy, ProverConfig};
 
 // Re-export profile types
 pub use prover::profile::SaturationProfile;
-
-// Re-export trace types
-pub use prover::trace::{extract_proof_from_events, EventLogReplayer};
 
 // Re-export generating inference functions
 pub use generating::{
@@ -57,10 +53,10 @@ pub use selection::{
 };
 
 #[cfg(feature = "ml")]
-pub use selection::{load_gcn_selector, GcnEmbedder, GcnScorer, GcnSelector};
+pub use selection::{GcnEmbedder, GcnScorer};
 
 #[cfg(feature = "ml")]
-pub use selection::{load_sentence_selector, PassThroughScorer, SentenceEmbedder, SentenceSelector};
+pub use selection::{PassThroughScorer, SentenceEmbedder};
 
 pub use logic::{unify, UnificationError, UnificationResult};
 

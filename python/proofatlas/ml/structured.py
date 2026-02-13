@@ -1,8 +1,7 @@
-"""Convert clause data to strings and batch graphs for training.
+"""Batch graphs and constants for training.
 
 Graph construction is done in Rust via GraphBuilder::build_from_clauses() — a single
 function shared between trace extraction and inference. This module handles:
-- String conversion from structured clause dicts (for legacy/deprecated paths)
 - Graph batching from per-clause numpy arrays into training batch tensors
 - Constants for node types, feature indices, and role/rule mappings
 """
@@ -62,76 +61,6 @@ RULE_MAP = {
     "equality_factoring": 5,
     "demodulation": 6,
 }
-
-
-def clause_to_string(clause: Dict[str, Any]) -> str:
-    """Convert structured clause to TPTP-style string.
-
-    Args:
-        clause: Structured clause dict with literals
-
-    Returns:
-        String representation like "mult(X, Y) = Z | ~p(X)"
-    """
-    literals = clause.get("literals", [])
-    if not literals:
-        return "[]"
-
-    lit_strs = []
-    for lit in literals:
-        atom = lit["atom"]
-        pred = atom["predicate"]
-        args = atom.get("args", [])
-
-        # Build atom string
-        if pred == "=" and len(args) == 2:
-            # Equality: show as t1 = t2
-            atom_str = f"{_term_to_string(args[0])} = {_term_to_string(args[1])}"
-        elif args:
-            args_str = ", ".join(_term_to_string(a) for a in args)
-            atom_str = f"{pred}({args_str})"
-        else:
-            atom_str = pred
-
-        # Add polarity
-        if lit["polarity"]:
-            lit_strs.append(atom_str)
-        else:
-            lit_strs.append(f"~{atom_str}")
-
-    return " | ".join(lit_strs)
-
-
-def _term_to_string(term: Dict[str, Any]) -> str:
-    """Convert structured term to string."""
-    term_type = term["type"]
-
-    if term_type == "Variable":
-        return term["name"]
-    elif term_type == "Constant":
-        return term["name"]
-    elif term_type == "Function":
-        name = term["name"]
-        args = term.get("args", [])
-        if args:
-            args_str = ", ".join(_term_to_string(a) for a in args)
-            return f"{name}({args_str})"
-        else:
-            return name
-    else:
-        return f"?{term_type}"
-
-
-def clauses_to_strings(clauses: List[Dict[str, Any]]) -> List[str]:
-    """Convert list of structured clauses to strings.
-
-    Args:
-        clauses: List of structured clause dicts
-
-    Returns:
-        List of string representations
-    """
-    return [clause_to_string(c) for c in clauses]
 
 
 def batch_graphs(

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use super::fof::{FOFFormula, Quantifier};
 use crate::logic::{
-    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
+    CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
     PredicateSymbol, Term, Variable,
 };
 
@@ -169,8 +169,8 @@ impl<'a> CNFConverter<'a> {
 
     /// Check if a formula is the $true constant
     fn is_true_constant(&self, formula: &FOFFormula) -> bool {
-        if let FOFFormula::Atom(atom) = formula {
-            self.interner.resolve_predicate(atom.predicate.id) == "$true"
+        if let FOFFormula::Atom { predicate, .. } = formula {
+            self.interner.resolve_predicate(predicate.id) == "$true"
         } else {
             false
         }
@@ -178,8 +178,8 @@ impl<'a> CNFConverter<'a> {
 
     /// Check if a formula is the $false constant
     fn is_false_constant(&self, formula: &FOFFormula) -> bool {
-        if let FOFFormula::Atom(atom) = formula {
-            self.interner.resolve_predicate(atom.predicate.id) == "$false"
+        if let FOFFormula::Atom { predicate, .. } = formula {
+            self.interner.resolve_predicate(predicate.id) == "$false"
         } else {
             false
         }
@@ -203,30 +203,30 @@ impl<'a> CNFConverter<'a> {
     /// Create an atom for $true
     fn make_true_atom(&mut self) -> FOFFormula {
         let pred = PredicateSymbol::new(self.interner.intern_predicate("$true"), 0);
-        FOFFormula::Atom(Atom {
+        FOFFormula::Atom {
             predicate: pred,
             args: vec![],
-        })
+        }
     }
 
     /// Create an atom for $false
     fn make_false_atom(&mut self) -> FOFFormula {
         let pred = PredicateSymbol::new(self.interner.intern_predicate("$false"), 0);
-        FOFFormula::Atom(Atom {
+        FOFFormula::Atom {
             predicate: pred,
             args: vec![],
-        })
+        }
     }
 
     /// Simplify formulas containing $true, $false, and distinct object equalities
     fn simplify_truth_constants(&mut self, formula: FOFFormula) -> FOFFormula {
         match formula {
-            FOFFormula::Atom(ref atom) => {
+            FOFFormula::Atom { ref predicate, ref args } => {
                 // Check for equality between distinct objects
-                if atom.is_equality(self.interner) && atom.args.len() == 2 {
+                if self.interner.resolve_predicate(predicate.id) == "=" && predicate.arity == 2 && args.len() == 2 {
                     if let (Some(left), Some(right)) = (
-                        self.distinct_object_name(&atom.args[0]),
-                        self.distinct_object_name(&atom.args[1]),
+                        self.distinct_object_name(&args[0]),
+                        self.distinct_object_name(&args[1]),
                     ) {
                         // "A" = "B" is false if different, true if same
                         if left == right {
@@ -402,7 +402,7 @@ impl<'a> CNFConverter<'a> {
         definitions: &mut Vec<FOFFormula>,
     ) -> FOFFormula {
         match formula {
-            FOFFormula::Atom(_) => formula,
+            FOFFormula::Atom { .. } => formula,
 
             FOFFormula::Not(f) => {
                 // Negation flips polarity
@@ -479,7 +479,7 @@ impl<'a> CNFConverter<'a> {
     /// Check if a formula contains any quantifiers
     fn contains_quantifier(&self, formula: &FOFFormula) -> bool {
         match formula {
-            FOFFormula::Atom(_) => false,
+            FOFFormula::Atom { .. } => false,
             FOFFormula::Not(f) => self.contains_quantifier(f),
             FOFFormula::And(f1, f2)
             | FOFFormula::Or(f1, f2)
@@ -526,10 +526,10 @@ impl<'a> CNFConverter<'a> {
         );
 
         let def_args: Vec<Term> = free_vars.iter().map(|v| Term::Variable(*v)).collect();
-        let def_atom = FOFFormula::Atom(Atom {
+        let def_atom = FOFFormula::Atom {
             predicate: def_pred,
             args: def_args,
-        });
+        };
 
         // Positive direction: D => (A <=> B)
         // As: D => (A => B) and D => (B => A)
@@ -590,7 +590,7 @@ impl<'a> CNFConverter<'a> {
         while let Some(item) = stack.pop() {
             match item {
                 WorkItem::Process(f) => match f {
-                    FOFFormula::Atom(_) | FOFFormula::Not(_) => {
+                    FOFFormula::Atom { .. } | FOFFormula::Not(_) => {
                         results.push(f);
                     }
 
@@ -704,16 +704,15 @@ impl<'a> CNFConverter<'a> {
         while let Some(item) = stack.pop() {
             match item {
                 WorkItem::Process(f) => match f {
-                    FOFFormula::Atom(atom) => {
-                        let new_args = atom
-                            .args
+                    FOFFormula::Atom { predicate, args } => {
+                        let new_args = args
                             .iter()
                             .map(|t| self.substitute_in_term(t, var, term))
                             .collect();
-                        results.push(FOFFormula::Atom(Atom {
-                            predicate: atom.predicate,
+                        results.push(FOFFormula::Atom {
+                            predicate,
                             args: new_args,
-                        }));
+                        });
                     }
 
                     FOFFormula::Not(f) => {
@@ -965,7 +964,7 @@ impl<'a> CNFConverter<'a> {
                             }
                         }
 
-                        FOFFormula::Atom(_) | FOFFormula::Not(_) => {
+                        FOFFormula::Atom { .. } | FOFFormula::Not(_) => {
                             results.push(vec![self.formula_to_clause(f)]);
                         }
 
@@ -1017,13 +1016,13 @@ impl<'a> CNFConverter<'a> {
                     stack.push(*f1);
                 }
 
-                FOFFormula::Atom(atom) => {
-                    literals.push(Literal::from_atom(atom, true));
+                FOFFormula::Atom { predicate, args } => {
+                    literals.push(Literal { predicate, args, polarity: true });
                 }
 
                 FOFFormula::Not(inner) => match *inner {
-                    FOFFormula::Atom(atom) => {
-                        literals.push(Literal::from_atom(atom, false));
+                    FOFFormula::Atom { predicate, args } => {
+                        literals.push(Literal { predicate, args, polarity: false });
                     }
                     _ => panic!("Negation of non-atom in CNF: {:?}", inner),
                 },
@@ -1064,13 +1063,9 @@ mod tests {
             PredicateSymbol::new(self.interner.intern_predicate(name), arity)
         }
 
-        fn atom(&mut self, name: &str, args: Vec<Term>) -> Atom {
-            let pred = self.pred(name, args.len() as u8);
-            Atom { predicate: pred, args }
-        }
-
         fn atom_formula(&mut self, name: &str, args: Vec<Term>) -> FOFFormula {
-            FOFFormula::Atom(self.atom(name, args))
+            let pred = self.pred(name, args.len() as u8);
+            FOFFormula::Atom { predicate: pred, args }
         }
     }
 

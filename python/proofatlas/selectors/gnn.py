@@ -403,24 +403,6 @@ class GCNLayer(nn.Module):
         return self.linear(h)
 
 
-class ScorerHead(nn.Module):
-    """
-    MLP scoring head for clause scoring.
-
-    Named fields match Burn's ScorerHead structure for weight compatibility.
-    """
-
-    def __init__(self, hidden_dim: int):
-        super().__init__()
-        self.linear1 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.linear1(x)
-        x = F.gelu(x)
-        return self.linear2(x)
-
-
 def _batch_from_pool(pool_matrix) -> torch.Tensor:
     """Derive node→graph assignment from pool matrix.
 
@@ -516,9 +498,6 @@ class ClauseGCN(nn.Module):
             num_heads=scorer_num_heads,
             num_layers=scorer_num_layers,
         )
-
-        # Keep reference to feature embedding for backwards compatibility
-        self.feature_embedding = self.node_embedding
 
     def forward(
         self,

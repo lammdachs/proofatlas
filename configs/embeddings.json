@@ -32,10 +32,6 @@
     "features": {
       "type": "features",
       "hidden_dim": 64
-    },
-
-    "none": {
-      "type": "none"
     }
   }
 }

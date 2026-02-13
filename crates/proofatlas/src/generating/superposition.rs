@@ -3,7 +3,7 @@
 use super::common::{
     collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
 };
-use crate::logic::{Atom, Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
+use crate::logic::{Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
@@ -116,16 +116,14 @@ pub fn superposition(
                                 let mut new_literals = collect_literals_except(&renamed_from, &[from_idx], &mgu);
 
                                 // Add the modified literal from into_clause
-                                let into_lit_modified = {
-                                    let new_atom = replace_at_position(
-                                        into_lit.predicate,
-                                        &into_lit.args,
-                                        &pos.path,
-                                        &replacement_sigma,
-                                        &mgu,
-                                    );
-                                    Literal::from_atom(new_atom, into_lit.polarity)
-                                };
+                                let into_lit_modified = replace_at_position(
+                                    into_lit.predicate,
+                                    &into_lit.args,
+                                    &pos.path,
+                                    &replacement_sigma,
+                                    &mgu,
+                                    into_lit.polarity,
+                                );
                                 new_literals.push(into_lit_modified);
 
                                 // Add other literals from into_clause
@@ -210,30 +208,24 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
     }
 }
 
-/// Replace a term at a specific position in a literal's arguments, returning an Atom
+/// Replace a term at a specific position in a literal's arguments, returning a Literal
 fn replace_at_position(
     predicate: PredicateSymbol,
     args: &[Term],
     path: &[usize],
     replacement: &Term,
     subst: &Substitution,
-) -> Atom {
-    if path.is_empty() {
-        // Can't replace at root of atom
-        let atom = Atom {
-            predicate,
-            args: args.to_vec(),
-        };
-        atom.apply_substitution(subst)
+    polarity: bool,
+) -> Literal {
+    let mut new_args = if path.is_empty() {
+        args.to_vec()
     } else {
-        let mut new_args = args.to_vec();
-        new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
-        Atom {
-            predicate,
-            args: new_args,
-        }
-        .apply_substitution(subst)
-    }
+        let mut a = args.to_vec();
+        a[path[0]] = replace_in_term(&a[path[0]], &path[1..], replacement);
+        a
+    };
+    new_args = new_args.iter().map(|a| a.apply_substitution(subst)).collect();
+    Literal { predicate, args: new_args, polarity }
 }
 
 /// Replace a term at a specific position in another term

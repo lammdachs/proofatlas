@@ -235,9 +235,8 @@ pub fn load_sentence_embedder<P: AsRef<Path>>(
 /// Base MiniLM encoder model for pre-computing embeddings at trace time.
 ///
 /// Unlike `SentenceEmbedder` (which wraps a trained scorer model), this loads
-/// the frozen base MiniLM exported by `export_base_minilm()` and returns raw
-/// 384-D embeddings. Used via the Backend to embed clause strings and node
-/// names before writing NPZ traces.
+/// the frozen base MiniLM and returns raw 384-D embeddings. Used via the
+/// Backend to embed clause strings and node names before writing NPZ traces.
 #[cfg(feature = "ml")]
 pub struct MiniLMEncoderModel {
     model: tch::CModule,

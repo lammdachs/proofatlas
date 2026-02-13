@@ -32,8 +32,7 @@ class SentenceEncoder(nn.Module):
     Sentence encoder for clause strings using pretrained transformers.
 
     Loads a pretrained model (e.g., all-MiniLM-L6-v2) and uses it to encode
-    clause strings. The transformer architecture can be reimplemented in Burn
-    for inference.
+    clause strings. Exported as TorchScript for Rust inference via tch-rs.
 
     Architecture:
         - Token embeddings + position embeddings

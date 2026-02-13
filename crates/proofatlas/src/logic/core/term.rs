@@ -101,21 +101,6 @@ impl Term {
         }
     }
 
-    /// Collect all variables in this term (legacy interface)
-    pub fn collect_variables(&self, vars: &mut std::collections::HashSet<Variable>) {
-        match self {
-            Term::Variable(v) => {
-                vars.insert(*v);
-            }
-            Term::Constant(_) => {}
-            Term::Function(_, args) => {
-                for arg in args {
-                    arg.collect_variables(vars);
-                }
-            }
-        }
-    }
-
     /// Format this term with an interner for name resolution
     pub fn display<'a>(&'a self, interner: &'a Interner) -> TermDisplay<'a> {
         TermDisplay {

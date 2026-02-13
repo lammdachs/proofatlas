@@ -28,7 +28,7 @@ proofatlas/
 │   │       ├── prover/         # Saturation engine
 │   │       │   ├── mod.rs      # Prover struct with prove()/init()/step()/saturate()
 │   │       │   ├── profile.rs  # SaturationProfile
-│   │       │   └── trace.rs    # EventLogReplayer, extract_proof_from_events
+│   │       │   └── trace.rs    # (reserved for future trace utilities)
 │   │       ├── selection/      # Clause selection strategies
 │   │       │   ├── clause.rs   # ProverSink, ClauseSelector traits
 │   │       │   ├── age_weight.rs # Heuristic age-weight selector
@@ -275,8 +275,6 @@ The saturation state maintains an event log (`Vec<StateChange>`) as the single s
 - **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
 - **Training data extraction**: Per-clause lifecycle arrays (transfer_step, activate_step, simplify_step) written to NPZ by `save_trace()` in Rust; training samples random step k and reconstructs U_k/P_k from lifecycle arrays
 
-The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying events.
-
 ### Literal Representation
 Literals have a flat structure with `predicate`, `args`, and `polarity` directly on the `Literal` struct (no intermediate `Atom` wrapper). `Atom` still exists for FOF formula representation in the parser but is not used in clause-level operations.
 
@@ -378,7 +376,7 @@ Graph traces additionally include `node_features`, `edge_src/dst`, `node_offsets
 
 **Reconstruction at step k**: `U_k = {i : transferred ≤ k AND not yet activated at k AND not simplified}`, `P_k = {i : activated < k AND not simplified}`.
 
-**`MiniLMEncoderModel`** (`selection/ml/sentence.rs`): Rust Backend Model wrapping base MiniLM (TorchScript) + tokenizer for pre-computing 384-D embeddings at trace time. `ensure_base_minilm()` in `ml/export.py` exports the frozen model.
+**`MiniLMEncoderModel`** (`selection/ml/sentence.rs`): Rust Backend Model wrapping base MiniLM (TorchScript) + tokenizer for pre-computing 384-D embeddings at trace time.
 
 ## Analysis Guidelines
 

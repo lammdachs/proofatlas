@@ -4,7 +4,7 @@ use super::cnf_conversion::fof_to_cnf_with_role;
 use super::fof::{FOFFormula, FormulaRole, NamedFormula, Quantifier};
 use crate::logic::ordering::orient_equalities::orient_all_equalities;
 use crate::logic::{
-    Atom, CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
+    CNFFormula, Clause, ClauseRole, Constant, FunctionSymbol, Interner, Literal,
     PredicateSymbol, Term, Variable,
 };
 use nom::{
@@ -560,10 +560,10 @@ fn parse_fof_true(input: &str) -> IResult<&str, FOFFormula> {
     let pred = with_ctx(|ctx| ctx.intern_predicate("$true", 0));
     Ok((
         input,
-        FOFFormula::Atom(Atom {
+        FOFFormula::Atom {
             predicate: pred,
             args: vec![],
-        }),
+        },
     ))
 }
 
@@ -573,10 +573,10 @@ fn parse_fof_false(input: &str) -> IResult<&str, FOFFormula> {
     let pred = with_ctx(|ctx| ctx.intern_predicate("$false", 0));
     Ok((
         input,
-        FOFFormula::Atom(Atom {
+        FOFFormula::Atom {
             predicate: pred,
             args: vec![],
-        }),
+        },
     ))
 }
 
@@ -602,7 +602,7 @@ fn parse_fof_unary(input: &str) -> IResult<&str, FOFFormula> {
             tuple((multispace0, char(')'))),
         ),
         // Atomic formula
-        map(parse_atom, FOFFormula::Atom),
+        map(parse_atom, |(predicate, args)| FOFFormula::Atom { predicate, args }),
     ))(input)
 }
 
@@ -616,12 +616,11 @@ fn parse_fof_infix_unary(input: &str) -> IResult<&str, FOFFormula> {
 
     // Create negated equality
     let eq_pred = with_ctx(|ctx| ctx.intern_predicate("=", 2));
-    let eq_atom = Atom {
+
+    Ok((input, FOFFormula::Not(Box::new(FOFFormula::Atom {
         predicate: eq_pred,
         args: vec![left, right],
-    };
-
-    Ok((input, FOFFormula::Not(Box::new(FOFFormula::Atom(eq_atom)))))
+    }))))
 }
 
 /// Parse quantified formula
@@ -960,11 +959,11 @@ fn parse_literal(input: &str) -> IResult<&str, Literal> {
             preceded(tuple((char('~'), multispace0)), parse_cnf_false),
             |lit| lit.complement(),
         ),
-        map(preceded(tuple((char('~'), multispace0)), parse_atom), |atom| {
-            Literal::from_atom(atom, false)
+        map(preceded(tuple((char('~'), multispace0)), parse_atom), |(predicate, args)| {
+            Literal { predicate, args, polarity: false }
         }),
         parse_negative_equality,
-        map(parse_atom, |atom| Literal::from_atom(atom, true)),
+        map(parse_atom, |(predicate, args)| Literal { predicate, args, polarity: true }),
     ))(input)
 }
 
@@ -984,13 +983,13 @@ fn parse_negative_equality(input: &str) -> IResult<&str, Literal> {
     ))
 }
 
-/// Parse an atom
-fn parse_atom(input: &str) -> IResult<&str, Atom> {
+/// Parse an atom, returning (predicate, args) tuple
+fn parse_atom(input: &str) -> IResult<&str, (PredicateSymbol, Vec<Term>)> {
     alt((parse_equality, parse_predicate))(input)
 }
 
 /// Parse an equality atom
-fn parse_equality(input: &str) -> IResult<&str, Atom> {
+fn parse_equality(input: &str) -> IResult<&str, (PredicateSymbol, Vec<Term>)> {
     let (input, left) = parse_term(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = tag("=")(input)?;
@@ -999,17 +998,11 @@ fn parse_equality(input: &str) -> IResult<&str, Atom> {
 
     let eq_pred = with_ctx(|ctx| ctx.intern_predicate("=", 2));
 
-    Ok((
-        input,
-        Atom {
-            predicate: eq_pred,
-            args: vec![left, right],
-        },
-    ))
+    Ok((input, (eq_pred, vec![left, right])))
 }
 
 /// Parse a predicate
-fn parse_predicate(input: &str) -> IResult<&str, Atom> {
+fn parse_predicate(input: &str) -> IResult<&str, (PredicateSymbol, Vec<Term>)> {
     let (input, name) = parse_identifier(input)?;
     let name = strip_quotes(name);
 
@@ -1020,22 +1013,10 @@ fn parse_predicate(input: &str) -> IResult<&str, Atom> {
 
         let pred = with_ctx(|ctx| ctx.intern_predicate(&name, args.len()));
 
-        Ok((
-            input,
-            Atom {
-                predicate: pred,
-                args,
-            },
-        ))
+        Ok((input, (pred, args)))
     } else {
         let pred = with_ctx(|ctx| ctx.intern_predicate(&name, 0));
-        Ok((
-            input,
-            Atom {
-                predicate: pred,
-                args: vec![],
-            },
-        ))
+        Ok((input, (pred, vec![])))
     }
 }
 

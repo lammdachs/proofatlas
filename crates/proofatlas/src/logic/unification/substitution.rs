@@ -2,7 +2,7 @@
 
 use crate::logic::core::clause::Clause;
 use crate::logic::interner::VariableId;
-use crate::logic::core::literal::{Atom, Literal};
+use crate::logic::core::literal::Literal;
 use crate::logic::core::term::{Term, Variable};
 use std::collections::HashMap;
 
@@ -139,20 +139,6 @@ impl Term {
                     .collect();
                 Term::Function(*f, new_args)
             }
-        }
-    }
-}
-
-impl Atom {
-    /// Apply a substitution to this atom
-    pub fn apply_substitution(&self, subst: &Substitution) -> Atom {
-        Atom {
-            predicate: self.predicate,
-            args: self
-                .args
-                .iter()
-                .map(|arg| arg.apply_substitution(subst))
-                .collect(),
         }
     }
 }

@@ -5,7 +5,6 @@ import torch
 
 from proofatlas.selectors.gnn import (
     GCNLayer,
-    ScorerHead,
     ClauseGCN,
     GraphNorm,
     NodeInputProjection,
@@ -80,15 +79,6 @@ class TestGCNLayer:
         loss.backward()
         assert x.grad is not None
 
-
-class TestScorerHead:
-    """Tests for ScorerHead."""
-
-    def test_forward_shape(self):
-        scorer = ScorerHead(hidden_dim=64)
-        x = torch.randn(10, 64)
-        out = scorer(x)
-        assert out.shape == (10, 1)
 
 class TestGraphNorm:
     """Tests for GraphNorm."""

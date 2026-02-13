@@ -272,11 +272,6 @@ class ProofBatchDataset(IterableDataset):
                 yield batch
 
     @property
-    def num_files(self) -> int:
-        """Number of trace files in this dataset."""
-        return len(self.files)
-
-    @property
     def num_problems(self) -> int:
         """Number of distinct problems (same as num_files for per-problem format)."""
         return len(self.files)

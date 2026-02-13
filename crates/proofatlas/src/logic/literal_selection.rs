@@ -212,9 +212,6 @@ impl SelectMaximal {
         }
     }
 
-    pub fn with_kbo(kbo: KBO) -> Self {
-        SelectMaximal { kbo }
-    }
 }
 
 impl Default for SelectMaximal {
@@ -252,9 +249,6 @@ impl SelectNegMaxWeightOrMaximal {
         }
     }
 
-    pub fn with_kbo(kbo: KBO) -> Self {
-        SelectNegMaxWeightOrMaximal { kbo }
-    }
 }
 
 impl Default for SelectNegMaxWeightOrMaximal {
@@ -301,9 +295,6 @@ impl SelectUniqueMaximalOrNegOrMaximal {
         }
     }
 
-    pub fn with_kbo(kbo: KBO) -> Self {
-        SelectUniqueMaximalOrNegOrMaximal { kbo }
-    }
 }
 
 impl Default for SelectUniqueMaximalOrNegOrMaximal {

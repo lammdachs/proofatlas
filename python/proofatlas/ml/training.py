@@ -20,100 +20,11 @@ import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 from ..selectors import create_model
-from .config import TrainingConfig
 
-# Re-export from new modules for backward compatibility
-from .losses import (
-    info_nce_loss,
-    info_nce_loss_per_proof,
-    margin_ranking_loss,
-    compute_loss,
-)
-from .datasets import (
-    ProofBatchDataset,
-    collate_proof_batch,
-    collate_sentence_batch,
-    scan_trace_files,
-)
+from .losses import compute_loss
+from .datasets import ProofBatchDataset, scan_trace_files
 from .logger import JSONLogger
 from .export import export_model
-
-
-# =============================================================================
-# Model Persistence
-# =============================================================================
-
-
-def save_model(model: nn.Module, path: Path, config: Optional[TrainingConfig] = None):
-    """Save model checkpoint."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "model_state_dict": model.state_dict(),
-        "config": config.to_dict() if config else None,
-    }, path)
-
-
-def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
-    """Load model from checkpoint."""
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    checkpoint = torch.load(path, map_location=device)
-    config_dict = checkpoint.get("config", {})
-
-    # Handle both old flat config and new nested config
-    model_config = config_dict.get("model", config_dict)
-
-    model = create_model(
-        model_type=model_config.get("type", model_config.get("model_type", "gcn")),
-        hidden_dim=model_config.get("hidden_dim", 64),
-        num_layers=model_config.get("num_layers", 3),
-        num_heads=model_config.get("num_heads", 4),
-    )
-
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device)
-    model.eval()
-
-    return model
-
-
-# =============================================================================
-# Trace Management
-# =============================================================================
-
-
-def load_trace_files(
-    traces_dir: Path,
-    preset: str,
-    encoder_type: str = "graph",
-    problem_names: Optional[set] = None,
-) -> List[Path]:
-    """Get list of per-problem trace files for a preset.
-
-    Each problem has one file: STEM.graph.npz or STEM.sentence.npz.
-
-    Args:
-        traces_dir: Base directory for traces (e.g., .data/traces/)
-        preset: Trace preset name (subdirectory in traces_dir)
-        encoder_type: "graph" or "string" — determines which .npz suffix to glob
-        problem_names: Optional set of problem names to include. If None, loads all.
-
-    Returns:
-        List of per-problem trace file paths.
-    """
-    preset_dir = Path(traces_dir) / preset
-    if not preset_dir.exists():
-        return []
-
-    suffix = "sentence.npz" if encoder_type == "string" else "graph.npz"
-    trace_files = sorted(preset_dir.glob(f"*.{suffix}"))
-    if problem_names is not None:
-        # File stem is PROBLEM.graph or PROBLEM.sentence — extract problem name
-        trace_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] in problem_names]
-
-    return trace_files
 
 
 # =============================================================================
@@ -176,26 +87,13 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
         scores tensor on device
     """
     if is_sentence_model:
-        if "u_embeddings" in batch:
-            # Pre-computed 384-D embeddings → project through learned layer
-            u_raw = batch["u_embeddings"].to(device)
-            u_emb = model.projection(u_raw)
+        u_raw = batch["u_embeddings"].to(device)
+        u_emb = model.projection(u_raw)
 
-            p_emb = None
-            if "p_embeddings" in batch:
-                p_raw = batch["p_embeddings"].to(device)
-                p_emb = model.projection(p_raw)
-        else:
-            # Legacy: tokenize on the fly
-            u_ids = batch["u_input_ids"].to(device)
-            u_mask = batch["u_attention_mask"].to(device)
-            u_emb = model.encode_tokens(u_ids, u_mask)
-
-            p_emb = None
-            if "p_input_ids" in batch:
-                p_ids = batch["p_input_ids"].to(device)
-                p_mask = batch["p_attention_mask"].to(device)
-                p_emb = model.encode_tokens(p_ids, p_mask)
+        p_emb = None
+        if "p_embeddings" in batch:
+            p_raw = batch["p_embeddings"].to(device)
+            p_emb = model.projection(p_raw)
 
         return model.scorer(u_emb, p_emb)
     elif is_features_model:

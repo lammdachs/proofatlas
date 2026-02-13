@@ -3,7 +3,7 @@
 //! This module provides structures for representing full first-order logic
 //! formulas before conversion to CNF.
 
-use crate::logic::{Atom, Interner, Term, Variable, VariableId};
+use crate::logic::{Interner, PredicateSymbol, Term, Variable, VariableId};
 use std::collections::{HashMap, HashSet};
 
 /// Quantifier type
@@ -17,7 +17,7 @@ pub enum Quantifier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FOFFormula {
     /// Atomic formula
-    Atom(Atom),
+    Atom { predicate: PredicateSymbol, args: Vec<Term> },
     /// Negation
     Not(Box<FOFFormula>),
     /// Conjunction
@@ -42,7 +42,7 @@ impl FOFFormula {
     /// Get all free variables in the formula
     pub fn free_variables(&self) -> HashSet<Variable> {
         match self {
-            FOFFormula::Atom(atom) => atom.args.iter().flat_map(|t| t.variables()).collect(),
+            FOFFormula::Atom { args, .. } => args.iter().flat_map(|t| t.variables()).collect(),
             FOFFormula::Not(f) => f.free_variables(),
             FOFFormula::And(f1, f2)
             | FOFFormula::Or(f1, f2)
@@ -71,9 +71,9 @@ impl FOFFormula {
     /// Get all free variable IDs in the formula
     pub fn free_variable_ids(&self) -> HashSet<VariableId> {
         match self {
-            FOFFormula::Atom(atom) => {
+            FOFFormula::Atom { args, .. } => {
                 let mut ids = HashSet::new();
-                for arg in &atom.args {
+                for arg in args {
                     arg.collect_variable_ids(&mut ids);
                 }
                 ids
@@ -116,11 +116,11 @@ impl FOFFormula {
                 WorkItem::Process(formula, negate) => {
                     match (formula, negate) {
                         // Atom - base case
-                        (FOFFormula::Atom(a), false) => {
-                            results.push(FOFFormula::Atom(a));
+                        (a @ FOFFormula::Atom { .. }, false) => {
+                            results.push(a);
                         }
-                        (FOFFormula::Atom(a), true) => {
-                            results.push(FOFFormula::Not(Box::new(FOFFormula::Atom(a))));
+                        (a @ FOFFormula::Atom { .. }, true) => {
+                            results.push(FOFFormula::Not(Box::new(a)));
                         }
 
                         // Double negation - just flip and continue
@@ -333,8 +333,8 @@ impl FOFFormula {
 
     fn collect_variable_ids(&self, ids: &mut HashSet<VariableId>) {
         match self {
-            FOFFormula::Atom(atom) => {
-                for arg in &atom.args {
+            FOFFormula::Atom { args, .. } => {
+                for arg in args {
                     arg.collect_variable_ids(ids);
                 }
             }
@@ -364,17 +364,16 @@ impl FOFFormula {
         interner: &mut Interner,
     ) -> FOFFormula {
         match self {
-            FOFFormula::Atom(atom) => {
+            FOFFormula::Atom { predicate, args } => {
                 // Rename variables in the atom according to the current renaming
-                let new_args: Vec<Term> = atom
-                    .args
+                let new_args: Vec<Term> = args
                     .into_iter()
                     .map(|t| Self::rename_term_vars(t, renaming))
                     .collect();
-                FOFFormula::Atom(Atom {
-                    predicate: atom.predicate,
+                FOFFormula::Atom {
+                    predicate,
                     args: new_args,
-                })
+                }
             }
 
             FOFFormula::Not(f) => {
@@ -496,14 +495,14 @@ mod tests {
         let p_pred = PredicateSymbol::new(interner.intern_predicate("P"), 0);
         let q_pred = PredicateSymbol::new(interner.intern_predicate("Q"), 0);
 
-        let p = FOFFormula::Atom(Atom {
+        let p = FOFFormula::Atom {
             predicate: p_pred,
             args: vec![],
-        });
-        let q = FOFFormula::Atom(Atom {
+        };
+        let q = FOFFormula::Atom {
             predicate: q_pred,
             args: vec![],
-        });
+        };
 
         let formula = FOFFormula::Not(Box::new(FOFFormula::And(
             Box::new(p.clone()),

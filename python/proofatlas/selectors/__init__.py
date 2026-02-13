@@ -1,23 +1,24 @@
 """
 Clause selector models for theorem proving.
 
-This module provides modular components for clause selection:
+This module provides components for clause selection:
 
-Modular design (recommended):
-    - Encoders: GCNEncoder
-    - Scorers: MLPScorer, AttentionScorer, TransformerScorer
-    - ClauseSelector: Combines encoder + projection + scorer
+Models:
+    - ClauseGCN: Graph Convolutional Network encoder + scorer
+    - SentenceEncoder: Sentence transformer encoder + scorer
+    - ClauseFeatures: Clause feature MLP encoder + scorer
+    - AgeWeightHeuristic: Age-weight heuristic baseline
 
-Convenience wrappers:
-    - ClauseGCN
+Scorers:
+    - MLPScorer, AttentionScorer, TransformerScorer
+
+Factory:
+    - create_model: Create any model by type string
 
 Example:
-    # Modular approach
-    encoder = GCNEncoder(hidden_dim=64, num_layers=3)
-    selector = ClauseSelector(encoder, scorer_type="attention", scorer_dim=64)
-
-    # Or use convenience wrapper
     model = ClauseGCN(hidden_dim=64, num_layers=3, scorer_type="attention")
+    # Or via factory:
+    model = create_model("gcn", hidden_dim=64, num_layers=3, scorer_type="attention")
 """
 
 from .gnn import (
@@ -26,12 +27,6 @@ from .gnn import (
     NodeFeatureEmbedding,
     ClauseFeatureEmbedding,
 )
-from .encoders import (
-    ClauseEncoder,
-    ClauseSelector,
-    GCNEncoder,
-    create_encoder,
-)
 from .scorers import (
     MLPScorer,
     AttentionScorer,
@@ -39,15 +34,10 @@ from .scorers import (
     create_scorer,
 )
 from .baseline import AgeWeightHeuristic
-from .utils import normalize_adjacency, sparse_mm
+from .utils import sparse_mm
 from .factory import create_model
 
 __all__ = [
-    # Modular components (recommended)
-    "ClauseEncoder",
-    "ClauseSelector",
-    "GCNEncoder",
-    "create_encoder",
     # Scorers
     "MLPScorer",
     "AttentionScorer",
@@ -63,7 +53,6 @@ __all__ = [
     # Baselines
     "AgeWeightHeuristic",
     # Utilities
-    "normalize_adjacency",
     "sparse_mm",
     # Factory
     "create_model",

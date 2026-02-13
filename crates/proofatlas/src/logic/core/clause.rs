@@ -35,11 +35,6 @@ impl ClauseRole {
         }
     }
 
-    /// Check if this is a goal clause (negated conjecture)
-    pub fn is_goal(&self) -> bool {
-        matches!(self, ClauseRole::NegatedConjecture)
-    }
-
     /// Convert from a TPTP role string to ClauseRole
     pub fn from_tptp_role(role: &str) -> Self {
         match role {
@@ -257,7 +252,7 @@ impl Clause {
 
     /// Map a rule name string to its numeric ID for ML features.
     ///
-    /// Must match the mapping in `python_bindings.rs::extract_tensor_trace`.
+    /// Must match the mapping in `python_bindings.rs::compute_clause_features_flat`.
     pub fn rule_name_to_id(rule_name: &str) -> u8 {
         match rule_name {
             "Input" => 0,

@@ -4,19 +4,9 @@ This module provides:
 - Graph conversion: clause graphs to PyTorch tensors
 - Structured data: .npz trace format with converters
 - Training: training loop and utilities
-- Config: configuration loading for data and selectors
 
 For selector models, use proofatlas.selectors directly.
 """
-
-from .graph_utils import (
-    to_torch_tensors,
-    to_sparse_adjacency,
-    batch_graphs,
-    extract_graph_embeddings,
-    get_node_type_masks,
-    compute_graph_statistics,
-)
 
 from .losses import (
     info_nce_loss,
@@ -38,9 +28,6 @@ from .export import export_model
 
 from .training import (
     run_training,
-    load_trace_files,
-    save_model,
-    load_model,
 )
 
 from .weights import (
@@ -50,40 +37,7 @@ from .weights import (
     get_encoder_type,
 )
 
-from .config import (
-    # Data config
-    DataConfig,
-    ProblemFilters,
-    SplitConfig,
-    SolverConfig,
-    TraceCollectionConfig,
-    OutputConfig,
-    # Training config
-    TrainingConfig,
-    ModelConfig,
-    TrainingParams,
-    OptimizerConfig,
-    SchedulerConfig,
-    # Utilities
-    list_configs,
-    merge_configs,
-)
-
-from .structured import (
-    # Conversion functions
-    clause_to_string,
-    clauses_to_strings,
-    batch_graphs as batch_structured_graphs,
-)
-
 __all__ = [
-    # Graph utilities
-    "to_torch_tensors",
-    "to_sparse_adjacency",
-    "batch_graphs",
-    "extract_graph_embeddings",
-    "get_node_type_masks",
-    "compute_graph_statistics",
     # Loss functions
     "info_nce_loss",
     "info_nce_loss_per_proof",
@@ -96,36 +50,13 @@ __all__ = [
     "scan_trace_files",
     # Training
     "run_training",
-    "load_trace_files",
     # Export
     "export_model",
     # Utilities
     "JSONLogger",
-    "save_model",
-    "load_model",
     # Weights
     "find_weights",
     "is_learned_selector",
     "get_model_name",
     "get_encoder_type",
-    # Config - Data
-    "DataConfig",
-    "ProblemFilters",
-    "SplitConfig",
-    "SolverConfig",
-    "TraceCollectionConfig",
-    "OutputConfig",
-    # Config - Training
-    "TrainingConfig",
-    "ModelConfig",
-    "TrainingParams",
-    "OptimizerConfig",
-    "SchedulerConfig",
-    # Config utilities
-    "list_configs",
-    "merge_configs",
-    # Structured data conversion
-    "clause_to_string",
-    "clauses_to_strings",
-    "batch_structured_graphs",
 ]
