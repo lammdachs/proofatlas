@@ -1,7 +1,7 @@
 """Job and daemon management for proofatlas-bench.
 
 Handles PID tracking, job status persistence, daemonization,
-and job status display. Only depends on stdlib.
+job status display, and result syncing/pushing. Only depends on stdlib.
 """
 
 import json
@@ -308,3 +308,220 @@ def daemonize(log_file_path: Path):
     sys.stderr = sys.stdout
 
     return (True, 0)
+
+
+# =============================================================================
+# Result syncing and pushing
+# =============================================================================
+
+
+def sync_all_run_results(base_dir: Path):
+    """Combine per-problem JSONs from .data/runs/ into single files in web/data/runs/."""
+    runs_src = base_dir / ".data" / "runs"
+    runs_dst = base_dir / "web" / "data" / "runs"
+    runs_dst.mkdir(parents=True, exist_ok=True)
+
+    if not runs_src.exists():
+        log("No .data/runs/ directory found — skipping run sync")
+        return
+
+    index_entries = []
+
+    for prover_dir in sorted(runs_src.iterdir()):
+        if not prover_dir.is_dir():
+            continue
+        prover = prover_dir.name
+
+        for config_dir in sorted(prover_dir.iterdir()):
+            if not config_dir.is_dir():
+                continue
+            preset = config_dir.name
+            run_key = f"{prover}_{preset}"
+
+            results = []
+            for problem_file in sorted(config_dir.glob("*.json")):
+                try:
+                    with open(problem_file) as f:
+                        data = json.load(f)
+                    results.append({
+                        "problem": data.get("problem", problem_file.stem + ".p"),
+                        "status": data.get("status", "unknown"),
+                        "time_s": data.get("time_s", 0),
+                        "timestamp": data.get("timestamp", ""),
+                    })
+                except (json.JSONDecodeError, IOError):
+                    continue
+
+            if not results:
+                continue
+
+            combined = {
+                "prover": prover,
+                "preset": preset,
+                "results": results,
+            }
+
+            out_path = runs_dst / f"{run_key}.json"
+            with open(out_path, "w") as f:
+                json.dump(combined, f, separators=(",", ":"))
+
+            index_entries.append(run_key)
+            log(f"[{run_key}] Wrote {len(results)} results to web/data/runs/")
+
+    # Write index
+    with open(runs_dst / "index.json", "w") as f:
+        json.dump({"runs": sorted(index_entries)}, f, indent=2)
+
+    log(f"Run index: {len(index_entries)} configs")
+
+
+def push_results(base_dir: Path, configs: list[str]) -> bool:
+    """Git add, pull, commit, push web/data/. Returns True if pushed successfully.
+
+    Uses file locking to prevent race conditions on shared storage.
+    """
+    import fcntl
+    import subprocess
+
+    sync_all_run_results(base_dir)
+
+    lock_file = base_dir / ".data" / "git.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(lock_file, "w") as lock_fd:
+            # Acquire exclusive lock (blocking)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+            subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
+
+            commit_msg = f"[skip ci] Update results: {', '.join(configs)}"
+            result = subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                if "nothing to commit" in result.stdout + result.stderr:
+                    log("No new results to commit")
+                    return True
+                log(f"Git commit failed: {result.stderr.strip()}")
+                return False
+
+            # Pull with rebase to incorporate any remote changes
+            pull = subprocess.run(
+                ["git", "pull", "--rebase"],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if pull.returncode != 0:
+                log(f"Git pull --rebase failed: {pull.stderr.strip()}")
+                log("Commit is local — will retry on next push interval")
+                return False
+
+            push = subprocess.run(
+                ["git", "push"],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if push.returncode != 0:
+                log(f"Git push failed: {push.stderr.strip()}")
+                return False
+
+            log(f"Pushed results for: {', '.join(configs)}")
+            return True
+    except OSError as e:
+        log(f"Failed to acquire git lock: {e}")
+        return False
+
+
+def upload_weights(base_dir: Path, configs: list[str]):
+    """Upload trained weights for completed configs to a rolling GitHub release.
+
+    Uses file locking for release creation to prevent race conditions on shared storage.
+    """
+    import fcntl
+    import subprocess
+
+    weights_dir = base_dir / ".weights"
+    if not weights_dir.exists():
+        log("No .weights/ directory — skipping weight upload")
+        return
+
+    tag = "weights"
+    release_name = "Model Weights"
+    release_body = (
+        f"Rolling backup of trained model weights.\n\n"
+        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Configs: {', '.join(configs)}"
+    )
+
+    lock_file = base_dir / ".data" / "gh_release.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Lock only for release creation/check to avoid race condition
+    try:
+        with open(lock_file, "w") as lock_fd:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+            # Ensure the tag and release exist
+            check = subprocess.run(
+                ["gh", "release", "view", tag],
+                cwd=str(base_dir), capture_output=True, text=True,
+            )
+            if check.returncode != 0:
+                log("Creating weights release...")
+                result = subprocess.run(
+                    ["gh", "release", "create", tag,
+                     "--title", release_name,
+                     "--notes", release_body,
+                     "--latest=false"],
+                    cwd=str(base_dir), capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    log(f"Failed to create release: {result.stderr.strip()}")
+                    return
+            else:
+                # Update release notes
+                subprocess.run(
+                    ["gh", "release", "edit", tag,
+                     "--notes", release_body],
+                    cwd=str(base_dir), capture_output=True, text=True,
+                )
+    except OSError as e:
+        log(f"Failed to acquire release lock: {e}")
+        return
+
+    # Collect weight files for completed configs
+    assets = []
+    for config_name in configs:
+        pt_file = weights_dir / f"{config_name}.pt"
+        if pt_file.exists():
+            assets.append(str(pt_file))
+        # Also upload tokenizer dirs (sentence models)
+        tok_dir = weights_dir / f"{config_name}_tokenizer"
+        if tok_dir.is_dir():
+            # Tar the tokenizer dir for upload
+            tar_path = weights_dir / f"{config_name}_tokenizer.tar.gz"
+            subprocess.run(
+                ["tar", "czf", str(tar_path), "-C", str(weights_dir), f"{config_name}_tokenizer"],
+                capture_output=True,
+            )
+            if tar_path.exists():
+                assets.append(str(tar_path))
+
+    if not assets:
+        log("No weight files found for completed configs")
+        return
+
+    # Upload with --clobber to overwrite existing assets
+    cmd = ["gh", "release", "upload", tag, "--clobber"] + assets
+    result = subprocess.run(
+        cmd, cwd=str(base_dir), capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        log(f"Weight upload failed: {result.stderr.strip()}")
+    else:
+        log(f"Uploaded weights: {', '.join(Path(a).name for a in assets)}")
+
+    # Clean up any temp tarballs
+    for config_name in configs:
+        tar_path = weights_dir / f"{config_name}_tokenizer.tar.gz"
+        tar_path.unlink(missing_ok=True)

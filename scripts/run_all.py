@@ -33,7 +33,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# For importing pipeline.py helpers
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
@@ -304,7 +303,7 @@ def main():
 
     if not args.skip_push:
         phase_header(4, "Push Results")
-        from pipeline import sync_all_run_results, push_results, upload_weights
+        from bench_jobs import push_results, upload_weights
 
         all_completed = ["age_weight"] + eval_completed if not args.skip_traces else eval_completed
         if all_completed:

@@ -37,7 +37,7 @@ proofatlas = "proofatlas.cli.prove:main"
 proofatlas-bench = "proofatlas.cli.bench:main"
 proofatlas-train = "proofatlas.cli.train:main"
 proofatlas-web = "proofatlas.cli.web:main"
-proofatlas-pipeline = "proofatlas.cli.pipeline:main"
+
 
 [project.urls]
 Homepage = "https://github.com/lexpk/proofatlas"
