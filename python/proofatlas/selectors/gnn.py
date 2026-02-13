@@ -586,6 +586,7 @@ class ClauseGCN(nn.Module):
         pool_matrix: torch.Tensor,
         clause_features: torch.Tensor = None,
         node_names: list = None,
+        sym_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Encode clauses to embeddings without scoring.
@@ -593,14 +594,17 @@ class ClauseGCN(nn.Module):
         Same as forward() but returns clause embeddings [num_clauses, hidden_dim]
         instead of scores. Used for cross-attention scoring where U and P
         are encoded separately.
+
+        Args:
+            sym_emb: Optional pre-computed symbol embeddings [num_nodes, 384].
+                     If provided, used directly instead of computing from node_names.
         """
         batch = _batch_from_pool(pool_matrix)
 
         if self.node_info == "features":
             x = self.node_embedding(node_features)
         else:
-            sym_emb = None
-            if node_names is not None:
+            if sym_emb is None and node_names is not None:
                 sym_emb = self.symbol_embedding.precompute(node_names, node_features.device)
             x = self.node_projection(node_features, sym_emb)
 

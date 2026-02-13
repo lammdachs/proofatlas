@@ -15,7 +15,7 @@ import sys
 __version__ = "0.3.0"
 __author__ = "ProofAtlas Contributors"
 
-__all__ = ['ProofAtlas', 'ProofStep']
+__all__ = ['ProofAtlas', 'ProofStep', 'MiniLMBackend']
 
 
 def _setup_torch_libs():
@@ -46,17 +46,39 @@ def _setup_torch_libs():
 # Lazy imports — only load Rust extension when needed
 _ProofAtlas = None
 _ProofStep = None
+_MiniLMBackend = None
+
+
+def _load_rust_ext():
+    """Load the Rust extension module, setting up torch libs first."""
+    global _ProofAtlas, _ProofStep, _MiniLMBackend
+    if _ProofAtlas is None:
+        _setup_torch_libs()
+        try:
+            from .proofatlas import ProofAtlas as _PA, ProofStep as _PS
+        except ImportError:
+            from proofatlas import ProofAtlas as _PA, ProofStep as _PS
+        _ProofAtlas, _ProofStep = _PA, _PS
+        # MiniLMBackend may not exist (requires ml feature)
+        try:
+            try:
+                from .proofatlas import MiniLMBackend as _MLB
+            except ImportError:
+                from proofatlas import MiniLMBackend as _MLB
+            _MiniLMBackend = _MLB
+        except ImportError:
+            pass
 
 
 def __getattr__(name):
-    global _ProofAtlas, _ProofStep
-    if name in ("ProofAtlas", "ProofStep"):
-        if _ProofAtlas is None:
-            _setup_torch_libs()
-            try:
-                from .proofatlas import ProofAtlas as _PA, ProofStep as _PS
-            except ImportError:
-                from proofatlas import ProofAtlas as _PA, ProofStep as _PS
-            _ProofAtlas, _ProofStep = _PA, _PS
-        return _ProofAtlas if name == "ProofAtlas" else _ProofStep
+    if name in ("ProofAtlas", "ProofStep", "MiniLMBackend"):
+        _load_rust_ext()
+        if name == "ProofAtlas":
+            return _ProofAtlas
+        elif name == "ProofStep":
+            return _ProofStep
+        elif name == "MiniLMBackend":
+            if _MiniLMBackend is None:
+                raise AttributeError("MiniLMBackend requires the 'ml' feature")
+            return _MiniLMBackend
     raise AttributeError(f"module 'proofatlas' has no attribute {name!r}")

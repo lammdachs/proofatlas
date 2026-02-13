@@ -599,6 +599,229 @@ impl PyProver {
 
         Ok((graph_dict, sentence_dict))
     }
+
+    /// Save trace data as per-problem NPZ files.
+    ///
+    /// Writes {traces_dir}/{preset}/{stem}.graph.npz and
+    /// {traces_dir}/{preset}/{stem}.sentence.npz with lifecycle encoding.
+    ///
+    /// If a MiniLMBackend is provided, pre-computes 384-D MiniLM embeddings
+    /// for node names (graph) and clause strings (sentence).
+    #[cfg(feature = "ml")]
+    #[pyo3(signature = (traces_dir, preset, problem, time_seconds, backend=None))]
+    pub fn save_trace(
+        &self,
+        traces_dir: &str,
+        preset: &str,
+        problem: &str,
+        time_seconds: f64,
+        backend: Option<&PyMiniLMBackend>,
+    ) -> PyResult<()> {
+        use crate::selection::ml::graph::GraphBuilder;
+        use crate::selection::training::npz::NpzWriter;
+        use std::path::PathBuf;
+
+        let interner = self.interner();
+        let clauses = self.clauses();
+        let num_clauses = clauses.len();
+
+        if num_clauses == 0 {
+            return Ok(());
+        }
+
+        // Only save traces for proofs
+        if self.empty_clause_idx().is_none() {
+            return Ok(());
+        }
+
+        let stem = std::path::Path::new(problem)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(problem);
+
+        let preset_dir = PathBuf::from(traces_dir).join(preset);
+        std::fs::create_dir_all(&preset_dir)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create traces dir: {}", e)))?;
+
+        // --- Lifecycle arrays ---
+        let (transfer_step, activate_step, simplify_step, num_steps, _) =
+            self.build_clause_lifecycle();
+
+        // --- Proof labels ---
+        let proof_clauses = self.get_proof_clause_set();
+        let labels: Vec<u8> = (0..num_clauses)
+            .map(|i| if proof_clauses.contains(&i) { 1 } else { 0 })
+            .collect();
+
+        // --- Clause features [C, 9] ---
+        let clause_features_flat = self.compute_clause_features_flat();
+
+        // --- Graph data ---
+        let clause_refs: Vec<&Clause> = clauses.iter().map(|c| c.as_ref()).collect();
+        let batch_graph = GraphBuilder::build_from_clauses(&clause_refs);
+        let node_names = GraphBuilder::collect_node_names(&clause_refs, interner);
+
+        // Node features [N, 3] flat
+        let node_features_flat: Vec<f32> = batch_graph
+            .node_features
+            .iter()
+            .flat_map(|nf| nf.iter().copied())
+            .collect();
+        let num_nodes = batch_graph.num_nodes;
+
+        // Edges
+        let _total_edges = batch_graph.edge_indices.len();
+        let edge_src: Vec<i32> = batch_graph.edge_indices.iter().map(|&(s, _)| s as i32).collect();
+        let edge_dst: Vec<i32> = batch_graph.edge_indices.iter().map(|&(_, d)| d as i32).collect();
+
+        // Offsets
+        let mut node_offsets = Vec::with_capacity(num_clauses + 1);
+        let mut edge_offsets = Vec::with_capacity(num_clauses + 1);
+        node_offsets.push(0i64);
+        edge_offsets.push(0i64);
+        for i in 0..num_clauses {
+            node_offsets.push(batch_graph.clause_boundaries[i].1 as i64);
+            edge_offsets.push(batch_graph.edge_boundaries[i].1 as i64);
+        }
+
+        let num_steps_arr = [num_steps];
+
+        // --- Pre-compute embeddings if backend available ---
+        let node_embeddings: Option<Vec<f32>>;
+        let node_sentinel_type: Option<Vec<i8>>;
+        let clause_embeddings: Option<Vec<f32>>;
+
+        if let Some(be) = backend {
+            // Graph: classify nodes as sentinel or real, encode real symbols
+            let mut sentinel_types = vec![-1i8; num_nodes]; // -1 = real symbol
+            let mut real_indices = Vec::new();
+            let mut real_names = Vec::new();
+
+            for (i, name) in node_names.iter().enumerate() {
+                match name.as_str() {
+                    "VAR" => sentinel_types[i] = 0,
+                    "CLAUSE" => sentinel_types[i] = 1,
+                    "LIT" => sentinel_types[i] = 2,
+                    _ => {
+                        real_indices.push(i);
+                        real_names.push(name.clone());
+                    }
+                }
+            }
+
+            // Deduplicate real names for efficient encoding
+            let mut unique_names: Vec<String> = Vec::new();
+            let mut name_to_uid: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for name in &real_names {
+                if !name_to_uid.contains_key(name) {
+                    name_to_uid.insert(name.clone(), unique_names.len());
+                    unique_names.push(name.clone());
+                }
+            }
+
+            let unique_embs = if unique_names.is_empty() {
+                vec![]
+            } else {
+                be.encode_strings(unique_names.clone())
+            };
+
+            // Scatter back to node positions (384-D)
+            let emb_dim = 384;
+            let mut flat_node_emb = vec![0.0f32; num_nodes * emb_dim];
+            for (j, &node_idx) in real_indices.iter().enumerate() {
+                let uid = name_to_uid[&real_names[j]];
+                let src = &unique_embs[uid];
+                let dst_start = node_idx * emb_dim;
+                flat_node_emb[dst_start..dst_start + emb_dim].copy_from_slice(src);
+            }
+
+            node_embeddings = Some(flat_node_emb);
+            node_sentinel_type = Some(sentinel_types);
+
+            // Sentence: encode clause display strings
+            let clause_strings: Vec<String> = clauses
+                .iter()
+                .map(|c| c.display(interner).to_string())
+                .collect();
+            let clause_embs = be.encode_strings(clause_strings);
+            let flat_clause_emb: Vec<f32> = clause_embs.into_iter().flatten().collect();
+            clause_embeddings = Some(flat_clause_emb);
+        } else {
+            node_embeddings = None;
+            node_sentinel_type = None;
+            clause_embeddings = None;
+        }
+
+        // --- Write graph NPZ ---
+        let graph_path = preset_dir.join(format!("{}.graph.npz", stem));
+        let mut gw = NpzWriter::new(&graph_path)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create graph NPZ: {}", e)))?;
+
+        gw.write_array_2d("node_features", &node_features_flat, num_nodes, 3)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("edge_src", &edge_src)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("edge_dst", &edge_dst)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("node_offsets", &node_offsets)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("edge_offsets", &edge_offsets)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_2d("clause_features", &clause_features_flat, num_clauses, 9)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("labels", &labels)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("transfer_step", &transfer_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("activate_step", &activate_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("simplify_step", &simplify_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        gw.write_array_1d("num_steps", &num_steps_arr)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+
+        if let Some(ref embs) = node_embeddings {
+            gw.write_array_2d("node_embeddings", embs, num_nodes, 384)
+                .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        }
+        if let Some(ref st) = node_sentinel_type {
+            gw.write_array_1d("node_sentinel_type", st)
+                .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        }
+
+        gw.finish()
+            .map_err(|e| PyValueError::new_err(format!("NPZ finish error: {}", e)))?;
+
+        // --- Write sentence NPZ ---
+        let sentence_path = preset_dir.join(format!("{}.sentence.npz", stem));
+        let mut sw = NpzWriter::new(&sentence_path)
+            .map_err(|e| PyValueError::new_err(format!("Failed to create sentence NPZ: {}", e)))?;
+
+        sw.write_array_2d("clause_features", &clause_features_flat, num_clauses, 9)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        sw.write_array_1d("labels", &labels)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        sw.write_array_1d("transfer_step", &transfer_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        sw.write_array_1d("activate_step", &activate_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        sw.write_array_1d("simplify_step", &simplify_step)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        sw.write_array_1d("num_steps", &num_steps_arr)
+            .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+
+        if let Some(ref embs) = clause_embeddings {
+            sw.write_array_2d("clause_embeddings", embs, num_clauses, 384)
+                .map_err(|e| PyValueError::new_err(format!("NPZ write error: {}", e)))?;
+        }
+
+        sw.finish()
+            .map_err(|e| PyValueError::new_err(format!("NPZ finish error: {}", e)))?;
+
+        let _ = time_seconds; // reserved for future metadata
+
+        Ok(())
+    }
 }
 
 impl PyProver {
@@ -724,6 +947,165 @@ fn term_stats(
     }
 }
 
+// =============================================================================
+// PyMiniLMBackend — wraps Backend + MiniLMEncoderModel for trace embedding
+// =============================================================================
+
+#[cfg(feature = "ml")]
+#[pyclass(unsendable, name = "MiniLMBackend")]
+pub struct PyMiniLMBackend {
+    handle: crate::selection::BackendHandle,
+    _backend: crate::selection::Backend,
+}
+
+#[cfg(feature = "ml")]
+#[pymethods]
+impl PyMiniLMBackend {
+    #[new]
+    #[pyo3(signature = (model_path, tokenizer_path, use_cuda=false))]
+    fn new(model_path: String, tokenizer_path: String, use_cuda: bool) -> PyResult<Self> {
+        let model = crate::selection::MiniLMEncoderModel::new(&model_path, &tokenizer_path, use_cuda)
+            .map_err(|e| PyValueError::new_err(e))?;
+        let backend = crate::selection::Backend::new(vec![Box::new(model)]);
+        let handle = backend.handle();
+        Ok(PyMiniLMBackend {
+            handle,
+            _backend: backend,
+        })
+    }
+}
+
+#[cfg(feature = "ml")]
+impl PyMiniLMBackend {
+    /// Encode strings via the backend (blocking).
+    fn encode_strings(&self, strings: Vec<String>) -> Vec<Vec<f32>> {
+        if strings.is_empty() {
+            return vec![];
+        }
+        let resp = self
+            .handle
+            .submit_sync(0, "minilm".to_string(), Box::new(strings))
+            .expect("MiniLM backend submission failed");
+        *resp.data.downcast::<Vec<Vec<f32>>>().expect("unexpected response type")
+    }
+}
+
+// =============================================================================
+// save_trace() method on PyProver
+// =============================================================================
+
+impl PyProver {
+    /// Build lifecycle arrays from the event log.
+    ///
+    /// Returns (transfer_step, activate_step, simplify_step, num_steps, num_clauses).
+    fn build_clause_lifecycle(&self) -> (Vec<i32>, Vec<i32>, Vec<i32>, i32, usize) {
+        let events = self.event_log();
+        let num_clauses = self.clauses().len();
+
+        let mut transfer_step = vec![-1i32; num_clauses];
+        let mut activate_step = vec![-1i32; num_clauses];
+        let mut simplify_step = vec![-1i32; num_clauses];
+        let mut step: i32 = 0;
+
+        for event in events {
+            match event {
+                RustStateChange::Transfer(idx) => {
+                    if *idx < num_clauses {
+                        transfer_step[*idx] = step;
+                    }
+                }
+                RustStateChange::Activate(idx) => {
+                    if *idx < num_clauses {
+                        activate_step[*idx] = step;
+                    }
+                    step += 1;
+                }
+                RustStateChange::Simplify(idx, _replacement, _, _) => {
+                    if *idx < num_clauses {
+                        simplify_step[*idx] = step;
+                    }
+                    // replacement enters N, not U — no transfer_step set
+                }
+                RustStateChange::Add(_, _, _) => {
+                    // enters N only
+                }
+            }
+        }
+
+        (transfer_step, activate_step, simplify_step, step, num_clauses)
+    }
+
+    /// Compute clause features [num_clauses, 9] as flat Vec<f32>.
+    fn compute_clause_features_flat(&self) -> Vec<f32> {
+        let clauses = self.clauses();
+        let events = self.event_log();
+        let num_clauses = clauses.len();
+
+        // Build derivation info
+        let mut derivation_info: HashMap<usize, String> = HashMap::new();
+        for event in events {
+            match event {
+                RustStateChange::Add(clause, rule_name, _) => {
+                    if let Some(idx) = clause.id {
+                        derivation_info.insert(idx, rule_name.clone());
+                    }
+                }
+                RustStateChange::Simplify(_, Some(clause), rule_name, _) => {
+                    if let Some(idx) = clause.id {
+                        derivation_info.insert(idx, rule_name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut features = Vec::with_capacity(num_clauses * 9);
+        for (idx, clause) in clauses.iter().enumerate() {
+            let rule_name = derivation_info.get(&idx).map(|s| s.as_str()).unwrap_or("input");
+            let rule_id = match rule_name {
+                "input" => 0.0f32,
+                "resolution" => 1.0,
+                "factoring" => 2.0,
+                "superposition" => 3.0,
+                "equality_resolution" => 4.0,
+                "equality_factoring" => 5.0,
+                "demodulation" => 6.0,
+                _ => 0.0,
+            };
+
+            let mut depth: usize = 0;
+            let mut symbol_count: usize = 0;
+            let mut variable_count: usize = 0;
+            let mut distinct_symbols: HashSet<u64> = HashSet::new();
+            let mut distinct_variables: HashSet<u64> = HashSet::new();
+
+            for lit in &clause.literals {
+                symbol_count += 1;
+                distinct_symbols.insert(lit.predicate.id.0 as u64 | (1u64 << 32));
+                for arg in &lit.args {
+                    let (d, sc, vc) = term_stats(arg, &mut distinct_symbols, &mut distinct_variables);
+                    depth = depth.max(d);
+                    symbol_count += sc;
+                    variable_count += vc;
+                }
+            }
+
+            features.extend_from_slice(&[
+                clause.age as f32,
+                clause.role.to_feature_value(),
+                rule_id,
+                clause.literals.len() as f32,
+                depth as f32,
+                symbol_count as f32,
+                distinct_symbols.len() as f32,
+                variable_count as f32,
+                distinct_variables.len() as f32,
+            ]);
+        }
+        features
+    }
+}
+
 /// Start a scoring server that blocks until the process is terminated.
 #[cfg(feature = "ml")]
 #[pyfunction]
@@ -785,6 +1167,8 @@ fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOrchestrator>()?;
     m.add_class::<PyProver>()?;
     m.add_class::<ProofStep>()?;
+    #[cfg(feature = "ml")]
+    m.add_class::<PyMiniLMBackend>()?;
     #[cfg(feature = "ml")]
     m.add_function(wrap_pyfunction!(start_scoring_server, m)?)?;
     Ok(())

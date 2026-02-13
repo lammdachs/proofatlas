@@ -32,7 +32,7 @@ from .losses import (
 from .datasets import (
     ProofBatchDataset,
     collate_proof_batch,
-    collate_tokenized_batch,
+    collate_sentence_batch,
     scan_trace_files,
 )
 from .logger import JSONLogger
@@ -84,131 +84,15 @@ def load_model(path: Path, device: Optional[torch.device] = None) -> nn.Module:
 # =============================================================================
 
 
-def save_tensor_trace(traces_dir, preset, problem, graph_dict, sentence_dict):
-    """Save tensor trace data as per-state .npz files.
-
-    Splits the full-problem trace (all clauses + all states) into per-state
-    files, each containing only the U+P clauses for that state.
-
-    Layout: traces_dir/preset/PROBLEM/idx.{graph,sentence}.npz
-
-    Args:
-        traces_dir: Base directory for traces (e.g., .data/traces/)
-        preset: Preset name for trace subdirectory
-        problem: Problem file name
-        graph_dict: Dict of numpy arrays for graph trace
-        sentence_dict: Dict of numpy arrays for sentence trace
-    """
-    import numpy as np
-
-    try:
-        stem = Path(problem).stem
-        problem_dir = Path(traces_dir) / preset / stem
-        problem_dir.mkdir(parents=True, exist_ok=True)
-
-        # Extract state arrays from graph_dict
-        state_u_offsets = graph_dict["state_u_offsets"]
-        state_p_offsets = graph_dict["state_p_offsets"]
-        state_u_indices = graph_dict["state_u_indices"]
-        state_p_indices = graph_dict["state_p_indices"]
-        num_states = len(graph_dict["state_selected"])
-
-        node_features = graph_dict["node_features"]
-        edge_src = graph_dict["edge_src"]
-        edge_dst = graph_dict["edge_dst"]
-        node_offsets = graph_dict["node_offsets"]
-        edge_offsets = graph_dict["edge_offsets"]
-        clause_features = graph_dict["clause_features"]
-        labels = graph_dict["labels"]
-
-        # Node names for symbol embedding (node_info="names"/"both")
-        node_names = graph_dict.get("node_names")  # list of strings, or None
-
-        # Sentence data
-        clause_strings = sentence_dict.get("clause_strings")
-        sent_labels = sentence_dict["labels"]
-
-        for si in range(num_states):
-            u_start, u_end = int(state_u_offsets[si]), int(state_u_offsets[si + 1])
-            p_start, p_end = int(state_p_offsets[si]), int(state_p_offsets[si + 1])
-            u_idx = state_u_indices[u_start:u_end].astype(np.int64)
-            p_idx = state_p_indices[p_start:p_end].astype(np.int64)
-
-            if len(u_idx) == 0:
-                continue
-
-            all_idx = np.concatenate([u_idx, p_idx])
-            num_u = len(u_idx)
-
-            # --- Graph per-state file ---
-            all_nf = []
-            all_es = []
-            all_ed = []
-            all_names = []
-            s_node_off = [0]
-            s_edge_off = [0]
-            node_cursor = 0
-
-            for idx in all_idx:
-                i = int(idx)
-                ns, ne = int(node_offsets[i]), int(node_offsets[i + 1])
-                es, ee = int(edge_offsets[i]), int(edge_offsets[i + 1])
-                nn = ne - ns
-                nedges = ee - es
-
-                if nn > 0:
-                    all_nf.append(node_features[ns:ne])
-                if nedges > 0:
-                    all_es.append(edge_src[es:ee].astype(np.int64) - ns + node_cursor)
-                    all_ed.append(edge_dst[es:ee].astype(np.int64) - ns + node_cursor)
-                if node_names is not None:
-                    all_names.extend(node_names[ns:ne])
-
-                node_cursor += nn
-                s_node_off.append(node_cursor)
-                s_edge_off.append(s_edge_off[-1] + nedges)
-
-            cnf = np.concatenate(all_nf) if all_nf else np.zeros((0, node_features.shape[1]), dtype=node_features.dtype)
-            ces = np.concatenate(all_es) if all_es else np.zeros(0, dtype=np.int64)
-            ced = np.concatenate(all_ed) if all_ed else np.zeros(0, dtype=np.int64)
-
-            save_kwargs = dict(
-                node_features=cnf,
-                edge_src=ces,
-                edge_dst=ced,
-                node_offsets=np.array(s_node_off, dtype=np.int64),
-                edge_offsets=np.array(s_edge_off, dtype=np.int64),
-                clause_features=clause_features[all_idx],
-                labels=labels[all_idx],
-                num_u=np.array(num_u, dtype=np.int64),
-            )
-            if all_names:
-                save_kwargs["node_names"] = np.array(all_names, dtype=object)
-
-            np.savez_compressed(problem_dir / f"{si}.graph.npz", **save_kwargs)
-
-            # --- Sentence per-state file ---
-            if clause_strings is not None:
-                s_strings = np.array([clause_strings[int(i)] for i in all_idx], dtype=object)
-                np.savez_compressed(
-                    problem_dir / f"{si}.sentence.npz",
-                    clause_strings=s_strings,
-                    labels=sent_labels[all_idx],
-                    num_u=np.array(num_u, dtype=np.int64),
-                )
-    except Exception:
-        pass
-
-
 def load_trace_files(
     traces_dir: Path,
     preset: str,
     encoder_type: str = "graph",
     problem_names: Optional[set] = None,
 ) -> List[Path]:
-    """Get list of per-state trace files for a preset.
+    """Get list of per-problem trace files for a preset.
 
-    Globs PROBLEM/idx.{graph,sentence}.npz in subdirectories.
+    Each problem has one file: STEM.graph.npz or STEM.sentence.npz.
 
     Args:
         traces_dir: Base directory for traces (e.g., .data/traces/)
@@ -217,17 +101,17 @@ def load_trace_files(
         problem_names: Optional set of problem names to include. If None, loads all.
 
     Returns:
-        List of per-state trace file paths.
+        List of per-problem trace file paths.
     """
     preset_dir = Path(traces_dir) / preset
     if not preset_dir.exists():
         return []
 
     suffix = "sentence.npz" if encoder_type == "string" else "graph.npz"
-    trace_files = sorted(preset_dir.glob(f"**/*.{suffix}"))
+    trace_files = sorted(preset_dir.glob(f"*.{suffix}"))
     if problem_names is not None:
-        # Parent directory name is the problem stem
-        trace_files = [f for f in trace_files if f.parent.name in problem_names]
+        # File stem is PROBLEM.graph or PROBLEM.sentence — extract problem name
+        trace_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] in problem_names]
 
     return trace_files
 
@@ -245,11 +129,41 @@ def _edge_list_to(edge_list, device):
     return edge_list.to(device)
 
 
+def _build_sym_emb(model, batch, prefix, device):
+    """Build symbol embeddings from pre-computed frozen embeddings + learned sentinels.
+
+    If the batch contains pre-computed node_embeddings and node_sentinel_type,
+    replaces sentinel positions with the model's learned sentinel embeddings.
+    Otherwise falls back to node_names for on-the-fly computation.
+
+    Returns (sym_emb, node_names) — one will be non-None, the other None.
+    """
+    # Only use pre-computed embeddings if the model has symbol_embedding
+    if not hasattr(model, 'symbol_embedding') or model.symbol_embedding is None:
+        return None, batch.get(f"{prefix}_node_names")
+
+    emb_key = f"{prefix}_node_embeddings"
+    st_key = f"{prefix}_node_sentinel_type"
+
+    if emb_key in batch:
+        sym_emb = batch[emb_key].clone().to(device)
+        sentinel = batch[st_key].to(device)
+        # Replace sentinel positions with learned embeddings
+        for st in range(3):  # VAR=0, CLAUSE=1, LIT=2
+            mask = sentinel == st
+            if mask.any():
+                sym_emb[mask] = model.symbol_embedding.sentinel_embeddings.weight[st]
+        return sym_emb, None
+    else:
+        return None, batch.get(f"{prefix}_node_names")
+
+
 def _forward_pass(model, batch, device, is_sentence_model, is_features_model=False):
     """Run forward pass through model, returning scores.
 
     Handles sentence, GNN, and features-only model types, encoding U and P
-    sets separately.
+    sets separately. Supports pre-computed embeddings (from NPZ traces) as
+    well as on-the-fly computation.
 
     Args:
         model: The clause selection model
@@ -262,15 +176,26 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
         scores tensor on device
     """
     if is_sentence_model:
-        u_ids = batch["u_input_ids"].to(device)
-        u_mask = batch["u_attention_mask"].to(device)
-        u_emb = model.encode_tokens(u_ids, u_mask)
+        if "u_embeddings" in batch:
+            # Pre-computed 384-D embeddings → project through learned layer
+            u_raw = batch["u_embeddings"].to(device)
+            u_emb = model.projection(u_raw)
 
-        p_emb = None
-        if "p_input_ids" in batch:
-            p_ids = batch["p_input_ids"].to(device)
-            p_mask = batch["p_attention_mask"].to(device)
-            p_emb = model.encode_tokens(p_ids, p_mask)
+            p_emb = None
+            if "p_embeddings" in batch:
+                p_raw = batch["p_embeddings"].to(device)
+                p_emb = model.projection(p_raw)
+        else:
+            # Legacy: tokenize on the fly
+            u_ids = batch["u_input_ids"].to(device)
+            u_mask = batch["u_attention_mask"].to(device)
+            u_emb = model.encode_tokens(u_ids, u_mask)
+
+            p_emb = None
+            if "p_input_ids" in batch:
+                p_ids = batch["p_input_ids"].to(device)
+                p_mask = batch["p_attention_mask"].to(device)
+                p_emb = model.encode_tokens(p_ids, p_mask)
 
         return model.scorer(u_emb, p_emb)
     elif is_features_model:
@@ -290,9 +215,10 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
         u_cf = batch.get("u_clause_features")
         if u_cf is not None:
             u_cf = u_cf.to(device)
-        u_node_names = batch.get("u_node_names")
 
-        u_emb = model.encode(u_x, u_adj, u_pool, u_cf, node_names=u_node_names)
+        # Pre-computed node embeddings or fallback to node_names
+        u_sym_emb, u_node_names = _build_sym_emb(model, batch, "u", device)
+        u_emb = model.encode(u_x, u_adj, u_pool, u_cf, node_names=u_node_names, sym_emb=u_sym_emb)
 
         p_emb = None
         if "p_node_features" in batch:
@@ -302,8 +228,8 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
             p_cf = batch.get("p_clause_features")
             if p_cf is not None:
                 p_cf = p_cf.to(device)
-            p_node_names = batch.get("p_node_names")
-            p_emb = model.encode(p_x, p_adj, p_pool, p_cf, node_names=p_node_names)
+            p_sym_emb, p_node_names = _build_sym_emb(model, batch, "p", device)
+            p_emb = model.encode(p_x, p_adj, p_pool, p_cf, node_names=p_node_names, sym_emb=p_sym_emb)
 
         return model.scorer(u_emb, p_emb)
 
@@ -325,7 +251,7 @@ def run_training(
     cpu_workers: int = 0,
     rank: int = 0,
     world_size: int = 1,
-    max_batch_bytes: Optional[int] = None,
+    max_clauses: Optional[int] = None,
     accumulate_batches: Optional[int] = None,
     force_cpu: bool = False,
     max_epochs: Optional[int] = None,
@@ -344,7 +270,7 @@ def run_training(
         cpu_workers: Number of DataLoader workers (default: 0)
         rank: GPU rank for DDP (default: 0)
         world_size: Total GPU count for DDP (default: 1)
-        max_batch_bytes: Override max batch size in bytes (default: from config)
+        max_clauses: Override max U clauses per batch (default: from config)
         accumulate_batches: Override gradient accumulation steps (default: from config)
 
     Returns:
@@ -406,7 +332,7 @@ def run_training(
             device=device,
             is_main=is_main,
             use_ddp=use_ddp,
-            max_batch_bytes=max_batch_bytes,
+            max_clauses=max_clauses,
             accumulate_batches=accumulate_batches,
             start_time=start_time,
             max_epochs_override=max_epochs,
@@ -433,7 +359,7 @@ def _run_training_inner(
     device,
     is_main,
     use_ddp,
-    max_batch_bytes,
+    max_clauses,
     accumulate_batches,
     start_time,
     max_epochs_override=None,
@@ -484,63 +410,57 @@ def _run_training_inner(
     # Determine output type based on embedding
     embedding_type = get_encoder_type(preset)
     if embedding_type == "string":
-        output_type = "tokenized"
+        output_type = "sentence"
     else:
         # Both "graph" and "features" use graph.npz traces
         output_type = "graph"
 
     model_name = get_model_name(preset)
 
-    # Get per-state trace files (.npz in PROBLEM/ subdirectories)
+    # Get per-problem trace files (flat: STEM.graph.npz or STEM.sentence.npz)
     trace_dir = Path(trace_dir)
     suffix = "sentence.npz" if embedding_type == "string" else "graph.npz"
-    trace_files = sorted(trace_dir.glob(f"**/*.{suffix}"))
+    trace_files = sorted(trace_dir.glob(f"*.{suffix}"))
     if problem_names is not None:
-        trace_files = [f for f in trace_files if f.parent.name in problem_names]
+        trace_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] in problem_names]
 
     if not trace_files:
-        raise ValueError(f"No trace files found in {trace_dir} (looking for **/*.{suffix})")
+        raise ValueError(f"No trace files found in {trace_dir} (looking for *.{suffix})")
 
-    # Count distinct problems (parent directories)
-    problems = {f.parent.name for f in trace_files}
-    log_msg(f"Found {len(trace_files)} state files from {len(problems)} problems")
+    log_msg(f"Found {len(trace_files)} problem traces")
 
-    # Problem-level split: group by problem, split problems, then flatten
+    # Problem-level split
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    problem_list = sorted(problems)
+    problem_list = sorted(f.stem.rsplit(".", 1)[0] for f in trace_files)
     random.shuffle(problem_list)
     n_val_problems = int(len(problem_list) * val_ratio)
     val_problem_set = set(problem_list[:n_val_problems])
 
-    train_files = [f for f in trace_files if f.parent.name not in val_problem_set]
-    val_files = [f for f in trace_files if f.parent.name in val_problem_set]
-    log_msg(f"Training {model_name}: {len(train_files)} train states, {len(val_files)} val states")
+    train_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] not in val_problem_set]
+    val_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] in val_problem_set]
+    log_msg(f"Training {model_name}: {len(train_files)} train, {len(val_files)} val problems")
 
     # Resolve batch size and accumulation: CLI overrides > config
     is_sentence_model_type = (embedding_type == "string")
 
-    if max_batch_bytes is None:
-        # Fall back to config-based defaults
+    if max_clauses is None:
         default_max_clauses = 512 if is_sentence_model_type else 8192
-        max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
-        # Estimate: ~1KB per clause for graphs, ~0.5KB for tokenized
-        bytes_per_clause = 512 if is_sentence_model_type else 1024
-        resolved_max_batch_bytes = max_clauses * bytes_per_clause
+        resolved_max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
     else:
-        resolved_max_batch_bytes = max_batch_bytes
+        resolved_max_clauses = max_clauses
 
     default_accumulate = 4 if is_sentence_model_type else 1
     accumulate_steps = accumulate_batches if accumulate_batches is not None else config.get("accumulate_steps", default_accumulate)
 
-    log_msg(f"Batch: {_fmt_bytes(resolved_max_batch_bytes)} max, {accumulate_steps} accumulation steps, {cpu_workers} workers")
+    log_msg(f"Batch: {resolved_max_clauses} max clauses, {accumulate_steps} accumulation steps, {cpu_workers} workers")
 
     # Create datasets using ProofBatchDataset
     log_msg(f"Loading training data ({output_type} format)...")
     train_ds = ProofBatchDataset(
         files=train_files,
         output_type=output_type,
-        max_batch_bytes=resolved_max_batch_bytes,
+        max_clauses=resolved_max_clauses,
         shuffle=True,
     )
 
@@ -550,11 +470,11 @@ def _run_training_inner(
         val_ds = ProofBatchDataset(
             files=val_files,
             output_type=output_type,
-            max_batch_bytes=resolved_max_batch_bytes,
+            max_clauses=resolved_max_clauses,
             shuffle=False,
         )
 
-    log_msg(f"Train: {train_ds.num_problems} problems ({train_ds.num_files} states), Val: {val_ds.num_problems if val_ds else 0} problems")
+    log_msg(f"Train: {train_ds.num_problems} problems, Val: {val_ds.num_problems if val_ds else 0} problems")
 
     # DataLoader: batch_size=None because IterableDataset yields complete batches
     # collate_fn passes through the single batch dict from each yield
@@ -637,7 +557,7 @@ def _run_training_inner(
                 "scorer_type": scorer_name,
             },
             training_config={
-                "batch_size": _fmt_bytes(resolved_max_batch_bytes),
+                "max_clauses": resolved_max_clauses,
                 "accumulate_steps": accumulate_steps,
                 "learning_rate": lr,
                 "max_epochs": max_epochs,
@@ -815,13 +735,3 @@ class _nullcontext:
         pass
 
 
-def _fmt_bytes(n: int) -> str:
-    """Format byte count as human-readable string."""
-    if n >= 1024 * 1024 * 1024:
-        return f"{n / (1024**3):.1f}G"
-    elif n >= 1024 * 1024:
-        return f"{n / (1024**2):.1f}M"
-    elif n >= 1024:
-        return f"{n / 1024:.1f}K"
-    else:
-        return f"{n}B"

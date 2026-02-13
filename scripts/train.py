@@ -12,7 +12,7 @@ USAGE:
     # Worker pipeline flags:
     proofatlas-train --config gcn_mlp --cpu-workers 4       # Parallel batch prep
     proofatlas-train --config gcn_mlp --gpu-workers 2       # Multi-GPU DDP
-    proofatlas-train --config gcn_mlp --batch-size 16M      # Max batch tensor bytes
+    proofatlas-train --config gcn_mlp --max-clauses 4096    # Max U clauses per batch
     proofatlas-train --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
 
 This script:
@@ -69,56 +69,6 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def parse_byte_size(s: str) -> int:
-    """Parse a human-readable byte size string.
-
-    Supports suffixes: K/KB, M/MB, G/GB (case-insensitive).
-    Plain integers are treated as bytes.
-
-    Examples:
-        "16M" -> 16777216
-        "512K" -> 524288
-        "2G" -> 2147483648
-        "1048576" -> 1048576
-    """
-    s = s.strip().upper()
-    multipliers = {
-        'K': 1024,
-        'KB': 1024,
-        'M': 1024 ** 2,
-        'MB': 1024 ** 2,
-        'G': 1024 ** 3,
-        'GB': 1024 ** 3,
-    }
-
-    for suffix, mult in sorted(multipliers.items(), key=lambda x: -len(x[0])):
-        if s.endswith(suffix):
-            num = s[:-len(suffix)].strip()
-            try:
-                return int(float(num) * mult)
-            except ValueError:
-                raise argparse.ArgumentTypeError(f"Invalid byte size: '{s}'")
-
-    try:
-        return int(s)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"Invalid byte size: '{s}'. Use suffixes like 16M, 512K, 2G"
-        )
-
-
-def _fmt_bytes(n: int) -> str:
-    """Format byte count as human-readable string."""
-    if n >= 1024 * 1024 * 1024:
-        return f"{n / (1024**3):.1f}G"
-    elif n >= 1024 * 1024:
-        return f"{n / (1024**2):.1f}M"
-    elif n >= 1024:
-        return f"{n / 1024:.1f}K"
-    else:
-        return f"{n}B"
-
-
 def check_cuda_device_count() -> int:
     """Check available CUDA GPU count via subprocess (avoids CUDA context in main)."""
     try:
@@ -136,7 +86,7 @@ def check_cuda_device_count() -> int:
 def validate_args(args, config):
     """Validate CLI arguments and return resolved values.
 
-    Returns (max_batch_bytes, accumulate_batches) after validation.
+    Returns (max_clauses, accumulate_batches) after validation.
     """
     errors = []
 
@@ -145,12 +95,10 @@ def validate_args(args, config):
     if args.gpu_workers < 1:
         errors.append(f"--gpu-workers must be >= 1 (got {args.gpu_workers})")
 
-    # Parse batch size
-    max_batch_bytes = None
-    if args.batch_size is not None:
-        max_batch_bytes = parse_byte_size(args.batch_size)
-        if max_batch_bytes <= 0:
-            errors.append(f"--batch-size must be > 0 (got {args.batch_size})")
+    # Max clauses
+    max_clauses = args.max_clauses
+    if max_clauses is not None and max_clauses <= 0:
+        errors.append(f"--max-clauses must be > 0 (got {max_clauses})")
 
     # Resolve accumulate_batches
     accumulate_batches = args.accumulate_batches
@@ -179,14 +127,10 @@ def validate_args(args, config):
             print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Log effective batch info
-    if max_batch_bytes is not None:
-        eff_accum = accumulate_batches or 1
-        effective = max_batch_bytes * eff_accum * args.gpu_workers
-        log(f"Effective batch: {_fmt_bytes(max_batch_bytes)} x {eff_accum} accum "
-            f"x {args.gpu_workers} GPUs = ~{_fmt_bytes(effective)}")
+    if max_clauses is not None:
+        log(f"Max clauses per batch: {max_clauses}")
 
-    return max_batch_bytes, accumulate_batches
+    return max_clauses, accumulate_batches
 
 
 def get_problems(base_dir, tptp_config, problem_set):
@@ -319,7 +263,7 @@ def handle_kill(base_dir):
 
 
 def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem_names,
-                      web_data_dir, cpu_workers, world_size, max_batch_bytes,
+                      web_data_dir, cpu_workers, world_size, max_clauses,
                       accumulate_batches, max_epochs):
     """DDP worker function at module level so it can be pickled by mp.spawn."""
     from proofatlas.ml.training import run_training
@@ -335,7 +279,7 @@ def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem
         cpu_workers=cpu_workers,
         rank=rank,
         world_size=world_size,
-        max_batch_bytes=max_batch_bytes,
+        max_clauses=max_clauses,
         accumulate_batches=accumulate_batches,
         max_epochs=max_epochs,
     )
@@ -351,7 +295,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     weights_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate CLI args
-    max_batch_bytes, accumulate_batches = validate_args(args, preset)
+    max_clauses, accumulate_batches = validate_args(args, preset)
 
     # Resolve trace directory
     trace_preset = preset.get("traces") or args.config
@@ -381,7 +325,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             _ddp_train_worker,
             args=(preset, trace_dir, weights_dir, base_dir / "configs",
                   problem_names, base_dir / "web" / "data", args.cpu_workers,
-                  args.gpu_workers, max_batch_bytes, accumulate_batches,
+                  args.gpu_workers, max_clauses, accumulate_batches,
                   args.max_epochs),
             nprocs=args.gpu_workers,
             join=True,
@@ -396,7 +340,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             web_data_dir=base_dir / "web" / "data",
             log_file=sys.stdout,
             cpu_workers=args.cpu_workers,
-            max_batch_bytes=max_batch_bytes,
+            max_clauses=max_clauses,
             accumulate_batches=accumulate_batches,
             force_cpu=not args.use_cuda,
             max_epochs=args.max_epochs,
@@ -430,9 +374,8 @@ def main():
                        help="DataLoader workers for parallel batch preparation (default: 2)")
     parser.add_argument("--gpu-workers", type=int, default=1,
                        help="DDP processes across GPUs (default: 1, no DDP)")
-    parser.add_argument("--batch-size", type=str, default=None,
-                       help="Max collated tensor bytes per micro-batch (default: 16M). "
-                            "Supports suffixes: K, M, G (e.g., 16M, 512K, 2G)")
+    parser.add_argument("--max-clauses", type=int, default=None,
+                       help="Max U clauses per micro-batch (default: 8192 graph, 512 sentence)")
     parser.add_argument("--accumulate-batches", type=int, default=None,
                        help="Gradient accumulation steps (default: from config)")
     parser.add_argument("--max-epochs", type=int, default=None,

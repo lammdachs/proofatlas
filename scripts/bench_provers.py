@@ -88,8 +88,8 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     # Collect trace for training
     if collect_trace and prover.proof_found and trace_preset:
         try:
-            graph_dict, sentence_dict = prover.extract_tensor_trace(elapsed)
-            _get_ml().save_tensor_trace(base_dir / ".data" / "traces", trace_preset, problem.name, graph_dict, sentence_dict)
+            traces_dir = str(base_dir / ".data" / "traces")
+            prover.save_trace(traces_dir, trace_preset, problem.name, elapsed)
         except Exception:
             pass
 

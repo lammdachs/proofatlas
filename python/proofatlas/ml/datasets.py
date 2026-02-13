@@ -1,16 +1,17 @@
 """Data loading and batching for clause selection training.
 
 Provides ProofBatchDataset (IterableDataset) that produces complete batch
-tensors in workers, and collate functions for graph/tokenized formats.
+tensors in workers, and collate functions for graph/sentence formats.
 
-Trace files are per-state .npz files in PROBLEM/ subdirectories:
-  traces/age_weight/AGT002+1/0.graph.npz   (one state's U+P clause data)
-Each worker loads one per-state file directly — no state sampling needed.
+Trace files are per-problem NPZ files with lifecycle encoding:
+  traces/age_weight/PUZ001-1.graph.npz    (one file per problem)
+  traces/age_weight/PUZ001-1.sentence.npz
+
+Each epoch samples a random step k per problem and reconstructs U_k/P_k
+from per-clause lifecycle arrays (transfer_step, activate_step, simplify_step).
 """
 
 import random
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -19,85 +20,58 @@ import torch
 from torch.utils.data import IterableDataset
 
 
-def _scan_trace(trace_file: Path) -> Optional[int]:
-    """Quick scan to validate a per-state trace and return its clause count.
+def _reconstruct_sets(npz, k: int):
+    """Reconstruct U_k and P_k from lifecycle arrays at step k.
 
-    Returns clause count if valid, None if trace should be skipped.
+    Returns (u_idx, p_idx, selected_idx) as numpy arrays, or None if U is empty.
     """
-    try:
-        with np.load(trace_file, allow_pickle=True) as data:
-            if "labels" not in data:
-                return None
-            if "num_u" not in data or int(data["num_u"]) == 0:
-                return None
-            return len(data["labels"])
-    except Exception:
+    transfer_step = npz["transfer_step"]
+    activate_step = npz["activate_step"]
+    simplify_step = npz["simplify_step"]
+
+    # U_k: transferred, not yet activated at step k, not simplified
+    u_mask = (
+        (transfer_step != -1) & (transfer_step <= k)
+        & ((activate_step == -1) | (activate_step >= k))
+        & ((simplify_step == -1) | (simplify_step > k))
+    )
+
+    # P_k: activated before step k, not simplified
+    p_mask = (
+        (activate_step != -1) & (activate_step < k)
+        & ((simplify_step == -1) | (simplify_step > k))
+    )
+
+    u_idx = np.where(u_mask)[0]
+    p_idx = np.where(p_mask)[0]
+
+    if len(u_idx) == 0:
         return None
 
+    # Selected clause: the one with activate_step == k
+    selected_mask = activate_step == k
+    selected_idx = np.where(selected_mask)[0]
 
-def _batch_bytes(batch: dict) -> int:
-    """Measure actual byte size of collated batch tensors."""
-    total = 0
-    for v in batch.values():
-        if isinstance(v, torch.Tensor):
-            if v.is_sparse:
-                total += v._indices().nelement() * v._indices().element_size()
-                total += v._values().nelement() * v._values().element_size()
-            else:
-                total += v.nelement() * v.element_size()
-    return total
+    return u_idx, p_idx, selected_idx
 
 
-def _estimate_graph_bytes(item: dict) -> int:
-    """Estimate collated tensor bytes from pre-sampled graph data (numpy arrays)."""
-    total = 0
-    for graphs in (item.get("u_graphs", []), item.get("p_graphs", [])):
-        for g in graphs:
-            num_nodes = g["num_nodes"]
-            num_edges = g["num_edges"]
-            # x: [num_nodes, 3] float32
-            total += num_nodes * 3 * 4
-            # adj sparse: indices [2, num_nodes + num_edges] int64 + values float32
-            total += (num_nodes + num_edges) * 2 * 8  # indices
-            total += (num_nodes + num_edges) * 4       # values
-            # pool_matrix sparse: indices [2, num_nodes] int64 + values float32
-            total += num_nodes * 2 * 8
-            total += num_nodes * 4
-            # clause_features: [CLAUSE_FEATURE_DIM] float32
-            total += 9 * 4
-    # labels: float32 per u_graph + proof_ids: int64 per u_graph
-    n_u = len(item.get("u_graphs", []))
-    total += n_u * 4 + n_u * 8
-    return total
-
-
-def _estimate_tokenized_bytes(item: dict) -> int:
-    """Estimate collated tensor bytes from pre-sampled tokenized data."""
-    total = 0
-    for key in ("u_input_ids", "u_attention_mask", "p_input_ids", "p_attention_mask"):
-        t = item.get(key)
-        if t is not None and isinstance(t, torch.Tensor):
-            total += t.nelement() * t.element_size()
-    n_u = len(item.get("u_labels", []))
-    total += n_u * 4 + n_u * 8  # labels float32 + proof_ids int64
-    return total
-
-
-def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
-    """Load a per-state .npz trace and return pre-sampled graph data.
-
-    The file already contains only U+P clauses for one state. First num_u
-    clauses are U, the rest are P.
-    """
+def _load_and_sample_graph(trace_file: Path) -> Optional[Dict]:
+    """Load per-problem graph NPZ, sample random step k, reconstruct U_k/P_k."""
     try:
-        npz = np.load(trace_file, allow_pickle=True)
+        npz = np.load(trace_file)
     except Exception:
         return None
 
     try:
-        num_u = int(npz["num_u"])
-        if num_u == 0:
+        num_steps = int(npz["num_steps"][0])
+        if num_steps == 0:
             return None
+
+        k = random.randint(0, num_steps - 1)
+        result = _reconstruct_sets(npz, k)
+        if result is None:
+            return None
+        u_idx, p_idx, _selected_idx = result
 
         node_features = npz["node_features"]
         edge_src = npz["edge_src"]
@@ -106,8 +80,9 @@ def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
         edge_offsets = npz["edge_offsets"]
         clause_features = npz["clause_features"]
         labels = npz["labels"]
-        num_clauses = len(labels)
-        node_names = list(npz["node_names"]) if "node_names" in npz else None
+
+        has_node_emb = "node_embeddings" in npz
+        has_sentinel = "node_sentinel_type" in npz
 
         def _extract_clause_graph(i):
             n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
@@ -131,16 +106,19 @@ def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
                 "num_edges": num_edges,
                 "clause_features": clause_features[i].copy(),
             }
-            if node_names is not None:
-                result["node_names"] = node_names[n_start:n_end]
+
+            if has_node_emb:
+                result["node_embeddings"] = npz["node_embeddings"][n_start:n_end].copy()
+            if has_sentinel:
+                result["node_sentinel_type"] = npz["node_sentinel_type"][n_start:n_end].copy()
+
             return result
 
-        u_graphs = [_extract_clause_graph(i) for i in range(num_u)]
-        u_labels = [int(labels[i]) for i in range(num_u)]
-        p_graphs = [_extract_clause_graph(i) for i in range(num_u, num_clauses)]
+        u_graphs = [_extract_clause_graph(i) for i in u_idx]
+        u_labels = [int(labels[i]) for i in u_idx]
+        p_graphs = [_extract_clause_graph(i) for i in p_idx]
 
-        # Problem name from parent directory
-        problem = trace_file.parent.name
+        problem = trace_file.stem.rsplit(".", 1)[0]  # Remove .graph suffix
 
         return {
             "u_graphs": u_graphs,
@@ -152,106 +130,85 @@ def _load_and_presample_graph(trace_file: Path) -> Optional[Dict]:
         npz.close()
 
 
-def _load_and_presample_tokenized(trace_file: Path) -> Optional[Dict]:
-    """Load a per-state sentence .npz trace and return pre-sampled tokenized data."""
+def _load_and_sample_sentence(trace_file: Path) -> Optional[Dict]:
+    """Load per-problem sentence NPZ, sample step k, gather embeddings by index."""
     try:
-        data = dict(np.load(trace_file, allow_pickle=True))
+        npz = np.load(trace_file)
     except Exception:
         return None
 
-    num_u = int(data.get("num_u", 0))
-    if num_u == 0:
-        return None
+    try:
+        num_steps = int(npz["num_steps"][0])
+        if num_steps == 0:
+            return None
 
-    clause_strings = data["clause_strings"]
-    labels = data["labels"]
-    num_clauses = len(labels)
+        k = random.randint(0, num_steps - 1)
+        result = _reconstruct_sets(npz, k)
+        if result is None:
+            return None
+        u_idx, p_idx, _selected_idx = result
 
-    u_strings = [str(clause_strings[i]) for i in range(num_u)]
-    u_labels = [int(labels[i]) for i in range(num_u)]
-    p_strings = [str(clause_strings[i]) for i in range(num_u, num_clauses)]
+        clause_features = npz["clause_features"]
+        labels = npz["labels"]
 
-    # Pre-tokenize
-    tokenizer = _get_tokenizer()
+        has_embeddings = "clause_embeddings" in npz
 
-    u_encoded = tokenizer(u_strings, padding=True, truncation=True, return_tensors="pt")
-    problem = trace_file.parent.name
-    result = {
-        "u_input_ids": u_encoded["input_ids"],
-        "u_attention_mask": u_encoded["attention_mask"],
-        "u_labels": u_labels,
-        "problem": problem,
-    }
+        u_cf = clause_features[u_idx].copy()
+        u_labels = [int(labels[i]) for i in u_idx]
+        p_cf = clause_features[p_idx].copy() if len(p_idx) > 0 else None
 
-    if p_strings:
-        p_encoded = tokenizer(p_strings, padding=True, truncation=True, return_tensors="pt")
-        result["p_input_ids"] = p_encoded["input_ids"]
-        result["p_attention_mask"] = p_encoded["attention_mask"]
+        problem = trace_file.stem.rsplit(".", 1)[0]
 
-    return result
+        result_dict = {
+            "u_clause_features": u_cf,
+            "u_labels": u_labels,
+            "problem": problem,
+        }
 
+        if p_cf is not None:
+            result_dict["p_clause_features"] = p_cf
 
-# Global tokenizer for pre-tokenization (loaded lazily)
-_tokenizer = None
+        if has_embeddings:
+            embs = npz["clause_embeddings"]
+            result_dict["u_embeddings"] = embs[u_idx].copy()
+            if len(p_idx) > 0:
+                result_dict["p_embeddings"] = embs[p_idx].copy()
 
-
-def _get_tokenizer():
-    """Get or load the tokenizer for pre-tokenization."""
-    global _tokenizer
-    if _tokenizer is None:
-        from transformers import AutoTokenizer
-        _tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-    return _tokenizer
+        return result_dict
+    finally:
+        npz.close()
 
 
 class ProofBatchDataset(IterableDataset):
-    """IterableDataset that produces complete batch tensors with exact byte measurement.
+    """IterableDataset that loads per-problem NPZ traces with lifecycle step sampling.
 
-    Each worker loads per-state .npz traces, collates per-proof, measures actual
-    tensor bytes, and yields complete batches.
+    Each worker loads per-problem .npz files, samples a random step per problem,
+    reconstructs U_k/P_k, buffers until clause count exceeds max_clauses,
+    then collates and yields a complete batch.
+
+    Each epoch samples new random steps per problem (natural augmentation).
 
     Args:
-        files: List of per-state trace file paths (PROBLEM/idx.graph.npz)
-        output_type: "graph" for GNN models, "tokenized" for sentence models
-        max_batch_bytes: Maximum collated tensor bytes per batch
+        files: List of per-problem trace file paths (STEM.graph.npz or STEM.sentence.npz)
+        output_type: "graph" for GNN models, "sentence" for sentence models
+        max_clauses: Maximum total U clauses per batch
         shuffle: Whether to shuffle files each epoch
-        states_per_problem: Number of random states to sample per problem per epoch.
-            If None, use all states. Default 1 preserves prior training dynamics.
     """
 
     def __init__(
         self,
         files: List[Path],
         output_type: str = "graph",
-        max_batch_bytes: int = 16 * 1024 * 1024,  # 16 MB default
+        max_clauses: int = 8192,
         shuffle: bool = True,
-        states_per_problem: Optional[int] = 1,
     ):
         self.files = list(files)
         self.output_type = output_type
-        self.max_batch_bytes = max_batch_bytes
+        self.max_clauses = max_clauses
         self.shuffle = shuffle
-        self.states_per_problem = states_per_problem
 
         if not self.files:
             raise ValueError("No trace files provided")
-
-        # Group files by problem (parent directory)
-        self._problem_groups: Dict[str, List[Path]] = defaultdict(list)
-        for f in self.files:
-            self._problem_groups[f.parent.name].append(f)
-
-    def _sample_files(self) -> List[Path]:
-        """Sample states_per_problem files per problem."""
-        if self.states_per_problem is None:
-            return list(self.files)
-        sampled = []
-        for files in self._problem_groups.values():
-            if len(files) <= self.states_per_problem:
-                sampled.extend(files)
-            else:
-                sampled.extend(random.sample(files, self.states_per_problem))
-        return sampled
 
     def _shard_files(self, worker_info, files):
         """Shard files across DataLoader workers."""
@@ -263,52 +220,51 @@ class ProofBatchDataset(IterableDataset):
         end = start + per_worker + (1 if worker_info.id < remainder else 0)
         return files[start:end]
 
-    def _load_and_presample(self, f: Path) -> Optional[Dict]:
-        """Load and presample a single trace file."""
-        if self.output_type == "tokenized":
-            return _load_and_presample_tokenized(f)
+    def _load_and_sample(self, f: Path) -> Optional[Dict]:
+        """Load and sample a single trace file."""
+        if self.output_type == "sentence":
+            return _load_and_sample_sentence(f)
         else:
-            return _load_and_presample_graph(f)
+            return _load_and_sample_graph(f)
 
     def _collate(self, items: List[Dict]) -> Optional[Dict]:
         """Collate pre-sampled items into a batch."""
-        if self.output_type == "tokenized":
-            return collate_tokenized_batch(items)
+        if self.output_type == "sentence":
+            return collate_sentence_batch(items)
         else:
             return collate_proof_batch(items)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        files = self._sample_files()
+        files = list(self.files)
         if self.shuffle:
             random.shuffle(files)
         files = self._shard_files(worker_info, files)
 
         buffer = []
-        buffer_bytes = 0
+        buffer_clauses = 0
 
         for f in files:
-            item = self._load_and_presample(f)
+            item = self._load_and_sample(f)
             if item is None:
                 continue
 
-            # Estimate tensor bytes without creating throwaway sparse tensors
-            if self.output_type == "tokenized":
-                proof_bytes = _estimate_tokenized_bytes(item)
+            if self.output_type == "sentence":
+                n_u = len(item["u_labels"])
             else:
-                proof_bytes = _estimate_graph_bytes(item)
+                n_u = len(item.get("u_graphs", []))
 
-            if buffer_bytes + proof_bytes > self.max_batch_bytes:
+            if buffer_clauses + n_u > self.max_clauses:
                 if buffer:
                     batch = self._collate(buffer)
                     if batch is not None:
                         yield batch
-                    buffer, buffer_bytes = [], 0
-                if proof_bytes > self.max_batch_bytes:
+                    buffer, buffer_clauses = [], 0
+                if n_u > self.max_clauses:
                     continue  # drop oversized item
 
             buffer.append(item)
-            buffer_bytes += proof_bytes
+            buffer_clauses += n_u
 
         if buffer:
             batch = self._collate(buffer)
@@ -322,74 +278,63 @@ class ProofBatchDataset(IterableDataset):
 
     @property
     def num_problems(self) -> int:
-        """Number of distinct problems in this dataset."""
-        return len(self._problem_groups)
+        """Number of distinct problems (same as num_files for per-problem format)."""
+        return len(self.files)
 
 
-def scan_trace_files(files: List[Path], max_workers: int = 4) -> List[Path]:
-    """Validate trace files in parallel and return valid ones.
+def collate_sentence_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor]]:
+    """Collate pre-sampled sentence items into a batch.
 
-    Args:
-        files: List of trace file paths to validate
-        max_workers: Number of threads for parallel I/O
-
-    Returns:
-        List of valid trace file paths
+    Concatenates pre-computed embeddings (no padding needed) and clause features.
     """
-    if max_workers > 1 and len(files) > 1:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(lambda f: (f, _scan_trace(f)), files))
-    else:
-        results = [(f, _scan_trace(f)) for f in files]
-
-    return [f for f, n in results if n is not None]
-
-
-def collate_tokenized_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor]]:
-    """Collate pre-sampled tokenized items into a batch."""
-    from torch.nn.utils.rnn import pad_sequence
-
-    all_u_input_ids = []
-    all_u_attention_mask = []
+    all_u_embeddings = []
+    all_u_cf = []
     all_u_labels = []
-    all_p_input_ids = []
-    all_p_attention_mask = []
     all_proof_ids = []
+    all_p_embeddings = []
+    all_p_cf = []
 
     for proof_idx, item in enumerate(batch):
         if item is None:
             continue
 
-        u_ids = item["u_input_ids"]
-        u_mask = item["u_attention_mask"]
         u_labels = item["u_labels"]
+        u_cf = item["u_clause_features"]
+        all_u_cf.append(u_cf)
+        all_u_labels.extend(u_labels)
+        all_proof_ids.extend([proof_idx] * len(u_labels))
 
-        for i in range(len(u_labels)):
-            all_u_input_ids.append(u_ids[i])
-            all_u_attention_mask.append(u_mask[i])
-            all_u_labels.append(u_labels[i])
-            all_proof_ids.append(proof_idx)
+        if "u_embeddings" in item:
+            all_u_embeddings.append(item["u_embeddings"])
 
-        if "p_input_ids" in item:
-            p_ids = item["p_input_ids"]
-            p_mask = item["p_attention_mask"]
-            for i in range(p_ids.size(0)):
-                all_p_input_ids.append(p_ids[i])
-                all_p_attention_mask.append(p_mask[i])
+        if "p_clause_features" in item:
+            all_p_cf.append(item["p_clause_features"])
+        if "p_embeddings" in item:
+            all_p_embeddings.append(item["p_embeddings"])
 
-    if not all_u_input_ids:
+    if not all_u_labels:
         return None
 
     result = {
-        "u_input_ids": pad_sequence(all_u_input_ids, batch_first=True, padding_value=0),
-        "u_attention_mask": pad_sequence(all_u_attention_mask, batch_first=True, padding_value=0),
+        "u_clause_features": torch.tensor(np.concatenate(all_u_cf), dtype=torch.float32),
         "labels": torch.tensor(all_u_labels, dtype=torch.float32),
         "proof_ids": torch.tensor(all_proof_ids, dtype=torch.long),
     }
 
-    if all_p_input_ids:
-        result["p_input_ids"] = pad_sequence(all_p_input_ids, batch_first=True, padding_value=0)
-        result["p_attention_mask"] = pad_sequence(all_p_attention_mask, batch_first=True, padding_value=0)
+    if all_u_embeddings:
+        result["u_embeddings"] = torch.tensor(
+            np.concatenate(all_u_embeddings), dtype=torch.float32
+        )
+
+    if all_p_cf:
+        result["p_clause_features"] = torch.tensor(
+            np.concatenate(all_p_cf), dtype=torch.float32
+        )
+
+    if all_p_embeddings:
+        result["p_embeddings"] = torch.tensor(
+            np.concatenate(all_p_embeddings), dtype=torch.float32
+        )
 
     return result
 
@@ -435,6 +380,10 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
     }
     if "node_names" in u_batched:
         result["u_node_names"] = u_batched["node_names"]
+    if "node_embeddings" in u_batched:
+        result["u_node_embeddings"] = u_batched["node_embeddings"]
+    if "node_sentinel_type" in u_batched:
+        result["u_node_sentinel_type"] = u_batched["node_sentinel_type"]
 
     # Batch P graphs (no labels needed)
     if all_p_graphs:
@@ -445,5 +394,33 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
         result["p_clause_features"] = p_batched.get("clause_features")
         if "node_names" in p_batched:
             result["p_node_names"] = p_batched["node_names"]
+        if "node_embeddings" in p_batched:
+            result["p_node_embeddings"] = p_batched["node_embeddings"]
+        if "node_sentinel_type" in p_batched:
+            result["p_node_sentinel_type"] = p_batched["node_sentinel_type"]
 
     return result
+
+
+def scan_trace_files(files: List[Path], max_workers: int = 4) -> List[Path]:
+    """Validate trace files in parallel and return valid ones."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _check(f):
+        try:
+            with np.load(f) as data:
+                if "labels" not in data or "num_steps" not in data:
+                    return None
+                if int(data["num_steps"][0]) == 0:
+                    return None
+                return f
+        except Exception:
+            return None
+
+    if max_workers > 1 and len(files) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_check, files))
+    else:
+        results = [_check(f) for f in files]
+
+    return [f for f in results if f is not None]

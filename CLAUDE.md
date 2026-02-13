@@ -33,10 +33,10 @@ proofatlas/
 │   │       │   ├── clause.rs   # ProverSink, ClauseSelector traits
 │   │       │   ├── age_weight.rs # Heuristic age-weight selector
 │   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer, CachingSelector
-│   │       │   ├── ml/         # ML model implementations (gcn, sentence, graph)
+│   │       │   ├── ml/         # ML model implementations (gcn, sentence, graph, features)
 │   │       │   ├── pipeline/   # Backend compute service, ChannelSink, EmbedScoreModel
 │   │       │   ├── network/    # Protocol, RemoteSelector, ScoringServer
-│   │       │   └── training/   # Training data extraction (proof_trace)
+│   │       │   └── training/   # proof_trace.rs, npz.rs (NpzWriter for trace output)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── atlas.rs        # ProofAtlas orchestrator (reusable across problems)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -273,8 +273,7 @@ Derivation information (rule name and premises) is stored directly in `StateChan
 ### Event Log
 The saturation state maintains an event log (`Vec<StateChange>`) as the single source of truth for derivations. All clause additions (`Add(clause, rule_name, premises)`) include the derivation info inline. This enables:
 - **Proof extraction**: `extract_proof()` builds a derivation map from the event log and traces back from the empty clause
-- **Training data extraction**: Replay events to reconstruct clause sets and label by proof membership
-- **Selection context tracking**: `SelectionTrainingExample` captures which clauses were available at each selection
+- **Training data extraction**: Per-clause lifecycle arrays (transfer_step, activate_step, simplify_step) written to NPZ by `save_trace()` in Rust; training samples random step k and reconstructs U_k/P_k from lifecycle arrays
 
 The `EventLogReplayer` utility reconstructs N/U/P sets at any point by replaying events.
 
@@ -361,6 +360,25 @@ proofatlas-bench --config gcn_mlp               # Step 2: evaluate (requires wei
 ```
 
 ML selectors use tch-rs (PyTorch C++ bindings) for inference and are enabled by default. Models are exported as TorchScript (`.pt` files). At runtime, libtorch is preloaded from the user's PyTorch installation via `python/proofatlas/__init__.py`.
+
+### Trace Format (Per-Problem NPZ with Lifecycle Encoding)
+
+Traces are stored as one NPZ file per problem (`.graph.npz` or `.sentence.npz`) in `.data/traces/{preset}/`. Written by `Prover.save_trace()` in Rust via `NpzWriter`. Per-clause lifecycle arrays enable step sampling at training time:
+
+| Array | Type | Description |
+|-------|------|-------------|
+| `transfer_step[C]` | i32 | Step when clause entered U (-1 if never) |
+| `activate_step[C]` | i32 | Step when clause activated U→P (-1 if never) |
+| `simplify_step[C]` | i32 | Step when clause simplified/deleted (-1 if never) |
+| `labels[C]` | u8 | 1 if clause is in the proof, 0 otherwise |
+| `num_steps[1]` | i32 | Total activation steps |
+| `clause_features[C,9]` | f32 | 9 clause features |
+
+Graph traces additionally include `node_features`, `edge_src/dst`, `node_offsets/edge_offsets`, and optionally `node_embeddings` (pre-computed MiniLM, 384-D) + `node_sentinel_type`. Sentence traces include `clause_embeddings` (pre-computed MiniLM, 384-D).
+
+**Reconstruction at step k**: `U_k = {i : transferred ≤ k AND not yet activated at k AND not simplified}`, `P_k = {i : activated < k AND not simplified}`.
+
+**`MiniLMEncoderModel`** (`selection/ml/sentence.rs`): Rust Backend Model wrapping base MiniLM (TorchScript) + tokenizer for pre-computing 384-D embeddings at trace time. `ensure_base_minilm()` in `ml/export.py` exports the frozen model.
 
 ## Analysis Guidelines
 

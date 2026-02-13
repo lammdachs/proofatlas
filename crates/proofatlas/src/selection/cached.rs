@@ -48,6 +48,15 @@ pub trait ClauseEmbedder: Send {
         unimplemented!("embed_texts not supported by this embedder")
     }
 
+    /// Compute embeddings from pre-extracted feature vectors.
+    ///
+    /// Used by the pipeline architecture for features-only models where
+    /// 9 clause features are extracted in the data processing thread.
+    /// Default: unimplemented (only features embedders need this).
+    fn embed_features(&self, _features: &[&[f32]]) -> Vec<Vec<f32>> {
+        unimplemented!("embed_features not supported by this embedder")
+    }
+
     /// Provide the symbol interner for clause serialization.
     /// Embedders that need symbol names (e.g., sentence transformers) should
     /// store this and use it during `embed_batch`.

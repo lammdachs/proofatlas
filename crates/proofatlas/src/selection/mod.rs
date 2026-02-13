@@ -52,8 +52,8 @@ pub use ml::gcn::{
 };
 #[cfg(feature = "ml")]
 pub use ml::sentence::{
-    load_sentence_embedder, load_sentence_selector, PassThroughScorer, SentenceEmbedder,
-    SentenceSelector,
+    load_sentence_embedder, load_sentence_selector, MiniLMEncoderModel, PassThroughScorer,
+    SentenceEmbedder, SentenceSelector, tokenize_batch,
 };
 #[cfg(unix)]
 pub use network::remote::{RemoteSelector, RemoteSelectorSink};
@@ -63,11 +63,17 @@ pub use network::server::ScoringServer;
 // Pipeline re-exports
 pub use pipeline::backend::{Backend, BackendHandle, BackendRequest, BackendResponse, Model};
 pub use pipeline::{
-    ChannelSink, EmbedScoreModel, Preprocessor, ProverSignal,
-    create_ml_pipeline, create_pipeline_with_handle, identity_preprocessor,
+    ChannelSink, ContextScoreModel, DataProcessor, EmbedModel, EmbedScoreModel, ProverSignal,
+    create_ml_pipeline, create_pipeline,
+};
+pub use pipeline::processors::{
+    GcnScoreProcessor, GcnEmbeddingProcessor,
+    SentenceScoreProcessor, SentenceEmbeddingProcessor,
+    FeaturesScoreProcessor, FeaturesEmbeddingProcessor,
 };
 
 // Graph/ML re-exports
+pub use ml::features::{extract_clause_features, NUM_CLAUSE_FEATURES};
 pub use ml::graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};
 pub use training::proof_trace::{
     compute_proof_statistics, extract_training_data,

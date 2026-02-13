@@ -28,9 +28,8 @@ from .losses import (
 from .datasets import (
     ProofBatchDataset,
     collate_proof_batch,
-    collate_tokenized_batch,
+    collate_sentence_batch,
     scan_trace_files,
-    _batch_bytes as batch_bytes,
 )
 
 from .logger import JSONLogger
@@ -40,7 +39,6 @@ from .export import export_model
 from .training import (
     run_training,
     load_trace_files,
-    save_tensor_trace,
     save_model,
     load_model,
 )
@@ -94,13 +92,11 @@ __all__ = [
     # Datasets
     "ProofBatchDataset",
     "collate_proof_batch",
-    "collate_tokenized_batch",
+    "collate_sentence_batch",
     "scan_trace_files",
-    "batch_bytes",
     # Training
     "run_training",
     "load_trace_files",
-    "save_tensor_trace",
     # Export
     "export_model",
     # Utilities

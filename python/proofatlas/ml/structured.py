@@ -171,6 +171,8 @@ def batch_graphs(
     all_edges = []
     all_clause_features = []
     all_node_names = []
+    all_node_embeddings = []
+    all_node_sentinel_type = []
     batch_indices = []
 
     node_offset = 0
@@ -184,6 +186,10 @@ def batch_graphs(
             all_clause_features.append(g['clause_features'])
         if 'node_names' in g:
             all_node_names.extend(g['node_names'])
+        if 'node_embeddings' in g:
+            all_node_embeddings.append(g['node_embeddings'])
+        if 'node_sentinel_type' in g:
+            all_node_sentinel_type.append(g['node_sentinel_type'])
 
         node_offset += g['num_nodes']
 
@@ -245,6 +251,16 @@ def batch_graphs(
 
     if all_node_names:
         result['node_names'] = all_node_names  # flat Python list, not tensor
+
+    if all_node_embeddings:
+        ne_np = np.concatenate(all_node_embeddings, axis=0)
+        result['node_embeddings'] = torch.tensor(ne_np, dtype=torch.float32, device=device)
+        del ne_np
+
+    if all_node_sentinel_type:
+        st_np = np.concatenate(all_node_sentinel_type, axis=0)
+        result['node_sentinel_type'] = torch.tensor(st_np, dtype=torch.long, device=device)
+        del st_np
 
     if labels is not None:
         result['y'] = torch.tensor(labels, dtype=torch.float, device=device)

@@ -34,8 +34,10 @@ enum SinkKind {
     #[cfg(feature = "ml")]
     Pipeline {
         handle: BackendHandle,
-        /// If true, the preprocessor converts clauses to strings (sentence models).
-        string_input: bool,
+        /// Encoder type: "gcn", "gat", "graphsage", "sentence", "features".
+        encoder: String,
+        /// Scorer type: "mlp", "attention", "transformer".
+        scorer: String,
     },
     /// Remote scoring server via Unix socket.
     #[cfg(unix)]
@@ -133,23 +135,49 @@ impl ProofAtlas {
                 Ok(Box::new(AgeWeightSink::new(*ratio)))
             }
             #[cfg(feature = "ml")]
-            SinkKind::Pipeline { handle, string_input } => {
-                let preprocess: crate::selection::Preprocessor = if *string_input {
-                    // Sentence path: convert clause→String using interner in data processing thread
-                    let int = Arc::new(interner.clone());
-                    Box::new(move |clause: Arc<crate::logic::Clause>| {
-                        let s = clause.display(&int).to_string();
-                        Box::new(s) as Box<dyn std::any::Any + Send>
-                    })
-                } else {
-                    // GCN path: pass clause through unchanged
-                    crate::selection::identity_preprocessor()
+            SinkKind::Pipeline { handle, encoder, scorer } => {
+                use crate::selection::pipeline::processors;
+
+                let int = Arc::new(interner.clone());
+                let temp = self.temperature;
+                let h = handle.clone();
+
+                let processor: Box<dyn crate::selection::DataProcessor> = match (encoder.as_str(), scorer.as_str()) {
+                    // GCN + MLP: cache scores
+                    ("gcn" | "gat" | "graphsage", "mlp") => {
+                        Box::new(processors::GcnScoreProcessor::new(h, temp))
+                    }
+                    // GCN + attention/transformer: cache embeddings
+                    ("gcn" | "gat" | "graphsage", "attention" | "transformer") => {
+                        Box::new(processors::GcnEmbeddingProcessor::new(h, temp))
+                    }
+                    // Sentence + MLP: cache scores
+                    ("sentence", "mlp") => {
+                        Box::new(processors::SentenceScoreProcessor::new(h, int, temp))
+                    }
+                    // Sentence + attention/transformer: cache embeddings
+                    ("sentence", "attention" | "transformer") => {
+                        Box::new(processors::SentenceEmbeddingProcessor::new(h, int, temp))
+                    }
+                    // Features + MLP: cache scores
+                    ("features", "mlp") => {
+                        Box::new(processors::FeaturesScoreProcessor::new(h, temp))
+                    }
+                    // Features + attention/transformer: cache embeddings
+                    ("features", "attention" | "transformer") => {
+                        Box::new(processors::FeaturesEmbeddingProcessor::new(h, temp))
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Unknown encoder/scorer combination: '{}' + '{}'",
+                            encoder, scorer
+                        ));
+                    }
                 };
-                Ok(Box::new(crate::selection::create_pipeline_with_handle(
-                    handle.clone(),
-                    self.temperature,
-                    "ml_pipeline".to_string(),
-                    preprocess,
+
+                Ok(Box::new(crate::selection::create_pipeline(
+                    processor,
+                    format!("{}_{}", encoder, scorer),
                 )))
             }
             #[cfg(unix)]
@@ -183,7 +211,7 @@ impl ProofAtlasBuilder {
         self
     }
 
-    /// Set the ML encoder type (e.g., "gcn", "gat", "graphsage", "sentence").
+    /// Set the ML encoder type (e.g., "gcn", "gat", "graphsage", "sentence", "features").
     pub fn encoder(mut self, encoder: impl Into<String>) -> Self {
         self.encoder = Some(encoder.into());
         self
@@ -252,60 +280,152 @@ impl ProofAtlasBuilder {
                 })
             }
             #[cfg(feature = "ml")]
-            Some(enc @ ("gcn" | "gat" | "graphsage" | "sentence")) => {
+            Some(enc @ ("gcn" | "gat" | "graphsage" | "sentence" | "features")) => {
                 let scorer_name = self.scorer.as_deref()
                     .ok_or_else(|| "scorer required when encoder is set".to_string())?;
                 let model_name = format!("{}_{}", enc, scorer_name);
+                let is_mlp = scorer_name == "mlp";
 
                 let weights_dir = std::path::PathBuf::from(
                     self.weights_path.as_deref().unwrap_or(".weights")
                 );
 
-                let string_input = enc == "sentence";
-
-                let (embedder, scorer_box): (
-                    Box<dyn crate::selection::cached::ClauseEmbedder + Send>,
-                    Box<dyn crate::selection::cached::EmbeddingScorer + Send>,
-                ) = if string_input {
-                    let model_path = weights_dir.join(format!("{}.pt", model_name));
-                    let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_name));
-                    if !model_path.exists() {
-                        return Err(format!("Model not found at {}", model_path.display()));
-                    }
-                    let emb = crate::selection::load_sentence_embedder(
-                        &model_path, &tokenizer_path, self.use_cuda,
+                let models: Vec<Box<dyn crate::selection::Model>> = if is_mlp {
+                    // MLP path: load combined model → EmbedScoreModel
+                    let (embedder, scorer_box) = load_embedder_scorer(
+                        enc, &model_name, &weights_dir, self.use_cuda,
                     )?;
-                    (Box::new(emb), Box::new(crate::selection::PassThroughScorer) as _)
+                    vec![Box::new(crate::selection::EmbedScoreModel::new(embedder, scorer_box))]
                 } else {
-                    let model_path = weights_dir.join(format!("{}.pt", model_name));
-                    if !model_path.exists() {
-                        return Err(format!("Model not found at {}", model_path.display()));
-                    }
-                    let emb = crate::selection::load_gcn_embedder(
-                        &model_path, self.use_cuda,
+                    // Attention/Transformer path: load encoder + scorer separately
+                    let (embedder, scorer_box) = load_split_encoder_scorer(
+                        enc, &model_name, &weights_dir, scorer_name, self.use_cuda,
                     )?;
-                    (Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _)
+                    vec![
+                        Box::new(crate::selection::EmbedModel::new(embedder)),
+                        Box::new(crate::selection::ContextScoreModel::new(scorer_box)),
+                    ]
                 };
 
-                let model = crate::selection::EmbedScoreModel::new(embedder, scorer_box);
-                let backend = crate::selection::Backend::new(vec![Box::new(model)]);
+                let backend = crate::selection::Backend::new(models);
                 let handle = backend.handle();
 
                 Ok(ProofAtlas {
                     config: self.config,
                     include_dirs: self.include_dirs,
-                    sink_kind: SinkKind::Pipeline { handle, string_input },
+                    sink_kind: SinkKind::Pipeline {
+                        handle,
+                        encoder: enc.to_string(),
+                        scorer: scorer_name.to_string(),
+                    },
                     temperature: self.temperature,
                     _backend: Some(backend),
                 })
             }
             Some(other) => {
                 #[cfg(feature = "ml")]
-                let available = "None, 'gcn', 'gat', 'graphsage', or 'sentence'";
+                let available = "None, 'gcn', 'gat', 'graphsage', 'sentence', or 'features'";
                 #[cfg(not(feature = "ml"))]
                 let available = "None (ML features not enabled)";
                 Err(format!("Unknown encoder: '{}'. Use {}", other, available))
             }
         }
+    }
+}
+
+/// Load embedder + scorer for MLP configurations (combined model).
+#[cfg(feature = "ml")]
+fn load_embedder_scorer(
+    enc: &str,
+    model_name: &str,
+    weights_dir: &std::path::Path,
+    use_cuda: bool,
+) -> Result<(
+    Box<dyn crate::selection::cached::ClauseEmbedder + Send>,
+    Box<dyn crate::selection::cached::EmbeddingScorer + Send>,
+), String> {
+    let model_path = weights_dir.join(format!("{}.pt", model_name));
+    if !model_path.exists() {
+        return Err(format!("Model not found at {}", model_path.display()));
+    }
+
+    match enc {
+        "sentence" => {
+            let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_name));
+            let emb = crate::selection::load_sentence_embedder(&model_path, &tokenizer_path, use_cuda)?;
+            Ok((Box::new(emb), Box::new(crate::selection::PassThroughScorer) as _))
+        }
+        "gcn" | "gat" | "graphsage" => {
+            let emb = crate::selection::load_gcn_embedder(&model_path, use_cuda)?;
+            Ok((Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _))
+        }
+        "features" => {
+            // Features models: TorchScript model takes [N, 9] features → scores
+            // We use GcnEmbedder-like approach: load as combined model
+            let emb = crate::selection::load_gcn_embedder(&model_path, use_cuda)?;
+            Ok((Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _))
+        }
+        _ => Err(format!("Unknown encoder for MLP path: '{}'", enc)),
+    }
+}
+
+/// Load encoder + scorer separately for attention/transformer configurations.
+#[cfg(feature = "ml")]
+fn load_split_encoder_scorer(
+    enc: &str,
+    model_name: &str,
+    weights_dir: &std::path::Path,
+    scorer_name: &str,
+    use_cuda: bool,
+) -> Result<(
+    Box<dyn crate::selection::cached::ClauseEmbedder + Send>,
+    Box<dyn crate::selection::cached::EmbeddingScorer + Send>,
+), String> {
+    let encoder_path = weights_dir.join(format!("{}_encoder.pt", model_name));
+    let scorer_path = weights_dir.join(format!("{}_scorer.pt", model_name));
+
+    // Fall back to combined model if split models don't exist yet
+    if !encoder_path.exists() || !scorer_path.exists() {
+        let combined_path = weights_dir.join(format!("{}.pt", model_name));
+        if combined_path.exists() {
+            eprintln!(
+                "Warning: Split encoder/scorer models not found for '{}'. \
+                 Falling back to combined model (re-export with updated export.py for optimal performance).",
+                model_name
+            );
+            return load_embedder_scorer(enc, model_name, weights_dir, use_cuda);
+        }
+        return Err(format!(
+            "Neither split models ({}_encoder.pt, {}_scorer.pt) nor combined model ({}.pt) found in {}",
+            model_name, model_name, model_name, weights_dir.display()
+        ));
+    }
+
+    let cross_attention = scorer_name == "attention" || scorer_name == "transformer";
+    // Default hidden_dim — ideally read from model metadata, but for now use 256 (GCN) or 64 (sentence/features)
+    let hidden_dim = match enc {
+        "gcn" | "gat" | "graphsage" => 256,
+        _ => 64,
+    };
+
+    match enc {
+        "gcn" | "gat" | "graphsage" => {
+            let encoder = crate::selection::GcnEncoder::new(&encoder_path, hidden_dim, use_cuda)?;
+            let scorer = crate::selection::TorchScriptScorer::new(&scorer_path, hidden_dim, cross_attention, use_cuda)?;
+            Ok((Box::new(encoder), Box::new(scorer)))
+        }
+        "sentence" => {
+            let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_name));
+            let emb = crate::selection::load_sentence_embedder(&encoder_path, &tokenizer_path, use_cuda)?;
+            let scorer = crate::selection::TorchScriptScorer::new(&scorer_path, hidden_dim, cross_attention, use_cuda)?;
+            Ok((Box::new(emb), Box::new(scorer)))
+        }
+        "features" => {
+            // Features encoder: load TorchScript model that takes [N, 9] → [N, hidden_dim]
+            let encoder = crate::selection::GcnEncoder::new(&encoder_path, hidden_dim, use_cuda)?;
+            let scorer = crate::selection::TorchScriptScorer::new(&scorer_path, hidden_dim, cross_attention, use_cuda)?;
+            Ok((Box::new(encoder), Box::new(scorer)))
+        }
+        _ => Err(format!("Unknown encoder for split path: '{}'", enc)),
     }
 }
