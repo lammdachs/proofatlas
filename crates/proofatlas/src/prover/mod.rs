@@ -172,8 +172,16 @@ impl Prover {
         self.clause_manager.start_time = Some(start_time);
         self.clause_manager.timeout = self.config.timeout;
 
+        let t_init = self.profile.as_ref().map(|_| Instant::now());
         if let Some(result) = self.init() {
+            if let (Some(p), Some(t)) = (self.profile.as_mut(), t_init) {
+                p.init_time = t.elapsed();
+                p.total_time = start_time.elapsed();
+            }
             return result;
+        }
+        if let (Some(p), Some(t)) = (self.profile.as_mut(), t_init) {
+            p.init_time = t.elapsed();
         }
 
         let result = loop {
@@ -231,6 +239,7 @@ impl Prover {
         }
 
         // === Step 1: Process new clauses ===
+        let t_process_new = self.profile.as_ref().map(|_| Instant::now());
         'simplify: while let Some(&clause_idx) = self.state.new.last() {
             // 1a: Apply forward simplification rules
             let mut forward_change: Option<StateChange> = None;
@@ -299,6 +308,10 @@ impl Prover {
                     return Some(result);
                 }
             }
+        }
+
+        if let (Some(p), Some(t)) = (self.profile.as_mut(), t_process_new) {
+            p.process_new_time += t.elapsed();
         }
 
         // === Step 2: Check saturation ===
