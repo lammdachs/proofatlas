@@ -736,6 +736,8 @@ def main():
     parser.add_argument("--gpu-workers", type=int, default=0,
                        help="Number of GPUs for ML inference (0=CPU, N>0=distribute across N GPUs)")
 
+    parser.add_argument("--timeout", type=float, default=None,
+                       help="Override per-problem timeout (seconds)")
     parser.add_argument("--trace", action="store_true",
                        help="Collect training traces (.npz) for successful proofs")
 
@@ -841,6 +843,11 @@ def main():
     if not runs:
         print("Error: No matching prover/preset combinations")
         sys.exit(1)
+
+    # Override timeout if specified
+    if args.timeout is not None:
+        for run in runs:
+            run["preset"] = {**run["preset"], "timeout": args.timeout}
 
     # Get problems
     problems = get_problems(base_dir, tptp_config, problem_set)

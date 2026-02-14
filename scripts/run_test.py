@@ -162,6 +162,7 @@ def main():
     parser.add_argument("--use-cuda", action="store_true", help="Use CUDA for training")
     parser.add_argument("--cpu-workers", type=int, default=1, help="CPU workers (default: 1)")
     parser.add_argument("--gpu-workers", type=int, default=None, help="GPU workers for evaluation")
+    parser.add_argument("--timeout", type=float, default=None, help="Override per-problem timeout (seconds)")
     parser.add_argument("--rerun", action="store_true", help="Force re-run everything")
     parser.add_argument("--kill", action="store_true", help="Kill running smoke test")
     args = parser.parse_args()
@@ -194,6 +195,8 @@ def main():
     print(f"  Time configs: {len(time_configs)}")
     print(f"  External: {', '.join(p['name'] for p in external) or 'none'}")
     print(f"  Training: {MAX_EPOCHS} epoch, {'GPU' if args.use_cuda else 'CPU'}")
+    if args.timeout is not None:
+        print(f"  Timeout: {args.timeout}s (override)")
     if gpu_eval:
         cpu_names = [c for c in all_eval if c not in gpu_eval]
         gpu_names = [c for c in all_eval if c in gpu_eval]
@@ -227,6 +230,8 @@ def main():
         cmd.extend(["--cpu-workers", str(args.cpu_workers)])
     if args.rerun:
         cmd.append("--rerun")
+    if args.timeout is not None:
+        cmd.extend(["--timeout", str(args.timeout)])
 
     rc = run_cmd(cmd, base_dir)
     record("traces", "age_weight", rc)
@@ -286,6 +291,8 @@ def main():
             cmd.extend(["--gpu-workers", str(args.gpu_workers)])
         if args.rerun:
             cmd.append("--rerun")
+        if args.timeout is not None:
+            cmd.extend(["--timeout", str(args.timeout)])
 
         rc = run_cmd(cmd, base_dir)
         record("step-eval", config, rc)
@@ -316,6 +323,8 @@ def main():
                 cmd.extend(["--gpu-workers", str(args.gpu_workers)])
             if args.rerun:
                 cmd.append("--rerun")
+            if args.timeout is not None:
+                cmd.extend(["--timeout", str(args.timeout)])
 
             rc = run_cmd(cmd, base_dir)
             record("time-eval", config, rc)
@@ -344,6 +353,8 @@ def main():
                 cmd.extend(["--cpu-workers", str(args.cpu_workers)])
             if args.rerun:
                 cmd.append("--rerun")
+            if args.timeout is not None:
+                cmd.extend(["--timeout", str(args.timeout)])
 
             rc = run_cmd(cmd, base_dir)
             record("external", f"{name}/{preset}", rc)
