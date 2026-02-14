@@ -13,6 +13,7 @@ USAGE:
     python scripts/run_test.py                  # Full smoke test
     python scripts/run_test.py --cpu-workers 4  # Parallel workers
     python scripts/run_test.py --use-cuda       # GPU training
+    python scripts/run_test.py --use-cuda --cpu-workers 8 --gpu-workers 1
     python scripts/run_test.py --rerun           # Force re-run everything
     python scripts/run_test.py --kill            # Kill running smoke test
 """
@@ -32,6 +33,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 PROBLEM_SET = "test"
 MAX_EPOCHS = 1
 PID_FILE = ".data/run_test.pid"
+
+# Configs that benefit from GPU evaluation (same as run_all.py)
+GPU_EVAL_ENCODERS = {"sentence"}
+GPU_EVAL_SCORERS = {"attention", "transformer"}
 
 
 def log(msg: str):
@@ -156,6 +161,7 @@ def main():
     parser = argparse.ArgumentParser(description="Quick smoke test for the full pipeline")
     parser.add_argument("--use-cuda", action="store_true", help="Use CUDA for training")
     parser.add_argument("--cpu-workers", type=int, default=1, help="CPU workers (default: 1)")
+    parser.add_argument("--gpu-workers", type=int, default=None, help="GPU workers for evaluation")
     parser.add_argument("--rerun", action="store_true", help="Force re-run everything")
     parser.add_argument("--kill", action="store_true", help="Kill running smoke test")
     args = parser.parse_args()
@@ -173,6 +179,12 @@ def main():
     time_configs = get_time_configs(presets)
     external = get_external_provers(base_dir)
 
+    # Partition configs by eval device
+    all_eval = step_configs + time_configs
+    gpu_eval = set(c for c in all_eval
+                   if presets[c].get("encoder") in GPU_EVAL_ENCODERS
+                   or presets[c].get("scorer") in GPU_EVAL_SCORERS) if args.gpu_workers else set()
+
     overall_start = time.time()
 
     print(f"{'='*60}")
@@ -182,6 +194,11 @@ def main():
     print(f"  Time configs: {len(time_configs)}")
     print(f"  External: {', '.join(p['name'] for p in external) or 'none'}")
     print(f"  Training: {MAX_EPOCHS} epoch, {'GPU' if args.use_cuda else 'CPU'}")
+    if gpu_eval:
+        cpu_names = [c for c in all_eval if c not in gpu_eval]
+        gpu_names = [c for c in all_eval if c in gpu_eval]
+        print(f"  Eval:   CPU ({', '.join(cpu_names)})")
+        print(f"          GPU ({', '.join(gpu_names)})")
     print(f"{'='*60}\n")
     sys.stdout.flush()
 
@@ -255,7 +272,9 @@ def main():
     log(f"Phase 3: Step-limited evaluation ({len(step_configs)} configs)")
 
     for i, config in enumerate(step_configs, 1):
-        log(f"  [{i}/{len(step_configs)}] {config}")
+        use_gpu = config in gpu_eval
+        device_tag = "GPU" if use_gpu else "CPU"
+        log(f"  [{i}/{len(step_configs)}] {config} ({device_tag})")
         cmd = [
             sys.executable, "-m", "proofatlas.cli.bench",
             "--config", config, "--foreground",
@@ -263,6 +282,8 @@ def main():
         ]
         if args.cpu_workers > 1:
             cmd.extend(["--cpu-workers", str(args.cpu_workers)])
+        if use_gpu:
+            cmd.extend(["--gpu-workers", str(args.gpu_workers)])
         if args.rerun:
             cmd.append("--rerun")
 
@@ -281,7 +302,9 @@ def main():
         log(f"Phase 4: Wall-time evaluation ({len(time_configs)} configs)")
 
         for i, config in enumerate(time_configs, 1):
-            log(f"  [{i}/{len(time_configs)}] {config}")
+            use_gpu = config in gpu_eval
+            device_tag = "GPU" if use_gpu else "CPU"
+            log(f"  [{i}/{len(time_configs)}] {config} ({device_tag})")
             cmd = [
                 sys.executable, "-m", "proofatlas.cli.bench",
                 "--config", config, "--foreground",
@@ -289,6 +312,8 @@ def main():
             ]
             if args.cpu_workers > 1:
                 cmd.extend(["--cpu-workers", str(args.cpu_workers)])
+            if use_gpu:
+                cmd.extend(["--gpu-workers", str(args.gpu_workers)])
             if args.rerun:
                 cmd.append("--rerun")
 
