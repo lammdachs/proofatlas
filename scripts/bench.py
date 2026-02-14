@@ -844,7 +844,7 @@ def main():
         print("Error: No matching prover/preset combinations")
         sys.exit(1)
 
-    # Override timeout if specified
+    # Override timeout if specified (both timeout and max_iterations apply; whichever fires first)
     if args.timeout is not None:
         for run in runs:
             run["preset"] = {**run["preset"], "timeout": args.timeout}

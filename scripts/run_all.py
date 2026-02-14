@@ -42,6 +42,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 PID_FILE_NAME = ".data/run_all.pid"
 
+_interrupted = False
+
 
 def log(msg: str):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -194,6 +196,8 @@ def run_subprocess(cmd: list[str], base_dir: Path) -> int:
     original_sigterm = signal.getsignal(signal.SIGTERM)
 
     def forward_signal(signum, frame):
+        global _interrupted
+        _interrupted = True
         try:
             os.killpg(proc.pid, signum)
         except (OSError, ProcessLookupError):
@@ -216,6 +220,13 @@ def phase_header(phase: int, title: str):
     print(f"  Phase {phase}: {title}")
     print(f"{'='*60}\n")
     sys.stdout.flush()
+
+
+def _check_interrupted(base_dir: Path):
+    if _interrupted:
+        log("Interrupted by user.")
+        remove_pid_file(base_dir)
+        sys.exit(130)
 
 
 def run_experiment(args, base_dir: Path):
@@ -319,6 +330,8 @@ def run_experiment(args, base_dir: Path):
     else:
         log("Skipping phase 1 (traces)")
 
+    _check_interrupted(base_dir)
+
     # ── Phase 2: Training ─────────────────────────────────────────
 
     train_failed = []
@@ -333,6 +346,7 @@ def run_experiment(args, base_dir: Path):
                 log(f"[{i}/{len(configs)}] {config}: weights exist, skipping")
                 continue
 
+            _check_interrupted(base_dir)
             log(f"[{i}/{len(configs)}] {config}: starting training...")
             cmd = [
                 sys.executable, "-m", "proofatlas.cli.train",
@@ -358,6 +372,8 @@ def run_experiment(args, base_dir: Path):
     else:
         log("Skipping phase 2 (training)")
 
+    _check_interrupted(base_dir)
+
     # ── Phase 3: Step-Limited Evaluation ─────────────────────────
 
     phase_start = time.time()
@@ -369,6 +385,7 @@ def run_experiment(args, base_dir: Path):
     for i, config in enumerate(configs, 1):
         use_gpu = args.gpu_workers is not None and config in gpu_eval
         device_tag = "GPU" if use_gpu else "CPU"
+        _check_interrupted(base_dir)
         log(f"[{i}/{len(configs)}] {config}: starting evaluation ({device_tag})...")
         cmd = [
             sys.executable, "-m", "proofatlas.cli.bench",
@@ -393,6 +410,8 @@ def run_experiment(args, base_dir: Path):
 
     log(f"Phase 3 done ({elapsed_str(phase_start)})")
 
+    _check_interrupted(base_dir)
+
     # ── Phase 4: Wall-Time Evaluation ─────────────────────────────
 
     time_completed = []
@@ -405,6 +424,7 @@ def run_experiment(args, base_dir: Path):
         for i, config in enumerate(time_configs, 1):
             use_gpu = args.gpu_workers is not None and config in gpu_eval
             device_tag = "GPU" if use_gpu else "CPU"
+            _check_interrupted(base_dir)
             log(f"[{i}/{len(time_configs)}] {config}: starting wall-time evaluation ({device_tag})...")
             cmd = [
                 sys.executable, "-m", "proofatlas.cli.bench",
@@ -513,6 +533,7 @@ def main():
         remove_pid_file(base_dir)
         sys.exit(128 + signum)
 
+    signal.signal(signal.SIGINT, cleanup_and_exit)
     signal.signal(signal.SIGTERM, cleanup_and_exit)
 
     try:
