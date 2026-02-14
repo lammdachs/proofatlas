@@ -96,6 +96,8 @@ impl<'a> fmt::Display for LiteralDisplay<'a> {
                 self.literal.args[0].display(self.interner),
                 self.literal.args[1].display(self.interner)
             )
+        } else if self.literal.args.len() == 1 {
+            write!(f, "{} {}", pred_str, self.literal.args[0].display(self.interner))
         } else {
             write!(f, "{}(", pred_str)?;
             for (i, arg) in self.literal.args.iter().enumerate() {

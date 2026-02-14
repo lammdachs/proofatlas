@@ -418,18 +418,18 @@ class ProofInspector {
             // Don't capture when typing in an input/textarea
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-            if (e.key === 'ArrowLeft') {
+            if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 this.stepBackward();
-            } else if (e.key === 'ArrowRight') {
+            } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 this.stepForward();
-            } else if (e.key === 'ArrowUp') {
+            } else if (e.key === 'ArrowLeft') {
                 e.preventDefault();
                 if (this.currentStep > 0) {
                     this.goToStep(this.currentStep - 1, 0);
                 }
-            } else if (e.key === 'ArrowDown') {
+            } else if (e.key === 'ArrowRight') {
                 e.preventDefault();
                 const maxStep = this.trace.iterations.length - 1;
                 if (this.currentStep < maxStep) {
