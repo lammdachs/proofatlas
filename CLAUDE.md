@@ -59,9 +59,10 @@ proofatlas/
 │   ├── bench_jobs.py           # Job/daemon management, PID tracking, status display
 │   ├── bench_provers.py        # Prover execution with ProofAtlasPool (persistent workers)
 │   ├── run_all.py              # Full experiment orchestration (traces → train → eval → push)
+│   ├── run_test.py             # Quick smoke test (test problem set, 1 epoch, all configs)
 │   ├── train.py                # Standalone ML model training (extracted from bench.py)
 │   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
+│   └── setup_*.py              # Setup TPTP, Vampire, SPASS, MiniLM base model
 │
 ├── .data/                      # Runtime data (gitignored)
 │   ├── traces/                 # Proof search traces
@@ -345,7 +346,8 @@ For GPU-accelerated inference with multiple workers, a socket-based scoring serv
 |----------|------|---------|-------|
 | age_weight | Y | - | Heuristic, no training |
 | gcn | Y | Y | Graph Convolutional Network |
-| features | - | Y | 9D clause feature MLP |
+| gcn_struct | Y | Y | GCN with features-only node info (no symbol embeddings) |
+| features | Y | Y | 9D clause feature MLP |
 | sentence | Y | Y | Sentence transformer (MiniLM) |
 
 **Scorer types** (all support `forward(u_emb, p_emb=None)`):

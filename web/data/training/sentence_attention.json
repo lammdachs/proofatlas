@@ -1,12 +1,12 @@
 {
-  "generated": "2026-02-12T10:29:45.625381",
+  "generated": "2026-02-14T14:22:30.463265",
   "name": "sentence_attention",
-  "start_time": "2026-02-12T10:29:45.625391",
-  "end_time": "2026-02-12T10:47:50.280242",
-  "total_time_seconds": 1116.9761719703674,
+  "start_time": "2026-02-14T14:22:30.463272",
+  "end_time": "2026-02-14T14:22:30.759352",
+  "total_time_seconds": 1.1978302001953125,
   "termination_reason": "completed",
-  "best_epoch": 4,
-  "best_val_loss": 2.77418940227121,
+  "best_epoch": 1,
+  "best_val_loss": 0.8955883234739304,
   "model": {
     "type": "sentence",
     "hidden_dim": 64,
@@ -15,10 +15,10 @@
     "scorer_type": "attention"
   },
   "training": {
-    "batch_size": "512.0K",
+    "batch_size_bytes": 65536,
     "accumulate_steps": 4,
     "learning_rate": 0.0003,
-    "max_epochs": 4,
+    "max_epochs": 1,
     "optimizer": "adamw",
     "weight_decay": 0.0001,
     "margin": 0.1,
@@ -28,32 +28,8 @@
   "epochs": [
     {
       "epoch": 1,
-      "train_loss": 3.6706688875221922,
-      "val_loss": 3.14299718714878,
-      "val_acc": null,
-      "val_mrr": null,
-      "learning_rate": 0.0003
-    },
-    {
-      "epoch": 2,
-      "train_loss": 3.0604546735747618,
-      "val_loss": 3.0186820979177105,
-      "val_acc": null,
-      "val_mrr": null,
-      "learning_rate": 0.0003
-    },
-    {
-      "epoch": 3,
-      "train_loss": 3.0714999163107066,
-      "val_loss": 2.9139742912203173,
-      "val_acc": null,
-      "val_mrr": null,
-      "learning_rate": 0.0003
-    },
-    {
-      "epoch": 4,
-      "train_loss": 3.0220757331334096,
-      "val_loss": 2.77418940227121,
+      "train_loss": 1.4906620545820757,
+      "val_loss": 0.8955883234739304,
       "val_acc": null,
       "val_mrr": null,
       "learning_rate": 0.0003

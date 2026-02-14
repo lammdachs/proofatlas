@@ -87,8 +87,9 @@ impl<'a> fmt::Display for LiteralDisplay<'a> {
         if !self.literal.polarity {
             write!(f, "~")?;
         }
-        let pred_name = self.interner.resolve_predicate(self.literal.predicate.id);
-        if pred_name == "=" && self.literal.args.len() == 2 {
+        let pred_name = self.interner.try_resolve_predicate(self.literal.predicate.id);
+        let pred_str = pred_name.unwrap_or("?P");
+        if pred_str == "=" && self.literal.args.len() == 2 {
             write!(
                 f,
                 "{} = {}",
@@ -96,7 +97,7 @@ impl<'a> fmt::Display for LiteralDisplay<'a> {
                 self.literal.args[1].display(self.interner)
             )
         } else {
-            write!(f, "{}(", pred_name)?;
+            write!(f, "{}(", pred_str)?;
             for (i, arg) in self.literal.args.iter().enumerate() {
                 if i > 0 {
                     write!(f, ",")?;

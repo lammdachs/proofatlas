@@ -36,6 +36,205 @@ pub fn extract_clause_features(clause: &Clause) -> [f32; NUM_CLAUSE_FEATURES] {
     ]
 }
 
+// =============================================================================
+// FeaturesEmbedder — combined model, returns scores as 1-D "embeddings"
+// =============================================================================
+
+/// Features embedder using PyTorch for inference.
+///
+/// Loads a TorchScript model that takes `[N, 9]` clause features and
+/// outputs scores directly. Scores are treated as 1-dimensional
+/// "embeddings" for caching purposes (same pattern as GcnEmbedder).
+#[cfg(feature = "ml")]
+pub struct FeaturesEmbedder {
+    model: tch::CModule,
+    device: tch::Device,
+}
+
+#[cfg(feature = "ml")]
+impl FeaturesEmbedder {
+    /// Create a new features embedder from a TorchScript model.
+    pub fn new<P: AsRef<std::path::Path>>(model_path: P, use_cuda: bool) -> Result<Self, String> {
+        let device = if use_cuda && tch::Cuda::is_available() {
+            tch::Device::Cuda(0)
+        } else {
+            tch::Device::Cpu
+        };
+
+        let model = tch::CModule::load_on_device(model_path.as_ref(), device)
+            .map_err(|e| format!("Failed to load TorchScript features model: {}", e))?;
+
+        Ok(Self { model, device })
+    }
+
+    /// Run the model on a features tensor and return per-clause results.
+    fn forward_tensor(&self, features_tensor: tch::Tensor, n: usize) -> Vec<Vec<f32>> {
+        let output = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[features_tensor])
+                .expect("Features forward failed")
+        });
+
+        let output_cpu = output.to_device(tch::Device::Cpu).view([-1]);
+        let scores: Vec<f32> =
+            Vec::<f32>::try_from(&output_cpu).expect("Failed to convert scores to Vec<f32>");
+
+        scores.iter().take(n).map(|&s| vec![s]).collect()
+    }
+}
+
+#[cfg(feature = "ml")]
+impl crate::selection::cached::ClauseEmbedder for FeaturesEmbedder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
+        }
+
+        let n = clauses.len();
+        let mut feat_flat = Vec::with_capacity(n * NUM_CLAUSE_FEATURES);
+        for clause in clauses {
+            feat_flat.extend_from_slice(&extract_clause_features(clause));
+        }
+        let features_tensor = tch::Tensor::from_slice(&feat_flat)
+            .view([n as i64, NUM_CLAUSE_FEATURES as i64])
+            .to_device(self.device);
+
+        self.forward_tensor(features_tensor, n)
+    }
+
+    fn embed_features(&self, features: &[&[f32]]) -> Vec<Vec<f32>> {
+        if features.is_empty() {
+            return vec![];
+        }
+
+        let n = features.len();
+        let feat_flat: Vec<f32> = features.iter().flat_map(|f| f.iter().copied()).collect();
+        let features_tensor = tch::Tensor::from_slice(&feat_flat)
+            .view([n as i64, NUM_CLAUSE_FEATURES as i64])
+            .to_device(self.device);
+
+        self.forward_tensor(features_tensor, n)
+    }
+
+    fn embedding_dim(&self) -> usize {
+        1 // Scores are treated as 1-dim embeddings
+    }
+
+    fn name(&self) -> &str {
+        "features"
+    }
+}
+
+/// Load a standalone features embedder.
+#[cfg(feature = "ml")]
+pub fn load_features_embedder<P: AsRef<std::path::Path>>(
+    model_path: P,
+    use_cuda: bool,
+) -> Result<FeaturesEmbedder, String> {
+    FeaturesEmbedder::new(model_path, use_cuda)
+}
+
+// =============================================================================
+// FeaturesEncoder — encoder-only, returns hidden_dim embeddings
+// =============================================================================
+
+/// Features encoder that returns real embeddings (not scores).
+///
+/// Loads an encoder-only TorchScript model (exported from model.encode()).
+/// Returns `[N, hidden_dim]` embeddings for caching. Used with
+/// `TorchScriptScorer` for separated encoder/scorer architecture.
+#[cfg(feature = "ml")]
+pub struct FeaturesEncoder {
+    model: tch::CModule,
+    device: tch::Device,
+    hidden_dim: usize,
+}
+
+#[cfg(feature = "ml")]
+impl FeaturesEncoder {
+    /// Create a new features encoder from a TorchScript encoder model.
+    pub fn new<P: AsRef<std::path::Path>>(
+        model_path: P,
+        hidden_dim: usize,
+        use_cuda: bool,
+    ) -> Result<Self, String> {
+        let device = if use_cuda && tch::Cuda::is_available() {
+            tch::Device::Cuda(0)
+        } else {
+            tch::Device::Cpu
+        };
+
+        let model = tch::CModule::load_on_device(model_path.as_ref(), device)
+            .map_err(|e| format!("Failed to load TorchScript features encoder: {}", e))?;
+
+        Ok(Self {
+            model,
+            device,
+            hidden_dim,
+        })
+    }
+
+    /// Run the encoder on a features tensor and return per-clause embeddings.
+    fn forward_tensor(&self, features_tensor: tch::Tensor, n: usize) -> Vec<Vec<f32>> {
+        let output = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[features_tensor])
+                .expect("Features encoder forward failed")
+        });
+
+        let output_cpu = output.to_device(tch::Device::Cpu);
+        let flat: Vec<f32> =
+            Vec::<f32>::try_from(&output_cpu.view([-1])).expect("Failed to convert embeddings");
+
+        flat.chunks(self.hidden_dim)
+            .take(n)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+}
+
+#[cfg(feature = "ml")]
+impl crate::selection::cached::ClauseEmbedder for FeaturesEncoder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
+        }
+
+        let n = clauses.len();
+        let mut feat_flat = Vec::with_capacity(n * NUM_CLAUSE_FEATURES);
+        for clause in clauses {
+            feat_flat.extend_from_slice(&extract_clause_features(clause));
+        }
+        let features_tensor = tch::Tensor::from_slice(&feat_flat)
+            .view([n as i64, NUM_CLAUSE_FEATURES as i64])
+            .to_device(self.device);
+
+        self.forward_tensor(features_tensor, n)
+    }
+
+    fn embed_features(&self, features: &[&[f32]]) -> Vec<Vec<f32>> {
+        if features.is_empty() {
+            return vec![];
+        }
+
+        let n = features.len();
+        let feat_flat: Vec<f32> = features.iter().flat_map(|f| f.iter().copied()).collect();
+        let features_tensor = tch::Tensor::from_slice(&feat_flat)
+            .view([n as i64, NUM_CLAUSE_FEATURES as i64])
+            .to_device(self.device);
+
+        self.forward_tensor(features_tensor, n)
+    }
+
+    fn embedding_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    fn name(&self) -> &str {
+        "features_encoder"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

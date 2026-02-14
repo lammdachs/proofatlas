@@ -45,6 +45,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import argparse
 import json
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -852,10 +853,9 @@ def main():
         print("Error: --gpu-workers cannot be negative")
         sys.exit(1)
 
-    # Check if any runs use ML selectors
-    ml = _get_ml()
+    # Check if any runs use ML selectors (inline check to avoid loading libtorch before fork)
     has_ml_runs = any(
-        r["prover"] == "proofatlas" and ml.is_learned_selector(r["preset"])
+        r["prover"] == "proofatlas" and "encoder" in r["preset"] and "scorer" in r["preset"]
         for r in runs
     )
 
@@ -867,7 +867,6 @@ def main():
             # Check GPU count via subprocess because CUDA_VISIBLE_DEVICES=""
             # is set in this process to prevent fork-inherited CUDA contexts.
             # Remove the override so the child sees all GPUs.
-            import subprocess
             check_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
             try:
                 result = subprocess.run(
@@ -895,6 +894,31 @@ def main():
         gpu_workers = cpu_workers
 
     use_cuda_eval = gpu_workers > 0
+
+    # Ensure base MiniLM weights exist for trace embedding.
+    # Must run before daemonize — torch.jit.trace can't run after fork.
+    if args.trace:
+        weights_dir = base_dir / ".weights"
+        minilm_model = weights_dir / "base_minilm.pt"
+        minilm_tokenizer = weights_dir / "base_minilm_tokenizer" / "tokenizer.json"
+        if not (minilm_model.exists() and minilm_tokenizer.exists()):
+            print("Downloading and exporting base MiniLM for trace embedding...")
+            sys.stdout.flush()
+            # Run in subprocess to isolate torch.jit.trace from our process.
+            # Remove CUDA_VISIBLE_DEVICES="" (set at top of bench.py) — it causes
+            # double-free crashes in torch.jit.trace with transformers 5.x SDPA.
+            export_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
+            rc = subprocess.run(
+                [sys.executable, str(base_dir / "scripts" / "setup_minilm.py")],
+                cwd=str(base_dir),
+                env=export_env,
+            ).returncode
+            if rc == 0:
+                print(f"Base MiniLM exported to {weights_dir}")
+            else:
+                print("Warning: Failed to export base MiniLM.")
+                print("Traces will lack pre-computed embeddings.")
+            sys.stdout.flush()
 
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)

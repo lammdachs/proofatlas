@@ -301,7 +301,12 @@ def main():
         print("[5/5] External tools (skipped)")
     print()
 
-    # Step 6b: WASM (optional, not counted in steps)
+    # Optional: MiniLM for trace embedding
+    print("[ML] Base MiniLM (for trace embedding)")
+    run_script(PROJECT_ROOT / "scripts" / "setup_minilm.py", "MiniLM setup")
+    print()
+
+    # Optional: WASM
     if not args.skip_wasm:
         print("[WASM] Web package")
         build_wasm()

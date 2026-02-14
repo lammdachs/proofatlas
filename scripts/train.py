@@ -12,7 +12,7 @@ USAGE:
     # Worker pipeline flags:
     proofatlas-train --config gcn_mlp --cpu-workers 4       # Parallel batch prep
     proofatlas-train --config gcn_mlp --gpu-workers 2       # Multi-GPU DDP
-    proofatlas-train --config gcn_mlp --max-clauses 4096    # Max U clauses per batch
+    proofatlas-train --config gcn_mlp --batch-size 16M      # Max tensor bytes per batch
     proofatlas-train --config gcn_mlp --accumulate-batches 4  # Gradient accumulation
 
 This script:
@@ -47,6 +47,36 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 TRAIN_PREFIX = "train"
+
+
+def parse_byte_size(s: str) -> int:
+    """Parse a human-readable byte size string (e.g. '16M', '512K', '1G') to bytes.
+
+    Supports suffixes: K/KB (KiB), M/MB (MiB), G/GB (GiB). Plain integers as bytes.
+    """
+    s = s.strip()
+    if not s:
+        raise ValueError("empty byte size string")
+
+    suffixes = {
+        'K': 1024, 'KB': 1024,
+        'M': 1024 ** 2, 'MB': 1024 ** 2,
+        'G': 1024 ** 3, 'GB': 1024 ** 3,
+    }
+
+    upper = s.upper()
+    for suffix, multiplier in sorted(suffixes.items(), key=lambda x: -len(x[0])):
+        if upper.endswith(suffix):
+            num_str = s[:len(s) - len(suffix)]
+            try:
+                return int(float(num_str) * multiplier)
+            except ValueError:
+                raise ValueError(f"invalid byte size: {s!r}")
+
+    try:
+        return int(s)
+    except ValueError:
+        raise ValueError(f"invalid byte size: {s!r}")
 
 
 def log(msg: str):
@@ -86,7 +116,7 @@ def check_cuda_device_count() -> int:
 def validate_args(args, config):
     """Validate CLI arguments and return resolved values.
 
-    Returns (max_clauses, accumulate_batches) after validation.
+    Returns (batch_size, accumulate_batches) after validation.
     """
     errors = []
 
@@ -95,10 +125,16 @@ def validate_args(args, config):
     if args.gpu_workers < 1:
         errors.append(f"--gpu-workers must be >= 1 (got {args.gpu_workers})")
 
-    # Max clauses
-    max_clauses = args.max_clauses
-    if max_clauses is not None and max_clauses <= 0:
-        errors.append(f"--max-clauses must be > 0 (got {max_clauses})")
+    # Batch size (bytes)
+    batch_size = None
+    if args.batch_size is not None:
+        try:
+            batch_size = parse_byte_size(args.batch_size)
+        except ValueError as e:
+            errors.append(f"--batch-size: {e}")
+        else:
+            if batch_size <= 0:
+                errors.append(f"--batch-size must be > 0 (got {args.batch_size})")
 
     # Resolve accumulate_batches
     accumulate_batches = args.accumulate_batches
@@ -127,10 +163,13 @@ def validate_args(args, config):
             print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if max_clauses is not None:
-        log(f"Max clauses per batch: {max_clauses}")
+    if batch_size is not None:
+        if batch_size >= 1024 * 1024:
+            log(f"Batch size: {batch_size // (1024*1024)}M bytes")
+        else:
+            log(f"Batch size: {batch_size // 1024}K bytes")
 
-    return max_clauses, accumulate_batches
+    return batch_size, accumulate_batches
 
 
 def get_problems(base_dir, tptp_config, problem_set):
@@ -263,7 +302,7 @@ def handle_kill(base_dir):
 
 
 def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem_names,
-                      web_data_dir, cpu_workers, world_size, max_clauses,
+                      web_data_dir, cpu_workers, world_size, batch_size,
                       accumulate_batches, max_epochs):
     """DDP worker function at module level so it can be pickled by mp.spawn."""
     from proofatlas.ml.training import run_training
@@ -279,7 +318,7 @@ def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem
         cpu_workers=cpu_workers,
         rank=rank,
         world_size=world_size,
-        max_clauses=max_clauses,
+        batch_size=batch_size,
         accumulate_batches=accumulate_batches,
         max_epochs=max_epochs,
     )
@@ -295,7 +334,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     weights_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate CLI args
-    max_clauses, accumulate_batches = validate_args(args, preset)
+    batch_size, accumulate_batches = validate_args(args, preset)
 
     # Resolve trace directory
     trace_preset = preset.get("traces") or args.config
@@ -325,7 +364,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             _ddp_train_worker,
             args=(preset, trace_dir, weights_dir, base_dir / "configs",
                   problem_names, base_dir / "web" / "data", args.cpu_workers,
-                  args.gpu_workers, max_clauses, accumulate_batches,
+                  args.gpu_workers, batch_size, accumulate_batches,
                   args.max_epochs),
             nprocs=args.gpu_workers,
             join=True,
@@ -340,7 +379,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             web_data_dir=base_dir / "web" / "data",
             log_file=sys.stdout,
             cpu_workers=args.cpu_workers,
-            max_clauses=max_clauses,
+            batch_size=batch_size,
             accumulate_batches=accumulate_batches,
             force_cpu=not args.use_cuda,
             max_epochs=args.max_epochs,
@@ -374,8 +413,8 @@ def main():
                        help="DataLoader workers for parallel batch preparation (default: 2)")
     parser.add_argument("--gpu-workers", type=int, default=1,
                        help="DDP processes across GPUs (default: 1, no DDP)")
-    parser.add_argument("--max-clauses", type=int, default=None,
-                       help="Max U clauses per micro-batch (default: 8192 graph, 512 sentence)")
+    parser.add_argument("--batch-size", type=str, default=None,
+                       help="Max tensor bytes per micro-batch, e.g. 64K (default: 64K)")
     parser.add_argument("--accumulate-batches", type=int, default=None,
                        help="Gradient accumulation steps (default: from config)")
     parser.add_argument("--max-epochs", type=int, default=None,

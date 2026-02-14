@@ -29,7 +29,7 @@
       "max_rating": 0.3,
       "max_clauses": 50,
       "max_term_depth": 4,
-      "domains": ["PUZ", "SYN"]
+      "domains": ["PUZ"]
     },
 
     "unit_equality": {
@@ -41,6 +41,13 @@
       "max_rating": 0.5,
       "max_clauses": 500,
       "domains": ["GRP", "RNG", "LAT", "BOO", "COL"]
+    },
+
+    "puz": {
+      "description": "PUZ domain unsatisfiable problems",
+      "status": ["unsatisfiable"],
+      "format": ["cnf", "fof"],
+      "domains": ["PUZ"]
     },
 
     "parser_test": {

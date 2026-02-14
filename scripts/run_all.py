@@ -9,6 +9,7 @@ USAGE:
     python scripts/run_all.py --use-cuda --cpu-workers 8 --gpu-workers 1
 
     python scripts/run_all.py --configs gcn_mlp sentence_mlp  # Specific configs
+    python scripts/run_all.py --problem-set puz              # Evaluate on PUZ only
     python scripts/run_all.py --max-epochs 4            # Short training run
     python scripts/run_all.py --skip-traces             # Skip phase 1
     python scripts/run_all.py --skip-training           # Skip phase 2
@@ -18,11 +19,12 @@ USAGE:
 
 Phases:
   1. Trace collection + age_weight baseline evaluation
-  2. Training (all ML configs on GPU via --use-cuda)
-  3. Evaluation — per-config device selection:
+  2. Training (step-limited ML configs on GPU via --use-cuda)
+  3. Step-limited evaluation — per-config device selection:
        *_mlp (non-sentence)    → CPU  (lightweight encoder + MLP scorer)
        *_attention, *_transformer, sentence_* → GPU  (--gpu-workers)
-  4. Push results + upload weights
+  4. Wall-time evaluation (time_* configs, reuse trained weights)
+  5. Push results + upload weights
 """
 
 import argparse
@@ -69,10 +71,20 @@ def load_presets(base_dir: Path) -> dict:
         return json.load(f).get("presets", {})
 
 
-def get_ml_configs(presets: dict) -> list[str]:
+def get_step_configs(presets: dict) -> list[str]:
+    """Step-limited ML configs (for training + step-limited evaluation)."""
     return sorted(
         name for name, preset in presets.items()
         if preset.get("encoder") and preset.get("scorer")
+        and not name.startswith("time_")
+    )
+
+
+def get_time_configs(presets: dict) -> list[str]:
+    """Wall-time ML configs (for time-limited evaluation only, reuse weights)."""
+    return sorted(
+        name for name in presets
+        if name.startswith("time_")
     )
 
 
@@ -213,30 +225,45 @@ def run_experiment(args, base_dir: Path):
     # Load presets for config validation and per-config device decisions
     presets = load_presets(base_dir)
 
-    # Resolve ML configs
+    # Resolve step-limited ML configs (for training + step eval)
+    all_step = get_step_configs(presets)
+    all_time = get_time_configs(presets)
+
     if args.configs:
-        configs = args.configs
-        all_ml = get_ml_configs(presets)
+        # User-specified configs: split into step and time
+        configs = [c for c in args.configs if not c.startswith("time_")]
+        time_configs = [c for c in args.configs if c.startswith("time_")]
         for c in configs:
-            if c not in all_ml:
-                print(f"Error: '{c}' is not a valid ML config")
-                print(f"Available: {', '.join(all_ml)}")
+            if c not in all_step:
+                print(f"Error: '{c}' is not a valid step-limited ML config")
+                print(f"Available: {', '.join(all_step)}")
+                sys.exit(1)
+        for c in time_configs:
+            if c not in all_time:
+                print(f"Error: '{c}' is not a valid wall-time config")
+                print(f"Available: {', '.join(all_time)}")
                 sys.exit(1)
     else:
-        configs = get_ml_configs(presets)
+        configs = all_step
+        time_configs = all_time
         if not configs:
             print("Error: No ML configs found in proofatlas.json")
             sys.exit(1)
 
     # Partition configs by eval device
-    gpu_eval = [c for c in configs
+    all_eval = configs + time_configs
+    gpu_eval = [c for c in all_eval
                 if presets[c].get("encoder") in GPU_EVAL_ENCODERS
                 or presets[c].get("scorer") in GPU_EVAL_SCORERS]
-    cpu_eval = [c for c in configs if c not in gpu_eval]
+    cpu_eval = [c for c in all_eval if c not in gpu_eval]
 
     print(f"{'='*60}")
     print(f"  ProofAtlas Full Experiment")
-    print(f"  ML configs: {', '.join(configs)}")
+    print(f"  Step configs: {', '.join(configs)}")
+    if time_configs:
+        print(f"  Time configs: {', '.join(time_configs)}")
+    if args.problem_set:
+        print(f"  Problem set: {args.problem_set}")
     print(f"  Train:  {'GPU' if args.use_cuda else 'CPU'}")
     if gpu_eval and args.gpu_workers:
         print(f"  Eval:   CPU ({', '.join(cpu_eval)})")
@@ -245,7 +272,8 @@ def run_experiment(args, base_dir: Path):
         print(f"  Eval:   CPU (all)")
     print(f"  Phases: {'traces' if not args.skip_traces else '-'}"
           f" | {'training' if not args.skip_training else '-'}"
-          f" | eval"
+          f" | step-eval"
+          f" | {'time-eval' if time_configs else '-'}"
           f" | {'push' if not args.skip_push else '-'}")
     print(f"{'='*60}")
     sys.stdout.flush()
@@ -277,6 +305,8 @@ def run_experiment(args, base_dir: Path):
             ]
             if args.cpu_workers is not None:
                 cmd.extend(["--cpu-workers", str(args.cpu_workers)])
+            if args.problem_set is not None:
+                cmd.extend(["--problem-set", args.problem_set])
             if needs_rerun:
                 cmd.append("--rerun")
 
@@ -328,10 +358,10 @@ def run_experiment(args, base_dir: Path):
     else:
         log("Skipping phase 2 (training)")
 
-    # ── Phase 3: Evaluation ───────────────────────────────────────
+    # ── Phase 3: Step-Limited Evaluation ─────────────────────────
 
     phase_start = time.time()
-    phase_header(3, "Evaluation")
+    phase_header(3, "Step-Limited Evaluation")
 
     eval_completed = []
     eval_failed = []
@@ -348,6 +378,8 @@ def run_experiment(args, base_dir: Path):
             cmd.extend(["--cpu-workers", str(args.cpu_workers)])
         if use_gpu:
             cmd.extend(["--gpu-workers", str(args.gpu_workers)])
+        if args.problem_set is not None:
+            cmd.extend(["--problem-set", args.problem_set])
         if args.rerun:
             cmd.append("--rerun")
 
@@ -361,20 +393,58 @@ def run_experiment(args, base_dir: Path):
 
     log(f"Phase 3 done ({elapsed_str(phase_start)})")
 
-    # ── Phase 4: Push Results ─────────────────────────────────────
+    # ── Phase 4: Wall-Time Evaluation ─────────────────────────────
+
+    time_completed = []
+    time_failed = []
+
+    if time_configs:
+        phase_start = time.time()
+        phase_header(4, "Wall-Time Evaluation")
+
+        for i, config in enumerate(time_configs, 1):
+            use_gpu = args.gpu_workers is not None and config in gpu_eval
+            device_tag = "GPU" if use_gpu else "CPU"
+            log(f"[{i}/{len(time_configs)}] {config}: starting wall-time evaluation ({device_tag})...")
+            cmd = [
+                sys.executable, "-m", "proofatlas.cli.bench",
+                "--config", config, "--foreground",
+            ]
+            if args.cpu_workers is not None:
+                cmd.extend(["--cpu-workers", str(args.cpu_workers)])
+            if use_gpu:
+                cmd.extend(["--gpu-workers", str(args.gpu_workers)])
+            if args.problem_set is not None:
+                cmd.extend(["--problem-set", args.problem_set])
+            if args.rerun:
+                cmd.append("--rerun")
+
+            rc = run_subprocess(cmd, base_dir)
+            if rc != 0:
+                log(f"[{i}/{len(time_configs)}] {config}: wall-time evaluation FAILED (exit {rc})")
+                time_failed.append(config)
+            else:
+                log(f"[{i}/{len(time_configs)}] {config}: wall-time evaluation complete")
+                time_completed.append(config)
+
+        log(f"Phase 4 done ({elapsed_str(phase_start)})")
+
+    # ── Phase 5: Push Results ─────────────────────────────────────
 
     if not args.skip_push:
-        phase_header(4, "Push Results")
+        phase_header(5, "Push Results")
         from bench_jobs import push_results, upload_weights
 
-        all_completed = ["age_weight"] + eval_completed if not args.skip_traces else eval_completed
+        all_completed = eval_completed + time_completed
+        if not args.skip_traces:
+            all_completed = ["age_weight"] + all_completed
         if all_completed:
             push_results(base_dir, all_completed)
             upload_weights(base_dir, eval_completed)
         else:
             log("No completed configs to push")
     else:
-        log("Skipping phase 4 (push)")
+        log("Skipping phase 5 (push)")
 
     # ── Summary ───────────────────────────────────────────────────
 
@@ -382,12 +452,14 @@ def run_experiment(args, base_dir: Path):
     print(f"  Experiment Complete ({elapsed_str(overall_start)})")
     print(f"{'='*60}")
     if eval_completed:
-        print(f"  Evaluated: {', '.join(eval_completed)}")
+        print(f"  Step-limited: {', '.join(eval_completed)}")
+    if time_completed:
+        print(f"  Wall-time:    {', '.join(time_completed)}")
     if train_failed:
         print(f"  Train failures: {', '.join(train_failed)}")
-    if eval_failed:
-        print(f"  Eval failures:  {', '.join(eval_failed)}")
-    if not eval_completed and not train_failed and not eval_failed:
+    if eval_failed or time_failed:
+        print(f"  Eval failures:  {', '.join(eval_failed + time_failed)}")
+    if not eval_completed and not time_completed and not train_failed and not eval_failed:
         print("  All phases skipped or no configs to process")
     print(f"{'='*60}")
     sys.stdout.flush()
@@ -423,6 +495,8 @@ def main():
                         help="Override max training epochs")
     parser.add_argument("--rerun", action="store_true",
                         help="Force re-run everything (ignore caches)")
+    parser.add_argument("--problem-set", default=None,
+                        help="Problem set to evaluate on (default: from tptp.json)")
 
     args = parser.parse_args()
     base_dir = find_project_root()

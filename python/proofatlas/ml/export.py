@@ -80,7 +80,11 @@ def export_model(
         traced.save(str(weights_path))
 
     # For attention/transformer scorers, also export split encoder + scorer
-    scorer_type = config.get("scoring", {}).get("type", "mlp")
+    scorer_type = config.get("scorer", config.get("scoring", {}))
+    if isinstance(scorer_type, dict):
+        scorer_type = scorer_type.get("type", "mlp")
+    else:
+        scorer_type = "mlp"
     if scorer_type in ("attention", "transformer"):
         _export_split_models(
             model, weights_dir, model_name, config,
@@ -109,7 +113,8 @@ def _export_split_models(
     encoder_path = weights_dir / f"{model_name}_encoder.pt"
     scorer_path = weights_dir / f"{model_name}_scorer.pt"
 
-    hidden_dim = config.get("hidden_dim", 64)
+    hidden_dim = config.get("embedding", {}).get("hidden_dim",
+                 config.get("hidden_dim", 64))
 
     # --- Export encoder ---
     if is_sentence_model:
@@ -128,6 +133,16 @@ def _export_split_models(
 
 def _export_sentence_encoder(model, encoder_path: Path, trace_device: torch.device):
     """Export sentence encoder that returns projected embeddings from tokens."""
+    from transformers import AutoModel, AutoConfig
+
+    # Re-load encoder with eager attention for tracing — SDPA (default in
+    # transformers 5.x) uses C++ kernels that can crash torch.jit.trace
+    config = AutoConfig.from_pretrained(model.model_name, torchscript=True)
+    trace_encoder = AutoModel.from_pretrained(
+        model.model_name, config=config, attn_implementation="eager"
+    ).to(trace_device)
+    trace_encoder.load_state_dict(model.encoder.state_dict(), strict=False)
+    trace_encoder.eval()
 
     class _SentenceEncoderWrapper(nn.Module):
         def __init__(self, encoder, projection):
@@ -141,12 +156,12 @@ def _export_sentence_encoder(model, encoder_path: Path, trace_device: torch.devi
             attention_mask: torch.Tensor,
         ) -> torch.Tensor:
             outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-            token_embeddings = outputs.last_hidden_state
+            token_embeddings: torch.Tensor = outputs[0]
             mask_expanded = attention_mask.unsqueeze(-1).float()
             embeddings = (token_embeddings * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
             return self.projection(embeddings)
 
-    wrapper = _SentenceEncoderWrapper(model.encoder, model.projection)
+    wrapper = _SentenceEncoderWrapper(trace_encoder, model.projection)
     wrapper.eval()
 
     dummy_ids = torch.zeros((3, 32), dtype=torch.long, device=trace_device)
@@ -318,5 +333,69 @@ def _export_scorer(scorer: nn.Module, scorer_path: Path, hidden_dim: int, trace_
     with torch.no_grad():
         traced = torch.jit.trace(scorer, (example_u, example_p), check_trace=False)
     traced.save(str(scorer_path))
+
+
+def ensure_base_minilm(weights_dir) -> Path:
+    """Ensure base MiniLM TorchScript model + tokenizer exist.
+
+    Downloads from HuggingFace if needed. The exported model returns raw
+    384-D embeddings (no projection), matching what MiniLMEncoderModel in
+    Rust expects for trace embedding.
+
+    Args:
+        weights_dir: Directory to store base_minilm.pt and base_minilm_tokenizer/
+
+    Returns:
+        Path to the weights directory
+    """
+    weights_dir = Path(weights_dir)
+    model_path = weights_dir / "base_minilm.pt"
+    tokenizer_dir = weights_dir / "base_minilm_tokenizer"
+    tokenizer_path = tokenizer_dir / "tokenizer.json"
+
+    if model_path.exists() and tokenizer_path.exists():
+        return weights_dir
+
+    weights_dir.mkdir(parents=True, exist_ok=True)
+
+    from transformers import AutoTokenizer, AutoModel, AutoConfig
+
+    model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    config = AutoConfig.from_pretrained(model_name, torchscript=True)
+    # Force eager attention — SDPA (default in transformers 5.x) uses C++ kernels
+    # that cause double-free crashes during torch.jit.trace
+    encoder = AutoModel.from_pretrained(model_name, config=config, attn_implementation="eager")
+    encoder.eval()
+
+    # Mean-pooling wrapper: token embeddings → sentence embedding [B, 384]
+    class _BaseMiniLMWrapper(nn.Module):
+        def __init__(self, enc):
+            super().__init__()
+            self.encoder = enc
+
+        def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+            outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+            token_embeddings: torch.Tensor = outputs[0]
+            mask_expanded = attention_mask.unsqueeze(-1).float()
+            return (token_embeddings * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
+
+    wrapper = _BaseMiniLMWrapper(encoder)
+    dummy_ids = torch.zeros((1, 32), dtype=torch.long)
+    dummy_mask = torch.ones((1, 32), dtype=torch.long)
+    with torch.no_grad():
+        traced = torch.jit.trace(wrapper, (dummy_ids, dummy_mask))
+    traced.save(str(model_path))
+
+    del wrapper, encoder, traced
+    import gc
+    gc.collect()
+
+    tokenizer_dir.mkdir(parents=True, exist_ok=True)
+    tokenizer.save_pretrained(str(tokenizer_dir))
+    del tokenizer
+    gc.collect()
+
+    return weights_dir
 
 

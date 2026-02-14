@@ -9,7 +9,7 @@
       "timeout": 10,
       "literal_selection": 21,
       "age_weight_ratio": 0.5,
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "age_weight": {
@@ -18,7 +18,7 @@
       "max_iterations": 256,
       "literal_selection": 21,
       "age_weight_ratio": 0.5,
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_mlp": {
@@ -29,7 +29,7 @@
       "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_attention": {
@@ -40,7 +40,7 @@
       "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_transformer": {
@@ -51,7 +51,7 @@
       "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "sentence_mlp": {
@@ -62,7 +62,7 @@
       "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "features_mlp": {
@@ -73,7 +73,7 @@
       "encoder": "features",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "features_attention": {
@@ -84,7 +84,7 @@
       "encoder": "features",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "features_transformer": {
@@ -95,7 +95,7 @@
       "encoder": "features",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_struct_mlp": {
@@ -106,7 +106,7 @@
       "encoder": "gcn_struct",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_struct_attention": {
@@ -117,7 +117,7 @@
       "encoder": "gcn_struct",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "gcn_struct_transformer": {
@@ -128,40 +128,7 @@
       "encoder": "gcn_struct",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 4096
-    },
-
-    "gcn_symbol_mlp": {
-      "description": "GCN (symbol) + MLP",
-      "timeout": 300,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_symbol",
-      "scorer": "mlp",
-      "traces": "age_weight",
-      "memory_limit": 4096
-    },
-
-    "gcn_symbol_attention": {
-      "description": "GCN (symbol) + Attention",
-      "timeout": 300,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_symbol",
-      "scorer": "attention",
-      "traces": "age_weight",
-      "memory_limit": 4096
-    },
-
-    "gcn_symbol_transformer": {
-      "description": "GCN (symbol) + Transformer",
-      "timeout": 300,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_symbol",
-      "scorer": "transformer",
-      "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "sentence_attention": {
@@ -172,7 +139,7 @@
       "encoder": "sentence",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
     },
 
     "sentence_transformer": {
@@ -183,7 +150,127 @@
       "encoder": "sentence",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 4096
+      "memory_limit": 1024
+    },
+
+    "time_gcn_mlp": {
+      "description": "GCN + MLP (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_gcn_attention": {
+      "description": "GCN + Attention (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_gcn_transformer": {
+      "description": "GCN + Transformer (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_gcn_struct_mlp": {
+      "description": "GCN (structural) + MLP (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_gcn_struct_attention": {
+      "description": "GCN (structural) + Attention (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_gcn_struct_transformer": {
+      "description": "GCN (structural) + Transformer (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_sentence_mlp": {
+      "description": "Sentence + MLP (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "sentence",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_sentence_attention": {
+      "description": "Sentence + Attention (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "sentence",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_sentence_transformer": {
+      "description": "Sentence + Transformer (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "sentence",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_features_mlp": {
+      "description": "Features + MLP (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "features",
+      "scorer": "mlp",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_features_attention": {
+      "description": "Features + Attention (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "features",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024
+    },
+
+    "time_features_transformer": {
+      "description": "Features + Transformer (10s wall-time)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "encoder": "features",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 1024
     }
   }
 }

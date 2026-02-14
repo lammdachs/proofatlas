@@ -16,13 +16,6 @@
       "node_info": "features"
     },
 
-    "gcn_symbol": {
-      "type": "gcn",
-      "hidden_dim": 256,
-      "num_layers": 6,
-      "node_info": "names"
-    },
-
     "sentence": {
       "type": "sentence",
       "freeze_encoder": true,

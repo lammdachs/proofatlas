@@ -72,6 +72,11 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
     else:
         atlas_kwargs["age_weight_ratio"] = float(age_weight_ratio)
 
+    if collect_trace:
+        atlas_kwargs["enable_trace"] = True
+        if not atlas_kwargs.get("weights_path"):
+            atlas_kwargs["weights_path"] = weights_path or str(base_dir / ".weights")
+
     start = time.time()
     try:
         atlas = ProofAtlas(**atlas_kwargs)
@@ -375,7 +380,8 @@ def run_single_problem(args, socket_path=None):
 
 
 def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
-                       use_cuda: bool = False, socket_path: str = None) -> dict:
+                       use_cuda: bool = False, socket_path: str = None,
+                       collect_trace: bool = False) -> dict:
     """Build ProofAtlas constructor kwargs from a preset config."""
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
@@ -401,6 +407,13 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
             kwargs["socket_path"] = socket_path
     else:
         kwargs["age_weight_ratio"] = float(preset.get("age_weight_ratio", 0.5))
+
+    # Enable trace embedding via MiniLM backend
+    if collect_trace:
+        kwargs["enable_trace"] = True
+        # Ensure weights_path is set so MiniLM model can be found
+        if not kwargs.get("weights_path"):
+            kwargs["weights_path"] = weights_path or str(Path(__file__).parent.parent / ".weights")
 
     return kwargs
 
@@ -551,7 +564,8 @@ class ProofAtlasPool:
         self.workers = []
         for i in range(n_workers):
             sp = socket_paths[i % len(socket_paths)] if socket_paths else None
-            kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda, sp)
+            kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda, sp,
+                                        collect_trace=collect_trace)
             worker = AtlasWorker(kwargs, base_dir, collect_trace, trace_preset)
             self.workers.append(worker)
 

@@ -149,7 +149,7 @@ def run_training(
     cpu_workers: int = 0,
     rank: int = 0,
     world_size: int = 1,
-    max_clauses: Optional[int] = None,
+    batch_size: Optional[int] = None,
     accumulate_batches: Optional[int] = None,
     force_cpu: bool = False,
     max_epochs: Optional[int] = None,
@@ -168,7 +168,7 @@ def run_training(
         cpu_workers: Number of DataLoader workers (default: 0)
         rank: GPU rank for DDP (default: 0)
         world_size: Total GPU count for DDP (default: 1)
-        max_clauses: Override max U clauses per batch (default: from config)
+        batch_size: Override max tensor bytes per batch (default: from config)
         accumulate_batches: Override gradient accumulation steps (default: from config)
 
     Returns:
@@ -230,7 +230,7 @@ def run_training(
             device=device,
             is_main=is_main,
             use_ddp=use_ddp,
-            max_clauses=max_clauses,
+            batch_size=batch_size,
             accumulate_batches=accumulate_batches,
             start_time=start_time,
             max_epochs_override=max_epochs,
@@ -257,7 +257,7 @@ def _run_training_inner(
     device,
     is_main,
     use_ddp,
-    max_clauses,
+    batch_size,
     accumulate_batches,
     start_time,
     max_epochs_override=None,
@@ -342,23 +342,27 @@ def _run_training_inner(
     # Resolve batch size and accumulation: CLI overrides > config
     is_sentence_model_type = (embedding_type == "string")
 
-    if max_clauses is None:
-        default_max_clauses = 512 if is_sentence_model_type else 8192
-        resolved_max_clauses = config.get("max_clauses_per_batch", default_max_clauses)
+    if batch_size is None:
+        default_batch_size = 64 * 1024
+        resolved_batch_size = config.get("batch_size_bytes", default_batch_size)
     else:
-        resolved_max_clauses = max_clauses
+        resolved_batch_size = batch_size
 
     default_accumulate = 4 if is_sentence_model_type else 1
     accumulate_steps = accumulate_batches if accumulate_batches is not None else config.get("accumulate_steps", default_accumulate)
 
-    log_msg(f"Batch: {resolved_max_clauses} max clauses, {accumulate_steps} accumulation steps, {cpu_workers} workers")
+    if resolved_batch_size >= 1024 * 1024:
+        batch_str = f"{resolved_batch_size // (1024*1024)}M"
+    else:
+        batch_str = f"{resolved_batch_size // 1024}K"
+    log_msg(f"Batch: {batch_str} bytes, {accumulate_steps} accumulation steps, {cpu_workers} workers")
 
     # Create datasets using ProofBatchDataset
     log_msg(f"Loading training data ({output_type} format)...")
     train_ds = ProofBatchDataset(
         files=train_files,
         output_type=output_type,
-        max_clauses=resolved_max_clauses,
+        batch_size=resolved_batch_size,
         shuffle=True,
     )
 
@@ -368,7 +372,7 @@ def _run_training_inner(
         val_ds = ProofBatchDataset(
             files=val_files,
             output_type=output_type,
-            max_clauses=resolved_max_clauses,
+            batch_size=resolved_batch_size,
             shuffle=False,
         )
 
@@ -455,7 +459,7 @@ def _run_training_inner(
                 "scorer_type": scorer_name,
             },
             training_config={
-                "max_clauses": resolved_max_clauses,
+                "batch_size_bytes": resolved_batch_size,
                 "accumulate_steps": accumulate_steps,
                 "learning_rate": lr,
                 "max_epochs": max_epochs,

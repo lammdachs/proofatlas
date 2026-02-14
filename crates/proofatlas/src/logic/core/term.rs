@@ -119,10 +119,19 @@ pub struct TermDisplay<'a> {
 impl<'a> fmt::Display for TermDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.term {
-            Term::Variable(v) => write!(f, "{}", self.interner.resolve_variable(v.id)),
-            Term::Constant(c) => write!(f, "{}", self.interner.resolve_constant(c.id)),
+            Term::Variable(v) => match self.interner.try_resolve_variable(v.id) {
+                Some(name) => write!(f, "{}", name),
+                None => write!(f, "V{}", v.id.0),
+            },
+            Term::Constant(c) => match self.interner.try_resolve_constant(c.id) {
+                Some(name) => write!(f, "{}", name),
+                None => write!(f, "c{}", c.id.0),
+            },
             Term::Function(func, args) => {
-                write!(f, "{}", self.interner.resolve_function(func.id))?;
+                match self.interner.try_resolve_function(func.id) {
+                    Some(name) => write!(f, "{}", name)?,
+                    None => write!(f, "f{}", func.id.0)?,
+                }
                 if !args.is_empty() {
                     write!(f, "(")?;
                     for (i, arg) in args.iter().enumerate() {

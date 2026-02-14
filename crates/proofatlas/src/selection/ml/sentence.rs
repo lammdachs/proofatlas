@@ -202,6 +202,115 @@ impl crate::selection::cached::EmbeddingScorer for PassThroughScorer {
     }
 }
 
+// =============================================================================
+// SentenceEncoder — encoder-only, returns hidden_dim embeddings
+// =============================================================================
+
+/// Sentence encoder that returns real embeddings (not scores).
+///
+/// Loads an encoder-only TorchScript model (exported from _export_sentence_encoder).
+/// Returns `[N, hidden_dim]` embeddings. Used with `TorchScriptScorer` for
+/// separated encoder/scorer architecture (attention/transformer scorers).
+#[cfg(feature = "ml")]
+pub struct SentenceEncoder {
+    model: tch::CModule,
+    tokenizer: tokenizers::Tokenizer,
+    device: tch::Device,
+    max_length: usize,
+    hidden_dim: usize,
+    interner: Option<Arc<Interner>>,
+}
+
+#[cfg(feature = "ml")]
+impl SentenceEncoder {
+    pub fn new<P: AsRef<Path>>(
+        model_path: P,
+        tokenizer_path: P,
+        hidden_dim: usize,
+        use_cuda: bool,
+    ) -> Result<Self, String> {
+        let device = if use_cuda && tch::Cuda::is_available() {
+            tch::Device::Cuda(0)
+        } else {
+            tch::Device::Cpu
+        };
+
+        let model = tch::CModule::load_on_device(model_path.as_ref(), device)
+            .map_err(|e| format!("Failed to load TorchScript sentence encoder: {}", e))?;
+
+        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path.as_ref())
+            .map_err(|e| format!("Failed to load tokenizer: {}", e))?;
+
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+            max_length: 128,
+            hidden_dim,
+            interner: None,
+        })
+    }
+
+    fn embed_strings(&self, clause_strings: &[&str]) -> Vec<Vec<f32>> {
+        if clause_strings.is_empty() {
+            return vec![];
+        }
+
+        let owned: Vec<String> = clause_strings.iter().map(|s| s.to_string()).collect();
+        let (input_ids, attention_mask) =
+            tokenize_batch(&self.tokenizer, &owned, self.max_length, self.device);
+
+        let embeddings = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[input_ids, attention_mask])
+                .expect("Sentence encoder forward failed")
+        });
+
+        let emb_cpu = embeddings.to_device(tch::Device::Cpu);
+        let shape = emb_cpu.size();
+        let n = shape[0] as usize;
+        let dim = if shape.len() > 1 { shape[1] as usize } else { 1 };
+        let flat: Vec<f32> =
+            Vec::<f32>::try_from(&emb_cpu.view([-1])).expect("Failed to convert tensor");
+
+        flat.chunks(dim).take(n).map(|c| c.to_vec()).collect()
+    }
+}
+
+#[cfg(feature = "ml")]
+impl crate::selection::cached::ClauseEmbedder for SentenceEncoder {
+    fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
+        if clauses.is_empty() {
+            return vec![];
+        }
+
+        let clause_strings: Vec<String> = if let Some(ref interner) = self.interner {
+            clauses.iter().map(|c| c.display(interner).to_string()).collect()
+        } else {
+            clauses.iter().map(|c| c.to_string()).collect()
+        };
+
+        let refs: Vec<&str> = clause_strings.iter().map(|s| s.as_str()).collect();
+        self.embed_strings(&refs)
+    }
+
+    fn embed_texts(&self, texts: &[&str]) -> Vec<Vec<f32>> {
+        self.embed_strings(texts)
+    }
+
+    fn embedding_dim(&self) -> usize {
+        self.hidden_dim
+    }
+
+    fn name(&self) -> &str {
+        "sentence_encoder"
+    }
+
+    fn set_interner(&mut self, interner: Arc<Interner>) {
+        self.interner = Some(interner);
+    }
+}
+
 /// Sentence selector with GPU acceleration
 #[cfg(feature = "ml")]
 pub type SentenceSelector = crate::selection::cached::CachingSelector<SentenceEmbedder, PassThroughScorer>;
@@ -271,32 +380,46 @@ impl MiniLMEncoderModel {
     }
 
     /// Encode strings to 384-D embeddings.
+    ///
+    /// Mini-batches internally to bound peak memory. MiniLM's self-attention
+    /// allocates O(batch * heads * seq * seq) intermediate tensors — encoding
+    /// thousands of strings at once easily exhausts RAM on constrained systems.
     pub fn encode_strings(&self, strings: &[String]) -> Vec<Vec<f32>> {
         if strings.is_empty() {
             return vec![];
         }
 
-        let (input_ids, attention_mask) =
-            tokenize_batch(&self.tokenizer, strings, self.max_length, self.device);
+        // Cap batch size to keep MiniLM attention memory bounded.
+        // At max_length=128, batch=64: attention ≈ 64*12*128*128*4 ≈ 50 MB.
+        const MAX_BATCH: usize = 64;
 
-        let embeddings = tch::no_grad(|| {
-            self.model
-                .forward_ts(&[input_ids, attention_mask])
-                .expect("MiniLM forward failed")
-        });
+        let mut all_results: Vec<Vec<f32>> = Vec::with_capacity(strings.len());
 
-        // Convert [B, 384] tensor to Vec<Vec<f32>>
-        let emb_cpu = embeddings.to_device(tch::Device::Cpu);
-        let shape = emb_cpu.size();
-        let n = shape[0] as usize;
-        let dim = shape[1] as usize;
-        let flat: Vec<f32> =
-            Vec::<f32>::try_from(&emb_cpu.view([-1])).expect("Failed to convert tensor");
+        for chunk in strings.chunks(MAX_BATCH) {
+            let (input_ids, attention_mask) =
+                tokenize_batch(&self.tokenizer, chunk, self.max_length, self.device);
 
-        flat.chunks_exact(dim)
-            .take(n)
-            .map(|chunk| chunk.to_vec())
-            .collect()
+            let embeddings = tch::no_grad(|| {
+                self.model
+                    .forward_ts(&[input_ids, attention_mask])
+                    .expect("MiniLM forward failed")
+            });
+
+            let emb_cpu = embeddings.to_device(tch::Device::Cpu);
+            let shape = emb_cpu.size();
+            let n = shape[0] as usize;
+            let dim = shape[1] as usize;
+            let flat: Vec<f32> =
+                Vec::<f32>::try_from(&emb_cpu.view([-1])).expect("Failed to convert tensor");
+
+            all_results.extend(
+                flat.chunks_exact(dim)
+                    .take(n)
+                    .map(|chunk| chunk.to_vec()),
+            );
+        }
+
+        all_results
     }
 }
 

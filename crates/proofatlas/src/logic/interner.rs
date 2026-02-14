@@ -98,6 +98,11 @@ impl StringArena {
         &self.strings[id as usize]
     }
 
+    /// Try to resolve an ID, returning None if out of bounds.
+    fn try_resolve(&self, id: u32) -> Option<&str> {
+        self.strings.get(id as usize).map(|s| s.as_str())
+    }
+
     /// Check if a string is already interned
     fn contains(&self, name: &str) -> bool {
         self.lookup.contains_key(name)
@@ -150,6 +155,11 @@ impl Interner {
         self.variables.resolve(id.0)
     }
 
+    /// Try to resolve a variable ID, returning None if not found (e.g., stale clone).
+    pub fn try_resolve_variable(&self, id: VariableId) -> Option<&str> {
+        self.variables.try_resolve(id.0)
+    }
+
     /// Check if a variable name is already interned
     pub fn contains_variable(&self, name: &str) -> bool {
         self.variables.contains(name)
@@ -175,6 +185,11 @@ impl Interner {
     /// Resolve a constant ID to its name
     pub fn resolve_constant(&self, id: ConstantId) -> &str {
         self.constants.resolve(id.0)
+    }
+
+    /// Try to resolve a constant ID, returning None if not found.
+    pub fn try_resolve_constant(&self, id: ConstantId) -> Option<&str> {
+        self.constants.try_resolve(id.0)
     }
 
     /// Check if a constant name is already interned
@@ -204,6 +219,11 @@ impl Interner {
         self.functions.resolve(id.0)
     }
 
+    /// Try to resolve a function ID, returning None if not found.
+    pub fn try_resolve_function(&self, id: FunctionId) -> Option<&str> {
+        self.functions.try_resolve(id.0)
+    }
+
     /// Check if a function name is already interned
     pub fn contains_function(&self, name: &str) -> bool {
         self.functions.contains(name)
@@ -229,6 +249,11 @@ impl Interner {
     /// Resolve a predicate ID to its name
     pub fn resolve_predicate(&self, id: PredicateId) -> &str {
         self.predicates.resolve(id.0)
+    }
+
+    /// Try to resolve a predicate ID, returning None if not found.
+    pub fn try_resolve_predicate(&self, id: PredicateId) -> Option<&str> {
+        self.predicates.try_resolve(id.0)
     }
 
     /// Check if a predicate name is already interned

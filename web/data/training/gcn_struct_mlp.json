@@ -1,18 +1,18 @@
 {
-  "generated": "2026-02-14T14:21:43.575886",
-  "name": "features_transformer",
-  "start_time": "2026-02-14T14:21:43.575895",
-  "end_time": "2026-02-14T14:21:47.419194",
-  "total_time_seconds": 3.847625970840454,
+  "generated": "2026-02-14T14:25:27.412815",
+  "name": "gcn_struct_mlp",
+  "start_time": "2026-02-14T14:25:27.412822",
+  "end_time": "2026-02-14T14:25:34.046570",
+  "total_time_seconds": 6.636765003204346,
   "termination_reason": "completed",
   "best_epoch": 1,
   "best_val_loss": 0.0,
   "model": {
-    "type": "features",
+    "type": "gcn",
     "hidden_dim": 64,
     "num_layers": 3,
     "input_dim": 8,
-    "scorer_type": "transformer"
+    "scorer_type": "mlp"
   },
   "training": {
     "batch_size_bytes": 65536,
@@ -28,7 +28,7 @@
   "epochs": [
     {
       "epoch": 1,
-      "train_loss": 0.6563899517059326,
+      "train_loss": 0.0,
       "val_loss": 0.0,
       "val_acc": null,
       "val_mrr": null,

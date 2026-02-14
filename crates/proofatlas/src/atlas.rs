@@ -74,6 +74,7 @@ impl ProofAtlas {
             temperature: 1.0,
             age_weight_ratio: 0.5,
             socket_path: None,
+            enable_trace: false,
         }
     }
 
@@ -102,6 +103,16 @@ impl ProofAtlas {
     /// Get the include directories.
     pub fn include_dirs(&self) -> &[String] {
         &self.include_dirs
+    }
+
+    /// Get a cloneable handle to the Backend (if any).
+    ///
+    /// Used by Python bindings to submit trace embedding requests to the
+    /// same Backend that serves inference. Returns `None` when no ML
+    /// backend is configured.
+    #[cfg(feature = "ml")]
+    pub fn backend_handle(&self) -> Option<BackendHandle> {
+        self._backend.as_ref().map(|b| b.handle())
     }
 
     /// Parse a TPTP file without running saturation.
@@ -150,18 +161,18 @@ impl ProofAtlas {
                 // - Sentence: heavy (MiniLM) → both follow use_cuda
                 let is_lightweight_encoder = matches!(
                     encoder.as_str(),
-                    "gcn" | "gat" | "graphsage" | "features"
+                    "gcn" | "gcn_struct" | "gat" | "graphsage" | "features"
                 );
                 let embed_cuda = if is_lightweight_encoder { false } else { cuda };
                 let score_cuda = cuda;
 
                 let processor: Box<dyn crate::selection::DataProcessor> = match (encoder.as_str(), scorer.as_str()) {
                     // GCN + MLP: cache scores
-                    ("gcn" | "gat" | "graphsage", "mlp") => {
+                    ("gcn" | "gcn_struct" | "gat" | "graphsage", "mlp") => {
                         Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda))
                     }
                     // GCN + attention/transformer: cache embeddings
-                    ("gcn" | "gat" | "graphsage", "attention" | "transformer") => {
+                    ("gcn" | "gcn_struct" | "gat" | "graphsage", "attention" | "transformer") => {
                         Box::new(processors::GcnEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda))
                     }
                     // Sentence + MLP: cache scores
@@ -215,6 +226,7 @@ pub struct ProofAtlasBuilder {
     temperature: f32,
     age_weight_ratio: f64,
     socket_path: Option<String>,
+    enable_trace: bool,
 }
 
 impl ProofAtlasBuilder {
@@ -266,6 +278,17 @@ impl ProofAtlasBuilder {
         self
     }
 
+    /// Enable trace embedding via a MiniLM Backend.
+    ///
+    /// When true, the builder will create (or augment) a Backend with a
+    /// base MiniLM model spec so that `save_trace()` can pre-compute
+    /// 384-D embeddings. Requires `weights_path` to point to a directory
+    /// containing `base_minilm.pt` and `base_minilm_tokenizer/`.
+    pub fn enable_trace(mut self, enable: bool) -> Self {
+        self.enable_trace = enable;
+        self
+    }
+
     /// Build the `ProofAtlas` orchestrator.
     pub fn build(self) -> Result<ProofAtlas, String> {
         #[cfg(unix)]
@@ -283,17 +306,37 @@ impl ProofAtlasBuilder {
         match self.encoder.as_deref() {
             None => {
                 // No ML — use heuristic selector
+                #[cfg(feature = "ml")]
+                let _backend = if self.enable_trace {
+                    if let Some(ref wp) = self.weights_path {
+                        let weights_dir = std::path::PathBuf::from(wp);
+                        match make_minilm_spec(&weights_dir) {
+                            Ok(spec) => {
+                                Some(Backend::new(vec![spec]))
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: trace embedding unavailable: {}", e);
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 Ok(ProofAtlas {
                     config: self.config,
                     include_dirs: self.include_dirs,
                     sink_kind: SinkKind::AgeWeight { ratio: self.age_weight_ratio },
                     temperature: self.temperature,
                     #[cfg(feature = "ml")]
-                    _backend: None,
+                    _backend,
                 })
             }
             #[cfg(feature = "ml")]
-            Some(enc @ ("gcn" | "gat" | "graphsage" | "sentence" | "features")) => {
+            Some(enc @ ("gcn" | "gcn_struct" | "gat" | "graphsage" | "sentence" | "features")) => {
                 let scorer_name = self.scorer.as_deref()
                     .ok_or_else(|| "scorer required when encoder is set".to_string())?;
                 let is_mlp = scorer_name == "mlp";
@@ -305,11 +348,18 @@ impl ProofAtlasBuilder {
                 // Create model specs with lazy-loading factories.
                 // The Backend loads each model on the device specified by the
                 // first request (from the DataProcessor's embed_cuda/score_cuda).
-                let specs = if is_mlp {
+                let mut specs = if is_mlp {
                     make_combined_spec(enc, scorer_name, &weights_dir)?
                 } else {
                     make_split_specs(enc, scorer_name, &weights_dir)?
                 };
+
+                // Append MiniLM spec for trace embedding if enabled
+                if self.enable_trace {
+                    if let Ok(minilm_spec) = make_minilm_spec(&weights_dir) {
+                        specs.push(minilm_spec);
+                    }
+                }
 
                 let backend = Backend::new(specs);
                 let handle = backend.handle();
@@ -329,7 +379,7 @@ impl ProofAtlasBuilder {
             }
             Some(other) => {
                 #[cfg(feature = "ml")]
-                let available = "None, 'gcn', 'gat', 'graphsage', 'sentence', or 'features'";
+                let available = "None, 'gcn', 'gcn_struct', 'gat', 'graphsage', 'sentence', or 'features'";
                 #[cfg(not(feature = "ml"))]
                 let available = "None (ML features not enabled)";
                 Err(format!("Unknown encoder: '{}'. Use {}", other, available))
@@ -385,26 +435,17 @@ fn make_split_specs(
     let encoder_path = weights_dir.join(format!("{}_encoder.pt", model_name));
     let scorer_path = weights_dir.join(format!("{}_scorer.pt", model_name));
 
-    // Fall back to combined model if split models don't exist yet
     if !encoder_path.exists() || !scorer_path.exists() {
-        let combined_path = weights_dir.join(format!("{}.pt", model_name));
-        if combined_path.exists() {
-            eprintln!(
-                "Warning: Split encoder/scorer models not found for '{}'. \
-                 Falling back to combined model (re-export with updated export.py for optimal performance).",
-                model_name
-            );
-            return make_combined_spec(enc, scorer_name, weights_dir);
-        }
         return Err(format!(
-            "Neither split models ({}_encoder.pt, {}_scorer.pt) nor combined model ({}.pt) found in {}",
-            model_name, model_name, model_name, weights_dir.display()
+            "Split models required for '{}' scorer: {}_encoder.pt and {}_scorer.pt not found in {}. \
+             Re-run training to generate them.",
+            scorer_name, model_name, model_name, weights_dir.display()
         ));
     }
 
     let cross_attention = scorer_name == "attention" || scorer_name == "transformer";
     let hidden_dim = match enc {
-        "gcn" | "gat" | "graphsage" => 256,
+        "gcn" | "gcn_struct" | "gat" | "graphsage" => 256,
         _ => 64,
     };
 
@@ -438,6 +479,42 @@ fn make_split_specs(
     Ok(vec![embed_spec, score_spec])
 }
 
+/// Create a ModelSpec for base MiniLM trace embedding.
+///
+/// Expects `{weights_dir}/base_minilm.pt` and `{weights_dir}/base_minilm_tokenizer/`.
+/// Python side guarantees these exist via `ensure_base_minilm()`.
+#[cfg(feature = "ml")]
+fn make_minilm_spec(
+    weights_dir: &std::path::Path,
+) -> Result<crate::selection::pipeline::backend::ModelSpec, String> {
+    use crate::selection::pipeline::backend::ModelSpec;
+
+    let model_path = weights_dir.join("base_minilm.pt");
+    let tokenizer_dir = weights_dir.join("base_minilm_tokenizer");
+
+    if !model_path.exists() {
+        return Err(format!("Base MiniLM model not found at {}", model_path.display()));
+    }
+    if !tokenizer_dir.exists() {
+        return Err(format!("Base MiniLM tokenizer not found at {}", tokenizer_dir.display()));
+    }
+
+    let model_path_str = model_path.to_string_lossy().to_string();
+    let tokenizer_dir_str = tokenizer_dir.to_string_lossy().to_string();
+
+    Ok(ModelSpec {
+        model_id: "minilm".to_string(),
+        factory: Box::new(move |use_cuda| {
+            let model = crate::selection::MiniLMEncoderModel::new(
+                &model_path_str,
+                &tokenizer_dir_str,
+                use_cuda,
+            )?;
+            Ok(Box::new(model) as Box<dyn crate::selection::pipeline::backend::Model>)
+        }),
+    })
+}
+
 // =============================================================================
 // Model loading helpers
 // =============================================================================
@@ -453,23 +530,23 @@ fn load_encoder(
     use_cuda: bool,
 ) -> Result<Box<dyn crate::selection::cached::ClauseEmbedder + Send>, String> {
     match enc {
-        "gcn" | "gat" | "graphsage" => {
+        "gcn" | "gcn_struct" | "gat" | "graphsage" => {
             let encoder = crate::selection::GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
             Ok(Box::new(encoder))
         }
         "sentence" => {
             // Find tokenizer relative to encoder path
-            let model_stem = encoder_path.file_stem()
+            let encoder_stem = encoder_path.file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .strip_suffix("_encoder")
                 .unwrap_or("");
-            let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_stem));
-            let emb = crate::selection::load_sentence_embedder(encoder_path, &tokenizer_path, use_cuda)?;
-            Ok(Box::new(emb))
+            let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", encoder_stem));
+            let encoder = crate::selection::SentenceEncoder::new(
+                encoder_path, &tokenizer_path, hidden_dim, use_cuda,
+            )?;
+            Ok(Box::new(encoder))
         }
         "features" => {
-            let encoder = crate::selection::GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
+            let encoder = crate::selection::FeaturesEncoder::new(encoder_path, hidden_dim, use_cuda)?;
             Ok(Box::new(encoder))
         }
         _ => Err(format!("Unknown encoder for split path: '{}'", enc)),
@@ -496,12 +573,12 @@ fn load_embedder_scorer(
             let emb = crate::selection::load_sentence_embedder(model_path, &tokenizer_path, use_cuda)?;
             Ok((Box::new(emb), Box::new(crate::selection::PassThroughScorer) as _))
         }
-        "gcn" | "gat" | "graphsage" => {
+        "gcn" | "gcn_struct" | "gat" | "graphsage" => {
             let emb = crate::selection::load_gcn_embedder(model_path, use_cuda)?;
             Ok((Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _))
         }
         "features" => {
-            let emb = crate::selection::load_gcn_embedder(model_path, use_cuda)?;
+            let emb = crate::selection::load_features_embedder(model_path, use_cuda)?;
             Ok((Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _))
         }
         _ => Err(format!("Unknown encoder for MLP path: '{}'", enc)),

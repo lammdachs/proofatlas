@@ -11,15 +11,15 @@
     "no_sel0": "SPASS does not support selecting all literals (Vampire sel0)"
   },
 
-  "default_preset": "time",
+  "default_preset": "spass_time",
 
   "presets": {
-    "time": {
+    "spass_time": {
       "description": "10s",
       "TimeLimit": 10,
       "Select": 1
     },
-    "age_weight_sel21": {
+    "spass_age_weight": {
       "description": "256 loops",
       "TimeLimit": 600,
       "Loops": 256,

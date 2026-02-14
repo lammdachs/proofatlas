@@ -277,7 +277,16 @@ class SentenceEncoder(nn.Module):
 
         self.eval()
 
-        # Create a wrapper module that exposes forward_tokens as forward
+        # Re-load encoder with eager attention for tracing — SDPA (default in
+        # transformers 5.x) uses C++ kernels that crash torch.jit.trace
+        from transformers import AutoModel, AutoConfig
+        config = AutoConfig.from_pretrained(self.model_name, torchscript=True)
+        trace_encoder = AutoModel.from_pretrained(
+            self.model_name, config=config, attn_implementation="eager"
+        )
+        trace_encoder.load_state_dict(self.encoder.state_dict(), strict=False)
+        trace_encoder.eval()
+
         class _ExportWrapper(nn.Module):
             def __init__(self, encoder, projection, scorer):
                 super().__init__()
@@ -291,13 +300,13 @@ class SentenceEncoder(nn.Module):
                 attention_mask: torch.Tensor,
             ) -> torch.Tensor:
                 outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-                token_embeddings = outputs.last_hidden_state
+                token_embeddings: torch.Tensor = outputs[0]
                 mask_expanded = attention_mask.unsqueeze(-1).float()
                 embeddings = (token_embeddings * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1).clamp(min=1e-9)
                 clause_emb = self.projection(embeddings)
                 return self.scorer(clause_emb)
 
-        wrapper = _ExportWrapper(self.encoder, self.projection, self.scorer)
+        wrapper = _ExportWrapper(trace_encoder, self.projection, self.scorer)
         wrapper.eval()
 
         # Create dummy inputs for tracing

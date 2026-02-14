@@ -53,7 +53,7 @@ pub use ml::gcn::{
 #[cfg(feature = "ml")]
 pub use ml::sentence::{
     load_sentence_embedder, MiniLMEncoderModel, PassThroughScorer,
-    SentenceEmbedder, tokenize_batch,
+    SentenceEmbedder, SentenceEncoder, tokenize_batch,
 };
 #[cfg(unix)]
 pub use network::remote::{RemoteSelector, RemoteSelectorSink};
@@ -71,6 +71,10 @@ pub use pipeline::processors::{
     SentenceScoreProcessor, SentenceEmbeddingProcessor,
     FeaturesScoreProcessor, FeaturesEmbeddingProcessor,
 };
+
+// Features model re-exports
+#[cfg(feature = "ml")]
+pub use ml::features::{FeaturesEmbedder, FeaturesEncoder, load_features_embedder};
 
 // Graph/ML re-exports
 pub use ml::features::{extract_clause_features, NUM_CLAUSE_FEATURES};

@@ -183,7 +183,7 @@ class ProofBatchDataset(IterableDataset):
     """IterableDataset that loads per-problem NPZ traces with lifecycle step sampling.
 
     Each worker loads per-problem .npz files, samples a random step per problem,
-    reconstructs U_k/P_k, buffers until clause count exceeds max_clauses,
+    reconstructs U_k/P_k, buffers until tensor size reaches byte budget,
     then collates and yields a complete batch.
 
     Each epoch samples new random steps per problem (natural augmentation).
@@ -191,7 +191,7 @@ class ProofBatchDataset(IterableDataset):
     Args:
         files: List of per-problem trace file paths (STEM.graph.npz or STEM.sentence.npz)
         output_type: "graph" for GNN models, "sentence" for sentence models
-        max_clauses: Maximum total U clauses per batch
+        batch_size: Maximum tensor bytes per micro-batch (default: 64 KiB)
         shuffle: Whether to shuffle files each epoch
     """
 
@@ -199,12 +199,12 @@ class ProofBatchDataset(IterableDataset):
         self,
         files: List[Path],
         output_type: str = "graph",
-        max_clauses: int = 8192,
+        batch_size: int = 64 * 1024,
         shuffle: bool = True,
     ):
         self.files = list(files)
         self.output_type = output_type
-        self.max_clauses = max_clauses
+        self.batch_size = batch_size
         self.shuffle = shuffle
 
         if not self.files:
@@ -219,6 +219,22 @@ class ProofBatchDataset(IterableDataset):
         start = worker_info.id * per_worker + min(worker_info.id, remainder)
         end = start + per_worker + (1 if worker_info.id < remainder else 0)
         return files[start:end]
+
+    def _estimate_item_bytes(self, item: Dict) -> int:
+        """Estimate tensor byte size of an item by summing ndarray nbytes."""
+        total = 0
+        if self.output_type == "sentence":
+            for key in ("u_clause_features", "p_clause_features", "u_embeddings", "p_embeddings"):
+                arr = item.get(key)
+                if arr is not None and isinstance(arr, np.ndarray):
+                    total += arr.nbytes
+        else:
+            for graph_list in (item.get("u_graphs", []), item.get("p_graphs", [])):
+                for g in graph_list:
+                    for v in g.values():
+                        if isinstance(v, np.ndarray):
+                            total += v.nbytes
+        return total
 
     def _load_and_sample(self, f: Path) -> Optional[Dict]:
         """Load and sample a single trace file."""
@@ -242,29 +258,26 @@ class ProofBatchDataset(IterableDataset):
         files = self._shard_files(worker_info, files)
 
         buffer = []
-        buffer_clauses = 0
+        buffer_bytes = 0
 
         for f in files:
             item = self._load_and_sample(f)
             if item is None:
                 continue
 
-            if self.output_type == "sentence":
-                n_u = len(item["u_labels"])
-            else:
-                n_u = len(item.get("u_graphs", []))
+            item_bytes = self._estimate_item_bytes(item)
 
-            if buffer_clauses + n_u > self.max_clauses:
+            if buffer_bytes + item_bytes > self.batch_size:
                 if buffer:
                     batch = self._collate(buffer)
                     if batch is not None:
                         yield batch
-                    buffer, buffer_clauses = [], 0
-                if n_u > self.max_clauses:
+                    buffer, buffer_bytes = [], 0
+                if item_bytes > self.batch_size:
                     continue  # drop oversized item
 
             buffer.append(item)
-            buffer_clauses += n_u
+            buffer_bytes += item_bytes
 
         if buffer:
             batch = self._collate(buffer)

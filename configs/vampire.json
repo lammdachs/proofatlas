@@ -9,17 +9,17 @@
     "binary": ".vampire/vampire"
   },
 
-  "default_preset": "time",
+  "default_preset": "vampire_time",
 
   "presets": {
-    "time": {
+    "vampire_time": {
       "description": "10s",
       "time_limit": 10,
       "selection": 21,
       "avatar": "off",
       "saturation_algorithm": "otter"
     },
-    "age_weight": {
+    "vampire_age_weight": {
       "description": "256 activations",
       "time_limit": 600,
       "activation_limit": 256,
