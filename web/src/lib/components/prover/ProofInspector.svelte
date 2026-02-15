@@ -273,24 +273,10 @@
 		<div>
 			<div class="flex items-center justify-between mb-2">
 				<h4 class="text-xs uppercase tracking-wide text-green font-mono">// iteration {currentStep + 1}/{maxStep + 1} &middot; event {currentEventIdx + 1}/{currentFlatEvents.length}</h4>
-				<div class="flex items-center gap-1">
-					<button class="p-1 text-text-muted hover:text-text transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed" disabled={isAtStart} onclick={goFirst} aria-label="First">
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
-					</button>
-					<button class="p-1 text-text-muted hover:text-text transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed" disabled={isAtStart} onclick={stepBackward} aria-label="Previous">
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-					</button>
-					<button class="p-1 text-text-muted hover:text-text transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed" disabled={isAtEnd} onclick={stepForward} aria-label="Next">
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-					</button>
-					<button class="p-1 text-text-muted hover:text-text transition-colors disabled:opacity-35 cursor-pointer disabled:cursor-not-allowed" disabled={isAtEnd} onclick={goLast} aria-label="Last">
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
-					</button>
-					<span class="ml-3 text-text-muted text-xs font-mono">
-						<kbd class="px-1.5 py-0.5 border border-surface-lighter/50">&#8592;&#8594;</kbd> iterations
-						<kbd class="ml-2 px-1.5 py-0.5 border border-surface-lighter/50">&#8593;&#8595;</kbd> events
-					</span>
-				</div>
+				<span class="text-text-muted text-xs font-mono">
+					<kbd class="px-1.5 py-0.5 border border-surface-lighter/50">&#8592;&#8594;</kbd> iterations
+					<kbd class="ml-2 px-1.5 py-0.5 border border-surface-lighter/50">&#8593;&#8595;</kbd> events
+				</span>
 			</div>
 			<div class="border border-surface-lighter/50 flex flex-col md:flex-row">
 				<!-- Left: event window -->
