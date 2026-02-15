@@ -1,6 +1,0 @@
-{
-  "runs": [
-    "proofatlas_age_weight",
-    "proofatlas_gcn_mlp"
-  ]
-}
