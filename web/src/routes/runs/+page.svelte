@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { base } from '$app/paths';
+
 	interface RunResult {
 		problem: string;
 		status: string;
@@ -24,7 +26,7 @@
 
 	async function loadIndex() {
 		try {
-			const resp = await fetch('/data/runs/index.json');
+			const resp = await fetch(`${base}/data/runs/index.json`);
 			if (!resp.ok) { noData = true; loading = false; return; }
 			const index = await resp.json();
 			runIndex = index.runs || [];
@@ -43,7 +45,7 @@
 		location.hash = name;
 
 		try {
-			const resp = await fetch(`/data/runs/${name}.json`);
+			const resp = await fetch(`${base}/data/runs/${name}.json`);
 			if (!resp.ok) return;
 			currentData = await resp.json();
 

@@ -40,22 +40,26 @@ jobs:
         run: |
           cargo build -p proofatlas-wasm --target wasm32-unknown-unknown --release
           wasm-bindgen target/wasm32-unknown-unknown/release/proofatlas_wasm.wasm \
-            --out-dir web/pkg \
+            --out-dir web/static/pkg \
             --target web \
             --no-typescript
 
-      - name: Prepare deployment files
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies and build SvelteKit
+        working-directory: web
+        env:
+          BASE_PATH: /proofatlas
         run: |
-          mkdir -p web/dist
-          cp web/index.html web/docs.html web/results.html web/training.html web/style.css web/docs-style.css web/app.js web/favicon.svg web/dist/
-          cp -r web/pkg web/dist/
-          cp -r web/examples web/dist/
-          cp -r web/data web/dist/ 2>/dev/null || true
+          npm ci
+          npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./web/dist
+          path: ./web/build
 
   deploy:
     environment:

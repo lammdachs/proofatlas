@@ -65,6 +65,7 @@ MANIFEST
 !web/examples/*.json
 !web/data/**/*.json
 !web/package.json
+!web/package-lock.json
 !web/tsconfig.json
 !web/static/examples/*.json
 !web/static/data/**/*.json

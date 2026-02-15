@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 
 	interface EpochData {
 		epoch: number;
@@ -47,7 +48,7 @@
 	async function loadRuns() {
 		try {
 			const cb = `?t=${Date.now()}`;
-			const resp = await fetch(`/data/training/index.json${cb}`);
+			const resp = await fetch(`${base}/data/training/index.json${cb}`);
 			if (!resp.ok) { noData = true; loading = false; return; }
 			const index = await resp.json();
 			const names: string[] = index.runs || [];
@@ -56,7 +57,7 @@
 			const loaded: Record<string, RunData> = {};
 			for (const name of names) {
 				try {
-					const r = await fetch(`/data/training/${name}.json${cb}`);
+					const r = await fetch(`${base}/data/training/${name}.json${cb}`);
 					if (r.ok) loaded[name] = await r.json();
 				} catch { /* skip */ }
 			}

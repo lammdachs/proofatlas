@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { base } from '$app/paths';
+
 	interface RunData {
 		prover: string;
 		preset: string;
@@ -21,7 +23,7 @@
 
 	async function loadData() {
 		try {
-			const resp = await fetch('/data/benchmarks/index.json');
+			const resp = await fetch(`${base}/data/benchmarks/index.json`);
 			if (!resp.ok) { noData = true; loading = false; return; }
 			const index = await resp.json();
 			const runNames: string[] = index.runs || [];
@@ -30,7 +32,7 @@
 			const loaded: Record<string, RunData> = {};
 			for (const name of runNames) {
 				try {
-					const r = await fetch(`/data/benchmarks/${name}.json`);
+					const r = await fetch(`${base}/data/benchmarks/${name}.json`);
 					if (r.ok) loaded[name] = await r.json();
 				} catch { /* skip */ }
 			}

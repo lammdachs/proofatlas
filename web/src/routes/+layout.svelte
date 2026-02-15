@@ -2,6 +2,7 @@
 	import '../styles/global.css';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { page } from '$app/state';
+	import { base } from '$app/paths';
 
 	let { children } = $props();
 	let mobileMenuOpen = $state(false);
@@ -15,8 +16,10 @@
 	];
 
 	function isActive(href: string): boolean {
-		if (href === '/') return page.url.pathname === '/';
-		return page.url.pathname.startsWith(href);
+		const path = page.url.pathname;
+		const full = base + href;
+		if (href === '/') return path === base || path === base + '/';
+		return path.startsWith(full);
 	}
 </script>
 
@@ -30,7 +33,7 @@
 <!-- Navigation -->
 <nav class="fixed top-0 left-0 right-0 z-50 px-6 py-4 backdrop-blur-md bg-surface/80 border-b border-surface-lighter/50">
 	<div class="max-w-6xl mx-auto flex items-center justify-between">
-		<a href="/" class="text-2xl font-bold font-display bg-gradient-to-r from-green to-terracotta bg-clip-text text-transparent hover:opacity-80 transition-opacity">
+		<a href="{base}/" class="text-2xl font-bold font-display bg-gradient-to-r from-green to-terracotta bg-clip-text text-transparent hover:opacity-80 transition-opacity">
 			ProofAtlas
 		</a>
 
@@ -38,7 +41,7 @@
 		<div class="hidden md:flex items-center gap-8">
 			{#each navLinks as link}
 				<a
-					href={link.href}
+					href="{base}{link.href}"
 					class="link-underline transition-colors {isActive(link.href) ? 'text-green font-semibold' : 'text-text-muted hover:text-text'}"
 				>
 					{link.label}
@@ -79,7 +82,7 @@
 			<div class="flex flex-col gap-4">
 				{#each navLinks as link}
 					<a
-						href={link.href}
+						href="{base}{link.href}"
 						class="transition-colors {isActive(link.href) ? 'text-green font-semibold' : 'text-text-muted hover:text-text'}"
 						onclick={() => mobileMenuOpen = false}
 					>

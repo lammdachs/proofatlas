@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { base } from '$app/paths';
+
 	let {
 		tptpInput = $bindable(''),
 		serverAvailable,
@@ -28,7 +30,7 @@
 
 	async function loadExamples() {
 		try {
-			const response = await fetch('/examples/examples.json');
+			const response = await fetch(`${base}/examples/examples.json`);
 			if (!response.ok) return;
 			const data = await response.json();
 			examples = data.examples;
@@ -36,7 +38,7 @@
 			// Preload all example files
 			for (const ex of examples) {
 				try {
-					const fileResp = await fetch(`/examples/${ex.file}`);
+					const fileResp = await fetch(`${base}/examples/${ex.file}`);
 					if (fileResp.ok) exampleContents[ex.id] = await fileResp.text();
 				} catch { /* skip */ }
 			}
@@ -57,7 +59,7 @@
 		if (!tptpName.trim()) return;
 		loadingProblem = true;
 		try {
-			const response = await fetch(`/api/tptp/${encodeURIComponent(tptpName.trim())}`);
+			const response = await fetch(`${base}/api/tptp/${encodeURIComponent(tptpName.trim())}`);
 			if (!response.ok) {
 				const err = await response.json().catch(() => ({}));
 				throw new Error(err.error || `Server error: ${response.status}`);

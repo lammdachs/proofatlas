@@ -40,14 +40,14 @@
 		<!-- Profile (expandable) -->
 		{#if result.profile}
 			{@const profile = result.profile as Record<string, any>}
-			<details class="card">
-				<summary class="px-6 py-5 cursor-pointer text-sm text-text-muted hover:text-text select-none transition-colors">
-					Profiling Details
+			<details>
+				<summary class="py-2 cursor-pointer text-xs uppercase tracking-wide text-green font-mono hover:text-text select-none transition-colors">
+					// profiling details
 				</summary>
-				<div class="px-6 pb-6 border-t border-surface-lighter/50">
+				<div class="pt-2">
 					<!-- Phase Timings -->
 					<div>
-						<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.5rem; margin-bottom: 0.5rem;">// phase timings</h4>
+						<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.75rem; margin-bottom: 0.25rem;">// phase timings</h4>
 						<table class="w-full text-sm">
 							<tbody>
 								{#each profileTable([
@@ -60,9 +60,9 @@
 									['Inference generation', formatDuration(profile.generate_inferences_time)],
 									['Inference addition', formatDuration(profile.add_inferences_time)],
 								]) as [label, value]}
-									<tr class="border-b border-surface-lighter/30 last:border-0">
-										<td class="py-3 text-text-muted">{label}</td>
-										<td class="py-3 text-right font-mono text-text">{value}</td>
+									<tr class="">
+										<td class="py-1 text-text-muted">{label}</td>
+										<td class="py-1 text-right font-mono text-text">{value}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -72,13 +72,13 @@
 					<!-- Generating Rules -->
 					{#if profile.generating_rules}
 						<div>
-							<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.5rem; margin-bottom: 0.5rem;">// generating inferences</h4>
+							<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.75rem; margin-bottom: 0.25rem;">// generating inferences</h4>
 							<table class="w-full text-sm">
 								<tbody>
 									{#each Object.entries(profile.generating_rules as Record<string, any>) as [name, stats]}
-										<tr class="border-b border-surface-lighter/30 last:border-0">
-											<td class="py-3 text-text-muted">{name}</td>
-											<td class="py-3 text-right font-mono text-text">{formatNum(stats.count)} in {formatDuration(stats.time)}</td>
+										<tr class="">
+											<td class="py-1 text-text-muted">{name}</td>
+											<td class="py-1 text-right font-mono text-text">{formatNum(stats.count)} in {formatDuration(stats.time)}</td>
 										</tr>
 									{/each}
 								</tbody>
@@ -88,7 +88,7 @@
 
 					<!-- Clause Lifecycle -->
 					<div>
-						<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.5rem; margin-bottom: 0.5rem;">// clause lifecycle</h4>
+						<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.75rem; margin-bottom: 0.25rem;">// clause lifecycle</h4>
 						<table class="w-full text-sm">
 							<tbody>
 								{#each profileTable([
@@ -98,9 +98,9 @@
 									['Max unprocessed', formatNum(profile.max_unprocessed_size)],
 									['Max processed', formatNum(profile.max_processed_size)],
 								]) as [label, value]}
-									<tr class="border-b border-surface-lighter/30 last:border-0">
-										<td class="py-3 text-text-muted">{label}</td>
-										<td class="py-3 text-right font-mono text-text">{value}</td>
+									<tr class="">
+										<td class="py-1 text-text-muted">{label}</td>
+										<td class="py-1 text-right font-mono text-text">{value}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -110,7 +110,7 @@
 					<!-- Selector Stats -->
 					{#if profile.selector_name}
 						<div>
-							<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.5rem; margin-bottom: 0.5rem;">// selector</h4>
+							<h4 class="text-xs uppercase tracking-wide text-green font-mono" style="margin-top: 0.75rem; margin-bottom: 0.25rem;">// selector</h4>
 							<table class="w-full text-sm">
 								<tbody>
 									{#each profileTable([
@@ -120,9 +120,9 @@
 										['Embed time', formatDuration(profile.selector_embed_time)],
 										['Score time', formatDuration(profile.selector_score_time)],
 									]) as [label, value]}
-										<tr class="border-b border-surface-lighter/30 last:border-0">
-											<td class="py-3 text-text-muted">{label}</td>
-											<td class="py-3 text-right font-mono text-text">{value}</td>
+										<tr class="">
+											<td class="py-1 text-text-muted">{label}</td>
+											<td class="py-1 text-right font-mono text-text">{value}</td>
 										</tr>
 									{/each}
 								</tbody>
