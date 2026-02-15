@@ -3,9 +3,9 @@
 use crate::logic::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, KBO};
 use crate::logic::unify;
 use crate::logic::unification::scoped::{
-    ScopedSubstitution, ScopedVar, apply_scoped_term, flatten_scoped, lift, unify_scoped_terms,
+    ScopedSubstitution, ScopedVar, flatten_scoped, unify_scoped_extend,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Unify the predicate/args of two literals (or atoms).
 ///
@@ -37,17 +37,16 @@ pub fn unify_atoms(
     Ok(subst)
 }
 
-/// Remove duplicate literals from a list
+/// Remove duplicate literals from a list.
+/// Uses equality comparison instead of HashSet to avoid cloning each literal.
+/// O(n^2) but n is typically 2-10 for clause literals.
 pub fn remove_duplicate_literals(literals: Vec<Literal>) -> Vec<Literal> {
-    let mut seen = HashSet::new();
-    let mut result = Vec::new();
-
+    let mut result = Vec::with_capacity(literals.len());
     for lit in literals {
-        if seen.insert(lit.clone()) {
+        if !result.contains(&lit) {
             result.push(lit);
         }
     }
-
     result
 }
 
@@ -85,6 +84,7 @@ pub fn is_ordered_greater(t1: &Term, t2: &Term, kbo: &KBO) -> bool {
 ///
 /// Returns a ScopedSubstitution if the predicates match and all
 /// argument pairs are unifiable across the two scopes.
+/// Uses direct Term unification to avoid intermediate ScopedTerm allocation.
 pub fn unify_atoms_scoped(
     pred1: PredicateSymbol,
     args1: &[Term],
@@ -99,9 +99,7 @@ pub fn unify_atoms_scoped(
 
     let mut subst = ScopedSubstitution::new();
     for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-        let st1 = apply_scoped_term(&lift(arg1, scope1), &subst);
-        let st2 = apply_scoped_term(&lift(arg2, scope2), &subst);
-        unify_scoped_terms(&st1, &st2, &mut subst)?;
+        unify_scoped_extend(arg1, scope1, arg2, scope2, &mut subst)?;
     }
 
     Ok(subst)

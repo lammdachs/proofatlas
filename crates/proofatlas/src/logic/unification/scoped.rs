@@ -5,9 +5,15 @@
 //! by pairing each VariableId with a scope tag (u8). This eliminates
 //! the O(clause_size) clone + intern cost of `rename_clause_variables`
 //! for every unification attempt (most of which fail).
+//!
+//! The substitution maps `ScopedVar` to `(Term, u8)` pairs, meaning
+//! "this term with all its variables interpreted at this scope."
+//! This avoids any intermediate `ScopedTerm` representation — unification
+//! works directly on `(&Term, scope)` pairs with zero allocation on the
+//! common failure path.
 
-use crate::logic::interner::{ConstantId, FunctionId, Interner, VariableId};
-use crate::logic::core::term::{Constant, FunctionSymbol, Term, Variable};
+use crate::logic::interner::{Interner, VariableId};
+use crate::logic::core::term::{Term, Variable};
 use std::collections::HashMap;
 
 /// A variable tagged with its parent clause scope
@@ -17,166 +23,143 @@ pub struct ScopedVar {
     pub id: VariableId,
 }
 
-/// A term with scoped variables
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ScopedTerm {
-    Variable(ScopedVar),
-    Constant(ConstantId),
-    Function(FunctionId, Vec<ScopedTerm>),
-}
+/// Substitution mapping scoped variables to (Term, scope) pairs.
+/// The scope indicates what scope all variables in the Term belong to.
+pub type ScopedSubstitution = HashMap<ScopedVar, (Term, u8)>;
 
-/// Substitution mapping scoped variables to scoped terms
-pub type ScopedSubstitution = HashMap<ScopedVar, ScopedTerm>;
-
-/// Lift a concrete Term into a ScopedTerm at the given scope
-pub fn lift(term: &Term, scope: u8) -> ScopedTerm {
-    match term {
-        Term::Variable(v) => ScopedTerm::Variable(ScopedVar { scope, id: v.id }),
-        Term::Constant(c) => ScopedTerm::Constant(c.id),
-        Term::Function(f, args) => {
-            ScopedTerm::Function(f.id, args.iter().map(|a| lift(a, scope)).collect())
-        }
-    }
-}
-
-/// Apply a scoped substitution to a concrete term at the given scope,
-/// producing a ScopedTerm
-pub fn apply_scoped(term: &Term, scope: u8, subst: &ScopedSubstitution) -> ScopedTerm {
-    apply_scoped_term(&lift(term, scope), subst)
-}
-
-/// Apply a scoped substitution to a ScopedTerm (chase bindings to fixpoint)
-pub fn apply_scoped_term(term: &ScopedTerm, subst: &ScopedSubstitution) -> ScopedTerm {
-    match term {
-        ScopedTerm::Variable(sv) => {
-            if let Some(bound) = subst.get(sv) {
-                // Chase the binding (it may itself be a variable)
-                apply_scoped_term(bound, subst)
-            } else {
-                term.clone()
-            }
-        }
-        ScopedTerm::Constant(_) => term.clone(),
-        ScopedTerm::Function(f, args) => {
-            ScopedTerm::Function(*f, args.iter().map(|a| apply_scoped_term(a, subst)).collect())
-        }
-    }
-}
-
-/// Occurs check: does `var` occur in `term` (after chasing bindings)?
-fn scoped_occurs_check(var: &ScopedVar, term: &ScopedTerm, subst: &ScopedSubstitution) -> bool {
-    match term {
-        ScopedTerm::Variable(sv) => {
-            if sv == var {
-                return true;
-            }
-            if let Some(bound) = subst.get(sv) {
-                scoped_occurs_check(var, bound, subst)
-            } else {
-                false
-            }
-        }
-        ScopedTerm::Constant(_) => false,
-        ScopedTerm::Function(_, args) => args.iter().any(|a| scoped_occurs_check(var, a, subst)),
-    }
-}
-
-/// Unify two concrete terms at different scopes
+/// Unify two concrete terms at different scopes.
 pub fn unify_scoped(
     t1: &Term,
     scope1: u8,
     t2: &Term,
     scope2: u8,
 ) -> Result<ScopedSubstitution, ()> {
-    let st1 = lift(t1, scope1);
-    let st2 = lift(t2, scope2);
     let mut subst = ScopedSubstitution::new();
-    unify_scoped_terms(&st1, &st2, &mut subst).map(|()| subst)
+    unify_terms(t1, scope1, t2, scope2, &mut subst)?;
+    Ok(subst)
 }
 
-/// Robinson unification on ScopedTerms
-pub fn unify_scoped_terms(
-    t1: &ScopedTerm,
-    t2: &ScopedTerm,
+/// Extend an existing scoped substitution with a new unification constraint.
+pub fn unify_scoped_extend(
+    t1: &Term,
+    scope1: u8,
+    t2: &Term,
+    scope2: u8,
     subst: &mut ScopedSubstitution,
 ) -> Result<(), ()> {
-    // Chase bindings
-    let t1 = apply_scoped_term(t1, subst);
-    let t2 = apply_scoped_term(t2, subst);
+    unify_terms(t1, scope1, t2, scope2, subst)
+}
 
-    match (&t1, &t2) {
-        _ if t1 == t2 => Ok(()),
-
-        (ScopedTerm::Variable(v), t) | (t, ScopedTerm::Variable(v)) => {
-            if scoped_occurs_check(v, t, subst) {
-                Err(())
-            } else {
-                subst.insert(*v, t.clone());
-                Ok(())
+/// Core Robinson unification on (Term, scope) pairs.
+/// Zero allocation on the failure path for non-variable terms.
+fn unify_terms(
+    t1: &Term,
+    s1: u8,
+    t2: &Term,
+    s2: u8,
+    subst: &mut ScopedSubstitution,
+) -> Result<(), ()> {
+    match (t1, t2) {
+        (Term::Variable(v1), Term::Variable(v2)) => {
+            let sv1 = ScopedVar { scope: s1, id: v1.id };
+            let sv2 = ScopedVar { scope: s2, id: v2.id };
+            if sv1 == sv2 {
+                return Ok(());
+            }
+            match (subst.get(&sv1).cloned(), subst.get(&sv2).cloned()) {
+                (Some((bt1, bs1)), Some((bt2, bs2))) => {
+                    unify_terms(&bt1, bs1, &bt2, bs2, subst)
+                }
+                (Some((bt, bs)), None) => {
+                    if occurs_in_term(&sv2, &bt, bs, subst) {
+                        return Err(());
+                    }
+                    subst.insert(sv2, (bt, bs));
+                    Ok(())
+                }
+                (None, Some((bt, bs))) => {
+                    if occurs_in_term(&sv1, &bt, bs, subst) {
+                        return Err(());
+                    }
+                    subst.insert(sv1, (bt, bs));
+                    Ok(())
+                }
+                (None, None) => {
+                    subst.insert(sv1, (Term::Variable(*v2), s2));
+                    Ok(())
+                }
             }
         }
-
-        (ScopedTerm::Constant(c1), ScopedTerm::Constant(c2)) => {
-            if c1 == c2 { Ok(()) } else { Err(()) }
+        (Term::Variable(v1), _) => {
+            let sv1 = ScopedVar { scope: s1, id: v1.id };
+            match subst.get(&sv1).cloned() {
+                Some((bound, bs)) => unify_terms(&bound, bs, t2, s2, subst),
+                None => {
+                    if occurs_in_term(&sv1, t2, s2, subst) {
+                        return Err(());
+                    }
+                    subst.insert(sv1, (t2.clone(), s2));
+                    Ok(())
+                }
+            }
         }
-
-        (ScopedTerm::Function(f1, args1), ScopedTerm::Function(f2, args2)) => {
-            if f1 != f2 || args1.len() != args2.len() {
+        (_, Term::Variable(v2)) => {
+            let sv2 = ScopedVar { scope: s2, id: v2.id };
+            match subst.get(&sv2).cloned() {
+                Some((bound, bs)) => unify_terms(t1, s1, &bound, bs, subst),
+                None => {
+                    if occurs_in_term(&sv2, t1, s1, subst) {
+                        return Err(());
+                    }
+                    subst.insert(sv2, (t1.clone(), s1));
+                    Ok(())
+                }
+            }
+        }
+        (Term::Constant(c1), Term::Constant(c2)) => {
+            if c1.id == c2.id {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+        (Term::Function(f1, args1), Term::Function(f2, args2)) => {
+            if f1.id != f2.id || args1.len() != args2.len() {
                 return Err(());
             }
             for (a1, a2) in args1.iter().zip(args2.iter()) {
-                unify_scoped_terms(a1, a2, subst)?;
+                unify_terms(a1, s1, a2, s2, subst)?;
             }
             Ok(())
         }
-
         _ => Err(()),
     }
 }
 
-/// Convert a ScopedTerm back to a concrete Term.
-///
-/// - Scope 0 variables keep their original VariableId
-/// - Other scopes get fresh interned names (`{name}_{scope}`)
-///   only for free variables that survive after substitution application
-pub fn flatten(
-    term: &ScopedTerm,
-    renaming: &mut HashMap<ScopedVar, VariableId>,
-    interner: &mut Interner,
-) -> Term {
+/// Occurs check: does `var` occur in `term` at `scope` (after chasing bindings)?
+fn occurs_in_term(var: &ScopedVar, term: &Term, scope: u8, subst: &ScopedSubstitution) -> bool {
     match term {
-        ScopedTerm::Variable(sv) => {
-            if let Some(&vid) = renaming.get(sv) {
-                Term::Variable(Variable::new(vid))
-            } else if sv.scope == 0 {
-                // Scope 0: keep original VariableId
-                renaming.insert(*sv, sv.id);
-                Term::Variable(Variable::new(sv.id))
+        Term::Variable(v) => {
+            let sv = ScopedVar { scope, id: v.id };
+            if sv == *var {
+                return true;
+            }
+            if let Some((bound, bs)) = subst.get(&sv) {
+                occurs_in_term(var, bound, *bs, subst)
             } else {
-                // Other scopes: intern fresh name
-                let old_name = interner.resolve_variable(sv.id).to_owned();
-                let new_name = format!("{}_{}", old_name, sv.scope);
-                let new_id = interner.intern_variable(&new_name);
-                renaming.insert(*sv, new_id);
-                Term::Variable(Variable::new(new_id))
+                false
             }
         }
-        ScopedTerm::Constant(cid) => Term::Constant(Constant::new(*cid)),
-        ScopedTerm::Function(fid, args) => {
-            // Look up arity from args length
-            let arity = args.len() as u8;
-            Term::Function(
-                FunctionSymbol::new(*fid, arity),
-                args.iter().map(|a| flatten(a, renaming, interner)).collect(),
-            )
-        }
+        Term::Constant(_) => false,
+        Term::Function(_, args) => args.iter().any(|a| occurs_in_term(var, a, scope, subst)),
     }
 }
 
 /// Apply scoped substitution to a concrete term and flatten in one pass.
 ///
-/// Equivalent to `flatten(apply_scoped(term, scope, subst), renaming, interner)`
-/// but avoids the intermediate ScopedTerm allocation in simple cases.
+/// Walks the concrete Term, chasing bindings as needed, producing a
+/// concrete Term with scope-0 variables keeping original IDs and
+/// other-scope variables getting fresh `{name}_{scope}` names.
 pub fn flatten_scoped(
     term: &Term,
     scope: u8,
@@ -184,14 +167,49 @@ pub fn flatten_scoped(
     renaming: &mut HashMap<ScopedVar, VariableId>,
     interner: &mut Interner,
 ) -> Term {
-    // Apply then flatten — the intermediate ScopedTerm is short-lived
-    let scoped = apply_scoped(term, scope, subst);
-    flatten(&scoped, renaming, interner)
+    match term {
+        Term::Variable(v) => {
+            let sv = ScopedVar { scope, id: v.id };
+            match subst.get(&sv) {
+                Some((bound, bs)) => flatten_scoped(bound, *bs, subst, renaming, interner),
+                None => resolve_scoped_var(sv, renaming, interner),
+            }
+        }
+        Term::Constant(c) => Term::Constant(*c),
+        Term::Function(f, args) => Term::Function(
+            *f,
+            args.iter()
+                .map(|a| flatten_scoped(a, scope, subst, renaming, interner))
+                .collect(),
+        ),
+    }
+}
+
+/// Resolve a free scoped variable to a concrete Term::Variable.
+/// Scope 0 keeps original VariableId, other scopes get fresh interned names.
+fn resolve_scoped_var(
+    sv: ScopedVar,
+    renaming: &mut HashMap<ScopedVar, VariableId>,
+    interner: &mut Interner,
+) -> Term {
+    if let Some(&vid) = renaming.get(&sv) {
+        Term::Variable(Variable::new(vid))
+    } else if sv.scope == 0 {
+        renaming.insert(sv, sv.id);
+        Term::Variable(Variable::new(sv.id))
+    } else {
+        let old_name = interner.resolve_variable(sv.id).to_owned();
+        let new_name = format!("{}_{}", old_name, sv.scope);
+        let new_id = interner.intern_variable(&new_name);
+        renaming.insert(sv, new_id);
+        Term::Variable(Variable::new(new_id))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logic::core::term::{Constant, FunctionSymbol};
     use crate::logic::Interner;
 
     struct Ctx {
@@ -232,21 +250,12 @@ mod tests {
 
         let mgu = unify_scoped(&t1, 0, &t2, 1).unwrap();
 
-        // X@0 should map to a, X@1 should map to a
-        let x_id = if let Term::Variable(v) = &x { v.id } else { panic!() };
-        let a_lifted = lift(&a, 0);
-
-        let x0_resolved = apply_scoped_term(
-            &ScopedTerm::Variable(ScopedVar { scope: 0, id: x_id }),
-            &mgu,
-        );
-        let x1_resolved = apply_scoped_term(
-            &ScopedTerm::Variable(ScopedVar { scope: 1, id: x_id }),
-            &mgu,
-        );
-
-        assert_eq!(x0_resolved, a_lifted);
-        assert_eq!(x1_resolved, a_lifted);
+        // Both X@0 and X@1 should resolve to a
+        let mut renaming = HashMap::new();
+        let x0_resolved = flatten_scoped(&x, 0, &mgu, &mut renaming, &mut ctx.interner);
+        let x1_resolved = flatten_scoped(&x, 1, &mgu, &mut renaming, &mut ctx.interner);
+        assert_eq!(x0_resolved, a);
+        assert_eq!(x1_resolved, a);
     }
 
     #[test]
@@ -260,19 +269,10 @@ mod tests {
         let a = ctx.const_("a");
         let f_x = ctx.func("f", vec![x.clone()]);
 
-        // Unify the arguments pairwise: first X@0 = a@1, then f(X)@0 = Y@1
-        // We'll unify the full P(X, f(X)) vs P(a, Y) by unifying args pairwise
+        // Unify the arguments pairwise using unify_scoped_extend
         let mut subst = ScopedSubstitution::new();
-
-        // Unify X@0 with a@1
-        let sx = lift(&x, 0);
-        let sa = lift(&a, 1);
-        unify_scoped_terms(&sx, &sa, &mut subst).unwrap();
-
-        // Unify f(X)@0 with Y@1
-        let sf_x = lift(&f_x, 0);
-        let sy = lift(&y, 1);
-        unify_scoped_terms(&sf_x, &sy, &mut subst).unwrap();
+        unify_scoped_extend(&x, 0, &a, 1, &mut subst).unwrap();
+        unify_scoped_extend(&f_x, 0, &y, 1, &mut subst).unwrap();
 
         // Now flatten f(X)@0 under the substitution: should give f(a)
         let mut renaming = HashMap::new();
@@ -351,20 +351,7 @@ mod tests {
 
         let mgu = unify_scoped(&x, 0, &f_x, 1).unwrap();
 
-        // X@0 should resolve to f(X@1)
-        let x_id = if let Term::Variable(v) = &x { v.id } else { panic!() };
-        let x0_resolved = apply_scoped_term(
-            &ScopedTerm::Variable(ScopedVar { scope: 0, id: x_id }),
-            &mgu,
-        );
-        // Should be f(X@1) — not f(X@0) or f(f(X@1))
-        let f_id = if let Term::Function(f, _) = &f_x { f.id } else { panic!() };
-        assert_eq!(
-            x0_resolved,
-            ScopedTerm::Function(f_id, vec![ScopedTerm::Variable(ScopedVar { scope: 1, id: x_id })])
-        );
-
-        // Flatten: X@1 should get renamed to X_1
+        // Flatten: X@0 should give f(X_1) since X@0 = f(X)@1
         let mut renaming = HashMap::new();
         let result = flatten_scoped(&x, 0, &mgu, &mut renaming, &mut ctx.interner);
         if let Term::Function(_, args) = &result {
