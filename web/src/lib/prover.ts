@@ -42,6 +42,7 @@ export interface TraceEvent {
 	clause: string;
 	rule: string;
 	premises: number[];
+	replacement_idx?: number;
 }
 
 export interface ServerStatus {

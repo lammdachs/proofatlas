@@ -351,7 +351,8 @@ fn events_to_js_value(events: &[StateChange], interner: &Interner) -> serde_json
                         "clause_idx": *clause_idx,
                         "clause": clause_str,
                         "rule": format!("{}Deletion", rule_name),
-                        "premises": [],
+                        "premises": premise_indices,
+                        "replacement_idx": repl_idx,
                     }));
                 } else {
                     // Pure deletion (tautology, subsumption)

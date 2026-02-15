@@ -168,23 +168,23 @@
 	}
 
 	function eventCategory(rule: string): 'deletion' | 'transfer' | 'selection' | 'simplify' | 'generation' {
-		if (['TautologyDeletion', 'SubsumptionDeletion', 'DemodulationDeletion',
-			'ForwardSubsumptionDeletion', 'BackwardSubsumptionDeletion', 'ForwardDemodulation'].includes(rule)) {
+		if (['TautologyDeletion', 'SubsumptionDeletion',
+			'ForwardSubsumptionDeletion', 'BackwardSubsumptionDeletion'].includes(rule)) {
 			return 'deletion';
 		}
-		if (rule === 'Transfer') return 'transfer';
+		if (rule === 'Transfer' || rule === 'Input') return 'transfer';
 		if (rule === 'GivenClauseSelection') return 'selection';
-		if (rule === 'Demodulation') return 'simplify';
+		if (rule === 'Demodulation' || rule === 'DemodulationDeletion') return 'simplify';
 		return 'generation';
 	}
 
 	function categoryColor(cat: string): string {
 		switch (cat) {
 			case 'deletion': return 'var(--color-event-deletion)';
-			case 'transfer': return 'var(--color-event-transfer)';
-			case 'selection': return 'var(--color-event-transfer)';
+			case 'transfer': return 'var(--color-event-generation)';
+			case 'selection': return 'var(--color-event-generation)';
 			case 'simplify': return 'var(--color-event-simplify)';
-			default: return 'var(--color-event-generation)';
+			default: return 'var(--color-event-transfer)';
 		}
 	}
 
@@ -327,12 +327,28 @@
 						{@const ev = currentEvent}
 						{@const cat = eventCategory(ev.rule)}
 						{@const isDeletion = cat === 'deletion'}
+						{@const isDemodDeletion = ev.rule === 'DemodulationDeletion' && ev.premises?.length >= 2}
 						{@const isTransfer = ev.rule === 'Transfer'}
 						{@const isSelection = ev.rule === 'GivenClauseSelection'}
 						{@const isDemodAdd = ev.rule === 'Demodulation'}
 						<table class="w-full text-sm">
 							<tbody>
-								{#if isDeletion}
+								{#if isDemodDeletion}
+									<tr class="border-b border-surface-lighter/20 last:border-0">
+										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Rewritten</td>
+										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
+									</tr>
+									<tr class="border-b border-surface-lighter/20 last:border-0">
+										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Using</td>
+										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[1])}</td>
+									</tr>
+									{#if ev.replacement_idx != null}
+										<tr class="border-b border-surface-lighter/20 last:border-0">
+											<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Result</td>
+											<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.replacement_idx)}</td>
+										</tr>
+									{/if}
+								{:else if isDeletion}
 									<tr class="border-b border-surface-lighter/20 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Deleted</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
