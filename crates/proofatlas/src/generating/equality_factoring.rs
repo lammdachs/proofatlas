@@ -1,7 +1,7 @@
 //! Equality factoring inference rule
 
 use super::common::{collect_literals_except, is_ordered_greater};
-use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
+use crate::logic::{Clause, Interner, Literal, Position, PredicateSymbol, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
@@ -19,10 +19,10 @@ pub fn equality_factoring(
     idx: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
+    kbo: &KBO,
 ) -> Vec<StateChange> {
     let mut results = Vec::new();
     let selected = selector.select(clause);
-    let kbo = KBO::new(KBOConfig::default());
 
     // Find all positive equality literals
     let positive_eq_literals: Vec<(usize, &Literal)> = clause
@@ -138,7 +138,8 @@ impl GeneratingInference for EqualityFactoringRule {
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
+        let kbo = &cm.term_ordering;
         let interner = &mut cm.interner;
-        equality_factoring(given, given_idx, selector, interner)
+        equality_factoring(given, given_idx, selector, interner, kbo)
     }
 }

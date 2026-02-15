@@ -3,7 +3,7 @@
 use super::common::{
     collect_scoped_literals_except, is_ordered_greater, remove_duplicate_literals,
 };
-use crate::logic::{Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Term, KBO};
+use crate::logic::{Clause, Interner, Literal, Position as FolPosition, Term, KBO};
 use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
@@ -14,10 +14,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
 
-/// Position in a term/atom where unification can occur
-struct Position {
-    term: Term,
-    path: Vec<usize>, // Path to this position
+/// Resolve the subterm at a path within a literal's arguments.
+fn resolve_at_path<'a>(args: &'a [Term], path: &[usize]) -> &'a Term {
+    let mut current = &args[path[0]];
+    for &idx in &path[1..] {
+        match current {
+            Term::Function(_, fargs) => current = &fargs[idx],
+            _ => unreachable!("invalid path into non-function term"),
+        }
+    }
+    current
 }
 
 /// Apply superposition rule using literal selection
@@ -32,9 +38,9 @@ pub fn superposition(
     idx2: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
+    kbo: &KBO,
 ) -> Vec<StateChange> {
     let mut results = Vec::new();
-    let kbo = KBO::new(KBOConfig::default());
 
     // Get selected literals from both clauses
     let selected_from = selector.select(from_clause);
@@ -70,17 +76,21 @@ pub fn superposition(
                         let into_lit = &into_clause.literals[into_idx];
 
                         // Find positions where pattern can be unified with some subterm
-                        let positions = find_unifiable_positions(&into_lit.args, pattern, &kbo);
+                        // Returns only paths (no term clones)
+                        let positions = find_unifiable_positions(&into_lit.args, pattern);
 
-                        for pos in positions {
-                            // CRITICAL: l' (pos.term) must not be a variable
+                        for pos in &positions {
+                            // Resolve the subterm at this path
+                            let subterm = resolve_at_path(&into_lit.args, pos);
+
+                            // CRITICAL: l' (subterm) must not be a variable
                             // This prevents unsound inferences
-                            if matches!(pos.term, Term::Variable(_)) {
+                            if matches!(subterm, Term::Variable(_)) {
                                 continue;
                             }
 
                             // Unify pattern (scope 0) with the subterm (scope 1)
-                            if let Ok(mgu) = unify_scoped(pattern, 0, &pos.term, 1) {
+                            if let Ok(mgu) = unify_scoped(pattern, 0, subterm, 1) {
                                 // Flatten to get concrete Terms for ordering checks
                                 let mut renaming = HashMap::new();
                                 let pattern_sigma = flatten_scoped(pattern, 0, &mgu, &mut renaming, interner);
@@ -93,18 +103,18 @@ pub fn superposition(
 
                                 // Additional check for superposition into equalities
                                 // The side containing l' must not be smaller than the other side
-                                if into_lit.is_equality(interner) && !pos.path.is_empty() {
+                                if into_lit.is_equality(interner) && !pos.is_empty() {
                                     let s = &into_lit.args[0];
                                     let t = &into_lit.args[1];
 
                                     let s_sigma = flatten_scoped(s, 1, &mgu, &mut renaming, interner);
                                     let t_sigma = flatten_scoped(t, 1, &mgu, &mut renaming, interner);
 
-                                    if pos.path[0] == 0 {
+                                    if pos[0] == 0 {
                                         if !is_ordered_greater(&s_sigma, &t_sigma, &kbo) {
                                             continue;
                                         }
-                                    } else if pos.path[0] == 1 {
+                                    } else if pos[0] == 1 {
                                         if !is_ordered_greater(&t_sigma, &s_sigma, &kbo) {
                                             continue;
                                         }
@@ -119,15 +129,13 @@ pub fn superposition(
                                 // Add the modified literal from into_clause:
                                 // flatten all args at scope 1, then replace at path
                                 let into_lit_modified = replace_at_position_scoped(
-                                    into_lit.predicate,
-                                    &into_lit.args,
-                                    &pos.path,
+                                    into_lit,
+                                    pos,
                                     &replacement_sigma,
                                     1,
                                     &mgu,
                                     &mut renaming,
                                     interner,
-                                    into_lit.polarity,
                                 );
                                 new_literals.push(into_lit_modified);
 
@@ -159,47 +167,43 @@ pub fn superposition(
     results
 }
 
-/// Find all positions in a literal's arguments where a term can potentially unify with pattern
-/// This is used to find occurrences of l in the literal that can unify with l
+/// Find all positions in a literal's arguments where a term can potentially unify with pattern.
+/// Returns only paths (no term clones). Terms are resolved at use site via `resolve_at_path`.
 ///
 /// For equalities, we search BOTH sides. The ordering constraint (s[l']*sigma not smaller than t*sigma)
 /// is checked later after computing the MGU, not here during position search.
-/// This is important because the ordering depends on the substitution, which
-/// we don't know until we find a unifier.
-fn find_unifiable_positions(args: &[Term], pattern: &Term, _kbo: &KBO) -> Vec<Position> {
+fn find_unifiable_positions(args: &[Term], pattern: &Term) -> Vec<Vec<usize>> {
     let mut positions = Vec::new();
+    let mut path = Vec::new();
 
-    // Search all arguments for potential unification positions
-    // For equalities, this searches both sides; the ordering constraint
-    // is checked later in the superposition function after computing the MGU
     for (i, arg) in args.iter().enumerate() {
-        find_positions_in_term(arg, pattern, vec![i], &mut positions);
+        path.push(i);
+        find_positions_in_term(arg, pattern, &mut path, &mut positions);
+        path.pop();
     }
 
     positions
 }
 
-/// Find positions in a term recursively
+/// Find positions in a term recursively.
+/// Uses push/pop on a shared path to avoid cloning at every branch.
 fn find_positions_in_term(
     term: &Term,
     pattern: &Term,
-    path: Vec<usize>,
-    positions: &mut Vec<Position>,
+    path: &mut Vec<usize>,
+    positions: &mut Vec<Vec<usize>>,
 ) {
     // Check if current position can unify
     if could_unify(term, pattern) {
-        positions.push(Position {
-            term: term.clone(),
-            path: path.clone(),
-        });
+        positions.push(path.clone()); // Only clone when a match is found
     }
 
     // Recurse into subterms
     if let Term::Function(_, args) = term {
         for (i, arg) in args.iter().enumerate() {
-            let mut new_path = path.clone();
-            new_path.push(i);
-            find_positions_in_term(arg, pattern, new_path, positions);
+            path.push(i);
+            find_positions_in_term(arg, pattern, path, positions);
+            path.pop();
         }
     }
 }
@@ -218,43 +222,62 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
 
 /// Replace a term at a specific position in a literal's arguments using scoped substitution.
 ///
-/// Flattens all args at the given scope through the scoped substitution, then replaces
-/// the subterm at `path` with `replacement_sigma` (already a concrete flattened Term).
+/// Combines flatten and replace in a single traversal: flattens all args through the scoped
+/// substitution, except at the replacement path where `replacement_sigma` is inserted directly.
+/// This avoids flattening the replaced subterm only to immediately overwrite it.
 fn replace_at_position_scoped(
-    predicate: PredicateSymbol,
-    args: &[Term],
+    lit: &Literal,
     path: &[usize],
     replacement_sigma: &Term,
     scope: u8,
     subst: &crate::logic::unification::scoped::ScopedSubstitution,
     renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
     interner: &mut Interner,
-    polarity: bool,
 ) -> Literal {
-    // Flatten all args through the scoped substitution
-    let mut new_args: Vec<Term> = args
-        .iter()
-        .map(|a| flatten_scoped(a, scope, subst, renaming, interner))
+    let new_args: Vec<Term> = lit.args.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if i == path[0] {
+                flatten_and_replace(a, &path[1..], replacement_sigma, scope, subst, renaming, interner)
+            } else {
+                flatten_scoped(a, scope, subst, renaming, interner)
+            }
+        })
         .collect();
-    // Replace the subterm at path with the already-flattened replacement
-    if !path.is_empty() {
-        new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement_sigma);
-    }
-    Literal { predicate, args: new_args, polarity }
+    Literal { predicate: lit.predicate, args: new_args, polarity: lit.polarity }
 }
 
-/// Replace a term at a specific position in another term
-fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
+/// Flatten a term through the scoped substitution, replacing the subterm at `path` with `replacement`.
+/// Combines flatten_scoped + replace_in_term into a single traversal.
+fn flatten_and_replace(
+    term: &Term,
+    path: &[usize],
+    replacement: &Term,
+    scope: u8,
+    subst: &crate::logic::unification::scoped::ScopedSubstitution,
+    renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
+    interner: &mut Interner,
+) -> Term {
     if path.is_empty() {
+        // At the replacement position — use the pre-computed replacement
         replacement.clone()
     } else {
         match term {
-            Term::Variable(_) | Term::Constant(_) => term.clone(),
-            Term::Function(f, args) => {
-                let mut new_args = args.clone();
-                new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
-                Term::Function(*f, new_args)
-            }
+            Term::Function(f, args) => Term::Function(
+                *f,
+                args.iter()
+                    .enumerate()
+                    .map(|(i, a)| {
+                        if i == path[0] {
+                            flatten_and_replace(a, &path[1..], replacement, scope, subst, renaming, interner)
+                        } else {
+                            flatten_scoped(a, scope, subst, renaming, interner)
+                        }
+                    })
+                    .collect(),
+            ),
+            // Path is non-empty but term is not a function — shouldn't happen with valid paths
+            _ => flatten_scoped(term, scope, subst, renaming, interner),
         }
     }
 }
@@ -295,6 +318,7 @@ impl GeneratingInference for SuperpositionRule {
         let memory_limit = cm.memory_limit;
         let baseline_rss = cm.baseline_rss_mb;
         let selector = cm.literal_selector.as_ref();
+        let kbo = &cm.term_ordering;
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
@@ -328,16 +352,16 @@ impl GeneratingInference for SuperpositionRule {
                 }
                 if let Some(processed_clause) = state.clauses.get(processed_idx) {
                     if given_has_eq {
-                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
+                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
                     }
                     if eq_clauses.contains(&processed_idx) {
-                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
                     }
                 }
             }
 
             if given_has_eq && !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
             }
         } else {
             for &processed_idx in state.processed.iter() {
@@ -346,12 +370,12 @@ impl GeneratingInference for SuperpositionRule {
                     continue;
                 }
                 if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                    changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
-                    changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                    changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
+                    changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
                 }
             }
             if !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
             }
         }
 
@@ -362,7 +386,7 @@ impl GeneratingInference for SuperpositionRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+    use crate::logic::{Constant, FunctionSymbol, KBOConfig, PredicateSymbol, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -428,7 +452,8 @@ mod tests {
         let clause2 = Clause::new(vec![Literal::positive(eq, vec![a.clone(), f_b.clone()])]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
+        let kbo = KBO::new(KBOConfig::default());
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner, &kbo);
 
         // Should derive: a = b
         assert!(
@@ -483,7 +508,8 @@ mod tests {
         let clause2 = Clause::new(vec![Literal::positive(p, vec![mult_ec.clone()])]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
+        let kbo = KBO::new(KBOConfig::default());
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner, &kbo);
 
         // Should derive P(c)
         assert_eq!(results.len(), 1);
