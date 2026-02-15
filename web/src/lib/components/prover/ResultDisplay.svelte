@@ -139,20 +139,20 @@
 				<!-- View toggle -->
 				<div class="flex items-center border-b border-surface-lighter/50 mb-4">
 					<button
-						class="flex-1 py-4 text-base text-center transition-all cursor-pointer {viewMode === 'proof'
+						class="link-underline flex-1 py-4 text-base text-center transition-all cursor-pointer {viewMode === 'proof'
 							? 'font-semibold'
 							: 'text-text-muted hover:text-text'}"
-						style={viewMode === 'proof' ? 'color: var(--color-primary);' : ''}
+						style={viewMode === 'proof' ? 'color: var(--color-green);' : ''}
 						onclick={() => viewMode = 'proof'}
 					>
 						Proof
 					</button>
 					<div class="w-px h-6 bg-surface-lighter/50"></div>
 					<button
-						class="flex-1 py-4 text-base text-center transition-all cursor-pointer {viewMode === 'inspector'
+						class="link-underline flex-1 py-4 text-base text-center transition-all cursor-pointer {viewMode === 'inspector'
 							? 'font-semibold'
 							: 'text-text-muted hover:text-text'}"
-						style={viewMode === 'inspector' ? 'color: var(--color-primary);' : ''}
+						style={viewMode === 'inspector' ? 'color: var(--color-green);' : ''}
 						onclick={() => viewMode = 'inspector'}
 					>
 						Inspector

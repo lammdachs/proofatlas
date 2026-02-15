@@ -39,7 +39,7 @@
 			{#each navLinks as link}
 				<a
 					href={link.href}
-					class="link-underline transition-colors {isActive(link.href) ? 'text-primary font-semibold' : 'text-text-muted hover:text-text'}"
+					class="link-underline transition-colors {isActive(link.href) ? 'text-green font-semibold' : 'text-text-muted hover:text-text'}"
 				>
 					{link.label}
 				</a>
@@ -80,7 +80,7 @@
 				{#each navLinks as link}
 					<a
 						href={link.href}
-						class="transition-colors {isActive(link.href) ? 'text-primary font-semibold' : 'text-text-muted hover:text-text'}"
+						class="transition-colors {isActive(link.href) ? 'text-green font-semibold' : 'text-text-muted hover:text-text'}"
 						onclick={() => mobileMenuOpen = false}
 					>
 						{link.label}
