@@ -1,14 +1,17 @@
 //! Superposition inference rule for equality reasoning
 
 use super::common::{
-    collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
+    collect_scoped_literals_except, is_ordered_greater, remove_duplicate_literals,
 };
-use crate::logic::{Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
+use crate::logic::{Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Term, KBO};
+use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
+use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
-use crate::logic::unify;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 /// Position in a term/atom where unification can occur
@@ -42,13 +45,12 @@ pub fn superposition(
         return results;
     }
 
-    // Rename variables to avoid conflicts
-    let renamed_into = rename_clause_variables(into_clause, "2", interner);
-    let renamed_from = rename_clause_variables(from_clause, "1", interner);
+    // No variable renaming needed — scoped unification handles variable separation.
+    // from_clause is at scope 0, into_clause is at scope 1.
 
     // Find positive equality literals in selected literals of from_clause
     for &from_idx in &selected_from {
-        let from_lit = &renamed_from.literals[from_idx];
+        let from_lit = &from_clause.literals[from_idx];
 
         if from_lit.polarity && from_lit.is_equality(interner) {
             if let [ref left, ref right] = from_lit.args.as_slice() {
@@ -65,7 +67,7 @@ pub fn superposition(
                 for (pattern, replacement, _dir) in directions {
                     // For each selected literal in into_clause
                     for &into_idx in &selected_into {
-                        let into_lit = &renamed_into.literals[into_idx];
+                        let into_lit = &into_clause.literals[into_idx];
 
                         // Find positions where pattern can be unified with some subterm
                         let positions = find_unifiable_positions(&into_lit.args, pattern, &kbo);
@@ -77,14 +79,14 @@ pub fn superposition(
                                 continue;
                             }
 
-                            if let Ok(mgu) = unify(pattern, &pos.term) {
-                                // Apply substitution to both sides
-                                let pattern_sigma = pattern.apply_substitution(&mgu);
-                                let replacement_sigma = replacement.apply_substitution(&mgu);
+                            // Unify pattern (scope 0) with the subterm (scope 1)
+                            if let Ok(mgu) = unify_scoped(pattern, 0, &pos.term, 1) {
+                                // Flatten to get concrete Terms for ordering checks
+                                let mut renaming = HashMap::new();
+                                let pattern_sigma = flatten_scoped(pattern, 0, &mgu, &mut renaming, interner);
+                                let replacement_sigma = flatten_scoped(replacement, 0, &mgu, &mut renaming, interner);
 
                                 // Check ordering constraint: pattern_sigma not smaller than replacement_sigma
-                                // i.e., pattern_sigma must NOT be smaller than replacement_sigma
-                                // This ensures we're rewriting larger to smaller (simplifying)
                                 if !is_ordered_greater(&pattern_sigma, &replacement_sigma, &kbo) {
                                     continue;
                                 }
@@ -95,48 +97,54 @@ pub fn superposition(
                                     let s = &into_lit.args[0];
                                     let t = &into_lit.args[1];
 
-                                    let s_sigma = s.apply_substitution(&mgu);
-                                    let t_sigma = t.apply_substitution(&mgu);
+                                    let s_sigma = flatten_scoped(s, 1, &mgu, &mut renaming, interner);
+                                    let t_sigma = flatten_scoped(t, 1, &mgu, &mut renaming, interner);
 
                                     if pos.path[0] == 0 {
-                                        // l' is in s (left side): need s*sigma not smaller than t*sigma
                                         if !is_ordered_greater(&s_sigma, &t_sigma, &kbo) {
                                             continue;
                                         }
                                     } else if pos.path[0] == 1 {
-                                        // l' is in t (right side): need t*sigma not smaller than s*sigma
                                         if !is_ordered_greater(&t_sigma, &s_sigma, &kbo) {
                                             continue;
                                         }
                                     }
                                 }
 
-                                // Apply superposition: replace pattern with replacement
-                                // Collect side literals from from_clause
-                                let mut new_literals = collect_literals_except(&renamed_from, &[from_idx], &mgu);
+                                // Collect side literals from from_clause (scope 0)
+                                let mut new_literals = collect_scoped_literals_except(
+                                    from_clause, &[from_idx], 0, &mgu, &mut renaming, interner,
+                                );
 
-                                // Add the modified literal from into_clause
-                                let into_lit_modified = replace_at_position(
+                                // Add the modified literal from into_clause:
+                                // flatten all args at scope 1, then replace at path
+                                let into_lit_modified = replace_at_position_scoped(
                                     into_lit.predicate,
                                     &into_lit.args,
                                     &pos.path,
                                     &replacement_sigma,
+                                    1,
                                     &mgu,
+                                    &mut renaming,
+                                    interner,
                                     into_lit.polarity,
                                 );
                                 new_literals.push(into_lit_modified);
 
-                                // Add other literals from into_clause
-                                new_literals.extend(collect_literals_except(&renamed_into, &[into_idx], &mgu));
+                                // Add other literals from into_clause (scope 1)
+                                new_literals.extend(collect_scoped_literals_except(
+                                    into_clause, &[into_idx], 1, &mgu, &mut renaming, interner,
+                                ));
 
                                 // Remove duplicates
                                 new_literals = remove_duplicate_literals(new_literals);
 
-                                let new_clause = Clause::new(new_literals);
+                                let mut new_clause = Clause::new(new_literals);
+                                orient_clause_equalities(&mut new_clause, interner);
 
                                 // Tautology check delegated to TautologyRule during forward simplification
                                 results.push(StateChange::Add(
-                                    new_clause,
+                                    Arc::new(new_clause),
                                     "Superposition".into(),
                                     vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
                                 ));
@@ -208,23 +216,30 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
     }
 }
 
-/// Replace a term at a specific position in a literal's arguments, returning a Literal
-fn replace_at_position(
+/// Replace a term at a specific position in a literal's arguments using scoped substitution.
+///
+/// Flattens all args at the given scope through the scoped substitution, then replaces
+/// the subterm at `path` with `replacement_sigma` (already a concrete flattened Term).
+fn replace_at_position_scoped(
     predicate: PredicateSymbol,
     args: &[Term],
     path: &[usize],
-    replacement: &Term,
-    subst: &Substitution,
+    replacement_sigma: &Term,
+    scope: u8,
+    subst: &crate::logic::unification::scoped::ScopedSubstitution,
+    renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
+    interner: &mut Interner,
     polarity: bool,
 ) -> Literal {
-    let mut new_args = if path.is_empty() {
-        args.to_vec()
-    } else {
-        let mut a = args.to_vec();
-        a[path[0]] = replace_in_term(&a[path[0]], &path[1..], replacement);
-        a
-    };
-    new_args = new_args.iter().map(|a| a.apply_substitution(subst)).collect();
+    // Flatten all args through the scoped substitution
+    let mut new_args: Vec<Term> = args
+        .iter()
+        .map(|a| flatten_scoped(a, scope, subst, renaming, interner))
+        .collect();
+    // Replace the subterm at path with the already-flattened replacement
+    if !path.is_empty() {
+        new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement_sigma);
+    }
     Literal { predicate, args: new_args, polarity }
 }
 

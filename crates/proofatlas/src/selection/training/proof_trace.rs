@@ -98,7 +98,7 @@ mod tests {
             clause_idx,
             rule_name,
             premises: positions,
-            conclusion: Clause::new(vec![]), // Empty for simplicity
+            conclusion: std::sync::Arc::new(Clause::new(vec![])), // Empty for simplicity
         }
     }
 

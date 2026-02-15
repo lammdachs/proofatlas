@@ -21,7 +21,7 @@ pub struct ProofStep {
     pub clause_idx: usize,
     pub rule_name: String,
     pub premises: Vec<Position>,
-    pub conclusion: Clause,
+    pub conclusion: Arc<Clause>,
 }
 
 // =============================================================================
@@ -37,10 +37,10 @@ pub struct ProofStep {
 #[derive(Debug, Clone, Serialize)]
 pub enum StateChange {
     /// New clause added to N (from inference or input): (clause, rule_name, premises)
-    Add(Clause, String, Vec<Position>),
+    Add(Arc<Clause>, String, Vec<Position>),
     /// Clause simplified: removed and optionally replaced.
     /// (clause_idx, replacement, rule_name, premises)
-    Simplify(usize, Option<Clause>, String, Vec<Position>),
+    Simplify(usize, Option<Arc<Clause>>, String, Vec<Position>),
     /// Clause transferred from N to U (survived forward simplification)
     Transfer(usize),
     /// Clause selected and transferred from U to P
@@ -196,7 +196,7 @@ impl SaturationState {
                     clause_idx: idx,
                     rule_name,
                     premises,
-                    conclusion: (*self.clauses[idx]).clone(),
+                    conclusion: Arc::clone(&self.clauses[idx]),
                 }
             })
             .collect()

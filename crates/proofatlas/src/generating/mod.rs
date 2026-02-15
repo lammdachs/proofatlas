@@ -11,8 +11,8 @@ pub mod equality_resolution;
 pub mod equality_factoring;
 
 pub use common::{
-    rename_clause_variables, rename_variables, unify_atoms,
-    remove_duplicate_literals, collect_literals_except, is_ordered_greater,
+    unify_atoms, unify_atoms_scoped, collect_literals_except, collect_scoped_literals_except,
+    remove_duplicate_literals, is_ordered_greater,
 };
 pub use resolution::{resolution, ResolutionRule};
 pub use superposition::{superposition, SuperpositionRule};

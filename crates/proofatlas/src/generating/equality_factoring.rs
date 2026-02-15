@@ -4,9 +4,11 @@ use super::common::{collect_literals_except, is_ordered_greater};
 use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateSymbol, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
+use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use std::sync::Arc;
 
 /// Apply equality factoring rule
 /// From l = r v s = t v C where sigma = mgu(l, s), l = r is selected
@@ -80,10 +82,11 @@ pub fn equality_factoring(
                     // Add all other literals from C (except the two equalities we're factoring)
                     new_literals.extend(collect_literals_except(clause, &[idx1, idx2], &sigma));
 
-                    let conclusion = Clause::new(new_literals);
+                    let mut conclusion = Clause::new(new_literals);
+                    orient_clause_equalities(&mut conclusion, interner);
 
                     results.push(StateChange::Add(
-                        conclusion,
+                        Arc::new(conclusion),
                         "EqualityFactoring".into(),
                         vec![Position::clause(idx)],
                     ));

@@ -6,6 +6,7 @@ use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
+use std::sync::Arc;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -45,7 +46,7 @@ pub fn factoring(
 
                         // Tautology check delegated to TautologyRule during forward simplification
                         results.push(StateChange::Add(
-                            new_clause,
+                            Arc::new(new_clause),
                             "Factoring".into(),
                             vec![Position::clause(idx)],
                         ));
@@ -89,7 +90,14 @@ impl GeneratingInference for FactoringRule {
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
-        factoring(given, given_idx, selector)
+        let mut changes = factoring(given, given_idx, selector);
+        // Orient after selector borrow ends (NLL)
+        for change in &mut changes {
+            if let StateChange::Add(ref mut arc, _, _) = change {
+                cm.orient_equalities(Arc::get_mut(arc).expect("refcount must be 1"));
+            }
+        }
+        changes
     }
 }
 

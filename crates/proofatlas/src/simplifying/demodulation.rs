@@ -9,6 +9,7 @@ use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
+use std::sync::Arc;
 
 // =============================================================================
 // Demodulation Algorithm
@@ -50,8 +51,9 @@ pub fn demodulate(
             if let Some(new_clause) = demodulate_clause(target, lhs, rhs, &kbo) {
                 let mut new_clause = new_clause;
                 new_clause.id = None;
+                orient_clause_equalities(&mut new_clause, interner);
                 results.push(StateChange::Add(
-                    new_clause,
+                    Arc::new(new_clause),
                     "Demodulation".into(),
                     vec![Position::clause(target_idx), Position::clause(unit_idx)],
                 ));
@@ -62,8 +64,9 @@ pub fn demodulate(
             if let Some(new_clause) = demodulate_clause(target, rhs, lhs, &kbo) {
                 let mut new_clause = new_clause;
                 new_clause.id = None;
+                orient_clause_equalities(&mut new_clause, interner);
                 results.push(StateChange::Add(
-                    new_clause,
+                    Arc::new(new_clause),
                     "Demodulation".into(),
                     vec![Position::clause(target_idx), Position::clause(unit_idx)],
                 ));
@@ -213,19 +216,15 @@ impl SimplifyingInference for DemodulationRule {
                 return None;
             }
             if let Some(unit_clause) = state.clauses.get(unit_idx) {
-                let results = demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
-                if !results.is_empty() {
-                    if let StateChange::Add(ref conclusion, _, _) = results[0] {
-                        let mut simplified_clause = conclusion.clone();
-                        orient_clause_equalities(&mut simplified_clause, interner);
-
-                        return Some(StateChange::Simplify(
-                            clause_idx,
-                            Some(simplified_clause),
-                            "Demodulation".into(),
-                            vec![Position::clause(clause_idx), Position::clause(unit_idx)],
-                        ));
-                    }
+                let mut results = demodulate(unit_clause, clause, unit_idx, clause_idx, interner);
+                if let Some(StateChange::Add(conclusion, _, _)) = results.pop() {
+                    // Orientation handled by apply_change
+                    return Some(StateChange::Simplify(
+                        clause_idx,
+                        Some(conclusion),
+                        "Demodulation".into(),
+                        vec![Position::clause(clause_idx), Position::clause(unit_idx)],
+                    ));
                 }
             }
         }
@@ -259,19 +258,15 @@ impl SimplifyingInference for DemodulationRule {
             }
 
             if let Some(target_clause) = state.clauses.get(target_idx) {
-                let results = demodulate(clause, target_clause, clause_idx, target_idx, interner);
-                if !results.is_empty() {
-                    if let StateChange::Add(ref conclusion, _, _) = results[0] {
-                        let mut simplified_clause = conclusion.clone();
-                        orient_clause_equalities(&mut simplified_clause, interner);
-
-                        changes.push(StateChange::Simplify(
-                            target_idx,
-                            Some(simplified_clause),
-                            "Demodulation".into(),
-                            vec![Position::clause(target_idx), Position::clause(clause_idx)],
-                        ));
-                    }
+                let mut results = demodulate(clause, target_clause, clause_idx, target_idx, interner);
+                if let Some(StateChange::Add(conclusion, _, _)) = results.pop() {
+                    // Orientation handled by apply_change
+                    changes.push(StateChange::Simplify(
+                        target_idx,
+                        Some(conclusion),
+                        "Demodulation".into(),
+                        vec![Position::clause(target_idx), Position::clause(clause_idx)],
+                    ));
                 }
             }
         }

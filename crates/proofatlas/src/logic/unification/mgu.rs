@@ -200,18 +200,21 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_variables() {
-        use crate::generating::common::rename_variables;
+    fn test_scoped_variable_separation() {
+        use crate::logic::unification::scoped::{flatten_scoped, unify_scoped, ScopedSubstitution};
+        use std::collections::HashMap;
 
         let mut ctx = TestContext::new();
         let x = ctx.var("X");
         let a = ctx.const_("a");
-        let term = ctx.func("f", vec![x, a]);
+        let term = ctx.func("f", vec![x.clone(), a]);
 
-        let renamed = rename_variables(&term, "1", &mut ctx.interner);
+        // Flatten term at scope 1 (no substitution): X should become X_1
+        let subst = ScopedSubstitution::new();
+        let mut renaming = HashMap::new();
+        let flattened = flatten_scoped(&term, 1, &subst, &mut renaming, &mut ctx.interner);
 
-        // Check that the renamed variable has a new name
-        if let Term::Function(_, args) = &renamed {
+        if let Term::Function(_, args) = &flattened {
             if let Term::Variable(v) = &args[0] {
                 assert_eq!(ctx.interner.resolve_variable(v.id), "X_1");
             } else {
@@ -220,5 +223,13 @@ mod tests {
         } else {
             panic!("Expected function");
         }
+
+        // Verify scoped unification separates same-named variables
+        let a2 = ctx.const_("a");
+        let mgu = unify_scoped(&x, 0, &a2, 1).unwrap();
+        // X@0 should map to constant a, but X@1 is unaffected
+        let mut renaming2 = HashMap::new();
+        let resolved = flatten_scoped(&x, 0, &mgu, &mut renaming2, &mut ctx.interner);
+        assert_eq!(resolved, ctx.const_("a"));
     }
 }

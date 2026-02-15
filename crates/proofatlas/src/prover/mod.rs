@@ -380,15 +380,11 @@ impl Prover {
             p.clauses_generated += new_changes.len();
         }
 
-        // Add new inferences
+        // Add new inferences (orientation handled by apply_change)
         let t0 = self.profile.as_ref().map(|_| Instant::now());
         for change in new_changes {
-            if let StateChange::Add(clause, rule_name, premises) = change {
-                let mut oriented = clause.clone();
-                self.clause_manager.orient_equalities(&mut oriented);
-                if let Some(result) = self.apply_change(StateChange::Add(oriented, rule_name, premises)) {
-                    return Some(result);
-                }
+            if let Some(result) = self.apply_change(change) {
+                return Some(result);
             }
         }
         if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
@@ -404,8 +400,9 @@ impl Prover {
     /// Must be called exactly once before the first `step()`.
     pub fn init(&mut self) -> Option<ProofResult> {
         let initial_clauses = std::mem::take(&mut self.initial_clauses);
-        for clause in initial_clauses {
-            if let Some(result) = self.apply_change(StateChange::Add(clause, "Input".into(), vec![])) {
+        for mut clause in initial_clauses {
+            self.clause_manager.orient_equalities(&mut clause);
+            if let Some(result) = self.apply_change(StateChange::Add(Arc::new(clause), "Input".into(), vec![])) {
                 return Some(result);
             }
         }
@@ -421,36 +418,31 @@ impl Prover {
     ///
     /// Returns `Some(ProofResult::ResourceLimit)` if a limit is exceeded.
     fn apply_change(&mut self, change: StateChange) -> Option<ProofResult> {
-        match &change {
-            StateChange::Add(clause, _rule_name, _premises) => {
-                if clause.literals.len() > self.config.max_clause_size {
+        match change {
+            StateChange::Add(mut arc_clause, rule_name, premises) => {
+                if arc_clause.literals.len() > self.config.max_clause_size {
                     return None;
                 }
 
                 let new_idx = self.state.clauses.len();
-                let mut clause_with_id = clause.clone();
-                clause_with_id.id = Some(new_idx);
-                clause_with_id.age = self.state.current_iteration;
-                clause_with_id.role = crate::logic::ClauseRole::Derived;
-                clause_with_id.derivation_rule = Clause::rule_name_to_id(_rule_name);
 
-                let mut oriented = clause.clone();
-                self.clause_manager.orient_equalities(&mut oriented);
-                self.index_registry.on_add(new_idx, &oriented);
-
-                let is_empty = clause_with_id.is_empty();
-
-                self.state.clauses.push(Arc::new(clause_with_id.clone()));
-                self.state.new.push(new_idx);
-
-                // Re-construct with updated clause (includes id)
-                if let StateChange::Add(_, rule_name, premises) = change {
-                    self.state.event_log.push(StateChange::Add(
-                        clause_with_id,
-                        rule_name,
-                        premises,
-                    ));
+                // Arc has refcount=1 (just created by caller), so get_mut succeeds.
+                // Clause is already oriented at creation — only set metadata here.
+                {
+                    let clause = Arc::get_mut(&mut arc_clause)
+                        .expect("Arc refcount must be 1 in apply_change/Add");
+                    clause.id = Some(new_idx);
+                    clause.age = self.state.current_iteration;
+                    clause.role = crate::logic::ClauseRole::Derived;
+                    clause.derivation_rule = Clause::rule_name_to_id(&rule_name);
                 }
+
+                self.index_registry.on_add(new_idx, &arc_clause);
+                let is_empty = arc_clause.is_empty();
+
+                self.state.clauses.push(Arc::clone(&arc_clause));
+                self.state.new.push(new_idx);
+                self.state.event_log.push(StateChange::Add(arc_clause, rule_name, premises));
 
                 // Empty clause → proof found
                 if is_empty {
@@ -491,8 +483,7 @@ impl Prover {
                     }
                 }
             }
-            StateChange::Simplify(clause_idx, ref replacement, ref _rule_name, ref _premises) => {
-                let clause_idx = *clause_idx;
+            StateChange::Simplify(clause_idx, replacement, rule_name, premises) => {
                 // Remove the simplified clause from whichever set contains it
                 if self.state.new.last() == Some(&clause_idx) {
                     self.state.new.pop();
@@ -507,38 +498,36 @@ impl Prover {
                 }
 
                 // If there's a replacement clause, add it to N
-                let logged_change = if let Some(repl) = replacement {
+                if let Some(mut repl) = replacement {
                     if repl.literals.len() > self.config.max_clause_size {
-                        self.state.event_log.push(change);
+                        self.state.event_log.push(StateChange::Simplify(clause_idx, Some(repl), rule_name, premises));
                         return None;
                     }
 
                     let new_idx = self.state.clauses.len();
-                    let mut clause_with_id = repl.clone();
-                    clause_with_id.id = Some(new_idx);
-                    clause_with_id.age = self.state.current_iteration;
-                    clause_with_id.role = crate::logic::ClauseRole::Derived;
-                    clause_with_id.derivation_rule = Clause::rule_name_to_id(_rule_name);
 
-                    let mut oriented = repl.clone();
-                    self.clause_manager.orient_equalities(&mut oriented);
-                    self.index_registry.on_add(new_idx, &oriented);
+                    // Arc has refcount=1, so get_mut succeeds.
+                    // Clause is already oriented at creation — only set metadata here.
+                    {
+                        let clause = Arc::get_mut(&mut repl)
+                            .expect("Arc refcount must be 1 in apply_change/Simplify");
+                        clause.id = Some(new_idx);
+                        clause.age = self.state.current_iteration;
+                        clause.role = crate::logic::ClauseRole::Derived;
+                        clause.derivation_rule = Clause::rule_name_to_id(&rule_name);
+                    }
 
-                    let is_empty = clause_with_id.is_empty();
+                    self.index_registry.on_add(new_idx, &repl);
+                    let is_empty = repl.is_empty();
 
-                    self.state.clauses.push(Arc::new(clause_with_id.clone()));
+                    self.state.clauses.push(Arc::clone(&repl));
                     self.state.new.push(new_idx);
 
                     if let Some(p) = self.profile.as_mut() {
                         p.clauses_added += 1;
                     }
 
-                    // Log with the clause that has an id assigned
-                    let StateChange::Simplify(idx, _, rule_name, premises) = change else {
-                        unreachable!()
-                    };
-                    let logged = StateChange::Simplify(idx, Some(clause_with_id), rule_name, premises);
-                    self.state.event_log.push(logged);
+                    self.state.event_log.push(StateChange::Simplify(clause_idx, Some(repl), rule_name, premises));
 
                     // Empty replacement clause → proof found
                     if is_empty {
@@ -571,12 +560,10 @@ impl Prover {
 
                     return None;
                 } else {
-                    change
-                };
-                self.state.event_log.push(logged_change);
+                    self.state.event_log.push(StateChange::Simplify(clause_idx, None, rule_name, premises));
+                }
             }
             StateChange::Transfer(clause_idx) => {
-                let clause_idx = *clause_idx;
                 // N → U
                 if self.state.new.last() == Some(&clause_idx) {
                     self.state.new.pop();
@@ -584,16 +571,15 @@ impl Prover {
                 self.state.unprocessed.insert(clause_idx);
                 self.index_registry.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
                 self.sink.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
-                self.state.event_log.push(change);
+                self.state.event_log.push(StateChange::Transfer(clause_idx));
             }
             StateChange::Activate(clause_idx) => {
-                let clause_idx = *clause_idx;
                 // U → P
                 self.state.unprocessed.shift_remove(&clause_idx);
                 self.state.processed.insert(clause_idx);
                 self.index_registry.on_activate(clause_idx, &self.state.clauses[clause_idx]);
                 self.sink.on_activate(clause_idx);
-                self.state.event_log.push(change);
+                self.state.event_log.push(StateChange::Activate(clause_idx));
 
                 // Increment iteration count at activation (given clause selection)
                 self.state.current_iteration += 1;

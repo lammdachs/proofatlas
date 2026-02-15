@@ -17,7 +17,7 @@ proofatlas/
 │   │       ├── logic/          # FOL types and manipulation
 │   │       │   ├── core/       # term.rs, literal.rs, clause.rs, position.rs
 │   │       │   ├── ordering/   # kbo.rs, orient_equalities.rs
-│   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs
+│   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs, scoped.rs
 │   │       │   ├── interner.rs # Symbol interning
 │   │       │   ├── literal_selection.rs  # LiteralSelector trait + impls
 │   │       │   ├── clause_manager.rs     # ClauseManager: interner + selector + KBO
@@ -191,8 +191,8 @@ The interner is problem-scoped (not global) for WASM compatibility and clean mem
 ### Unification
 Uses eager substitution propagation. When adding a new binding, all existing substitutions are immediately updated to prevent unsound inferences.
 
-### Variable Renaming
-Variables from different clauses are renamed to avoid capture (e.g., X becomes X_c10 for clause 10). New variable names are interned during inference.
+### Scoped Variables (Binary Inference)
+Binary inference rules (resolution, superposition) use scoped variables instead of variable renaming. Each clause's variables are tagged with a scope (u8: 0 for first clause, 1 for second). `ScopedVar{scope, id}` distinguishes same-named variables from different clauses without cloning or interning. After unification succeeds, `flatten()` converts back to concrete Terms (scope 0 keeps original IDs, others get fresh `{name}_{scope}` names). Unary inferences (factoring, equality resolution/factoring) continue using regular `Substitution`.
 
 ### Superposition Calculus
 - Only applies to positive equalities
@@ -262,8 +262,8 @@ Rules are **stateless** — they receive the full context at call time and do no
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `StateChange` values for atomic state modifications:
-- `Add(clause, rule_name, premises)`: Add new clause to N
-- `Simplify(clause_idx, replacement, rule_name, premises)`: Remove clause and optionally replace it
+- `Add(Arc<Clause>, rule_name, premises)`: Add new clause to N
+- `Simplify(clause_idx, Option<Arc<Clause>>, rule_name, premises)`: Remove clause and optionally replace it
 - `Transfer(clause_idx)`: Move clause N→U
 - `Activate(clause_idx)`: Move clause U→P
 

@@ -4,9 +4,11 @@ use super::common::collect_literals_except;
 use crate::logic::{Clause, Interner, Position};
 use crate::state::{SaturationState, StateChange, GeneratingInference};
 use crate::logic::clause_manager::ClauseManager;
+use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
+use std::sync::Arc;
 
 /// Apply equality resolution rule using literal selection
 /// From ~s = t, if we can unify s and t, derive the remaining clause
@@ -37,10 +39,11 @@ pub fn equality_resolution(
                 if let Ok(mgu) = unify(s, t) {
                     // The negative equality disappears, leaving the remaining literals
                     let new_literals = collect_literals_except(clause, &[i], &mgu);
-                    let new_clause = Clause::new(new_literals);
+                    let mut new_clause = Clause::new(new_literals);
+                    orient_clause_equalities(&mut new_clause, interner);
 
                     results.push(StateChange::Add(
-                        new_clause,
+                        Arc::new(new_clause),
                         "EqualityResolution".into(),
                         vec![Position::clause(idx)],
                     ));

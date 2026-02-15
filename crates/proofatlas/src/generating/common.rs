@@ -1,50 +1,11 @@
 //! Common types and utilities for inference rules
 
-use crate::logic::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, Variable, KBO};
+use crate::logic::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, KBO};
 use crate::logic::unify;
-use std::collections::HashSet;
-
-/// Rename all variables in a clause to avoid conflicts
-pub fn rename_clause_variables(clause: &Clause, suffix: &str, interner: &mut Interner) -> Clause {
-    Clause {
-        literals: clause
-            .literals
-            .iter()
-            .map(|lit| Literal {
-                predicate: lit.predicate,
-                args: lit
-                    .args
-                    .iter()
-                    .map(|arg| rename_variables(arg, suffix, interner))
-                    .collect(),
-                polarity: lit.polarity,
-            })
-            .collect(),
-        id: clause.id,
-        role: clause.role,
-        age: clause.age,
-        derivation_rule: clause.derivation_rule,
-    }
-}
-
-/// Rename variables in a term
-pub fn rename_variables(term: &Term, suffix: &str, interner: &mut Interner) -> Term {
-    match term {
-        Term::Variable(v) => {
-            let old_name = interner.resolve_variable(v.id);
-            let new_name = format!("{}_{}", old_name, suffix);
-            let new_id = interner.intern_variable(&new_name);
-            Term::Variable(Variable::new(new_id))
-        }
-        Term::Constant(c) => Term::Constant(*c),
-        Term::Function(f, args) => Term::Function(
-            *f,
-            args.iter()
-                .map(|arg| rename_variables(arg, suffix, interner))
-                .collect(),
-        ),
-    }
-}
+use crate::logic::unification::scoped::{
+    ScopedSubstitution, ScopedVar, apply_scoped_term, flatten_scoped, lift, unify_scoped_terms,
+};
+use std::collections::{HashMap, HashSet};
 
 /// Unify the predicate/args of two literals (or atoms).
 ///
@@ -118,4 +79,54 @@ pub fn is_ordered_greater(t1: &Term, t2: &Term, kbo: &KBO) -> bool {
         kbo.compare(t1, t2),
         TermOrdering::Greater | TermOrdering::Incomparable
     )
+}
+
+/// Unify atoms from two different clauses using scoped variables.
+///
+/// Returns a ScopedSubstitution if the predicates match and all
+/// argument pairs are unifiable across the two scopes.
+pub fn unify_atoms_scoped(
+    pred1: PredicateSymbol,
+    args1: &[Term],
+    scope1: u8,
+    pred2: PredicateSymbol,
+    args2: &[Term],
+    scope2: u8,
+) -> Result<ScopedSubstitution, ()> {
+    if pred1 != pred2 || args1.len() != args2.len() {
+        return Err(());
+    }
+
+    let mut subst = ScopedSubstitution::new();
+    for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+        let st1 = apply_scoped_term(&lift(arg1, scope1), &subst);
+        let st2 = apply_scoped_term(&lift(arg2, scope2), &subst);
+        unify_scoped_terms(&st1, &st2, &mut subst)?;
+    }
+
+    Ok(subst)
+}
+
+/// Collect literals from a clause, excluding indices, applying scoped subst + flatten.
+pub fn collect_scoped_literals_except(
+    clause: &Clause,
+    exclude: &[usize],
+    scope: u8,
+    subst: &ScopedSubstitution,
+    renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
+    interner: &mut Interner,
+) -> Vec<Literal> {
+    clause
+        .literals
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !exclude.contains(i))
+        .map(|(_, lit)| {
+            Literal {
+                predicate: lit.predicate,
+                args: lit.args.iter().map(|arg| flatten_scoped(arg, scope, subst, renaming, interner)).collect(),
+                polarity: lit.polarity,
+            }
+        })
+        .collect()
 }
