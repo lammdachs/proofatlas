@@ -33,7 +33,7 @@
 {#if result}
 	<div class="space-y-6">
 		<!-- Status -->
-		<div class="p-5 border-b-2" style="border-color: {statusColor(result)}; background: color-mix(in srgb, {statusColor(result)} 8%, transparent);">
+		<div class="p-5 border-b-2" style="border-color: {statusColor(result)}; background: color-mix(in srgb, {statusColor(result)} 12%, transparent);">
 			<p class="font-semibold" style="color: {statusColor(result)}">{result.message}</p>
 		</div>
 
@@ -161,7 +161,7 @@
 
 				{#if viewMode === 'proof'}
 					{#if result.proof && result.proof.length > 0}
-						<div class="overflow-hidden border border-surface-lighter/50 pb-4" style="background: color-mix(in srgb, var(--color-surface-light) 50%, transparent);">
+						<div class="overflow-hidden border border-surface-lighter/50 pb-4" style="background: var(--color-card);">
 							<table class="w-full">
 								<thead>
 									<tr class="border-b border-surface-lighter/50">
@@ -172,7 +172,7 @@
 								</thead>
 								<tbody>
 									{#each result.proof as step, i}
-										<tr class="border-b border-surface-lighter/20 hover:bg-surface-lighter/30 transition-colors">
+										<tr class="border-b border-surface-lighter/30 hover:bg-surface-lighter/30 transition-colors">
 											<td class="px-4 py-2.5 font-mono text-xs text-text-muted">{step.id}</td>
 											<td class="px-4 py-2.5 font-mono text-sm text-text">{step.clause}</td>
 											<td class="px-4 py-2.5 text-right font-mono text-xs text-text-muted whitespace-nowrap">

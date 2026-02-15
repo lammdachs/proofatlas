@@ -278,7 +278,7 @@
 					<kbd class="ml-2 px-1.5 py-0.5 border border-surface-lighter/50">&#8593;&#8595;</kbd> events
 				</span>
 			</div>
-			<div class="border border-surface-lighter/50 flex flex-col md:flex-row">
+			<div class="border border-surface-lighter/50 flex flex-col md:flex-row" style="background: var(--color-card);">
 				<!-- Left: event window -->
 				<div class="md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-surface-lighter/50" style="min-height: 8.75rem;">
 					{#if currentFlatEvents.length > 0}
@@ -291,7 +291,7 @@
 							{@const active = i === currentEventIdx}
 							<button
 								class="w-full text-left px-3 py-1.5 font-mono text-sm cursor-pointer transition-all flex items-center gap-2 hover:bg-surface-lighter/30 {active ? 'text-text font-semibold' : 'text-text-muted'}"
-								style={active ? `border-left: 2px solid ${categoryColor(cat)}; background: color-mix(in srgb, ${categoryColor(cat)} 8%, transparent);` : 'border-left: 2px solid transparent;'}
+								style={active ? `border-left: 2px solid ${categoryColor(cat)}; background: color-mix(in srgb, ${categoryColor(cat)} 12%, transparent);` : 'border-left: 2px solid transparent;'}
 								onclick={() => goToStep(currentStep, i)}
 							>
 								<span class="w-1.5 h-1.5 rounded-full shrink-0" style="background: {categoryColor(cat)}"></span>
@@ -320,70 +320,70 @@
 						<table class="w-full text-sm">
 							<tbody>
 								{#if isDemodDeletion}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Rewritten</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Using</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[1])}</td>
 									</tr>
 									{#if ev.replacement_idx != null}
-										<tr class="border-b border-surface-lighter/20 last:border-0">
+										<tr class="border-b border-surface-lighter/30 last:border-0">
 											<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Result</td>
 											<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.replacement_idx)}</td>
 										</tr>
 									{/if}
 								{:else if isDeletion}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Deleted</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
 									{#if ev.premises.length > 0}
-										<tr class="border-b border-surface-lighter/20 last:border-0">
+										<tr class="border-b border-surface-lighter/30 last:border-0">
 											<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">By</td>
 											<td class="py-2 font-mono text-sm text-text leading-relaxed">{#each ev.premises as p}{@html formatClauseRef(p)}<br/>{/each}</td>
 										</tr>
 									{/if}
 								{:else if isTransfer}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Clause</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Move</td>
 										<td class="py-2 text-sm text-text">N &rarr; U</td>
 									</tr>
 								{:else if isSelection}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Given</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Move</td>
 										<td class="py-2 text-sm text-text">U &rarr; P</td>
 									</tr>
 								{:else if isDemodAdd && ev.premises.length >= 2}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Rewritten</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[0])}</td>
 									</tr>
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Using</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[1])}</td>
 									</tr>
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Result</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
 								{:else}
 									{#if ev.premises.length > 0}
-										<tr class="border-b border-surface-lighter/20 last:border-0">
+										<tr class="border-b border-surface-lighter/30 last:border-0">
 											<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Premises</td>
 											<td class="py-2 font-mono text-sm text-text leading-relaxed">{#each ev.premises as p}{@html formatClauseRef(p)}<br/>{/each}</td>
 										</tr>
 									{/if}
-									<tr class="border-b border-surface-lighter/20 last:border-0">
+									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Result</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
@@ -400,7 +400,7 @@
 		<!-- 3. Clause Sets -->
 		<div>
 			<h4 class="text-xs uppercase tracking-wide text-green font-mono mb-2">// clause sets</h4>
-			<div class="border border-surface-lighter/50">
+			<div class="border border-surface-lighter/50" style="background: var(--color-card);">
 				<!-- Header row -->
 				<div class="flex items-center border-b border-surface-lighter/50">
 					<!-- Desktop: three column headers -->
@@ -433,7 +433,7 @@
 								<div
 									class="px-3 py-1 font-mono text-sm leading-relaxed truncate hover:whitespace-normal hover:break-all transition-all {highlightedClauseIds.has(clause.id) ? 'text-text' : 'text-text opacity-60'}"
 									style={highlightedClauseIds.has(clause.id) && currentEvent
-										? `background: color-mix(in srgb, ${categoryColor(eventCategory(currentEvent.rule))} 12%, transparent);`
+										? `background: color-mix(in srgb, ${categoryColor(eventCategory(currentEvent.rule))} 18%, transparent);`
 										: ''}
 									title="[{clause.id}] {clause.text}"
 								>
@@ -453,7 +453,7 @@
 						<div
 							class="px-3 py-1 font-mono text-sm leading-relaxed truncate hover:whitespace-normal hover:break-all transition-all {highlightedClauseIds.has(clause.id) ? 'text-text' : 'text-text opacity-60'}"
 							style={highlightedClauseIds.has(clause.id) && currentEvent
-								? `background: color-mix(in srgb, ${categoryColor(eventCategory(currentEvent.rule))} 12%, transparent);`
+								? `background: color-mix(in srgb, ${categoryColor(eventCategory(currentEvent.rule))} 18%, transparent);`
 								: ''}
 							title="[{clause.id}] {clause.text}"
 						>

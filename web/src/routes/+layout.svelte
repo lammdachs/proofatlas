@@ -24,7 +24,7 @@
 </script>
 
 <!-- Background blobs -->
-<div class="fixed inset-0 overflow-hidden pointer-events-none -z-10">
+<div class="fixed inset-0 overflow-hidden pointer-events-none -z-10 blobs">
 	<div class="absolute top-20 left-10 w-72 h-72 bg-green/30 rounded-full blur-3xl animate-blob"></div>
 	<div class="absolute top-40 right-20 w-96 h-96 bg-terracotta/25 rounded-full blur-3xl animate-blob" style="animation-delay: 2s;"></div>
 	<div class="absolute bottom-20 left-1/3 w-80 h-80 bg-accent/30 rounded-full blur-3xl animate-blob" style="animation-delay: 4s;"></div>
