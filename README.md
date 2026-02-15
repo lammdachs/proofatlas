@@ -1,6 +1,6 @@
 # ProofAtlas: Neural Clause Selection for Theorem Proving
 
-ProofAtlas is a research framework for experimenting with neural guidance in automated theorem proving. It combines a high-performance Rust theorem prover with ML-based clause selection.
+ProofAtlas is a high-performance theorem prover for first-order logic with equality, combining saturation-based superposition calculus with ML-guided clause selection. Written in Rust with Python bindings, it supports multiple neural architectures for learning clause selection strategies from proof traces.
 
 ## Live Demo
 
@@ -8,55 +8,54 @@ Try ProofAtlas in your browser: **[lammdachs.github.io/proofatlas](https://lammd
 
 ## Research Focus
 
-**How can we best represent logical clauses as graphs and learn to select useful clauses during proof search?**
+**Can neural networks learn to select useful clauses during saturation-based proof search?**
 
-- **Graph representations**: Converting clauses to graphs with node features (type, arity, depth, age, etc.)
-- **Graph Neural Networks**: GCN, MLP architectures for learning clause embeddings
-- **Clause selection**: Replacing heuristics like age-weight ratio with learned selectors
+- **Clause encoders**: Graph neural networks (GCN), sentence transformers (MiniLM), and clause feature vectors
+- **Scoring architectures**: MLP, multi-head attention, transformer, and cross-attention heads
+- **Pipelined inference**: Asynchronous ML scoring overlapped with proof search
+- **Trace-based training**: Per-clause lifecycle arrays enable step-level supervision from proof search traces
 
 ## Project Structure
 
 ```
 proofatlas/
-│
 ├── crates/
-│   ├── proofatlas/             # Core theorem prover (Rust)
+│   ├── proofatlas/                # Core theorem prover (Rust)
 │   │   └── src/
-│   │       ├── core/           # Terms, literals, clauses, substitutions, KBO ordering
-│   │       ├── inference/      # Inference rules: resolution, superposition, demodulation
-│   │       ├── saturation/     # Saturation loop, forward/backward subsumption
-│   │       ├── parser/         # TPTP parser with FOF→CNF conversion
-│   │       ├── unification/    # Most General Unifier (MGU) computation
-│   │       ├── selectors/      # Clause/literal selection strategies (tch-rs ML)
-│   │       └── ml/             # Graph building from clauses
+│   │       ├── logic/             # FOL types: core/, ordering/, unification/, interner, clause_manager
+│   │       ├── simplifying/       # Tautology elimination, subsumption, demodulation
+│   │       ├── generating/        # Resolution, superposition, factoring, equality rules
+│   │       ├── index/             # SubsumptionChecker, SelectedLiteralIndex, DiscriminationTree
+│   │       ├── prover/            # Saturation engine (prove/init/step/saturate)
+│   │       ├── selection/         # Clause selection: age-weight, ML pipeline, scoring server
+│   │       │   ├── ml/            # GCN, sentence, features encoders (tch-rs)
+│   │       │   ├── pipeline/      # Backend compute service, ChannelSink
+│   │       │   ├── network/       # Scoring protocol, RemoteSelector, ScoringServer
+│   │       │   └── training/      # NPZ trace writer, proof trace extraction
+│   │       ├── parser/            # TPTP parser with FOF→CNF conversion
+│   │       ├── atlas.rs           # ProofAtlas orchestrator (reusable across problems)
+│   │       ├── config.rs          # ProverConfig, LiteralSelectionStrategy
+│   │       └── state.rs           # SaturationState, StateChange, ProofResult, inference traits
 │   │
-│   └── proofatlas-wasm/        # WebAssembly bindings for browser execution
+│   └── proofatlas-wasm/           # WebAssembly bindings for browser execution
 │
-├── python/proofatlas/          # Python package
-│   ├── cli/                    # Command-line interface (bench entry point)
-│   ├── ml/                     # Training configs, data loading, training loops
-│   └── selectors/              # PyTorch model implementations (GCN, Sentence)
+├── python/proofatlas/             # Python package
+│   ├── cli/                       # CLI tools: prove, bench, train, web
+│   ├── ml/                        # Training loops, data loading, model export
+│   └── selectors/                 # PyTorch models: GCN, sentence, features, scorers
 │
-├── web/                        # Web frontend
-│   ├── index.html              # Main prover interface
-│   ├── app.js                  # Frontend logic
-│   └── style.css               # Styling
+├── web/                           # SvelteKit web frontend (Tailwind CSS, Chart.js)
+├── configs/                       # JSON configs: presets, training, problem sets, embeddings, scorers
+├── scripts/                       # Setup, benchmarking, training, experiment orchestration
+├── docs/                          # Architecture, CLI reference, configuration, ML training guides
 │
-├── configs/                    # JSON configuration for provers, training, benchmarks
-│
-├── scripts/                    # Utility scripts
-│   ├── setup.py                # One-command project setup
-│   ├── bench.py                # Multi-prover benchmarking with trace collection
-│   ├── export.py               # Export results for web display
-│   └── setup_*.py              # Setup TPTP, Vampire, SPASS
-│
-├── .data/                      # Runtime data (gitignored)
-│   ├── traces/                 # Proof search traces for ML training
-│   └── runs/                   # Benchmark results
-├── .tptp/                      # TPTP problem library (gitignored)
-├── .weights/                   # Trained model weights (gitignored)
-├── .vampire/                   # Vampire prover binary (gitignored)
-└── .spass/                     # SPASS prover binary (gitignored)
+├── .data/                         # Runtime data (gitignored)
+│   ├── traces/                    # Proof search traces (NPZ)
+│   └── runs/                      # Benchmark results
+├── .tptp/                         # TPTP problem library (gitignored)
+├── .weights/                      # Trained model weights (gitignored)
+├── .vampire/                      # Vampire prover binary (gitignored)
+└── .spass/                        # SPASS prover binary (gitignored)
 ```
 
 ## Installation
@@ -84,82 +83,108 @@ python scripts/setup.py
 ### Running the Prover
 
 ```bash
-# Basic usage
-proofatlas .tptp/TPTP-v9.0.0/Problems/PUZ/PUZ001-1.p
+proofatlas problem.p                              # Basic usage
+proofatlas problem.p --config time                 # With preset (10s timeout)
+proofatlas problem.p --timeout 30                  # Custom timeout
+proofatlas problem.p --literal-selection 21         # Literal selection strategy
+proofatlas problem.p --json output.json            # Export result to JSON
+proofatlas --list                                  # List available presets
+```
 
-# With preset and timeout
-proofatlas problem.p --config time --timeout 30
+### Training ML Models
 
-# List available presets
-proofatlas --list
+```bash
+proofatlas-train --config gcn_mlp                  # Train GCN + MLP scorer
+proofatlas-train --config sentence_attention        # Train sentence + attention scorer
+proofatlas-train --config gcn_mlp --use-cuda       # Train on GPU
+proofatlas-train --config gcn_mlp --max-epochs 4   # Short test run
 ```
 
 ### Benchmarking
 
 ```bash
-# Run benchmarks with a preset
-proofatlas-bench --config time
-
-# Retrain ML model
-proofatlas-bench --config gcn_mlp --retrain
+proofatlas-bench                                   # Run all presets
+proofatlas-bench --config gcn_mlp                  # Run specific preset
+proofatlas-bench --config gcn_mlp --retrain        # Retrain before benchmarking
+proofatlas-bench --status                          # Check running jobs
+proofatlas-bench --kill                            # Stop running jobs
 ```
 
-### Local Web Interface
+### Web Interface
 
 ```bash
-# Serve locally (Python)
-python -m http.server 8000 --directory web
-
-# Or with Node.js
-npx serve web
+proofatlas-web                                     # Start on default port
+proofatlas-web --port 3000                         # Custom port
+proofatlas-web --kill                              # Stop the server
 ```
 
-Then open http://localhost:8000 in your browser.
+## ML Architecture
 
-## Clause Selection
+ProofAtlas supports a modular encoder + scorer architecture. Models are trained in PyTorch, exported to TorchScript, and loaded at inference time via tch-rs.
 
-### Heuristic Selectors
+### Encoders
 
-```rust
-use proofatlas::AgeWeightSelector;
-let selector = AgeWeightSelector::new(0.5); // 50% age, 50% weight
+| Encoder | Description |
+|---------|-------------|
+| `gcn` | Graph Convolutional Network over clause structure (node type, arity, depth, polarity, etc.) |
+| `gcn_struct` | GCN with structural features only (no symbol embeddings) |
+| `features` | 9-dimensional clause feature vector (sinusoidal + one-hot encoding → MLP) |
+| `sentence` | Sentence transformer (MiniLM) encoding clause text as 384-D embeddings |
+
+### Scorers
+
+| Scorer | Description |
+|--------|-------------|
+| `mlp` | Feed-forward network |
+| `attention` | Multi-head self/cross-attention with learnable sentinel |
+| `transformer` | Full transformer block with cross-attention |
+| `cross_attention` | Dot-product cross-attention |
+
+Any encoder can be combined with any scorer. Presets are defined in `configs/proofatlas.json` and follow the pattern `{encoder}_{scorer}` (e.g., `gcn_mlp`, `sentence_attention`, `features_transformer`).
+
+### Inference Pipeline
+
+During proof search, clause scoring runs asynchronously in a pipelined architecture:
+
+```
+Prover → ChannelSink → Data Processing Thread → Backend (CPU/GPU model)
+          (signals)      (embedding cache,         (TorchScript)
+                          softmax sampling)
 ```
 
-### ML Selectors (tch-rs)
+For multi-GPU setups, a socket-based scoring server is available via `--gpu-workers`.
 
-```rust
-use proofatlas::load_gcn_selector;
-let selector = load_gcn_selector(
-    ".weights/gcn_model.pt",
-    true,  // use_cuda
-)?;
-```
+## Superposition Calculus
 
-ML selectors are enabled by default and use GPU-accelerated inference via tch-rs. CUDA is used automatically when available.
+ProofAtlas implements the superposition calculus for first-order logic with equality:
 
-## Node Features
-
-Each clause is converted to a graph with 8-dimensional raw node features:
-
-| Index | Feature | Description |
-|-------|---------|-------------|
-| 0 | Node type | 0-5: clause, literal, predicate, function, variable, constant |
-| 1 | Arity | Number of arguments |
-| 2 | Arg position | Position as argument to parent |
-| 3 | Depth | Distance from clause root |
-| 4 | Age | Clause age normalized to [0, 1] |
-| 5 | Role | 0-4: axiom, hypothesis, definition, negated_conjecture, derived |
-| 6 | Polarity | 1=positive literal, 0=negative |
-| 7 | Is equality | 1 if equality predicate, 0 otherwise |
-
-The model's feature embedding layer converts these to a richer representation using one-hot and sinusoidal encodings.
+- **Generating rules**: Binary resolution, superposition (left/right), factoring, equality resolution, equality factoring
+- **Simplifying rules**: Tautology elimination, forward/backward subsumption, forward/backward demodulation
+- **Term ordering**: Knuth-Bendix Ordering (KBO)
+- **Literal selection**: Four strategies (levels 0, 20, 21, 22) based on [Hoder et al. 2016](https://doi.org/10.1007/978-3-319-40229-1_18)
+- **Indexing**: Feature vector index for subsumption, discrimination tree for demodulation, selected literal index for inference candidate filtering
 
 ## Tests
 
 ```bash
-cargo test                        # Rust tests
-python -m pytest python/tests/    # Python tests
+# Rust tests (requires PyTorch environment)
+export LIBTORCH_USE_PYTORCH=1
+export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
+cargo test
+
+# Python tests
+pytest python/tests/ -v
 ```
+
+## Documentation
+
+Detailed documentation is available in [`docs/`](docs/):
+
+- [Architecture](docs/architecture.md) — system design and module overview
+- [CLI Reference](docs/cli_reference.md) — command-line interface documentation
+- [Configuration](docs/configuration.md) — config file format and options
+- [ML Training](docs/ml_training.md) — training workflow and trace format
+- [Calculus Quick Reference](docs/calculus_quick_reference.md) — superposition calculus rules
 
 ## Contributing
 
@@ -167,14 +192,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-BSD 0-Clause License
+MIT License
 
 ## Citation
 
 ```bibtex
-@software{proofatlas2024,
+@software{proofatlas,
   title = {ProofAtlas: Neural Clause Selection for Theorem Proving},
-  year = {2024},
+  author = {Pluska, Alexander},
+  year = {2025},
   url = {https://github.com/lexpk/proofatlas}
 }
 ```

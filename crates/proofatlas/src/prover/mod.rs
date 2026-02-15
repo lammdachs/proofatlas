@@ -241,6 +241,11 @@ impl Prover {
         // === Step 1: Process new clauses ===
         let t_process_new = self.profile.as_ref().map(|_| Instant::now());
         'simplify: while let Some(&clause_idx) = self.state.new.last() {
+            // Check timeout/cancel between processing each new clause
+            if self.clause_manager.is_cancelled() {
+                return Some(ProofResult::ResourceLimit);
+            }
+
             // 1a: Apply forward simplification rules
             let mut forward_change: Option<StateChange> = None;
             for rule in self.simplifying_inferences.iter() {
@@ -552,6 +557,14 @@ impl Prover {
                                 if rss.saturating_sub(baseline) >= limit_mb {
                                     return Some(ProofResult::ResourceLimit);
                                 }
+                            }
+                        }
+                        if self.cancel.load(Ordering::Relaxed) {
+                            return Some(ProofResult::ResourceLimit);
+                        }
+                        if let Some(start) = self.start_time {
+                            if start.elapsed() > self.config.timeout {
+                                return Some(ProofResult::ResourceLimit);
                             }
                         }
                     }

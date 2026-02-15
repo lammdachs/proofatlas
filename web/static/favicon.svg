@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background - atlas/globe shape -->
+  <circle cx="32" cy="32" r="28" fill="#34495e" stroke="#2c3e50" stroke-width="2"/>
+  
+  <!-- Globe lines (meridians and parallels) -->
+  <g stroke="#4a5f7f" stroke-width="1" fill="none" opacity="0.5">
+    <!-- Horizontal lines (parallels) -->
+    <ellipse cx="32" cy="32" rx="24" ry="8"/>
+    <ellipse cx="32" cy="32" rx="24" ry="16"/>
+    <ellipse cx="32" cy="32" rx="24" ry="24"/>
+    
+    <!-- Vertical lines (meridians) -->
+    <ellipse cx="32" cy="32" rx="8" ry="24"/>
+    <ellipse cx="32" cy="32" rx="16" ry="24"/>
+  </g>
+  
+  <!-- Large turnstile symbol in center -->
+  <g stroke="#3498db" stroke-width="3" fill="none" stroke-linecap="round">
+    <!-- Vertical line of turnstile -->
+    <line x1="24" y1="20" x2="24" y2="44"/>
+    <!-- Horizontal line of turnstile -->
+    <line x1="24" y1="32" x2="44" y2="32"/>
+  </g>
+  
+  <!-- Highlight effect on turnstile -->
+  <g stroke="#5dade2" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8">
+    <line x1="24" y1="20" x2="24" y2="44"/>
+    <line x1="24" y1="32" x2="44" y2="32"/>
+  </g>
+</svg>

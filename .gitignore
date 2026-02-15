@@ -24,6 +24,11 @@ Cargo.lock
 # WASM build outputs
 /web/pkg/
 /web/dist/
+/web/static/pkg/
+
+# SvelteKit
+/web/build/
+/web/.svelte-kit/
 
 # Python
 __pycache__/
@@ -37,6 +42,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!web/src/lib/
 lib64/
 parts/
 sdist/
@@ -53,11 +59,15 @@ MANIFEST
 *.pt
 *.ckpt
 
-# JSON (except configs and web data)
+# JSON (except configs, web data, and web project files)
 *.json
 !configs/**/*.json
 !web/examples/*.json
 !web/data/**/*.json
+!web/package.json
+!web/tsconfig.json
+!web/static/examples/*.json
+!web/static/data/**/*.json
 
 # Node.js
 node_modules/

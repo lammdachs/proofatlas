@@ -3,6 +3,9 @@
 #[allow(unused_imports)]
 use std::time::Duration;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use std::time::Instant;
 
@@ -15,9 +18,13 @@ pub struct Instant {
 #[cfg(target_arch = "wasm32")]
 impl Instant {
     pub fn now() -> Self {
-        let millis = web_sys::window()
-            .and_then(|w| w.performance())
-            .map(|p| p.now())
+        // Use js_sys::global() to get performance.now() — works in both Window and Worker
+        let millis = js_sys::Reflect::get(&js_sys::global(), &"performance".into())
+            .ok()
+            .and_then(|perf| {
+                let perf: web_sys::Performance = perf.dyn_into().ok()?;
+                Some(perf.now())
+            })
             .unwrap_or(0.0);
         Instant { millis }
     }

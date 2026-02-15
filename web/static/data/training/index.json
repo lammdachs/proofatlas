@@ -1,0 +1,18 @@
+{
+  "generated": "2026-01-19T03:59:02.510762",
+  "runs": [
+    "features_attention",
+    "features_mlp",
+    "features_transformer",
+    "gcn_attention",
+    "gcn_mlp",
+    "gcn_struct_attention",
+    "gcn_struct_mlp",
+    "gcn_struct_transformer",
+    "gcn_symbol_transformer",
+    "gcn_transformer",
+    "sentence_attention",
+    "sentence_mlp",
+    "sentence_transformer"
+  ]
+}

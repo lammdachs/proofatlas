@@ -28,29 +28,41 @@ from pathlib import Path
 
 
 def find_web_dir() -> Path:
-    """Find the web directory."""
-    # Try relative to this file
+    """Find the web directory and return the directory to serve from.
+
+    Looks for SvelteKit build output (web/build/index.html) first,
+    then falls back to legacy layout (web/index.html).
+    """
     candidates = [
         Path(__file__).parent.parent.parent.parent.parent / "web",
         Path.cwd() / "web",
     ]
 
-    for candidate in candidates:
-        if (candidate / "index.html").exists():
-            return candidate.resolve()
-
     # Search upward from cwd
     path = Path.cwd()
     while path != path.parent:
-        if (path / "web" / "index.html").exists():
-            return (path / "web").resolve()
+        candidates.append(path / "web")
         path = path.parent
+
+    for candidate in candidates:
+        # SvelteKit build output (preferred)
+        if (candidate / "build" / "index.html").exists():
+            return (candidate / "build").resolve()
+        # Legacy layout (pre-SvelteKit)
+        if (candidate / "index.html").exists():
+            return candidate.resolve()
 
     return None
 
 
 def find_project_root(web_dir: Path) -> Path:
-    """Find the project root (parent of web/)."""
+    """Find the project root (ancestor containing configs/ directory)."""
+    path = web_dir
+    while path != path.parent:
+        if (path / "configs").is_dir():
+            return path
+        path = path.parent
+    # Fallback: assume web_dir is web/ or web/build/
     return web_dir.parent
 
 
@@ -529,13 +541,13 @@ def start_server(port: int, web_dir: Path):
         print(f"Use --kill to stop it first")
         sys.exit(1)
 
-    # Check if WASM package exists
+    # Check if WASM package exists (in served directory's pkg/)
     pkg_dir = web_dir / "pkg"
     if not (pkg_dir / "proofatlas_wasm.js").exists():
-        print("Error: WASM package not found in web/pkg/")
-        print("The package should be built during pip install.")
-        print("If missing, run: wasm-pack build --target web --out-dir ../../web/pkg crates/proofatlas-wasm")
-        sys.exit(1)
+        print("Warning: WASM package not found in pkg/")
+        print("Browser-only proving will not work.")
+        print("Build WASM: wasm-pack build --target web --out-dir ../../web/static/pkg crates/proofatlas-wasm")
+        print("Then rebuild: cd web && npm run build")
 
     project_root = find_project_root(web_dir)
 

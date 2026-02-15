@@ -1,0 +1,15 @@
+{
+  "generated": "2026-02-14T14:49:50.761059",
+  "prover": "proofatlas",
+  "preset": "age_weight",
+  "completed": 38,
+  "total": 38,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 29,
+    "saturated": 0,
+    "resource_limit": 9,
+    "error": 0
+  },
+  "proof_rate": 76.3157894736842
+}

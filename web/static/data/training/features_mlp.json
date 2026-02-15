@@ -1,0 +1,39 @@
+{
+  "generated": "2026-02-14T14:15:06.067108",
+  "name": "features_mlp",
+  "start_time": "2026-02-14T14:15:06.067113",
+  "end_time": "2026-02-14T14:15:12.758810",
+  "total_time_seconds": 6.693213939666748,
+  "termination_reason": "completed",
+  "best_epoch": 1,
+  "best_val_loss": 0.0,
+  "model": {
+    "type": "features",
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "input_dim": 8,
+    "scorer_type": "mlp"
+  },
+  "training": {
+    "batch_size_bytes": 65536,
+    "accumulate_steps": 1,
+    "learning_rate": 0.0003,
+    "max_epochs": 1,
+    "optimizer": "adamw",
+    "weight_decay": 0.0001,
+    "margin": 0.1,
+    "cpu_workers": 2,
+    "gpu_workers": 1
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 0.743043065071106,
+      "val_loss": 0.0,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    }
+  ],
+  "evaluations": []
+}

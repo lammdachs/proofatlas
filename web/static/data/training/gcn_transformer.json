@@ -1,0 +1,39 @@
+{
+  "generated": "2026-02-14T14:25:46.587964",
+  "name": "gcn_transformer",
+  "start_time": "2026-02-14T14:25:46.587973",
+  "end_time": "2026-02-14T14:25:53.598337",
+  "total_time_seconds": 7.023070335388184,
+  "termination_reason": "completed",
+  "best_epoch": 1,
+  "best_val_loss": 0.0,
+  "model": {
+    "type": "gcn",
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "input_dim": 8,
+    "scorer_type": "transformer"
+  },
+  "training": {
+    "batch_size_bytes": 65536,
+    "accumulate_steps": 1,
+    "learning_rate": 0.0003,
+    "max_epochs": 1,
+    "optimizer": "adamw",
+    "weight_decay": 0.0001,
+    "margin": 0.1,
+    "cpu_workers": 2,
+    "gpu_workers": 1
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 0.9743123054504395,
+      "val_loss": 0.0,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    }
+  ],
+  "evaluations": []
+}

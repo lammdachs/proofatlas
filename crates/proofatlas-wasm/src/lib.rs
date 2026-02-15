@@ -1,10 +1,23 @@
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use serde::{Serialize, Deserialize};
 use proofatlas::{
     parse_tptp, ProverConfig, ProofResult, Prover, LiteralSelectionStrategy,
     Clause, Literal, Interner, AgeWeightSink, ProverSink, StateChange,
 };
 use std::time::Duration;
+
+/// Get current time in milliseconds via `performance.now()`.
+/// Works in both Window and Web Worker contexts by using `js_sys::global()`.
+fn performance_now() -> f64 {
+    js_sys::Reflect::get(&js_sys::global(), &"performance".into())
+        .ok()
+        .and_then(|perf| {
+            let perf: web_sys::Performance = perf.dyn_into().ok()?;
+            Some(perf.now())
+        })
+        .unwrap_or(0.0)
+}
 
 #[wasm_bindgen]
 pub struct ProofAtlasWasm;
@@ -78,11 +91,7 @@ impl ProofAtlasWasm {
         web_sys::console::log_1(&format!("Parsed {} clauses", cnf.formula.clauses.len()).into());
 
         let initial_clauses = cnf.formula.clauses.len();
-        let start_time = web_sys::window()
-            .unwrap()
-            .performance()
-            .unwrap()
-            .now();
+        let start_time = performance_now();
 
         // Create saturation config with configurable literal selection
         let literal_selection = match options.literal_selection.as_deref() {
@@ -124,11 +133,7 @@ impl ProofAtlasWasm {
 
         web_sys::console::log_1(&"Saturation completed".into());
 
-        let end_time = web_sys::window()
-            .unwrap()
-            .performance()
-            .unwrap()
-            .now();
+        let end_time = performance_now();
 
         let time_ms = (end_time - start_time) as u32;
 
@@ -388,6 +393,7 @@ fn events_to_js_value(events: &[StateChange], interner: &Interner) -> serde_json
                     "clause_idx": *clause_idx,
                     "clause": clause_str,
                     "rule": "GivenClauseSelection",
+                    "premises": [],
                 }));
                 in_generation_phase = true;
             }
@@ -427,11 +433,5 @@ fn format_literal(lit: &Literal, interner: &Interner) -> String {
 // Required for wasm-bindgen
 #[wasm_bindgen(start)]
 pub fn main() {
-    // Set panic hook for better error messages
     console_error_panic_hook::set_once();
-
-    // Also set up better panic handling
-    std::panic::set_hook(Box::new(|info| {
-        console_error_panic_hook::hook(info);
-    }));
 }
