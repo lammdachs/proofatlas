@@ -1,6 +1,8 @@
 {
   "version": "9.0.0",
   "source": "https://tptp.org/TPTP/Archive/TPTP-v9.0.0.tgz",
+  "repo": "lammdachs/proofatlas-tptp-subset",
+  "attribution": "TPTP Problem Library v9.0.0, copyright 1993-onwards Geoff Sutcliffe & Christian Suttner. https://tptp.org",
 
   "paths": {
     "root": ".tptp/TPTP-v9.0.0",
@@ -9,50 +11,28 @@
   },
 
   "defaults": {
-    "problem_set": "unsat100"
+    "problem_set": "bench"
   },
 
   "problem_sets": {
-    "unsat100": {
-      "description": "Unsatisfiable problems with at most 100 clauses",
-      "status": ["unsatisfiable"],
+    "all": {
+      "description": "All CNF/FOF problems under 64kB",
       "format": ["cnf", "fof"],
-      "max_clauses": 100,
-      "max_term_depth" : 8,
-      "exclude_domains": ["CSR", "HWV", "SWV"]
+      "max_total_size_bytes": 65536
+    },
+
+    "bench": {
+      "description": "Unsatisfiable and unknown problems for benchmarking",
+      "format": ["cnf", "fof"],
+      "max_total_size_bytes": 65536,
+      "status": ["unsatisfiable", "unknown"]
     },
 
     "test": {
-      "description": "Small test set for quick iteration",
-      "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "max_rating": 0.3,
-      "max_clauses": 50,
-      "max_term_depth": 4,
-      "domains": ["PUZ"]
-    },
-
-    "unit_equality": {
-      "description": "Unit equality problems (simpler, good for initial experiments)",
-      "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "has_equality": true,
-      "is_unit_only": true,
-      "max_rating": 0.5,
-      "max_clauses": 500,
-      "domains": ["GRP", "RNG", "LAT", "BOO", "COL"]
-    },
-
-    "puz": {
-      "description": "PUZ domain unsatisfiable problems",
-      "status": ["unsatisfiable"],
+      "description": "PUZ domain problems for quick testing",
       "format": ["cnf", "fof"],
+      "max_total_size_bytes": 65536,
       "domains": ["PUZ"]
-    },
-
-    "parser_test": {
-      "description": "All unsat100 problems that currently error (for regression testing)",
-      "problems_file": ".data/parser_test_problems.txt"
     }
   }
 }

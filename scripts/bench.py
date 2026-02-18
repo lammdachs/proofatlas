@@ -255,6 +255,9 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
             if "is_unit_only" in filters and filters["is_unit_only"] is not None:
                 if meta.get("is_unit_only") != filters["is_unit_only"]:
                     continue
+            if "max_total_size_bytes" in filters and filters["max_total_size_bytes"] is not None:
+                if meta.get("total_size", 0) > filters["max_total_size_bytes"]:
+                    continue
 
             problems.append(problem_file)
 

@@ -122,7 +122,13 @@ proofatlas-bench --status                     # Check job status
 
 ## Problem Sets
 
-Problem sets are defined in `configs/tptp.json` and filter TPTP problems for benchmarking. The default is set in `defaults.problem_set`.
+Problem sets are defined in `configs/tptp.json` and filter TPTP problems for benchmarking. The default is set in `defaults.problem_set`. All sets share a base filter of CNF/FOF format with a 64kB total size limit (problem file + axiom files).
+
+| Set | Description |
+|-----|-------------|
+| `all` | All CNF/FOF problems under 64kB (13,178 problems) |
+| `bench` | Unsatisfiable and unknown problems (default, 11,094 problems) |
+| `test` | PUZ domain only (123 problems) |
 
 ### Available Filters
 
@@ -138,25 +144,11 @@ Problem sets are defined in `configs/tptp.json` and filter TPTP problems for ben
 | `max_clause_size` | int | Maximum literals per clause |
 | `has_equality` | bool | `true` = only equality, `false` = no equality |
 | `is_unit_only` | bool | `true` = only unit clauses, `false` = has non-unit |
+| `max_total_size_bytes` | int | Max combined size of problem + included axiom files |
 
-### Example Problem Set
+### TPTP GitHub Mirror
 
-```json
-{
-  "problem_sets": {
-    "unit_equality": {
-      "description": "Unit equality problems",
-      "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "has_equality": true,
-      "is_unit_only": true,
-      "max_clauses": 500,
-      "max_term_depth": 8,
-      "domains": ["GRP", "RNG", "LAT"]
-    }
-  }
-}
-```
+A CNF/FOF subset of TPTP v9.0.0 is mirrored at `lammdachs/proofatlas-tptp-subset` for the web UI. The web frontend fetches problems from `raw.githubusercontent.com` when no local server is available. Problem metadata (`file_size`, `includes`, `total_size`) is extracted by `setup_tptp.py`.
 
 ## Testing the Theorem Prover
 

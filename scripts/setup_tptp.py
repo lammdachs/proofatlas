@@ -10,6 +10,7 @@ Usage:
 """
 
 import json
+import re
 import tarfile
 import time
 import urllib.request
@@ -108,6 +109,9 @@ def _download_progress(block_num: int, block_size: int, total_size: int):
 # Metadata Extraction
 # =============================================================================
 
+INCLUDE_RE = re.compile(r"^include\('([^']+)'\s*(?:,\s*\[[^\]]*\])?\s*\)\.", re.MULTILINE)
+
+
 @dataclass
 class ProblemMetadata:
     path: str
@@ -125,6 +129,9 @@ class ProblemMetadata:
     num_functions: int
     num_constants: int
     max_term_depth: int
+    file_size: int
+    includes: List[str]
+    total_size: int
 
 
 def extract_header_info(content: str) -> Tuple[str, float]:
@@ -355,6 +362,19 @@ def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, in
             all_unit, has_equality, max_depth, predicates, functions, constants)
 
 
+def extract_includes(content: str, tptp_root: Path) -> Tuple[List[str], int]:
+    """Extract include directives and compute total size of referenced axiom files."""
+    includes = []
+    axiom_size = 0
+    for m in INCLUDE_RE.finditer(content):
+        rel_path = m.group(1)
+        includes.append(rel_path)
+        ax_path = tptp_root / rel_path
+        if ax_path.exists():
+            axiom_size += ax_path.stat().st_size
+    return includes, axiom_size
+
+
 def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMetadata]:
     """Extract metadata from a single problem file."""
     try:
@@ -374,7 +394,12 @@ def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMet
     (num_clauses, num_axioms, num_conjectures, max_clause_size,
      all_unit, has_equality, max_depth, predicates, functions, constants) = parse_clauses_fast(content)
 
-    relative_path = problem_path.relative_to(tptp_root)
+    file_size = problem_path.stat().st_size
+    includes, axiom_size = extract_includes(content, tptp_root)
+    total_size = file_size + axiom_size
+
+    problems_dir = tptp_root / "Problems"
+    relative_path = problem_path.relative_to(problems_dir)
     domain = problem_path.parent.name
 
     return ProblemMetadata(
@@ -393,6 +418,9 @@ def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMet
         num_functions=len(functions),
         num_constants=len(constants),
         max_term_depth=max_depth,
+        file_size=file_size,
+        includes=includes,
+        total_size=total_size,
     )
 
 
@@ -400,6 +428,9 @@ def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
     """Extract metadata from all TPTP problems."""
     print("\nExtracting problem metadata...")
     print("=" * 50)
+
+    # tptp_root is the parent of Problems/ — needed to resolve include('Axioms/...')
+    tptp_root = problems_dir.parent
 
     all_files = []
     domains = sorted([d for d in problems_dir.iterdir() if d.is_dir()])
@@ -419,7 +450,7 @@ def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
         bar = "█" * filled + "░" * (bar_len - filled)
         print(f"\r[{bar}] {pct:5.1f}% ({i+1}/{total_files})", end="", flush=True)
 
-        metadata = extract_metadata(problem_file, problems_dir)
+        metadata = extract_metadata(problem_file, tptp_root)
         if metadata is not None:
             problems.append(metadata)
 

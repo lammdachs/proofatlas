@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 
+	const TPTP_MIRROR = 'https://raw.githubusercontent.com/lammdachs/proofatlas-tptp-subset/main';
+
 	let {
 		tptpInput = $bindable(''),
 		serverAvailable,
@@ -55,17 +57,42 @@
 		}
 	}
 
+	/** Map a TPTP problem name (e.g. "GRP001-1") to its domain directory. */
+	function tptpDomain(name: string): string {
+		return name.replace(/[0-9].*$/, '');
+	}
+
 	async function loadProblem() {
 		if (!tptpName.trim()) return;
 		loadingProblem = true;
 		try {
-			const response = await fetch(`${base}/api/tptp/${encodeURIComponent(tptpName.trim())}`);
-			if (!response.ok) {
-				const err = await response.json().catch(() => ({}));
-				throw new Error(err.error || `Server error: ${response.status}`);
+			const name = tptpName.trim();
+			const file = name.endsWith('.p') ? name : `${name}.p`;
+			let content: string | null = null;
+
+			// Try local server first
+			if (serverAvailable) {
+				try {
+					const response = await fetch(`${base}/api/tptp/${encodeURIComponent(name)}`);
+					if (response.ok) {
+						const data = await response.json();
+						content = data.content;
+					}
+				} catch { /* fall through to mirror */ }
 			}
-			const data = await response.json();
-			tptpInput = data.content;
+
+			// Fall back to GitHub mirror
+			if (content === null) {
+				const domain = tptpDomain(file.replace('.p', ''));
+				const url = `${TPTP_MIRROR}/Problems/${domain}/${file}`;
+				const response = await fetch(url);
+				if (!response.ok) {
+					throw new Error(`Problem not found: ${name}`);
+				}
+				content = await response.text();
+			}
+
+			tptpInput = content;
 			selectedExample = '';
 			tptpName = '';
 		} catch (error) {
@@ -110,15 +137,14 @@
 		<input
 			type="text"
 			class="input flex-1 min-w-40"
-			placeholder={serverAvailable ? 'Problem name (e.g., GRP001-1)' : 'Install locally for TPTP loading'}
-			disabled={!serverAvailable}
+			placeholder="Problem name (e.g., GRP001-1)"
 			bind:value={tptpName}
 			onkeydown={handleTptpNameKeydown}
 		/>
 
 		<button
 			class="btn btn-secondary"
-			disabled={!serverAvailable || loadingProblem}
+			disabled={loadingProblem}
 			onclick={loadProblem}
 		>
 			{loadingProblem ? 'Loading...' : 'Load'}
