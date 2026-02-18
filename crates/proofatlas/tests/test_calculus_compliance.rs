@@ -152,6 +152,282 @@ fn test_resolution_with_variables() {
 }
 
 // =========================================================================
+// Resolution — negative cases (constraint enforcement)
+// =========================================================================
+
+#[test]
+fn test_resolution_cross_binding_occurs_check() {
+    let mut ctx = TestCtx::new();
+    let p = ctx.pred("P", 2);
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let fx = ctx.func("f", vec![x.clone()]);
+    let fy = ctx.func("f", vec![y.clone()]);
+
+    // P(X, f(X)) and ~P(f(Y), Y) — first args: X = f(Y) succeeds,
+    // then f(X) = f(f(Y)) must unify with Y — occurs check after composition
+    let c1 = Clause::new(vec![Literal::positive(p, vec![x.clone(), fx])]);
+    let c2 = Clause::new(vec![Literal::negative(p, vec![fy, y.clone()])]);
+
+    let results = resolution(&c1, &c2, 0, 1, &SelectAll, &mut ctx.interner);
+    assert_eq!(count_adds(&results), 0, "cross-binding occurs check should block resolution");
+}
+
+#[test]
+fn test_resolution_binding_chain_occurs_check() {
+    let mut ctx = TestCtx::new();
+    let p = ctx.pred("P", 2);
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let fxa = ctx.func("f", vec![x.clone(), a.clone()]);
+    let fya = ctx.func("f", vec![y.clone(), a.clone()]);
+
+    // P(X, f(X,a)) and ~P(f(Y,a), Y) — first args: X = f(Y,a) succeeds,
+    // then f(f(Y,a),a) must unify with Y — binary function occurs check
+    let c1 = Clause::new(vec![Literal::positive(p, vec![x.clone(), fxa])]);
+    let c2 = Clause::new(vec![Literal::negative(p, vec![fya, y.clone()])]);
+
+    let results = resolution(&c1, &c2, 0, 1, &SelectAll, &mut ctx.interner);
+    assert_eq!(count_adds(&results), 0, "binding chain occurs check should block resolution");
+}
+
+#[test]
+fn test_resolution_diamond_conflict() {
+    let mut ctx = TestCtx::new();
+    let p = ctx.pred("P", 2);
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let fxy = ctx.func("f", vec![x.clone(), y.clone()]);
+    let fyx = ctx.func("f", vec![y.clone(), x.clone()]);
+    let fab1 = ctx.func("f", vec![a.clone(), b.clone()]);
+    let fab2 = ctx.func("f", vec![a.clone(), b.clone()]);
+
+    // P(f(X,Y), f(Y,X)) and ~P(f(a,b), f(a,b)) — first pair: X=a, Y=b succeeds.
+    // Second pair: f(Y,X) = f(a,b) requires Y=a, X=b — contradicts committed bindings.
+    let c1 = Clause::new(vec![Literal::positive(p, vec![fxy, fyx])]);
+    let c2 = Clause::new(vec![Literal::negative(p, vec![fab1, fab2])]);
+
+    let results = resolution(&c1, &c2, 0, 1, &SelectAll, &mut ctx.interner);
+    assert_eq!(count_adds(&results), 0, "diamond binding conflict should block resolution");
+}
+
+#[test]
+fn test_resolution_symmetric_swap_occurs_check() {
+    let mut ctx = TestCtx::new();
+    let p = ctx.pred("P", 1);
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let gx = ctx.func("g", vec![x.clone()]);
+    let gy = ctx.func("g", vec![y.clone()]);
+    let f_x_gx = ctx.func("f", vec![x.clone(), gx]);
+    let f_gy_y = ctx.func("f", vec![gy, y.clone()]);
+
+    // P(f(X,g(X))) and ~P(f(g(Y),Y)) — same outer f, same arity, swapped args.
+    // First args: X = g(Y) succeeds. Then g(X) = g(g(Y)) must unify with Y —
+    // occurs check two function applications deep.
+    let c1 = Clause::new(vec![Literal::positive(p, vec![f_x_gx])]);
+    let c2 = Clause::new(vec![Literal::negative(p, vec![f_gy_y])]);
+
+    let results = resolution(&c1, &c2, 0, 1, &SelectAll, &mut ctx.interner);
+    assert_eq!(count_adds(&results), 0, "symmetric swap occurs check should block resolution");
+}
+
+#[test]
+fn test_resolution_nested_chain_occurs_check() {
+    let mut ctx = TestCtx::new();
+    let p = ctx.pred("P", 2);
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let gxa = ctx.func("g", vec![x.clone(), a.clone()]);
+    let gya = ctx.func("g", vec![y.clone(), a.clone()]);
+    let f_gxa = ctx.func("f", vec![gxa.clone()]);
+    let fy = ctx.func("f", vec![y.clone()]);
+
+    // P(X, f(g(X,a))) and ~P(g(Y,a), f(Y)) — first pair: X = g(Y,a) succeeds.
+    // Second pair: f(g(X,a)) = f(Y), so g(X,a) = Y. Substituting X: g(g(Y,a),a) = Y —
+    // occurs check through two nested function applications.
+    let c1 = Clause::new(vec![Literal::positive(p, vec![x.clone(), f_gxa])]);
+    let c2 = Clause::new(vec![Literal::negative(p, vec![gya, fy])]);
+
+    let results = resolution(&c1, &c2, 0, 1, &SelectAll, &mut ctx.interner);
+    assert_eq!(count_adds(&results), 0, "nested chain occurs check should block resolution");
+}
+
+// =========================================================================
+// Superposition — negative cases (constraint enforcement)
+// =========================================================================
+
+#[test]
+fn test_superposition_ordering_blocks_small_to_large() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let p = ctx.pred("P", 1);
+    let a = ctx.const_("a");
+    let fa = ctx.func("f", vec![a.clone()]);
+
+    // a = f(a): under KBO, f(a) > a, so this orients as f(a) = a.
+    // Superposition can rewrite f(a) → a but NOT a → f(a).
+    // Target: P(a). To get P(f(a)) we would need the backward direction.
+    let eq_clause = Clause::new(vec![Literal::positive(eq, vec![a.clone(), fa.clone()])]);
+    let target = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+
+    let kbo = KBO::new(KBOConfig::default());
+    let results = superposition(&eq_clause, &target, 0, 1, &SelectAll, &mut ctx.interner, &kbo);
+    // a in P(a) is a constant, not a variable, so superposition CAN try it.
+    // But the equation orients f(a) → a, so matching a against f(a) fails
+    // (the LHS of the oriented equation is f(a), not a).
+    // No rewrites should be produced.
+    assert_eq!(count_adds(&results), 0,
+        "ordering should prevent rewriting a → f(a)");
+}
+
+#[test]
+fn test_superposition_occurs_check_blocks() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let p = ctx.pred("P", 2);
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let fa = ctx.func("f", vec![a.clone()]);
+
+    // f(a) = a and P(X, f(X)) — superposing f(a) → a into f(X) unifies a with X,
+    // giving P(a, a). But if the target were P(Y, Y), occurs check on scoped
+    // unification would prevent invalid bindings.
+    let eq_clause = Clause::new(vec![Literal::positive(eq, vec![fa.clone(), a.clone()])]);
+    let target = Clause::new(vec![Literal::positive(p, vec![y.clone(), y.clone()])]);
+
+    let kbo = KBO::new(KBOConfig::default());
+    let results = superposition(&eq_clause, &target, 0, 1, &SelectAll, &mut ctx.interner, &kbo);
+    // P(Y, Y) has no function subterms to match f(a) against — Y is a variable
+    assert_eq!(count_adds(&results), 0,
+        "superposition into variable positions should be blocked");
+}
+
+// =========================================================================
+// Demodulation — negative cases (constraint enforcement)
+// =========================================================================
+
+#[test]
+fn test_demodulation_ordering_blocks_wrong_direction() {
+    use proofatlas::simplifying::demodulation::demodulate;
+
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let p = ctx.pred("P", 1);
+    let a = ctx.const_("a");
+    let fa = ctx.func("f", vec![a.clone()]);
+
+    // Unit equality: a = f(a). Under KBO, f(a) > a, so this orients as f(a) = a.
+    // Demodulation can rewrite f(a) → a but NOT a → f(a).
+    let unit_eq = Clause::new(vec![Literal::positive(eq, vec![a.clone(), fa.clone()])]);
+    // Target: P(a) — has 'a', but rewriting a → f(a) is blocked by ordering.
+    let target = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+
+    let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
+    assert_eq!(count_adds(&results), 0,
+        "demodulation ordering should block rewriting a → f(a)");
+}
+
+#[test]
+fn test_demodulation_pattern_variable_vs_target_constant() {
+    use proofatlas::simplifying::demodulation::demodulate;
+
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let p = ctx.pred("P", 1);
+    let x = ctx.var("X");
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let fb = ctx.func("f", vec![b.clone()]);
+
+    // Unit equality: f(X) = a. Under KBO, f(X) > a, orients as f(X) → a.
+    // Target: P(f(b)). Matching f(X) against f(b) succeeds with X → b.
+    // Then check lσ > rσ: f(b) > a. This should succeed.
+    let unit_eq = Clause::new(vec![Literal::positive(eq, vec![ctx.func("f", vec![x.clone()]), a.clone()])]);
+    let target = Clause::new(vec![Literal::positive(p, vec![fb])]);
+
+    let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
+    // This should succeed — f(b) matches f(X) with X=b, and f(b) > a
+    assert_eq!(count_adds(&results), 1,
+        "demodulation with pattern variable should match");
+    assert_eq!(get_conclusion(&results[0]).literals[0].args[0], a);
+}
+
+#[test]
+fn test_demodulation_no_match_wrong_head() {
+    use proofatlas::simplifying::demodulation::demodulate;
+
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let p = ctx.pred("P", 1);
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let fa = ctx.func("f", vec![a.clone()]);
+    let ga = ctx.func("g", vec![a.clone()]);
+
+    // Unit equality: f(a) = b. Target: P(g(a)). Head mismatch (f vs g).
+    let unit_eq = Clause::new(vec![Literal::positive(eq, vec![fa, b.clone()])]);
+    let target = Clause::new(vec![Literal::positive(p, vec![ga])]);
+
+    let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
+    assert_eq!(count_adds(&results), 0,
+        "demodulation should not match with different head symbol");
+}
+
+// =========================================================================
+// Equality Resolution — negative cases
+// =========================================================================
+
+#[test]
+fn test_equality_resolution_multi_step_occurs_check() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let gxa = ctx.func("g", vec![x.clone(), a.clone()]);
+    let gya = ctx.func("g", vec![y.clone(), a.clone()]);
+    let f_x_gxa = ctx.func("f", vec![x.clone(), gxa]);
+    let f_gya_y = ctx.func("f", vec![gya, y.clone()]);
+
+    // ~(f(X, g(X, a)) = f(g(Y, a), Y)) — first pair: X = g(Y,a) succeeds.
+    // Second pair: g(X,a) = Y. Substituting X: g(g(Y,a),a) = Y — occurs check
+    // only visible after composing the binding from the first pair.
+    let clause = Clause::new(vec![Literal::negative(eq, vec![f_x_gxa, f_gya_y])]);
+
+    let results = equality_resolution(&clause, 0, &SelectAll, &ctx.interner);
+    assert_eq!(count_adds(&results), 0,
+        "multi-step occurs check should block equality resolution");
+}
+
+#[test]
+fn test_equality_resolution_delayed_constant_clash() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let gxy = ctx.func("g", vec![x.clone(), y.clone()]);
+    let gba = ctx.func("g", vec![b.clone(), a.clone()]);
+    let f_x_y_gxy = ctx.func("f", vec![x.clone(), y.clone(), gxy]);
+    let f_a_b_gba = ctx.func("f", vec![a.clone(), b.clone(), gba]);
+
+    // ~(f(X, Y, g(X, Y)) = f(a, b, g(b, a))) — first two args: X=a, Y=b succeed.
+    // Third arg: g(X,Y) = g(b,a). After substitution: g(a,b) vs g(b,a) — constant
+    // clash hidden inside the third argument, only revealed after applying bindings.
+    let clause = Clause::new(vec![Literal::negative(eq, vec![f_x_y_gxy, f_a_b_gba])]);
+
+    let results = equality_resolution(&clause, 0, &SelectAll, &ctx.interner);
+    assert_eq!(count_adds(&results), 0,
+        "delayed constant clash should block equality resolution");
+}
+
+// =========================================================================
 // Factoring
 // =========================================================================
 

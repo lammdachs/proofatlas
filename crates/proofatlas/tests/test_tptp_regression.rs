@@ -114,6 +114,25 @@ tptp_proof!(unif_nested_equality, "tests/problems/unif_nested_equality.p");
 tptp_proof!(unif_multi_arity, "tests/problems/unif_multi_arity.p");
 
 // =========================================================================
+// Negative: unification constraint enforcement (all satisfiable)
+// =========================================================================
+
+// Cross-binding occurs check: X→f(Y) then f(f(Y)) vs Y — cycle after substitution composition
+tptp_no_proof!(neg_cross_occurs, "tests/problems/neg_cross_occurs.p");
+// Binding chain with binary function: X→f(Y,a) then f(f(Y,a),a) vs Y — partial alignment before cycle
+tptp_no_proof!(neg_binding_chain, "tests/problems/neg_binding_chain.p");
+// Diamond conflict: first arg pair X=a,Y=b succeeds, second pair Y=a,X=b contradicts
+tptp_no_proof!(neg_diamond_binding, "tests/problems/neg_diamond_binding.p");
+// Symmetric swap: X→g(Y) then g(g(Y)) vs Y — occurs check two function applications deep
+tptp_no_proof!(neg_symmetric_swap, "tests/problems/neg_symmetric_swap.p");
+// Delayed occurs check: two valid resolutions produce q(f(Z),f(Z)), then W=f(Z) forces Z=f(Z)
+tptp_no_proof!(neg_delayed_occurs, "tests/problems/neg_delayed_occurs.p");
+// Predicate argument order matters: p(a,b) does not imply p(b,a)
+tptp_no_proof!(neg_predicate_asymmetry, "tests/problems/neg_predicate_asymmetry.p");
+// Occurs check in equality reasoning: f(X) != X cannot be resolved away
+tptp_no_proof!(neg_occurs_check_eq, "tests/problems/neg_occurs_check_eq.p");
+
+// =========================================================================
 // Group theory (A3/A4, exercises full equality reasoning)
 // =========================================================================
 

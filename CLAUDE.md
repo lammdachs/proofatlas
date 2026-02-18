@@ -155,9 +155,9 @@ A CNF/FOF subset of TPTP v9.0.0 is mirrored at `lammdachs/proofatlas-tptp-subset
 Five-layer testing strategy:
 
 1. **Proof Verification**: Every proof is independently verified — `verify_proof()` on `Prover` checks each inference step. Each rule implements `verify()` on its trait (`GeneratingInference`/`SimplifyingInference`). `VerificationError` enum in `state.rs`.
-2. **Calculus Compliance**: 29 tests in `test_calculus_compliance.rs` covering side conditions for all 8 inference rules.
+2. **Calculus Compliance**: 41 tests in `test_calculus_compliance.rs` covering side conditions for all 8 inference rules.
 3. **Property-Based Testing**: `proptest` tests in `logic/unification/proptest_tests.rs` and `logic/ordering/proptest_tests.rs` — unification soundness/symmetry, KBO transitivity/totality, matching correctness.
-4. **TPTP Regression Suite**: 27 tests in `test_tptp_regression.rs` with `tptp_proof!`/`tptp_no_proof!` macros. Problem files in `tests/problems/`. Every proof runs `verify_proof()` automatically.
+4. **TPTP Regression Suite**: 34 tests in `test_tptp_regression.rs` with `tptp_proof!`/`tptp_no_proof!` macros. Problem files in `tests/problems/`. Every proof runs `verify_proof()` automatically.
 5. **WASM Tests**: 22 `wasm-bindgen-test` tests in `crates/proofatlas-wasm/tests/wasm_tests.rs`. Run with `wasm-pack test --headless --chrome crates/proofatlas-wasm`.
 
 When testing with TPTP problems:
