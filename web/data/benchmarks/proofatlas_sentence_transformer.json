@@ -1,0 +1,15 @@
+{
+  "generated": "2026-02-18T01:51:31.623969",
+  "prover": "proofatlas",
+  "preset": "sentence_transformer",
+  "completed": 8398,
+  "total": 8398,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 627,
+    "saturated": 0,
+    "resource_limit": 7748,
+    "error": 23
+  },
+  "proof_rate": 7.46606334841629
+}

@@ -1,6 +1,29 @@
 {
   "runs": [
     "proofatlas_age_weight",
-    "proofatlas_gcn_mlp"
+    "proofatlas_features_attention",
+    "proofatlas_features_mlp",
+    "proofatlas_features_transformer",
+    "proofatlas_gcn_attention",
+    "proofatlas_gcn_mlp",
+    "proofatlas_gcn_struct_attention",
+    "proofatlas_gcn_struct_mlp",
+    "proofatlas_gcn_struct_transformer",
+    "proofatlas_gcn_transformer",
+    "proofatlas_sentence_attention",
+    "proofatlas_sentence_mlp",
+    "proofatlas_sentence_transformer",
+    "proofatlas_time_features_attention",
+    "proofatlas_time_features_mlp",
+    "proofatlas_time_features_transformer",
+    "proofatlas_time_gcn_attention",
+    "proofatlas_time_gcn_mlp",
+    "proofatlas_time_gcn_struct_attention",
+    "proofatlas_time_gcn_struct_mlp",
+    "proofatlas_time_gcn_struct_transformer",
+    "proofatlas_time_gcn_transformer",
+    "proofatlas_time_sentence_attention",
+    "proofatlas_time_sentence_mlp",
+    "proofatlas_time_sentence_transformer"
   ]
 }
