@@ -8,28 +8,30 @@ ProofAtlas is a high-performance theorem prover with ML-guided clause selection.
 
 - **Clause selection strategies**: Improving the selection of clauses during saturation
 - **Literal selection**: Strategies for selecting literals within clauses
-- **Graph neural networks**: Learning clause representations for ML-guided selection
+- **ML-guided selection**: Graph neural networks, sentence transformers, and feature-based models for learning clause selection
 - **Benchmark evaluation**: Comparing against other provers (Vampire, SPASS)
 
 ## Getting Started
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/yourusername/proofatlas.git`
-3. Create a new branch: `git checkout -b feature/your-feature-name`
+3. Run setup: `python scripts/setup.py`
+4. Create a new branch: `git checkout -b feature/your-feature-name`
 
 ## Prerequisites
 
-- Python 3.7+
+- Python 3.10+
 - Rust toolchain (install from https://rustup.rs/)
+- PyTorch (for ML features)
 
 ## Installation
 
 ```bash
-# Install Python package
-pip install -e ".[dev]"
+# Install Python package (builds Rust extension via maturin)
+LIBTORCH_USE_PYTORCH=1 maturin develop
 
-# Build Rust prover
-cargo build --release
+# Or install in editable mode
+pip install -e ".[dev]"
 ```
 
 ## Project Structure
@@ -38,21 +40,24 @@ cargo build --release
 proofatlas/
 ├── crates/proofatlas/        # Core theorem prover (Rust)
 │   └── src/
-│       ├── core/             # Terms, literals, clauses, substitutions
-│       ├── inference/        # Resolution, superposition, demodulation
-│       ├── saturation/       # Saturation loop, subsumption
-│       ├── parser/           # TPTP parser
-│       ├── selectors/        # Clause/literal selection strategies
-│       └── ml/               # Graph building, weight loading
-├── python/                   # Python package
-│   ├── proofatlas/
-│   │   ├── cli/              # Command-line tools
-│   │   ├── ml/               # ML training infrastructure
-│   │   └── selectors/        # PyTorch model implementations
-│   └── tests/
-├── configs/                  # Prover and benchmark configurations
-├── scripts/                  # Utility scripts (bench.py, export.py)
-└── .tptp/                    # TPTP problem library
+│       ├── logic/            # FOL types: core/, ordering/, unification/, interner, clause_manager
+│       ├── simplifying/      # Tautology, subsumption, demodulation
+│       ├── generating/       # Resolution, superposition, factoring, equality rules
+│       ├── index/            # IndexRegistry, SubsumptionChecker, SelectedLiteralIndex, DiscriminationTree
+│       ├── prover/           # Saturation engine (Prover struct)
+│       ├── selection/        # Clause selection: age_weight, ML pipeline, scoring server
+│       ├── parser/           # TPTP parser with FOF→CNF conversion
+│       ├── atlas.rs          # ProofAtlas orchestrator
+│       ├── state.rs          # SaturationState, StateChange, traits
+│       └── config.rs         # ProverConfig
+├── crates/proofatlas-wasm/   # WebAssembly bindings
+├── python/proofatlas/        # Python package
+│   ├── cli/                  # CLI tools: prove, bench, train, web
+│   ├── ml/                   # Training loops, data loading, model export
+│   └── selectors/            # PyTorch models: GCN, sentence, features, scorers
+├── web/                      # SvelteKit web frontend
+├── configs/                  # JSON configs: presets, training, problem sets
+└── scripts/                  # Setup, benchmarking, training, experiment orchestration
 ```
 
 ## Development Process
@@ -62,7 +67,6 @@ proofatlas/
 **Rust:**
 - Run `cargo fmt` before committing
 - Run `cargo clippy` to check for common issues
-- Write doc comments for public items
 
 **Python:**
 - Use Black for formatting: `black python/`
@@ -73,6 +77,9 @@ proofatlas/
 
 **Rust:**
 ```bash
+export LIBTORCH_USE_PYTORCH=1
+export LD_LIBRARY_PATH=$(python -c "import torch; print(torch.__path__[0])")/lib
+
 cargo test                    # Run all tests
 cargo test --test '*'         # Integration tests only
 cargo test -- --nocapture     # With output
@@ -80,7 +87,7 @@ cargo test -- --nocapture     # With output
 
 **Python:**
 ```bash
-python -m pytest python/tests/ -v
+pytest python/tests/ -v
 ```
 
 ### Commit Messages
@@ -89,42 +96,40 @@ python -m pytest python/tests/ -v
 - Start with a verb in present tense (e.g., "Add", "Fix", "Update")
 - Reference issues when applicable: "Fix #123: Description"
 
-Example:
-```
-Add literal selection strategy 21
-
-- Implement unique maximal literal selection
-- Fall back to negative max-weight when no unique maximal
-- Add tests for edge cases
-```
-
 ## Pull Request Process
 
 1. Ensure all tests pass (`cargo test` and `pytest`)
-2. Update documentation if needed
-3. Add tests for new functionality
-4. Request review from maintainers
+2. Add tests for new functionality
+3. Request review from maintainers
 
 ## Adding New Features
 
 ### New Literal Selection Strategies
 
-1. Add implementation in `crates/proofatlas/src/saturation/literal_selection.rs`
-2. Register in the CLI options
+1. Add implementation in `crates/proofatlas/src/logic/literal_selection.rs`
+2. Register in `LiteralSelectionStrategy` enum in `config.rs`
 3. Add tests
-4. Document the strategy behavior
 
 ### New Inference Rules
 
-1. Add implementation in `crates/proofatlas/src/rules/`
-2. Create tests
-3. Integrate with saturation loop in `crates/proofatlas/src/saturation/loop.rs`
+Generating rules implement `GeneratingInference` (in `state.rs`):
+
+1. Add implementation in `crates/proofatlas/src/generating/`
+2. Implement `generate(given_idx, &SaturationState, &mut ClauseManager, &IndexRegistry)`
+3. Register in the prover's rule list in `crates/proofatlas/src/prover/mod.rs`
+4. Add tests
+
+Simplifying rules implement `SimplifyingInference` (in `state.rs`):
+
+1. Add implementation in `crates/proofatlas/src/simplifying/`
+2. Implement `simplify_forward` and/or `simplify_backward`
+3. Register in the prover's rule list in `crates/proofatlas/src/prover/mod.rs`
+4. Add tests
 
 ### Benchmark Configurations
 
 1. Add preset to `configs/proofatlas.json`
 2. Test with `proofatlas-bench --config your_preset`
-3. Document the configuration
 
 ## Benchmarking
 

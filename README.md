@@ -47,8 +47,6 @@ proofatlas/
 ├── web/                           # SvelteKit web frontend (Tailwind CSS, Chart.js)
 ├── configs/                       # JSON configs: presets, training, problem sets, embeddings, scorers
 ├── scripts/                       # Setup, benchmarking, training, experiment orchestration
-├── docs/                          # Architecture, CLI reference, configuration, ML training guides
-│
 ├── .data/                         # Runtime data (gitignored)
 │   ├── traces/                    # Proof search traces (NPZ)
 │   └── runs/                      # Benchmark results
@@ -175,16 +173,6 @@ cargo test
 # Python tests
 pytest python/tests/ -v
 ```
-
-## Documentation
-
-Detailed documentation is available in [`docs/`](docs/):
-
-- [Architecture](docs/architecture.md) — system design and module overview
-- [CLI Reference](docs/cli_reference.md) — command-line interface documentation
-- [Configuration](docs/configuration.md) — config file format and options
-- [ML Training](docs/ml_training.md) — training workflow and trace format
-- [Calculus Quick Reference](docs/calculus_quick_reference.md) — superposition calculus rules
 
 ## Contributing
 
