@@ -51,3 +51,4 @@ ml = ["tch", "tokenizers"]
 wasm = []
 
 [dev-dependencies]
+proptest = "1.0"

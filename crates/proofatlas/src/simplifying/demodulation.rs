@@ -3,7 +3,8 @@
 //! This module merges the demodulation algorithm (rewriting terms using unit
 //! equalities) with the DemodulationRule adapter for the saturation framework.
 
-use crate::logic::{Clause, Interner, KBOConfig, Literal, Position, PredicateId, Term, TermOrdering, KBO};
+use crate::logic::{Clause, Interner, KBOConfig, Literal, PredicateId, Term, TermOrdering, KBO};
+use crate::logic::Position;
 use crate::logic::match_term;
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
@@ -193,6 +194,76 @@ impl Default for DemodulationRule {
 impl SimplifyingInference for DemodulationRule {
     fn name(&self) -> &str {
         "Demodulation"
+    }
+
+    fn verify(
+        &self,
+        _clause_idx: usize,
+        replacement: Option<&Clause>,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), crate::state::VerificationError> {
+        use crate::state::VerificationError;
+
+        // Demodulation must produce a replacement clause
+        let replacement = match replacement {
+            Some(r) => r,
+            None => {
+                return Err(VerificationError::InvalidConclusion {
+                    step_idx: 0,
+                    rule: "Demodulation".into(),
+                    reason: "demodulation must produce a replacement clause".into(),
+                });
+            }
+        };
+
+        if premises.len() != 2 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Demodulation".into(),
+                reason: format!("expected 2 premises (target + unit eq), got {}", premises.len()),
+            });
+        }
+
+        let interner = &cm.interner;
+
+        // One premise is the original clause, the other is the unit equality
+        // premises[0] is the target clause (should match clause_idx), premises[1] is the unit equality
+        // But the order may vary, so try both.
+        for (target_pos, unit_pos) in [
+            (&premises[0], &premises[1]),
+            (&premises[1], &premises[0]),
+        ] {
+            if let Some(unit_clause) = state.clauses.get(unit_pos.clause) {
+                // Check that the unit clause is actually a unit positive equality
+                if unit_clause.literals.len() != 1 || !unit_clause.literals[0].polarity {
+                    continue;
+                }
+                if !unit_clause.literals[0].is_equality(interner) {
+                    continue;
+                }
+
+                // Try to reproduce the demodulation
+                let target_clause = &state.clauses[target_pos.clause];
+                let results = demodulate(unit_clause, target_clause, unit_pos.clause, target_pos.clause, interner);
+                for result in &results {
+                    if let StateChange::Add(ref result_clause, _, _) = result {
+                        if replacement.literals.len() == result_clause.literals.len()
+                            && replacement.literals.iter().all(|cl| result_clause.literals.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Demodulation".into(),
+            reason: "could not reproduce the demodulation result".into(),
+        })
     }
 
     fn simplify_forward(

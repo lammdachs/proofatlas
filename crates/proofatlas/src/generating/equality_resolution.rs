@@ -2,7 +2,7 @@
 
 use super::common::collect_literals_except;
 use crate::logic::{Clause, Interner, Position};
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
@@ -75,6 +75,49 @@ impl Default for EqualityResolutionRule {
 impl GeneratingInference for EqualityResolutionRule {
     fn name(&self) -> &str {
         "EqualityResolution"
+    }
+
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::state::VerificationError;
+
+        if premises.len() != 1 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "EqualityResolution".into(),
+                reason: format!("expected 1 premise, got {}", premises.len()),
+            });
+        }
+
+        let premise = &state.clauses[premises[0].clause];
+        let interner = &cm.interner;
+
+        // Find a negative equality literal whose sides unify
+        for (i, lit) in premise.literals.iter().enumerate() {
+            if !lit.polarity && lit.is_equality(interner) {
+                if let [ref s, ref t] = lit.args.as_slice() {
+                    if let Ok(mgu) = crate::logic::unify(s, t) {
+                        let new_lits = super::common::collect_literals_except(premise, &[i], &mgu);
+                        if conclusion.literals.len() == new_lits.len()
+                            && conclusion.literals.iter().all(|cl| new_lits.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "EqualityResolution".into(),
+            reason: "no negative equality with unifiable sides produces this conclusion".into(),
+        })
     }
 
     fn generate(

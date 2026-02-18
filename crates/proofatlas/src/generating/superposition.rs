@@ -3,9 +3,9 @@
 use super::common::{
     collect_scoped_literals_except, is_ordered_greater, remove_duplicate_literals,
 };
-use crate::logic::{Clause, Interner, Literal, Position as FolPosition, Term, KBO};
+use crate::logic::{Clause, Interner, Literal, Position, Term, KBO};
 use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
@@ -154,7 +154,7 @@ pub fn superposition(
                                 results.push(StateChange::Add(
                                     Arc::new(new_clause),
                                     "Superposition".into(),
-                                    vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
+                                    vec![Position::clause(idx1), Position::clause(idx2)],
                                 ));
                             }
                         }
@@ -302,6 +302,90 @@ impl Default for SuperpositionRule {
 impl GeneratingInference for SuperpositionRule {
     fn name(&self) -> &str {
         "Superposition"
+    }
+
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::logic::ordering::orient_equalities::orient_clause_equalities;
+
+        if premises.len() != 2 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Superposition".into(),
+                reason: format!("expected 2 premises, got {}", premises.len()),
+            });
+        }
+
+        let from_clause = &state.clauses[premises[0].clause];
+        let into_clause = &state.clauses[premises[1].clause];
+        let interner = &cm.interner;
+
+        // Try all combinations: the equation can come from either premise.
+        for (eq_clause, target_clause) in [
+            (from_clause.as_ref(), into_clause.as_ref()),
+            (into_clause.as_ref(), from_clause.as_ref()),
+        ] {
+            for (eq_idx, eq_lit) in eq_clause.literals.iter().enumerate() {
+                if !eq_lit.polarity || !eq_lit.is_equality(interner) {
+                    continue;
+                }
+                if let [ref left, ref right] = eq_lit.args.as_slice() {
+                    for (pattern, replacement) in [(left, right), (right, left)] {
+                        for (into_idx, into_lit) in target_clause.literals.iter().enumerate() {
+                            let positions = find_unifiable_positions(&into_lit.args, pattern);
+                            for pos in &positions {
+                                let subterm = resolve_at_path(&into_lit.args, pos);
+                                if matches!(subterm, Term::Variable(_)) {
+                                    continue;
+                                }
+                                if let Ok(mgu) = unify_scoped(pattern, 0, subterm, 1) {
+                                    // Use a single mutable interner clone for consistent variable renaming
+                                    let mut int = interner.clone();
+                                    let mut renaming = HashMap::new();
+                                    let replacement_sigma = flatten_scoped(
+                                        replacement, 0, &mgu, &mut renaming, &mut int,
+                                    );
+
+                                    let mut new_lits = collect_scoped_literals_except(
+                                        eq_clause, &[eq_idx], 0, &mgu, &mut renaming, &mut int,
+                                    );
+                                    let into_lit_modified = replace_at_position_scoped(
+                                        into_lit, pos, &replacement_sigma, 1, &mgu,
+                                        &mut renaming, &mut int,
+                                    );
+                                    new_lits.push(into_lit_modified);
+                                    new_lits.extend(collect_scoped_literals_except(
+                                        target_clause, &[into_idx], 1, &mgu, &mut renaming, &mut int,
+                                    ));
+                                    new_lits = remove_duplicate_literals(new_lits);
+
+                                    // Orient equalities to match what the prover does
+                                    let mut reconstructed = Clause::new(new_lits);
+                                    orient_clause_equalities(&mut reconstructed, &int);
+
+                                    if conclusion.literals.len() == reconstructed.literals.len()
+                                        && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
+                                    {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Superposition".into(),
+            reason: "no equation/position combination produces this conclusion".into(),
+        })
     }
 
     fn generate(

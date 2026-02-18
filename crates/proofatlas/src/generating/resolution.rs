@@ -3,7 +3,7 @@
 use super::common::{
     collect_scoped_literals_except, remove_duplicate_literals, unify_atoms_scoped,
 };
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::{Clause, Interner, Position};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
@@ -89,6 +89,64 @@ impl Default for ResolutionRule {
 impl GeneratingInference for ResolutionRule {
     fn name(&self) -> &str {
         "Resolution"
+    }
+
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::logic::ordering::orient_equalities::orient_clause_equalities;
+
+        if premises.len() != 2 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Resolution".into(),
+                reason: format!("expected 2 premises, got {}", premises.len()),
+            });
+        }
+
+        let c1 = &state.clauses[premises[0].clause];
+        let c2 = &state.clauses[premises[1].clause];
+        let interner = &cm.interner;
+
+        for (i, lit1) in c1.literals.iter().enumerate() {
+            for (j, lit2) in c2.literals.iter().enumerate() {
+                if lit1.polarity != lit2.polarity && lit1.predicate == lit2.predicate {
+                    if let Ok(mgu) = super::common::unify_atoms_scoped(
+                        lit1.predicate, &lit1.args, 0,
+                        lit2.predicate, &lit2.args, 1,
+                    ) {
+                        let mut int = interner.clone();
+                        let mut renaming = std::collections::HashMap::new();
+                        let mut new_lits = super::common::collect_scoped_literals_except(
+                            c1, &[i], 0, &mgu, &mut renaming, &mut int,
+                        );
+                        new_lits.extend(super::common::collect_scoped_literals_except(
+                            c2, &[j], 1, &mgu, &mut renaming, &mut int,
+                        ));
+                        new_lits = super::common::remove_duplicate_literals(new_lits);
+
+                        let mut reconstructed = Clause::new(new_lits);
+                        orient_clause_equalities(&mut reconstructed, &int);
+
+                        if conclusion.literals.len() == reconstructed.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Resolution".into(),
+            reason: "no complementary literal pair produces this resolvent".into(),
+        })
     }
 
     fn generate(

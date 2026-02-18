@@ -16,11 +16,12 @@ fn test_simple_resolution() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);
+    let (result, prover) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
     match result {
-        ProofResult::Proof { .. } => {
-            // Expected - proof found
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx)
+                .expect("proof verification failed");
         }
         _ => panic!("Expected proof, got {:?}", result),
     }
@@ -34,11 +35,12 @@ fn test_equality_reflexivity() {
 
     let parsed = parse_tptp(tptp, &[], None, None).unwrap();
     let config = ProverConfig::default();
-    let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);
+    let (result, prover) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
     match result {
-        ProofResult::Proof { .. } => {
-            // Expected - contradiction found
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx)
+                .expect("proof verification failed");
         }
         _ => panic!("Expected proof, got {:?}", result),
     }

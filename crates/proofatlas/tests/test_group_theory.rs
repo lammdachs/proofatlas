@@ -10,8 +10,8 @@ fn create_sink() -> Box<dyn ProverSink> {
     Box::new(AgeWeightSink::new(0.5))
 }
 
-/// Run a group theory problem and return the result
-fn run_group_problem(problem_file: &str, timeout_secs: u64) -> ProofResult {
+/// Run a group theory problem and return (result, prover)
+fn run_group_problem(problem_file: &str, timeout_secs: u64) -> (ProofResult, Prover) {
     let parsed = parse_tptp_file(problem_file, &[], None, None).expect("Failed to parse TPTP file");
 
     let config = ProverConfig {
@@ -23,41 +23,72 @@ fn run_group_problem(problem_file: &str, timeout_secs: u64) -> ProofResult {
     };
 
     let mut prover = Prover::new(parsed.formula.clauses, config, create_sink(), parsed.interner);
-    prover.prove()
+    let result = prover.prove();
+    (result, prover)
 }
 
 #[test]
 fn test_right_identity() {
-    let result = run_group_problem("tests/problems/right_identity.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove right identity");
+    let (result, prover) = run_group_problem("tests/problems/right_identity.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove right identity: {:?}", result),
+    }
 }
 
 #[test]
 fn test_uniqueness_of_identity() {
-    let result = run_group_problem("tests/problems/uniqueness_of_identity.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove uniqueness of identity");
+    let (result, prover) = run_group_problem("tests/problems/uniqueness_of_identity.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove uniqueness of identity: {:?}", result),
+    }
 }
 
 #[test]
 fn test_right_inverse() {
-    let result = run_group_problem("tests/problems/right_inverse.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove right inverse");
+    let (result, prover) = run_group_problem("tests/problems/right_inverse.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove right inverse: {:?}", result),
+    }
 }
 
 #[test]
 fn test_uniqueness_of_inverse() {
-    let result = run_group_problem("tests/problems/uniqueness_of_inverse.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove uniqueness of inverse");
+    let (result, prover) = run_group_problem("tests/problems/uniqueness_of_inverse.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove uniqueness of inverse: {:?}", result),
+    }
 }
 
 #[test]
 fn test_inverse_of_identity() {
-    let result = run_group_problem("tests/problems/inverse_of_identity.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove inverse of identity is identity");
+    let (result, prover) = run_group_problem("tests/problems/inverse_of_identity.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove inverse of identity is identity: {:?}", result),
+    }
 }
 
 #[test]
 fn test_inverse_of_inverse() {
-    let result = run_group_problem("tests/problems/inverse_of_inverse.p", 10);
-    assert!(matches!(result, ProofResult::Proof { .. }), "Failed to prove inverse of inverse");
+    let (result, prover) = run_group_problem("tests/problems/inverse_of_inverse.p", 10);
+    match result {
+        ProofResult::Proof { empty_clause_idx } => {
+            prover.verify_proof(empty_clause_idx).expect("proof verification failed");
+        }
+        _ => panic!("Failed to prove inverse of inverse: {:?}", result),
+    }
 }

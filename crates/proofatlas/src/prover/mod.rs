@@ -226,6 +226,98 @@ impl Prover {
         self.state.extract_proof(clause_idx)
     }
 
+    /// Verify every step in a proof is correct.
+    ///
+    /// Extracts the proof from the given empty clause index, then dispatches
+    /// each step to the appropriate rule's `verify()` method.
+    pub fn verify_proof(&self, empty_clause_idx: usize) -> Result<(), crate::state::VerificationError> {
+        use crate::state::VerificationError;
+
+        let steps = self.state.extract_proof(empty_clause_idx);
+
+        for (step_num, step) in steps.iter().enumerate() {
+            // Check that all premise clause indices are valid
+            for pos in &step.premises {
+                if pos.clause >= self.state.clauses.len() {
+                    return Err(VerificationError::InvalidPremise {
+                        step_idx: step_num,
+                        premise_idx: pos.clause,
+                    });
+                }
+            }
+
+            match step.rule_name.as_str() {
+                "Input" => {
+                    // Input steps: verify the clause index is within the initial clause count
+                    if step.clause_idx >= self.state.initial_clause_count {
+                        return Err(VerificationError::InputNotFound {
+                            step_idx: step_num,
+                            clause_idx: step.clause_idx,
+                        });
+                    }
+                }
+                rule_name => {
+                    // Try generating rules first
+                    let gen_result = self.generating_inferences.iter()
+                        .find(|r| r.name() == rule_name)
+                        .map(|r| r.verify(&step.conclusion, &step.premises, &self.state, &self.clause_manager));
+
+                    if let Some(result) = gen_result {
+                        if let Err(mut e) = result {
+                            // Patch in the correct step index
+                            match &mut e {
+                                VerificationError::InvalidConclusion { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::InvalidPremise { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::UnknownRule { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::InputNotFound { step_idx, .. } => *step_idx = step_num,
+                            }
+                            return Err(e);
+                        }
+                        continue;
+                    }
+
+                    // Try simplifying rules
+                    let simp_result = self.simplifying_inferences.iter()
+                        .find(|r| r.name() == rule_name)
+                        .map(|r| r.verify(
+                            step.clause_idx,
+                            // For simplifying inferences, the "conclusion" in the proof step
+                            // is the replacement clause (if any). We need to determine if
+                            // this is a deletion or a replacement.
+                            if step.conclusion.is_empty() && rule_name != "EqualityResolution" {
+                                None
+                            } else {
+                                Some(step.conclusion.as_ref())
+                            },
+                            &step.premises,
+                            &self.state,
+                            &self.clause_manager,
+                        ));
+
+                    if let Some(result) = simp_result {
+                        if let Err(mut e) = result {
+                            match &mut e {
+                                VerificationError::InvalidConclusion { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::InvalidPremise { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::UnknownRule { step_idx, .. } => *step_idx = step_num,
+                                VerificationError::InputNotFound { step_idx, .. } => *step_idx = step_num,
+                            }
+                            return Err(e);
+                        }
+                        continue;
+                    }
+
+                    return Err(VerificationError::UnknownRule {
+                        step_idx: step_num,
+                        rule: rule_name.to_string(),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Execute one step of the saturation loop.
     ///
     /// Returns `Some(result)` if the proof search is complete, `None` to continue.

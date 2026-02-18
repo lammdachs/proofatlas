@@ -71,6 +71,48 @@ impl SimplifyingInference for SubsumptionRule {
         "Subsumption"
     }
 
+    fn verify(
+        &self,
+        clause_idx: usize,
+        replacement: Option<&Clause>,
+        premises: &[Position],
+        state: &SaturationState,
+        _cm: &ClauseManager,
+    ) -> Result<(), crate::state::VerificationError> {
+        use crate::state::VerificationError;
+
+        // Subsumption deletion: no replacement, and the subsuming clause must subsume the deleted clause
+        if replacement.is_some() {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Subsumption".into(),
+                reason: "subsumption should not produce a replacement clause".into(),
+            });
+        }
+
+        if premises.len() != 1 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Subsumption".into(),
+                reason: format!("expected 1 premise (subsumer), got {}", premises.len()),
+            });
+        }
+
+        let subsumed = &state.clauses[clause_idx];
+        let subsumer = &state.clauses[premises[0].clause];
+
+        // Verify using the full subsumption check
+        if subsumes(subsumer, subsumed) || subsumes_greedy(subsumer, subsumed) {
+            Ok(())
+        } else {
+            Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Subsumption".into(),
+                reason: "subsumer does not subsume the deleted clause".into(),
+            })
+        }
+    }
+
     fn simplify_forward(
         &self,
         clause_idx: usize,
