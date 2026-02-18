@@ -4,7 +4,7 @@
 //!
 //! - **Literal selection** ([`LiteralSelector`]) — which literal(s) in a clause
 //!   are eligible for inference rules (resolution, superposition, etc.)
-//! - **Clause selection** ([`ClauseSelector`]) — which clause to process next
+//! - **Clause selection** ([`ProverSink`]) — which clause to process next
 //!   from the unprocessed set (the "given clause" choice)
 //!
 //! # Literal selection strategies
@@ -15,12 +15,10 @@
 //! - [`SelectUniqueMaximalOrNegOrMaximal`] (Sel21): unique maximal, else neg max-weight, else all maximal
 //! - [`SelectNegMaxWeightOrMaximal`] (Sel22): neg max-weight literal, else all maximal
 //!
-//! # Clause selection strategies
+//! # Clause selection (ProverSink)
 //!
-//! - [`AgeWeightSelector`]: classic age-weight ratio heuristic
-//! - [`CachingSelector`]: ML-based selection with embedding cache
-//! - [`GcnSelector`] (feature-gated): GCN graph neural network
-//! - [`SentenceSelector`] (feature-gated): sentence transformer
+//! - [`AgeWeightSink`]: classic age-weight ratio heuristic
+//! - [`ChannelSink`]: pipelined ML inference via Backend
 
 // Core (top-level)
 pub mod age_weight;
@@ -29,7 +27,6 @@ pub mod clause;
 
 // Subgroups
 pub mod ml;
-pub mod network;
 pub mod pipeline;
 pub mod training;
 
@@ -40,9 +37,9 @@ pub use crate::logic::literal_selection::{
 };
 
 // Clause selection re-exports
-pub use age_weight::{AgeWeightSelector, AgeWeightSink, FIFOSelector, WeightSelector};
-pub use cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
-pub use clause::{ClauseSelector, ProverSink, SelectorStats};
+pub use age_weight::AgeWeightSink;
+pub use cached::{ClauseEmbedder, EmbeddingScorer};
+pub use clause::{ProverSink, SelectorStats};
 #[cfg(feature = "ml")]
 pub use ml::gcn::{GcnEmbedder, GcnScorer};
 #[cfg(feature = "ml")]
@@ -55,10 +52,6 @@ pub use ml::sentence::{
     load_sentence_embedder, MiniLMEncoderModel, PassThroughScorer,
     SentenceEmbedder, SentenceEncoder, tokenize_batch,
 };
-#[cfg(unix)]
-pub use network::remote::{RemoteSelector, RemoteSelectorSink};
-#[cfg(feature = "ml")]
-pub use network::server::ScoringServer;
 
 // Pipeline re-exports
 pub use pipeline::backend::{Backend, BackendHandle, BackendRequest, BackendResponse, Model, ModelSpec};
@@ -79,7 +72,3 @@ pub use ml::features::{FeaturesEmbedder, FeaturesEncoder, load_features_embedder
 // Graph/ML re-exports
 pub use ml::features::{extract_clause_features, NUM_CLAUSE_FEATURES};
 pub use ml::graph::{BatchClauseGraph, ClauseGraph, GraphBuilder, FEATURE_DIM, NODE_TYPES};
-pub use training::proof_trace::{
-    compute_proof_statistics, extract_training_data,
-    ProofStatistics, TrainingExample,
-};

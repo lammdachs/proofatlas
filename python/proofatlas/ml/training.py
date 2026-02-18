@@ -417,7 +417,7 @@ def _run_training_inner(
         sin_dim=emb_config.get("sin_dim", 8),
     )
 
-    needs_adj = model_type in ["gcn", "gat", "graphsage", "gnn_transformer"]
+    needs_adj = model_type == "gcn"
     is_sentence_model = model_type == "sentence"
     is_features_model = model_type == "features"
     model = model.to(device)
@@ -465,7 +465,6 @@ def _run_training_inner(
                 "max_epochs": max_epochs,
                 "optimizer": optimizer_type,
                 "weight_decay": weight_decay,
-                "margin": config.get("margin", 0.1),
                 "cpu_workers": cpu_workers,
                 "gpu_workers": world_size,
             },
@@ -481,7 +480,6 @@ def _run_training_inner(
     # Loss configuration
     loss_type = config.get("loss_type", "info_nce")
     temperature = config.get("temperature", 1.0)
-    margin = config.get("margin", 0.1)
     gradient_clip = config.get("gradient_clip", 1.0)
 
     log_every_steps = config.get("log_every_steps", 100)
@@ -510,7 +508,7 @@ def _run_training_inner(
                 raw_model = model.module if use_ddp else model
                 scores = _forward_pass(raw_model, batch, device, is_sentence_model, is_features_model)
 
-                loss = compute_loss(scores, labels, proof_ids, loss_type, temperature, margin)
+                loss = compute_loss(scores, labels, proof_ids, loss_type, temperature)
                 if accumulate_steps > 1:
                     loss = loss / accumulate_steps
                 loss.backward()
@@ -554,7 +552,7 @@ def _run_training_inner(
                     raw_model = model.module if use_ddp else model
                     scores = _forward_pass(raw_model, batch, device, is_sentence_model, is_features_model)
 
-                    val_loss += compute_loss(scores, labels, val_proof_ids, loss_type, temperature, margin).item()
+                    val_loss += compute_loss(scores, labels, val_proof_ids, loss_type, temperature).item()
                     num_val_batches += 1
             val_loss /= num_val_batches if num_val_batches > 0 else 1
 

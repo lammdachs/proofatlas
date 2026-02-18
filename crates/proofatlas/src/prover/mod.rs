@@ -6,7 +6,6 @@
 //! Use `prove()` to run to completion, or `step()` for incremental execution.
 
 pub mod profile;
-pub mod trace;
 
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::{CNFFormula, Clause, Interner};

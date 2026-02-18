@@ -27,16 +27,14 @@ proofatlas/
 │   │       ├── index/          # Index trait, IndexRegistry, SubsumptionChecker, SelectedLiteralIndex
 │   │       ├── prover/         # Saturation engine
 │   │       │   ├── mod.rs      # Prover struct with prove()/init()/step()/saturate()
-│   │       │   ├── profile.rs  # SaturationProfile
-│   │       │   └── trace.rs    # (reserved for future trace utilities)
+│   │       │   └── profile.rs  # SaturationProfile
 │   │       ├── selection/      # Clause selection strategies
-│   │       │   ├── clause.rs   # ProverSink, ClauseSelector traits
-│   │       │   ├── age_weight.rs # Heuristic age-weight selector
-│   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer, CachingSelector
+│   │       │   ├── clause.rs   # ProverSink trait
+│   │       │   ├── age_weight.rs # AgeWeightSink (age-weight heuristic)
+│   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer traits
 │   │       │   ├── ml/         # ML model implementations (gcn, sentence, graph, features)
 │   │       │   ├── pipeline/   # Backend compute service, ChannelSink, EmbedScoreModel
-│   │       │   ├── network/    # Protocol, RemoteSelector, ScoringServer
-│   │       │   └── training/   # proof_trace.rs, npz.rs (NpzWriter for trace output)
+│   │       │   └── training/   # npz.rs (NpzWriter for trace output)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── atlas.rs        # ProofAtlas orchestrator (reusable across problems)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -55,7 +53,7 @@ proofatlas/
 │
 ├── scripts/                    # Utility scripts
 │   ├── setup.py                # One-command project setup
-│   ├── bench.py                # Benchmark orchestration, scoring server mgmt, CLI/daemon
+│   ├── bench.py                # Benchmark orchestration, CLI/daemon
 │   ├── bench_jobs.py           # Job/daemon management, PID tracking, status display
 │   ├── bench_provers.py        # Prover execution with ProofAtlasPool (persistent workers)
 │   ├── run_all.py              # Full experiment orchestration (traces → train → eval → push)
@@ -290,7 +288,7 @@ Literals have a flat structure with `predicate`, `args`, and `polarity` directly
 - **Sub-phase timings**: forward/backward demodulation, forward/backward subsumption
 - **Per-rule counts and timings**: resolution, superposition, factoring, equality resolution, equality factoring, demodulation
 - **Aggregate counters**: iterations, clauses generated/added/subsumed/demodulated, tautologies deleted, max set sizes
-- **Selector stats**: name, cache hits/misses, embed/score time (populated from `ClauseSelector::stats()`)
+- **Selector stats**: name, cache hits/misses, embed/score time (populated from `ProverSink::stats()`)
 
 Zero overhead when disabled: all instrumentation is gated on `Option::None`, costing a single predicted-not-taken branch per instrumentation point.
 
@@ -298,17 +296,9 @@ Zero overhead when disabled: all instrumentation is gated on `Option::None`, cos
 
 ### Clause Selection
 
-Two trait hierarchies coexist:
-
 **`ProverSink`** (`selection/clause.rs`): Signal-based interface. The prover pushes lifecycle events (`on_transfer`, `on_activate`, `on_simplify`) and requests selection via `select()`. Implementations track their own internal state from signals.
 - `AgeWeightSink`: Heuristic age-weight ratio with internal `IndexMap<usize, usize>`
 - `ChannelSink`: Sends signals via `mpsc` channel to a data processing thread (pipelined ML inference)
-- `RemoteSelectorSink`: Adapter wrapping `RemoteSelector` for backward compatibility (GPU scoring servers)
-
-**`ClauseSelector`** (`selection/clause.rs`): Legacy poll-based interface. Receives `&mut IndexSet<usize>` and `&[Arc<Clause>]` at each selection.
-- `AgeWeightSelector`: Alternates FIFO and lightest with configurable ratio
-- `CachingSelector`: ML-based with embedding cache (in-process, used for tests)
-- `RemoteSelector`: ML-based via scoring server (used for GPU inference)
 
 ### Pipelined ML Inference
 
@@ -329,18 +319,9 @@ Prover --> ChannelSink --(mpsc)--> Data Processing Thread --> BackendHandle --> 
 - **Data processing thread**: Receives `ProverSignal`s. On `Transfer`: submits clause to Backend, caches score. On `Select`: softmax-samples from cached scores.
 - **Factory**: `create_ml_pipeline(embedder, scorer, temperature) -> ChannelSink`
 
-### Scoring Server (GPU only)
-
-For GPU-accelerated inference with multiple workers, a socket-based scoring server is still used:
-
-- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, 16 MiB stack per handler thread
-- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses (capped at 512/request), applies softmax sampling locally. Auto-reconnects on failure.
-- **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, length-prefixed bincode framing
-- **bench.py**: Only starts scoring servers when `--gpu-workers N` is set. CPU workers use the in-process pipeline.
-
 ## ML Architecture
 
-**Workflow**: Train in PyTorch --> Export to TorchScript --> Load in Backend (CPU) or ScoringServer (GPU)
+**Workflow**: Train in PyTorch --> Export to TorchScript --> Load in Backend (CPU or GPU via `use_cuda`)
 
 | Selector | Rust | PyTorch | Notes |
 |----------|------|---------|-------|

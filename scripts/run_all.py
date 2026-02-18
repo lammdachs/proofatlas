@@ -3,10 +3,10 @@
 Full experiment script: traces, training, evaluation, and push.
 
 Runs in the foreground by default. Use nohup for headless operation:
-    nohup python scripts/run_all.py --use-cuda --cpu-workers 56 --gpu-workers 4 &
+    nohup python scripts/run_all.py --use-cuda --cuda --cpu-workers 56 --gpu-workers 4 &
 
 USAGE:
-    python scripts/run_all.py --use-cuda --cpu-workers 8 --gpu-workers 1
+    python scripts/run_all.py --use-cuda --cuda --cpu-workers 8 --gpu-workers 1
 
     python scripts/run_all.py --configs gcn_mlp sentence_mlp  # Specific configs
     python scripts/run_all.py --problem-set puz              # Evaluate on PUZ only
@@ -22,7 +22,7 @@ Phases:
   2. Training (step-limited ML configs on GPU via --use-cuda)
   3. Step-limited evaluation — per-config device selection:
        *_mlp (non-sentence)    → CPU  (lightweight encoder + MLP scorer)
-       *_attention, *_transformer, sentence_* → GPU  (--gpu-workers)
+       *_attention, *_transformer, sentence_* → GPU  (--cuda)
   4. Wall-time evaluation (time_* configs, reuse trained weights)
   5. Push results + upload weights
 """
@@ -394,7 +394,7 @@ def run_experiment(args, base_dir: Path):
         if args.cpu_workers is not None:
             cmd.extend(["--cpu-workers", str(args.cpu_workers)])
         if use_gpu:
-            cmd.extend(["--gpu-workers", str(args.gpu_workers)])
+            cmd.append("--cuda")
         if args.problem_set is not None:
             cmd.extend(["--problem-set", args.problem_set])
         if args.rerun:
@@ -433,7 +433,7 @@ def run_experiment(args, base_dir: Path):
             if args.cpu_workers is not None:
                 cmd.extend(["--cpu-workers", str(args.cpu_workers)])
             if use_gpu:
-                cmd.extend(["--gpu-workers", str(args.gpu_workers)])
+                cmd.append("--cuda")
             if args.problem_set is not None:
                 cmd.extend(["--problem-set", args.problem_set])
             if args.rerun:

@@ -7,7 +7,6 @@ Models:
     - ClauseGCN: Graph Convolutional Network encoder + scorer
     - SentenceEncoder: Sentence transformer encoder + scorer
     - ClauseFeatures: Clause feature MLP encoder + scorer
-    - AgeWeightHeuristic: Age-weight heuristic baseline
 
 Scorers:
     - MLPScorer, AttentionScorer, TransformerScorer
@@ -33,7 +32,6 @@ from .scorers import (
     TransformerScorer,
     create_scorer,
 )
-from .baseline import AgeWeightHeuristic
 from .utils import sparse_mm
 from .factory import create_model
 
@@ -50,8 +48,6 @@ __all__ = [
     # Feature embeddings
     "NodeFeatureEmbedding",
     "ClauseFeatureEmbedding",
-    # Baselines
-    "AgeWeightHeuristic",
     # Utilities
     "sparse_mm",
     # Factory

@@ -34,16 +34,13 @@ enum SinkKind {
     #[cfg(feature = "ml")]
     Pipeline {
         handle: BackendHandle,
-        /// Encoder type: "gcn", "gat", "graphsage", "sentence", "features".
+        /// Encoder type: "gcn", "sentence", "features".
         encoder: String,
         /// Scorer type: "mlp", "attention", "transformer".
         scorer: String,
         /// Whether CUDA is available (used for per-model device decisions in processors).
         use_cuda: bool,
     },
-    /// Remote scoring server via Unix socket.
-    #[cfg(unix)]
-    Remote { socket_path: String },
 }
 
 /// Reusable orchestrator for proving multiple problems.
@@ -73,7 +70,6 @@ impl ProofAtlas {
             use_cuda: false,
             temperature: 1.0,
             age_weight_ratio: 0.5,
-            socket_path: None,
             enable_trace: false,
         }
     }
@@ -161,18 +157,18 @@ impl ProofAtlas {
                 // - Sentence: heavy (MiniLM) → both follow use_cuda
                 let is_lightweight_encoder = matches!(
                     encoder.as_str(),
-                    "gcn" | "gcn_struct" | "gat" | "graphsage" | "features"
+                    "gcn" | "gcn_struct" | "features"
                 );
                 let embed_cuda = if is_lightweight_encoder { false } else { cuda };
                 let score_cuda = cuda;
 
                 let processor: Box<dyn crate::selection::DataProcessor> = match (encoder.as_str(), scorer.as_str()) {
                     // GCN + MLP: cache scores
-                    ("gcn" | "gcn_struct" | "gat" | "graphsage", "mlp") => {
+                    ("gcn" | "gcn_struct", "mlp") => {
                         Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda))
                     }
                     // GCN + attention/transformer: cache embeddings
-                    ("gcn" | "gcn_struct" | "gat" | "graphsage", "attention" | "transformer") => {
+                    ("gcn" | "gcn_struct", "attention" | "transformer") => {
                         Box::new(processors::GcnEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda))
                     }
                     // Sentence + MLP: cache scores
@@ -204,13 +200,6 @@ impl ProofAtlas {
                     format!("{}_{}", encoder, scorer),
                 )))
             }
-            #[cfg(unix)]
-            SinkKind::Remote { socket_path } => {
-                use crate::selection::ClauseSelector; // for set_interner
-                let mut selector = crate::selection::RemoteSelector::connect(socket_path)?;
-                selector.set_interner(Arc::new(interner.clone()));
-                Ok(Box::new(crate::selection::RemoteSelectorSink::new(selector)))
-            }
         }
     }
 }
@@ -225,7 +214,6 @@ pub struct ProofAtlasBuilder {
     use_cuda: bool,
     temperature: f32,
     age_weight_ratio: f64,
-    socket_path: Option<String>,
     enable_trace: bool,
 }
 
@@ -236,7 +224,7 @@ impl ProofAtlasBuilder {
         self
     }
 
-    /// Set the ML encoder type (e.g., "gcn", "gat", "graphsage", "sentence", "features").
+    /// Set the ML encoder type (e.g., "gcn", "gcn_struct", "sentence", "features").
     pub fn encoder(mut self, encoder: impl Into<String>) -> Self {
         self.encoder = Some(encoder.into());
         self
@@ -272,12 +260,6 @@ impl ProofAtlasBuilder {
         self
     }
 
-    /// Set Unix socket path for remote scoring server.
-    pub fn socket_path(mut self, path: impl Into<String>) -> Self {
-        self.socket_path = Some(path.into());
-        self
-    }
-
     /// Enable trace embedding via a MiniLM Backend.
     ///
     /// When true, the builder will create (or augment) a Backend with a
@@ -291,18 +273,6 @@ impl ProofAtlasBuilder {
 
     /// Build the `ProofAtlas` orchestrator.
     pub fn build(self) -> Result<ProofAtlas, String> {
-        #[cfg(unix)]
-        if let Some(ref socket_path) = self.socket_path {
-            return Ok(ProofAtlas {
-                config: self.config,
-                include_dirs: self.include_dirs,
-                sink_kind: SinkKind::Remote { socket_path: socket_path.clone() },
-                temperature: self.temperature,
-                #[cfg(feature = "ml")]
-                _backend: None,
-            });
-        }
-
         match self.encoder.as_deref() {
             None => {
                 // No ML — use heuristic selector
@@ -336,7 +306,7 @@ impl ProofAtlasBuilder {
                 })
             }
             #[cfg(feature = "ml")]
-            Some(enc @ ("gcn" | "gcn_struct" | "gat" | "graphsage" | "sentence" | "features")) => {
+            Some(enc @ ("gcn" | "gcn_struct" | "sentence" | "features")) => {
                 let scorer_name = self.scorer.as_deref()
                     .ok_or_else(|| "scorer required when encoder is set".to_string())?;
                 let is_mlp = scorer_name == "mlp";
@@ -379,7 +349,7 @@ impl ProofAtlasBuilder {
             }
             Some(other) => {
                 #[cfg(feature = "ml")]
-                let available = "None, 'gcn', 'gcn_struct', 'gat', 'graphsage', 'sentence', or 'features'";
+                let available = "None, 'gcn', 'gcn_struct', 'sentence', or 'features'";
                 #[cfg(not(feature = "ml"))]
                 let available = "None (ML features not enabled)";
                 Err(format!("Unknown encoder: '{}'. Use {}", other, available))
@@ -445,7 +415,7 @@ fn make_split_specs(
 
     let cross_attention = scorer_name == "attention" || scorer_name == "transformer";
     let hidden_dim = match enc {
-        "gcn" | "gcn_struct" | "gat" | "graphsage" => 256,
+        "gcn" | "gcn_struct" => 256,
         _ => 64,
     };
 
@@ -530,7 +500,7 @@ fn load_encoder(
     use_cuda: bool,
 ) -> Result<Box<dyn crate::selection::cached::ClauseEmbedder + Send>, String> {
     match enc {
-        "gcn" | "gcn_struct" | "gat" | "graphsage" => {
+        "gcn" | "gcn_struct" => {
             let encoder = crate::selection::GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
             Ok(Box::new(encoder))
         }
@@ -573,7 +543,7 @@ fn load_embedder_scorer(
             let emb = crate::selection::load_sentence_embedder(model_path, &tokenizer_path, use_cuda)?;
             Ok((Box::new(emb), Box::new(crate::selection::PassThroughScorer) as _))
         }
-        "gcn" | "gcn_struct" | "gat" | "graphsage" => {
+        "gcn" | "gcn_struct" => {
             let emb = crate::selection::load_gcn_embedder(model_path, use_cuda)?;
             Ok((Box::new(emb) as _, Box::new(crate::selection::GcnScorer) as _))
         }

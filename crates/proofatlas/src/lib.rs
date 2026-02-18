@@ -47,9 +47,9 @@ pub use generating::{
 
 // Re-export selection types
 pub use selection::{
-    AgeWeightSelector, AgeWeightSink, ClauseSelector, FIFOSelector, LiteralSelector,
+    AgeWeightSink, LiteralSelector,
     ProverSink, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
-    SelectUniqueMaximalOrNegOrMaximal, WeightSelector,
+    SelectUniqueMaximalOrNegOrMaximal,
 };
 
 #[cfg(feature = "ml")]

@@ -11,7 +11,6 @@ For selector models, use proofatlas.selectors directly.
 from .losses import (
     info_nce_loss,
     info_nce_loss_per_proof,
-    margin_ranking_loss,
     compute_loss,
 )
 
@@ -41,7 +40,6 @@ __all__ = [
     # Loss functions
     "info_nce_loss",
     "info_nce_loss_per_proof",
-    "margin_ranking_loss",
     "compute_loss",
     # Datasets
     "ProofBatchDataset",

@@ -20,7 +20,6 @@ ML MODELS:
         proofatlas-bench --config gcn_mlp
 
     CPU workers use an in-process pipeline (no external server needed).
-    GPU workers (--gpu-workers N) use scoring server subprocesses per GPU.
 
 OUTPUT:
     .data/runs/proofatlas/<preset>/     - Per-problem results
@@ -328,62 +327,6 @@ def _update_benchmark_index(output_dir: Path):
         json.dump(index, f, indent=2)
 
 
-# Scoring server management
-
-def _start_scoring_server_subprocess(encoder, scorer, weights_path, socket_path, use_cuda, gpu_id=None):
-    """Start a scoring server in a subprocess (blocks in that subprocess).
-
-    Returns (Popen, stderr_path). stderr is written to a temp file so the pipe
-    buffer can't fill up and block the server (which would freeze socket handlers
-    and cause 'connection reset' errors from workers).
-    """
-    import subprocess as sp
-    import tempfile
-
-    script = f'''
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path("{Path(__file__).parent.parent / "python"}").resolve()))
-from proofatlas.proofatlas import start_scoring_server
-start_scoring_server(
-    encoder="{encoder}",
-    scorer="{scorer}",
-    weights_path="{weights_path}",
-    socket_path="{socket_path}",
-    use_cuda={use_cuda},
-)
-'''
-    env = {**os.environ}
-    if use_cuda:
-        # Restore GPU visibility for the server subprocess (the parent hides GPUs
-        # via CUDA_VISIBLE_DEVICES="" to prevent fork-inherited CUDA contexts).
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id) if gpu_id is not None else "0"
-    else:
-        env["CUDA_VISIBLE_DEVICES"] = ""
-
-    stderr_file = tempfile.NamedTemporaryFile(prefix="proofatlas-server-", suffix=".log", delete=False)
-
-    proc = sp.Popen(
-        [sys.executable, '-c', script],
-        stdout=sp.DEVNULL,
-        stderr=stderr_file,
-        cwd=str(Path(__file__).parent.parent),
-        env=env,
-    )
-    stderr_file.close()  # Process inherited the fd, we can close our handle
-    return proc, stderr_file.name
-
-
-def _wait_for_socket(socket_path, timeout=10):
-    """Wait for a Unix socket file to appear."""
-    start = time.time()
-    while time.time() - start < timeout:
-        if Path(socket_path).exists():
-            return True
-        time.sleep(0.1)
-    return False
-
-
 # Evaluation
 
 STATUS_SYMBOLS = {"proof": "+", "saturated": "~", "resource_limit": "R", "error": "!"}
@@ -404,58 +347,6 @@ def _log_result(result, stats, index, total, log_file, base_dir, prover, preset_
     export_benchmark_progress(base_dir, prover, preset_name, stats, index, total)
 
 
-def _restart_server(i, server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda, reason):
-    """Restart a single scoring server. Returns True on success."""
-    old_proc = server_procs[i]
-    if old_proc.poll() is None:
-        old_proc.terminate()
-        try:
-            old_proc.wait(timeout=5)
-        except Exception:
-            old_proc.kill()
-            old_proc.wait()
-    print(f"Scoring server {i}: {reason}, restarting...")
-    sys.stdout.flush()
-    gpu_id = i if use_cuda else None
-    new_proc, new_log = _start_scoring_server_subprocess(
-        encoder=preset["encoder"],
-        scorer=preset["scorer"],
-        weights_path=weights_path,
-        socket_path=socket_paths[i],
-        use_cuda=use_cuda,
-        gpu_id=gpu_id,
-    )
-    server_procs[i] = new_proc
-    stderr_logs[i] = new_log
-    if _wait_for_socket(socket_paths[i]):
-        print(f"Scoring server {i} restarted at {socket_paths[i]}")
-        sys.stdout.flush()
-        return True
-    else:
-        print(f"ERROR: Scoring server {i} failed to restart")
-        sys.stdout.flush()
-        return False
-
-
-def _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                   completed_count=0):
-    """Check server health and restart any dead servers. Returns number restarted."""
-    if not server_procs:
-        return 0
-    restarted = 0
-    for i, proc in enumerate(server_procs):
-        if proc.poll() is not None:
-            rc = proc.returncode
-            if rc < 0:
-                desc = f"died (signal {-rc})"
-            elif rc == 0:
-                desc = "died (clean exit)"
-            else:
-                desc = f"died (exit code {rc})"
-            if _restart_server(i, server_procs, socket_paths, stderr_logs,
-                               preset, weights_path, use_cuda, desc):
-                restarted += 1
-    return restarted
 
 
 def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
@@ -463,228 +354,150 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    preset_name: str = None, weights_path: str = None,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False, n_jobs: int = 1,
-                   use_cuda: bool = False, gpu_workers: int = 0,
+                   use_cuda: bool = False,
                    collect_traces: bool = False):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
-
-    # Start scoring server(s) for GPU ML inference.
-    # CPU workers use the in-process pipeline (no server needed).
-    server_procs = []
-    socket_paths = []
-    stderr_logs = []
     ml = _get_ml()
 
-    if prover == "proofatlas" and ml.is_learned_selector(preset) and weights_path and gpu_workers > 0:
-        model_label = f"{preset['encoder']}_{preset['scorer']}"
-        print(f"\nStarting {gpu_workers} scoring server(s) for {model_label}...")
-        for i in range(gpu_workers):
-            sp = f"/tmp/proofatlas-scoring-{os.getpid()}-{i}.sock"
-            proc, stderr_path = _start_scoring_server_subprocess(
-                encoder=preset["encoder"],
-                scorer=preset["scorer"],
-                weights_path=weights_path,
-                socket_path=sp,
-                use_cuda=True,
-                gpu_id=i,
-            )
-            server_procs.append(proc)
-            socket_paths.append(sp)
-            stderr_logs.append(stderr_path)
+    if prover == "proofatlas":
+        model_label = f"{preset['encoder']}_{preset['scorer']}" if ml.is_learned_selector(preset) else "age_weight"
+        print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
+        if weights_path:
+            print(f"Weights: {weights_path}")
+    else:
+        print(f"\nEvaluating {len(problems)} problems" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
 
-        # Wait for all sockets
-        for sp in socket_paths:
-            if not _wait_for_socket(sp):
-                idx = socket_paths.index(sp)
-                server_procs[idx].terminate()
-                server_procs[idx].wait(timeout=5)
-                print(f"ERROR: Scoring server failed to start at {sp}")
-                # Read stderr from log file
-                try:
-                    stderr_content = Path(stderr_logs[idx]).read_text(errors="replace")
-                    for line in stderr_content.splitlines()[-10:]:
-                        print(f"  Server: {line}")
-                except Exception:
-                    pass
-                # Terminate any servers that did start
-                for proc in server_procs:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except Exception:
-                        proc.kill()
-                for s in socket_paths:
-                    Path(s).unlink(missing_ok=True)
-                for log_path in stderr_logs:
-                    Path(log_path).unlink(missing_ok=True)
-                return stats
+    collect_trace = collect_traces and (prover == "proofatlas")
 
-        print(f"All {len(socket_paths)} scoring servers ready")
+    if prover == "proofatlas":
+        # Persistent worker pool — reuses ProofAtlas (and ML model) across problems
+        from bench_provers import ProofAtlasPool
 
-    try:
-        if prover == "proofatlas":
-            model_label = f"{preset['encoder']}_{preset['scorer']}" if ml.is_learned_selector(preset) else "age_weight"
-            print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
-            if weights_path:
-                print(f"Weights: {weights_path}")
-        else:
-            print(f"\nEvaluating {len(problems)} problems" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
+        pool = ProofAtlasPool(
+            n_workers=n_jobs, preset=preset, base_dir=base_dir,
+            tptp_root=tptp_root, weights_path=weights_path,
+            use_cuda=use_cuda,
+            collect_trace=collect_trace, trace_preset=trace_preset,
+        )
+        pool.start()
 
-        collect_trace = collect_traces and (prover == "proofatlas")
+        try:
+            if n_jobs > 1:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                import threading
 
-        if prover == "proofatlas":
-            # Persistent worker pool — reuses ProofAtlas (and ML model) across problems
-            from bench_provers import ProofAtlasPool
+                problem_iter = iter(enumerate(problems, 1))
+                iter_lock = threading.Lock()
+                log_lock = threading.Lock()
+                completed_count = [0]
 
-            pool = ProofAtlasPool(
-                n_workers=n_jobs, preset=preset, base_dir=base_dir,
-                tptp_root=tptp_root, weights_path=weights_path,
-                use_cuda=use_cuda, socket_paths=socket_paths or None,
-                collect_trace=collect_trace, trace_preset=trace_preset,
-            )
-            pool.start()
-
-            try:
-                if n_jobs > 1:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    import threading
-
-                    problem_iter = iter(enumerate(problems, 1))
-                    iter_lock = threading.Lock()
-                    log_lock = threading.Lock()
-                    completed_count = [0]
-
-                    def _pool_worker_fn(worker_idx):
-                        worker = pool.workers[worker_idx]
-                        while True:
-                            with iter_lock:
-                                try:
-                                    i, problem = next(problem_iter)
-                                except StopIteration:
-                                    return
-
-                            existing = load_run_result(base_dir, prover, preset_name, problem)
-                            if existing and not rerun:
-                                with log_lock:
-                                    completed_count[0] += 1
-                                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                                   completed_count=completed_count[0])
-                                    _log_result(existing, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=True)
-                                continue
-
+                def _pool_worker_fn(worker_idx):
+                    worker = pool.workers[worker_idx]
+                    while True:
+                        with iter_lock:
                             try:
-                                result = worker.submit(problem, pool.process_timeout)
-                                if result.status == "timeout":
-                                    result.status = "resource_limit"
-                                save_run_result(base_dir, prover, preset_name, result)
-                            except Exception as e:
-                                result = BenchResult(problem=problem.name, status="error", time_s=0)
-                                print(f"ERROR: {e}")
-
-                            with log_lock:
-                                completed_count[0] += 1
-                                _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                               completed_count=completed_count[0])
-                                _log_result(result, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=False)
-
-                    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                        futures = [executor.submit(_pool_worker_fn, i) for i in range(n_jobs)]
-                        for f in as_completed(futures):
-                            try:
-                                f.result()
-                            except Exception as e:
-                                print(f"ERROR in pool worker: {e}")
-                                stats["error"] += 1
-                else:
-                    # Sequential execution with persistent worker
-                    for i, problem in enumerate(problems, 1):
-                        _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                       completed_count=i - 1)
+                                i, problem = next(problem_iter)
+                            except StopIteration:
+                                return
 
                         existing = load_run_result(base_dir, prover, preset_name, problem)
                         if existing and not rerun:
-                            _log_result(existing, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=True)
+                            with log_lock:
+                                completed_count[0] += 1
+                                _log_result(existing, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=True)
                             continue
 
                         try:
-                            result = pool.workers[0].submit(problem, pool.process_timeout)
+                            result = worker.submit(problem, pool.process_timeout)
                             if result.status == "timeout":
                                 result.status = "resource_limit"
                             save_run_result(base_dir, prover, preset_name, result)
-                            _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=False)
                         except Exception as e:
-                            print(f"ERROR processing {problem.name}: {e}")
-                            sys.stdout.flush()
-                            import traceback
-                            traceback.print_exc()
-                            sys.stdout.flush()
-            finally:
-                pool.shutdown()
+                            result = BenchResult(problem=problem.name, status="error", time_s=0)
+                            print(f"ERROR: {e}")
 
-        else:
-            # External provers (Vampire, SPASS): subprocess per problem
-            work_items = [
-                (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
-                for problem in problems
-            ]
-
-            if n_jobs > 1:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
+                        with log_lock:
+                            completed_count[0] += 1
+                            _log_result(result, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=False)
 
                 with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                    futures = {executor.submit(run_single_problem, item, socket_path=socket_paths[i % len(socket_paths)] if socket_paths else None): i for i, item in enumerate(work_items)}
-                    completed = 0
-
-                    for future in as_completed(futures):
-                        completed += 1
-                        _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                       completed_count=completed)
+                    futures = [executor.submit(_pool_worker_fn, i) for i in range(n_jobs)]
+                    for f in as_completed(futures):
                         try:
-                            status, result = future.result()
-                            _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                            f.result()
                         except Exception as e:
-                            print(f"ERROR: {e}")
+                            print(f"ERROR in pool worker: {e}")
                             stats["error"] += 1
             else:
-                for i, item in enumerate(work_items, 1):
-                    _check_servers(server_procs, socket_paths, stderr_logs, preset, weights_path, use_cuda,
-                                   completed_count=i - 1)
-                    if i % 100 == 0:
-                        import gc
-                        gc.collect()
+                # Sequential execution with persistent worker
+                for i, problem in enumerate(problems, 1):
+                    existing = load_run_result(base_dir, prover, preset_name, problem)
+                    if existing and not rerun:
+                        _log_result(existing, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=True)
+                        continue
 
                     try:
-                        sp = socket_paths[(i - 1) % len(socket_paths)] if socket_paths else None
-                        status, result = run_single_problem(item, socket_path=sp)
-                        _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                        result = pool.workers[0].submit(problem, pool.process_timeout)
+                        if result.status == "timeout":
+                            result.status = "resource_limit"
+                        save_run_result(base_dir, prover, preset_name, result)
+                        _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=False)
                     except Exception as e:
-                        print(f"ERROR processing {item[0].name}: {e}")
+                        print(f"ERROR processing {problem.name}: {e}")
                         sys.stdout.flush()
                         import traceback
                         traceback.print_exc()
                         sys.stdout.flush()
+        finally:
+            pool.shutdown()
 
-        # Print summary (individual results saved to .data/runs/)
-        # Note: skip count is separate (skipped problems are also counted in their status)
-        total = len(problems)
-        proof_rate = 100 * stats["proof"] / total if total else 0
+    else:
+        # External provers (Vampire, SPASS): subprocess per problem
+        work_items = [
+            (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
+            for problem in problems
+        ]
 
-        print(f"\n{'='*60}")
-        skip_str = f" S{stats['skip']}" if stats["skip"] else ""
-        print(f"Results: +{stats['proof']} ~{stats['saturated']} R{stats['resource_limit']}{skip_str} ({proof_rate:.1f}% proofs)")
+        if n_jobs > 1:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    finally:
-        # Terminate scoring server subprocesses
-        for proc in server_procs:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except Exception:
-                proc.kill()
-        for sp in socket_paths:
-            Path(sp).unlink(missing_ok=True)
-        for log_path in stderr_logs:
-            Path(log_path).unlink(missing_ok=True)
+            with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+                futures = {executor.submit(run_single_problem, item): i for i, item in enumerate(work_items)}
+                completed = 0
+
+                for future in as_completed(futures):
+                    completed += 1
+                    try:
+                        status, result = future.result()
+                        _log_result(result, stats, completed, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                    except Exception as e:
+                        print(f"ERROR: {e}")
+                        stats["error"] += 1
+        else:
+            for i, item in enumerate(work_items, 1):
+                if i % 100 == 0:
+                    import gc
+                    gc.collect()
+
+                try:
+                    status, result = run_single_problem(item)
+                    _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
+                except Exception as e:
+                    print(f"ERROR processing {item[0].name}: {e}")
+                    sys.stdout.flush()
+                    import traceback
+                    traceback.print_exc()
+                    sys.stdout.flush()
+
+    # Print summary (individual results saved to .data/runs/)
+    # Note: skip count is separate (skipped problems are also counted in their status)
+    total = len(problems)
+    proof_rate = 100 * stats["proof"] / total if total else 0
+
+    print(f"\n{'='*60}")
+    skip_str = f" S{stats['skip']}" if stats["skip"] else ""
+    print(f"Results: +{stats['proof']} ~{stats['saturated']} R{stats['resource_limit']}{skip_str} ({proof_rate:.1f}% proofs)")
 
     return stats
 
@@ -699,8 +512,8 @@ def main():
                        help="Re-evaluate problems even if cached results exist")
     parser.add_argument("--cpu-workers", type=int, default=1,
                        help="Number of parallel CPU workers (default: 1)")
-    parser.add_argument("--gpu-workers", type=int, default=0,
-                       help="Number of GPUs for ML inference (0=CPU, N>0=distribute across N GPUs)")
+    parser.add_argument("--cuda", action="store_true",
+                       help="Use CUDA for ML inference")
 
     parser.add_argument("--timeout", type=float, default=None,
                        help="Override per-problem timeout (seconds)")
@@ -819,54 +632,7 @@ def main():
     problems = get_problems(base_dir, tptp_config, problem_set)
 
     # Validate worker configuration
-    gpu_workers = args.gpu_workers
-    cpu_workers = args.cpu_workers
-
-    if gpu_workers < 0:
-        print("Error: --gpu-workers cannot be negative")
-        sys.exit(1)
-
-    # Check if any runs use ML selectors (inline check to avoid loading libtorch before fork)
-    has_ml_runs = any(
-        r["prover"] == "proofatlas" and "encoder" in r["preset"] and "scorer" in r["preset"]
-        for r in runs
-    )
-
-    if gpu_workers > 0:
-        if not has_ml_runs:
-            print("Warning: --gpu-workers has no effect without ML selector configs, ignoring")
-            gpu_workers = 0
-        else:
-            # Check GPU count via subprocess because CUDA_VISIBLE_DEVICES=""
-            # is set in this process to prevent fork-inherited CUDA contexts.
-            # Remove the override so the child sees all GPUs.
-            check_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-c",
-                     "import torch; print(torch.cuda.device_count())"],
-                    capture_output=True, text=True, timeout=30,
-                    env=check_env,
-                )
-                available_gpus = int(result.stdout.strip())
-            except Exception:
-                print("Error: --gpu-workers requires PyTorch with CUDA support")
-                sys.exit(1)
-
-            if available_gpus == 0:
-                print("Error: --gpu-workers > 0 but no CUDA GPUs detected")
-                print("Use --gpu-workers 0 for CPU inference")
-                sys.exit(1)
-
-            if gpu_workers > available_gpus:
-                print(f"Error: --gpu-workers {gpu_workers} exceeds available GPUs ({available_gpus})")
-                sys.exit(1)
-
-    if gpu_workers > 0 and gpu_workers > cpu_workers:
-        print(f"Note: Clamping --gpu-workers from {gpu_workers} to {cpu_workers} (no more servers than workers)")
-        gpu_workers = cpu_workers
-
-    use_cuda_eval = gpu_workers > 0
+    use_cuda_eval = args.cuda
 
     # Ensure base MiniLM weights exist for trace embedding.
     # Must run before daemonize — torch.jit.trace can't run after fork.
@@ -914,7 +680,7 @@ def main():
         print(f"Benchmark daemon started (PID: {os.getpid()})")
         print(f"Working directory: {base_dir}")
         print(f"Configs: {len(runs)}, Problems: {len(problems)}")
-        print(f"Backend: {'cuda (' + str(gpu_workers) + ' GPUs)' if use_cuda_eval else 'cpu'}")
+        print(f"Backend: {'cuda' if use_cuda_eval else 'cpu'}")
         sys.stdout.flush()
 
         # Clear any stale PID tracking and save job status
@@ -1006,7 +772,7 @@ def main():
                 preset_name=preset_name, weights_path=weights_dir_str,
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.cpu_workers,
-                use_cuda=use_cuda_eval, gpu_workers=gpu_workers,
+                use_cuda=use_cuda_eval,
                 collect_traces=args.trace,
             )
             log(f"[{preset_name}] Evaluation complete")
