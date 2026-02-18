@@ -191,24 +191,13 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     if not problems_dir.exists():
         raise FileNotFoundError(f"TPTP problems not found: {problems_dir}")
 
-    # Load metadata
-    metadata_path = base_dir / ".data" / "problem_metadata.json"
+    # Load metadata from index.json alongside Problems/
+    index_path = problems_dir.parent / "index.json"
     metadata = {}
-    if metadata_path.exists():
-        with open(metadata_path) as f:
+    if index_path.exists():
+        with open(index_path) as f:
             data = json.load(f)
-            problems_list = data.get("problems", data) if isinstance(data, dict) else data
-            metadata = {p["path"]: p for p in problems_list}
-
-    # Check for explicit problem list (inline or from file)
-    explicit_problems = filters.get("problems")
-    if "problems_file" in filters:
-        problems_file = base_dir / filters["problems_file"]
-        if problems_file.exists():
-            with open(problems_file) as f:
-                explicit_problems = [line.strip() for line in f if line.strip()]
-    if explicit_problems:
-        explicit_set = set(explicit_problems)
+            metadata = {p["path"]: p for p in data["problems"]}
 
     problems = []
     for domain_dir in sorted(problems_dir.iterdir()):
@@ -216,46 +205,20 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
             continue
 
         domain = domain_dir.name
-        if "domains" in filters and filters["domains"] and domain not in filters["domains"]:
-            continue
-        if "exclude_domains" in filters and domain in filters.get("exclude_domains", []):
+        if "domains" in filters and domain not in filters["domains"]:
             continue
 
         for problem_file in sorted(domain_dir.glob("*.p")):
             rel_path = str(problem_file.relative_to(problems_dir))
             meta = metadata.get(rel_path, {})
 
-            # Filter by explicit problem names (without .p extension)
-            if explicit_problems:
-                problem_name = problem_file.stem
-                if problem_name not in explicit_set:
-                    continue
-
-            if "status" in filters and filters["status"]:
+            if "status" in filters:
                 if meta.get("status") not in filters["status"]:
                     continue
-            if "format" in filters and filters["format"]:
+            if "format" in filters:
                 if meta.get("format") not in filters["format"]:
                     continue
-            if "max_rating" in filters and filters["max_rating"] is not None:
-                if meta.get("rating", 1.0) > filters["max_rating"]:
-                    continue
-            if "max_clauses" in filters and filters["max_clauses"] is not None:
-                if meta.get("num_clauses", 0) > filters["max_clauses"]:
-                    continue
-            if "max_term_depth" in filters and filters["max_term_depth"] is not None:
-                if meta.get("max_term_depth", 0) > filters["max_term_depth"]:
-                    continue
-            if "max_clause_size" in filters and filters["max_clause_size"] is not None:
-                if meta.get("max_clause_size", 0) > filters["max_clause_size"]:
-                    continue
-            if "has_equality" in filters and filters["has_equality"] is not None:
-                if meta.get("has_equality") != filters["has_equality"]:
-                    continue
-            if "is_unit_only" in filters and filters["is_unit_only"] is not None:
-                if meta.get("is_unit_only") != filters["is_unit_only"]:
-                    continue
-            if "max_total_size_bytes" in filters and filters["max_total_size_bytes"] is not None:
+            if "max_total_size_bytes" in filters:
                 if meta.get("total_size", 0) > filters["max_total_size_bytes"]:
                     continue
 

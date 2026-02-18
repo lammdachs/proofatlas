@@ -193,7 +193,7 @@ def build_extension():
 def setup_external_tools():
     """Download TPTP, Vampire, and SPASS."""
     # TPTP (all platforms)
-    metadata = PROJECT_ROOT / ".data" / "problem_metadata.json"
+    metadata = PROJECT_ROOT / ".tptp" / "TPTP-v9.0.0" / "index.json"
     if metadata.exists():
         print("  TPTP already installed")
     else:

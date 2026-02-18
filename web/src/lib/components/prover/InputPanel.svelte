@@ -62,6 +62,30 @@
 		return name.replace(/[0-9].*$/, '');
 	}
 
+	/** Fetch a file from the GitHub mirror, returning its text. */
+	async function fetchMirror(path: string): Promise<string> {
+		const response = await fetch(`${TPTP_MIRROR}/${path}`);
+		if (!response.ok) throw new Error(`Not found: ${path}`);
+		return response.text();
+	}
+
+	/** Replace include('Axioms/...') directives with the actual axiom file contents. */
+	async function resolveIncludes(content: string): Promise<string> {
+		const includeRe = /^include\('([^']+)'\s*(?:,\s*\[[^\]]*\])?\s*\)\.\s*$/gm;
+		const matches = [...content.matchAll(includeRe)];
+		if (matches.length === 0) return content;
+
+		const fetches = matches.map(m => fetchMirror(m[1]).catch(() => `% Failed to load ${m[1]}\n`));
+		const axiomContents = await Promise.all(fetches);
+
+		let result = content;
+		for (let i = matches.length - 1; i >= 0; i--) {
+			const m = matches[i];
+			result = result.slice(0, m.index!) + axiomContents[i] + result.slice(m.index! + m[0].length);
+		}
+		return result;
+	}
+
 	async function loadProblem() {
 		if (!tptpName.trim()) return;
 		loadingProblem = true;
@@ -70,7 +94,7 @@
 			const file = name.endsWith('.p') ? name : `${name}.p`;
 			let content: string | null = null;
 
-			// Try local server first
+			// Try local server first (server resolves includes via local TPTP)
 			if (serverAvailable) {
 				try {
 					const response = await fetch(`${base}/api/tptp/${encodeURIComponent(name)}`);
@@ -81,15 +105,11 @@
 				} catch { /* fall through to mirror */ }
 			}
 
-			// Fall back to GitHub mirror
+			// Fall back to GitHub mirror — fetch problem and inline axiom includes
 			if (content === null) {
 				const domain = tptpDomain(file.replace('.p', ''));
-				const url = `${TPTP_MIRROR}/Problems/${domain}/${file}`;
-				const response = await fetch(url);
-				if (!response.ok) {
-					throw new Error(`Problem not found: ${name}`);
-				}
-				content = await response.text();
+				const raw = await fetchMirror(`Problems/${domain}/${file}`);
+				content = await resolveIncludes(raw);
 			}
 
 			tptpInput = content;
