@@ -9,7 +9,6 @@
 
 	const navLinks = [
 		{ href: '/', label: 'Prover' },
-		{ href: '/docs', label: 'Docs' },
 		{ href: '/results', label: 'Results' },
 		{ href: '/runs', label: 'Runs' },
 		{ href: '/training', label: 'Training' },

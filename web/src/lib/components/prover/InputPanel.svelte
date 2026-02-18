@@ -157,7 +157,7 @@
 		<input
 			type="text"
 			class="input flex-1 min-w-40"
-			placeholder="Problem name (e.g., GRP001-1)"
+			placeholder="TPTP Problem ID (e.g., GRP001-1)"
 			bind:value={tptpName}
 			onkeydown={handleTptpNameKeydown}
 		/>

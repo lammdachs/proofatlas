@@ -225,8 +225,7 @@
 	{:else if noData}
 		<div class="text-center py-10 text-text-muted">
 			<h3 class="font-semibold text-lg mb-2">No Training Data Available</h3>
-			<p class="mb-3">Training results will appear here after running experiments.</p>
-			<p>See <a href="/docs" class="text-blue-400 hover:underline">documentation</a> for training instructions.</p>
+			<p>Training results will appear here after running experiments.</p>
 		</div>
 	{:else}
 		<!-- Run selector -->
