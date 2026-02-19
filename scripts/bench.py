@@ -75,18 +75,8 @@ def _get_ml():
 
 def find_project_root() -> Path:
     """Find the proofatlas project root."""
-    candidates = [Path.cwd(), Path(__file__).parent.parent]
-    for candidate in candidates:
-        if (candidate / "configs" / "proofatlas.json").exists():
-            return candidate.resolve()
-
-    path = Path.cwd()
-    while path != path.parent:
-        if (path / "configs" / "proofatlas.json").exists():
-            return path.resolve()
-        path = path.parent
-
-    raise FileNotFoundError("Could not find proofatlas project root.")
+    from proofatlas.paths import find_project_root as _find
+    return _find()
 
 
 def load_config(config_path: Path) -> dict:

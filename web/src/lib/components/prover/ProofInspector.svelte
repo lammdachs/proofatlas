@@ -28,6 +28,9 @@
 					if (!map.has(ev.clause_idx)) {
 						map.set(ev.clause_idx, { id: ev.clause_idx, clause: ev.clause, rule: ev.rule, parents: ev.premises || [] });
 					}
+					if (ev.replacement_idx != null && ev.replacement_clause && !map.has(ev.replacement_idx)) {
+						map.set(ev.replacement_idx, { id: ev.replacement_idx, clause: ev.replacement_clause, rule: ev.rule, parents: ev.premises || [] });
+					}
 				}
 				if (iter.selection && !map.has(iter.selection.clause_idx)) {
 					map.set(iter.selection.clause_idx, { id: iter.selection.clause_idx, clause: iter.selection.clause, rule: iter.selection.rule, parents: [] });
@@ -51,6 +54,7 @@
 		const ids = new Set<number>();
 		if (currentEvent) {
 			ids.add(currentEvent.clause_idx);
+			if (currentEvent.replacement_idx != null) ids.add(currentEvent.replacement_idx);
 			if (currentEvent.premises) {
 				for (const p of currentEvent.premises) ids.add(p);
 			}
@@ -71,16 +75,22 @@
 
 	function replayEvent(ev: TraceEvent, n: Set<number>, u: Set<number>, p: Set<number>) {
 		const rule = ev.rule;
-		if (['TautologyDeletion', 'SubsumptionDeletion', 'DemodulationDeletion',
-			'ForwardSubsumptionDeletion', 'BackwardSubsumptionDeletion', 'ForwardDemodulation'].includes(rule)) {
+		if (['TautologyDeletion', 'SubsumptionDeletion',
+			'ForwardSubsumptionDeletion', 'BackwardSubsumptionDeletion'].includes(rule)) {
 			n.delete(ev.clause_idx);
 			u.delete(ev.clause_idx);
 			p.delete(ev.clause_idx);
+		} else if (rule === 'Forward Demodulation' || rule === 'Backward Demodulation') {
+			// Demodulation: remove original, add replacement to N
+			n.delete(ev.clause_idx);
+			u.delete(ev.clause_idx);
+			p.delete(ev.clause_idx);
+			if (ev.replacement_idx != null) {
+				n.add(ev.replacement_idx);
+			}
 		} else if (rule === 'Transfer') {
 			n.delete(ev.clause_idx);
 			u.add(ev.clause_idx);
-		} else if (rule === 'Demodulation') {
-			n.add(ev.clause_idx);
 		} else if (rule === 'GivenClauseSelection') {
 			u.delete(ev.clause_idx);
 			p.add(ev.clause_idx);
@@ -157,11 +167,10 @@
 			case 'SubsumptionDeletion':
 			case 'ForwardSubsumptionDeletion': return 'Fwd Subsumption';
 			case 'BackwardSubsumptionDeletion': return 'Bwd Subsumption';
-			case 'DemodulationDeletion':
-			case 'ForwardDemodulation': return 'Fwd Demodulation';
+			case 'Forward Demodulation': return 'Fwd Demodulation';
+			case 'Backward Demodulation': return 'Bwd Demodulation';
 			case 'Transfer': return 'Transfer';
 			case 'Input': return 'Input';
-			case 'Demodulation': return 'Bwd Demodulation';
 			case 'GivenClauseSelection': return 'Selection';
 			default: return ev.rule;
 		}
@@ -174,16 +183,17 @@
 		}
 		if (rule === 'Transfer' || rule === 'Input') return 'transfer';
 		if (rule === 'GivenClauseSelection') return 'selection';
-		if (rule === 'Demodulation' || rule === 'DemodulationDeletion') return 'simplify';
+		if (rule === 'Forward Demodulation' || rule === 'Backward Demodulation') return 'simplify';
 		return 'generation';
 	}
 
 	function categoryColor(cat: string): string {
 		switch (cat) {
 			case 'deletion': return 'var(--color-event-deletion)';
-			case 'transfer': return 'var(--color-event-generation)';
+			case 'transfer': return 'var(--color-event-transfer)';
 			case 'selection': return 'var(--color-event-generation)';
 			case 'simplify': return 'var(--color-event-simplify)';
+			case 'generation': return 'var(--color-event-generation)';
 			default: return 'var(--color-event-transfer)';
 		}
 	}
@@ -296,7 +306,7 @@
 							>
 								<span class="w-1.5 h-1.5 rounded-full shrink-0" style="background: {categoryColor(cat)}"></span>
 								{eventLabel(ev)}
-								<span class="opacity-50">[{ev.clause_idx}]</span>
+								<span class="opacity-50">[{ev.replacement_idx ?? ev.clause_idx}]</span>
 							</button>
 						{/each}
 						{#if eventWindow.bottomDots}
@@ -313,13 +323,12 @@
 						{@const ev = currentEvent}
 						{@const cat = eventCategory(ev.rule)}
 						{@const isDeletion = cat === 'deletion'}
-						{@const isDemodDeletion = ev.rule === 'DemodulationDeletion' && ev.premises?.length >= 2}
+						{@const isDemod = cat === 'simplify' && ev.premises?.length >= 2}
 						{@const isTransfer = ev.rule === 'Transfer'}
 						{@const isSelection = ev.rule === 'GivenClauseSelection'}
-						{@const isDemodAdd = ev.rule === 'Demodulation'}
 						<table class="w-full text-sm">
 							<tbody>
-								{#if isDemodDeletion}
+								{#if isDemod}
 									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Rewritten</td>
 										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
@@ -362,19 +371,6 @@
 									<tr class="border-b border-surface-lighter/30 last:border-0">
 										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Move</td>
 										<td class="py-2 text-sm text-text">U &rarr; P</td>
-									</tr>
-								{:else if isDemodAdd && ev.premises.length >= 2}
-									<tr class="border-b border-surface-lighter/30 last:border-0">
-										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Rewritten</td>
-										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[0])}</td>
-									</tr>
-									<tr class="border-b border-surface-lighter/30 last:border-0">
-										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Using</td>
-										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.premises[1])}</td>
-									</tr>
-									<tr class="border-b border-surface-lighter/30 last:border-0">
-										<td class="w-24 py-2 text-xs uppercase tracking-wide text-text-muted font-mono align-top">Result</td>
-										<td class="py-2 font-mono text-sm text-text leading-relaxed">{@html formatClauseRef(ev.clause_idx)}</td>
 									</tr>
 								{:else}
 									{#if ev.premises.length > 0}

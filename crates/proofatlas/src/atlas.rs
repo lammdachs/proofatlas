@@ -11,8 +11,6 @@
 //! let (result, prover) = atlas.prove_file("problem.p")?;
 //! ```
 
-use std::sync::Arc;
-
 use crate::config::ProverConfig;
 use crate::logic::Interner;
 use crate::parser::{parse_tptp, parse_tptp_file};
@@ -52,6 +50,7 @@ pub struct ProofAtlas {
     config: ProverConfig,
     include_dirs: Vec<String>,
     sink_kind: SinkKind,
+    #[cfg_attr(not(feature = "ml"), allow(dead_code))]
     temperature: f32,
     /// Keep the Backend alive for the lifetime of the orchestrator.
     #[cfg(feature = "ml")]
@@ -141,11 +140,13 @@ impl ProofAtlas {
     pub fn create_sink(&self, interner: &Interner) -> Result<Box<dyn ProverSink>, String> {
         match &self.sink_kind {
             SinkKind::AgeWeight { ratio } => {
+                let _ = interner;
                 Ok(Box::new(AgeWeightSink::new(*ratio)))
             }
             #[cfg(feature = "ml")]
             SinkKind::Pipeline { handle, encoder, scorer, use_cuda } => {
                 use crate::selection::pipeline::processors;
+                use std::sync::Arc;
 
                 let int = Arc::new(interner.clone());
                 let temp = self.temperature;

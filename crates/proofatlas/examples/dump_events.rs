@@ -85,6 +85,7 @@ fn main() {
 
     // Second pass: build iterations (mirrors WASM logic)
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct TraceEvent {
         clause_idx: usize,
         rule: String,

@@ -1,3 +1,7 @@
+// These are wasm_bindgen_test functions, only runnable via `wasm-pack test`.
+// cargo test sees them as dead code since they lack #[test].
+#![allow(dead_code)]
+
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 

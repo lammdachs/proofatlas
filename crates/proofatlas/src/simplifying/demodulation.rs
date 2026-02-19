@@ -293,7 +293,7 @@ impl SimplifyingInference for DemodulationRule {
                     return Some(StateChange::Simplify(
                         clause_idx,
                         Some(conclusion),
-                        "Demodulation".into(),
+                        "Forward Demodulation".into(),
                         vec![Position::clause(clause_idx), Position::clause(unit_idx)],
                     ));
                 }
@@ -335,7 +335,7 @@ impl SimplifyingInference for DemodulationRule {
                     changes.push(StateChange::Simplify(
                         target_idx,
                         Some(conclusion),
-                        "Demodulation".into(),
+                        "Backward Demodulation".into(),
                         vec![Position::clause(target_idx), Position::clause(clause_idx)],
                     ));
                 }

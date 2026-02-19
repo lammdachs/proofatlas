@@ -52,10 +52,8 @@ def elapsed_str(start: float) -> str:
 
 
 def find_project_root() -> Path:
-    path = Path(__file__).resolve().parent.parent
-    if (path / "crates" / "proofatlas").exists():
-        return path
-    raise RuntimeError(f"Cannot find project root (tried {path})")
+    from proofatlas.paths import find_project_root as _find
+    return _find()
 
 
 def write_pid(base_dir: Path):

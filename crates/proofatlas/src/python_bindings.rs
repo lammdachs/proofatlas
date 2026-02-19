@@ -344,6 +344,71 @@ impl PyProver {
         Ok(Some(json))
     }
 
+    /// Get the structured trace (iterations with simplification/selection/generation)
+    /// as JSON, ready for the frontend ProofInspector.
+    pub fn trace_iterations_json(&self) -> PyResult<Option<String>> {
+        let events = self.event_log();
+        if events.is_empty() {
+            return Ok(None);
+        }
+        let interner = self.interner();
+        let trace = crate::state::build_trace(events, |c| c.display(interner).to_string());
+        let json = serde_json::to_string(&trace)
+            .map_err(|e| PyValueError::new_err(format!("Trace serialization failed: {}", e)))?;
+        Ok(Some(json))
+    }
+
+    /// Build the complete prove result as JSON (shared format with WASM).
+    ///
+    /// This is the single source of truth for the web API response format.
+    pub fn prove_result_json(&self, elapsed_ms: u32) -> PyResult<String> {
+        use crate::state::{
+            build_trace, steps_to_wire, all_steps_wire, status_message,
+            ProveResult as CoreResult, ProveStatistics,
+        };
+
+        let interner = self.interner();
+        let events = self.event_log();
+        let (status, msg) = status_message(&self.result);
+
+        let (success, proof, message, final_clauses) = match &self.result {
+            ProofResult::Proof { empty_clause_idx } => {
+                let steps = self.prover.extract_proof(*empty_clause_idx);
+                let wire = steps_to_wire(&steps, interner);
+                let message = format!("Proof found with {} steps", wire.len());
+                let final_count = self.clauses().len();
+                (true, Some(wire), message, final_count)
+            }
+            _ => (false, None, msg.to_string(), self.clauses().len()),
+        };
+
+        let all_clauses = all_steps_wire(events, interner);
+
+        let result = CoreResult {
+            success,
+            status: status.to_string(),
+            message,
+            proof,
+            all_clauses: Some(all_clauses),
+            statistics: ProveStatistics {
+                initial_clauses: self.initial_count,
+                generated_clauses: self.clauses().len(),
+                final_clauses,
+                time_ms: elapsed_ms,
+            },
+            trace: if !events.is_empty() {
+                Some(build_trace(events, |c| c.display(interner).to_string()))
+            } else {
+                None
+            },
+            profile: self.profile_json.as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+        };
+
+        serde_json::to_string(&result)
+            .map_err(|e| PyValueError::new_err(format!("Serialization failed: {}", e)))
+    }
+
     /// Get statistics.
     pub fn statistics(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();

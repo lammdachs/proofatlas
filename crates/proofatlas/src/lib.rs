@@ -30,8 +30,9 @@ pub use logic::{
 
 // Re-export state types
 pub use state::{
-    clause_indices, EventLog, ProofResult, ProofStep,
-    SaturationState, StateChange, VerificationError,
+    all_steps_wire, build_trace, clause_indices, steps_to_wire, status_message,
+    EventLog, ProofResult, ProofStep, ProveResult, ProveStatistics,
+    SaturationState, StateChange, Trace, VerificationError, WireStep,
 };
 
 // Re-export config types

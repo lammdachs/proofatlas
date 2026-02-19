@@ -9,23 +9,7 @@ It imports and runs the main function from scripts/train.py.
 import sys
 from pathlib import Path
 
-
-def find_project_root() -> Path:
-    """Find the proofatlas project root."""
-    root = Path(__file__).parent.parent.parent.parent.parent
-
-    candidates = [root, Path.cwd()]
-    for candidate in candidates:
-        if (candidate / "configs" / "proofatlas.json").exists():
-            return candidate
-
-    path = Path.cwd()
-    while path != path.parent:
-        if (path / "configs" / "proofatlas.json").exists():
-            return path
-        path = path.parent
-
-    return Path.cwd()
+from proofatlas.paths import find_project_root
 
 
 def main():

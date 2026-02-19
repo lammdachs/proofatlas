@@ -87,10 +87,8 @@ def log(msg: str):
 
 def find_project_root() -> Path:
     """Find the proofatlas project root."""
-    path = Path(__file__).resolve().parent.parent
-    if (path / "crates" / "proofatlas").exists():
-        return path
-    raise RuntimeError(f"Cannot find project root (tried {path})")
+    from proofatlas.paths import find_project_root as _find
+    return _find()
 
 
 def load_config(path: Path) -> dict:

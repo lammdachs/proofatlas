@@ -7,7 +7,7 @@ export interface ProveResult {
 	status: string;
 	message: string;
 	proof: ProofStep[] | null;
-	all_clauses: ProofStep[] | null;
+	all_clauses?: ProofStep[] | null;
 	statistics: Statistics;
 	trace: Trace | null;
 	profile: Record<string, unknown> | null;
@@ -44,6 +44,7 @@ export interface TraceEvent {
 	rule: string;
 	premises: number[];
 	replacement_idx?: number;
+	replacement_clause?: string;
 }
 
 export interface ServerStatus {

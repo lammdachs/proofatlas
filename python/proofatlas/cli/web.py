@@ -26,44 +26,21 @@ import time
 import traceback
 from pathlib import Path
 
+from proofatlas.paths import find_project_root
 
-def find_web_dir() -> Path:
-    """Find the web directory and return the directory to serve from.
+
+def find_web_dir(project_root: Path) -> Path:
+    """Find the web directory to serve from, starting at the project root.
 
     Looks for SvelteKit build output (web/build/index.html) first,
     then falls back to legacy layout (web/index.html).
     """
-    candidates = [
-        Path(__file__).parent.parent.parent.parent.parent / "web",
-        Path.cwd() / "web",
-    ]
-
-    # Search upward from cwd
-    path = Path.cwd()
-    while path != path.parent:
-        candidates.append(path / "web")
-        path = path.parent
-
-    for candidate in candidates:
-        # SvelteKit build output (preferred)
-        if (candidate / "build" / "index.html").exists():
-            return (candidate / "build").resolve()
-        # Legacy layout (pre-SvelteKit)
-        if (candidate / "index.html").exists():
-            return candidate.resolve()
-
+    web = project_root / "web"
+    if (web / "build" / "index.html").exists():
+        return (web / "build").resolve()
+    if (web / "index.html").exists():
+        return web.resolve()
     return None
-
-
-def find_project_root(web_dir: Path) -> Path:
-    """Find the project root (ancestor containing configs/ directory)."""
-    path = web_dir
-    while path != path.parent:
-        if (path / "configs").is_dir():
-            return path
-        path = path.parent
-    # Fallback: assume web_dir is web/ or web/build/
-    return web_dir.parent
 
 
 def check_ml_available() -> bool:
@@ -74,177 +51,6 @@ def check_ml_available() -> bool:
         return True
     except Exception:
         return False
-
-
-def _convert_trace(trace_json: str, all_clauses: list) -> dict:
-    """Convert the Rust EventLog JSON into the flat event format for ProofInspector.
-
-    The Rust format is a list of StateChange events with types:
-    - Add: clause added to N (from inference or input)
-    - Simplify: clause removed and optionally replaced (simplification)
-    - Transfer: clause moved from N to U
-    - Activate: clause moved from U to P (given clause selection)
-
-    The JS inspector expects iterations with {simplification, selection, generation}.
-
-    Args:
-        trace_json: JSON string of StateChange events
-        all_clauses: List of clause dicts with 'id' and 'clause' keys (formatted strings)
-    """
-    events = json.loads(trace_json)
-
-    # Build clause string lookup from all_clauses (which has resolved symbol names)
-    clauses = {}
-    for c in all_clauses:
-        clauses[c["id"]] = c["clause"]
-
-    # First pass: count initial clauses
-    initial_clause_count = 0
-
-    for event in events:
-        if "Add" in event:
-            clause, rule, premises = event["Add"]
-            idx = clause.get("id")
-            if idx is not None and rule == "Input":
-                initial_clause_count = max(initial_clause_count, idx + 1)
-
-    # Build initial_clauses array
-    initial_clauses = [
-        {"id": i, "clause": clauses.get(i, "")}
-        for i in range(initial_clause_count)
-    ]
-
-    # Second pass: build iterations using a phase-aware state machine.
-    #
-    # The prover emits events per iteration in this order:
-    #   1. Simplification (Simplify on N, backward Simplify on U/P)
-    #   2. Transfer (N → U)
-    #   3. Activate (U → P) — given clause selection
-    #   4. Generation (Add "Resolution", "Superposition", etc.)
-    #
-    # We track two phases: SIMPLIFICATION (before Activate) and GENERATION (after).
-    # A non-generating event during GENERATION means the next iteration has started.
-
-    def _clause_indices(positions):
-        """Extract clause indices from a list of Position objects (dicts with 'clause' key)."""
-        return [p["clause"] if isinstance(p, dict) else p for p in positions]
-
-    iterations = []
-    current_simplification = []
-    current_generation = []
-    current_selection = None
-    in_generation_phase = False
-
-    def flush():
-        nonlocal current_simplification, current_generation, current_selection
-        if current_selection or current_simplification or current_generation:
-            iterations.append({
-                "simplification": current_simplification,
-                "selection": current_selection,
-                "generation": current_generation,
-            })
-            current_simplification = []
-            current_generation = []
-            current_selection = None
-
-    for event in events:
-        if "Add" in event:
-            clause, rule, premises = event["Add"]
-            idx = clause.get("id")
-            if idx is None:
-                continue
-
-            clause_str = clauses.get(idx, "")
-            premise_indices = _clause_indices(premises)
-
-            if rule == "Input":
-                # Show input clause additions in the simplification phase
-                current_simplification.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": "Input", "premises": premise_indices,
-                })
-            else:
-                # All other Add events are generating inferences
-                current_generation.append({
-                    "clause_idx": idx, "clause": clause_str,
-                    "rule": rule, "premises": premise_indices,
-                })
-
-        elif "Simplify" in event:
-            clause_idx, replacement, rule_name, premises = event["Simplify"]
-
-            # If in generation phase, a Simplify means next iteration started
-            if in_generation_phase:
-                flush()
-                in_generation_phase = False
-
-            clause_str = clauses.get(clause_idx, "")
-            premise_indices = _clause_indices(premises)
-
-            if replacement is not None:
-                # Replacement (demodulation): emit add then deletion
-                repl_idx = replacement.get("id", 0)
-                repl_str = clauses.get(repl_idx, "")
-                current_simplification.append({
-                    "clause_idx": repl_idx, "clause": repl_str,
-                    "rule": rule_name, "premises": premise_indices,
-                })
-                current_simplification.append({
-                    "clause_idx": clause_idx, "clause": clause_str,
-                    "rule": f"{rule_name}Deletion", "premises": [],
-                })
-            else:
-                # Pure deletion (tautology, subsumption)
-                rule = {
-                    "Tautology": "TautologyDeletion",
-                    "Subsumption": "SubsumptionDeletion",
-                }.get(rule_name, "SubsumptionDeletion")
-                current_simplification.append({
-                    "clause_idx": clause_idx, "clause": clause_str,
-                    "rule": rule, "premises": premise_indices,
-                })
-
-        elif "Transfer" in event:
-            # Transfer is simplification phase — if in generation, flush first
-            if in_generation_phase:
-                flush()
-                in_generation_phase = False
-            idx = event["Transfer"]
-            clause_str = clauses.get(idx, "")
-            current_simplification.append({
-                "clause_idx": idx, "clause": clause_str,
-                "rule": "Transfer", "premises": [],
-            })
-
-        elif "Activate" in event:
-            # Activate marks selection — if already in generation phase, flush first
-            if in_generation_phase:
-                flush()
-            idx = event["Activate"]
-            clause_str = clauses.get(idx, "")
-            current_selection = {
-                "clause_idx": idx, "clause": clause_str,
-                "rule": "GivenClauseSelection",
-            }
-            in_generation_phase = True
-
-    # Flush any remaining events
-    if current_simplification or current_generation or current_selection:
-        iterations.append({
-            "simplification": current_simplification,
-            "selection": current_selection,
-            "generation": current_generation,
-        })
-
-    return {"initial_clauses": initial_clauses, "iterations": iterations}
-
-
-# Status messages for non-proof results
-STATUS_MESSAGES = {
-    "saturated": "Saturated without finding a proof - the formula may be satisfiable",
-    "resource_limit": "Resource limit reached",
-    "timeout": "Timeout reached before finding a proof",
-}
 
 
 def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
@@ -284,52 +90,8 @@ def run_prove(tptp_input: str, options: dict, tptp_root: str = None,
     prover = atlas.prove_string(tptp_input)
     elapsed_ms = int((time.time() - start) * 1000)
 
-    proof_found = prover.proof_found
-    status = prover.status
-
-    # Get all steps and proof trace
-    all_steps_list = prover.all_steps()
-    proof_steps_list = prover.proof_steps() if proof_found else []
-    stats = prover.statistics()
-    profile_json = prover.profile_json()
-
-    # Convert ProofStep objects to dicts matching WASM format
-    def step_to_dict(s):
-        return {
-            "id": s.clause_id,
-            "clause": s.clause_string,
-            "rule": s.rule_name,
-            "parents": list(s.parent_ids),
-        }
-
-    all_clauses = [step_to_dict(s) for s in all_steps_list]
-
-    # Determine message
-    if proof_found:
-        message = f"Proof found with {len(proof_steps_list)} steps"
-    else:
-        message = STATUS_MESSAGES.get(status, status)
-
-    # Parse the structured saturation trace from Rust and convert to
-    # the flat event format expected by the JS ProofInspector.
-    trace_json = prover.trace_json()
-    trace = _convert_trace(trace_json, all_clauses) if trace_json else None
-
-    return {
-        "success": proof_found,
-        "status": "proof_found" if proof_found else status,
-        "message": message,
-        "proof": [step_to_dict(s) for s in proof_steps_list] if proof_found else None,
-        "all_clauses": all_clauses,
-        "statistics": {
-            "initial_clauses": prover.initial_count,
-            "generated_clauses": len(all_clauses),
-            "final_clauses": stats["total"],
-            "time_ms": elapsed_ms,
-        },
-        "trace": trace,
-        "profile": json.loads(profile_json) if profile_json else None,
-    }
+    # Build the complete result in Rust (shared format with WASM)
+    return json.loads(prover.prove_result_json(elapsed_ms))
 
 
 class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
@@ -533,7 +295,7 @@ def kill_server():
         sys.exit(1)
 
 
-def start_server(port: int, web_dir: Path):
+def start_server(port: int, web_dir: Path, project_root: Path):
     """Start the web server."""
     running, pid = is_server_running()
     if running:
@@ -548,8 +310,6 @@ def start_server(port: int, web_dir: Path):
         print("Browser-only proving will not work.")
         print("Build WASM: wasm-pack build --target web --out-dir ../../web/static/pkg crates/proofatlas-wasm")
         print("Then rebuild: cd web && npm run build")
-
-    project_root = find_project_root(web_dir)
 
     # Check ML availability
     ml_available = check_ml_available()
@@ -609,13 +369,19 @@ def main():
         kill_server()
         return
 
-    web_dir = find_web_dir()
-    if not web_dir:
-        print("Error: web directory not found")
-        print("Run from the proofatlas repository root")
+    try:
+        project_root = find_project_root()
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    start_server(args.port, web_dir)
+    web_dir = find_web_dir(project_root)
+    if not web_dir:
+        print("Error: web directory not found")
+        print(f"Expected web/build/index.html or web/index.html under {project_root}")
+        sys.exit(1)
+
+    start_server(args.port, web_dir, project_root)
 
 
 if __name__ == "__main__":

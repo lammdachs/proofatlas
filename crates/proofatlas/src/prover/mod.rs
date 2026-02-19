@@ -275,9 +275,10 @@ impl Prover {
                         continue;
                     }
 
-                    // Try simplifying rules
+                    // Try simplifying rules (strip Forward/Backward prefix for matching)
+                    let base_rule = rule_name.strip_prefix("Forward ").or_else(|| rule_name.strip_prefix("Backward ")).unwrap_or(rule_name);
                     let simp_result = self.simplifying_inferences.iter()
-                        .find(|r| r.name() == rule_name)
+                        .find(|r| r.name() == base_rule)
                         .map(|r| r.verify(
                             step.clause_idx,
                             // For simplifying inferences, the "conclusion" in the proof step
