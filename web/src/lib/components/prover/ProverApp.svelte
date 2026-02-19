@@ -128,14 +128,14 @@
 
 	<!-- Error -->
 	{#if error}
-		<div class="p-5 border-b-2" style="border-color: var(--color-status-error); background: color-mix(in srgb, var(--color-status-error) 8%, transparent);">
+		<div class="p-5 border-b-2" style="border-color: var(--color-status-error); background: color-mix(in srgb, var(--color-status-error) 12%, transparent);">
 			<p class="text-sm font-semibold" style="color: var(--color-status-error)">{error}</p>
 		</div>
 	{/if}
 
 	<!-- Working indicator -->
 	{#if proving}
-		<div class="p-5 flex items-center gap-3 border-b-2" style="border-color: var(--color-status-working); background: color-mix(in srgb, var(--color-status-working) 8%, transparent);">
+		<div class="p-5 flex items-center gap-3 border-b-2" style="border-color: var(--color-status-working); background: color-mix(in srgb, var(--color-status-working) 12%, transparent);">
 			<span class="spinner"></span>
 			<p class="text-sm font-semibold" style="color: var(--color-status-working)">Solving...</p>
 		</div>

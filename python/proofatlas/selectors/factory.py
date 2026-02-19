@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 
 from .gnn import ClauseGCN
-from .baseline import AgeWeightHeuristic
 from .sentence import SentenceEncoder, HAS_TRANSFORMERS
 from .features import ClauseFeatures
 
@@ -28,7 +27,6 @@ def create_model(
     Args:
         model_type: One of:
             - "gcn": Graph Convolutional Network
-            - "age_weight": Age-weight heuristic
             - "features": Clause feature MLP
             - "sentence": Pretrained sentence encoder (requires transformers)
         node_feature_dim: Input feature dimension (default: 3)
@@ -66,10 +64,6 @@ def create_model(
             sin_dim=sin_dim,
             node_info=kwargs.get('node_info', 'features'),
             **scorer_kwargs,
-        )
-    elif model_type == "age_weight":
-        return AgeWeightHeuristic(
-            age_probability=kwargs.get('age_probability', 0.5),
         )
     elif model_type == "features":
         return ClauseFeatures(

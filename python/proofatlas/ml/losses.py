@@ -1,6 +1,6 @@
 """Loss functions for clause selection training.
 
-Provides InfoNCE contrastive loss, margin ranking loss, and per-proof variants.
+Provides InfoNCE contrastive loss and per-proof variants.
 """
 
 import torch
@@ -56,51 +56,6 @@ def info_nce_loss(
     return losses.mean()
 
 
-def margin_ranking_loss(
-    scores: torch.Tensor,
-    labels: torch.Tensor,
-    margin: float = 1.0,
-    num_pairs: int = 16,
-) -> torch.Tensor:
-    """
-    Pairwise margin ranking loss for clause selection.
-
-    Sample (positive, negative) pairs and train positive to score higher.
-
-    Args:
-        scores: [batch_size] clause scores from model
-        labels: [batch_size] binary labels (1=proof clause, 0=not)
-        margin: margin between positive and negative scores
-        num_pairs: number of pairs to sample per positive
-
-    Returns:
-        Scalar loss
-    """
-    pos_mask = labels.bool()
-    neg_mask = ~pos_mask
-
-    num_pos = pos_mask.sum()
-    num_neg = neg_mask.sum()
-
-    if num_pos == 0 or num_neg == 0:
-        return F.binary_cross_entropy_with_logits(scores, labels.float())
-
-    pos_scores = scores[pos_mask]  # [num_pos]
-    neg_scores = scores[neg_mask]  # [num_neg]
-
-    # Sample negative indices for each positive
-    neg_indices = torch.randint(0, num_neg, (num_pos, num_pairs), device=scores.device)
-    sampled_neg = neg_scores[neg_indices]  # [num_pos, num_pairs]
-
-    # Expand positive scores for pairwise comparison
-    pos_expanded = pos_scores.unsqueeze(1).expand(-1, num_pairs)  # [num_pos, num_pairs]
-
-    # Margin ranking loss: max(0, margin - (pos - neg))
-    losses = F.relu(margin - (pos_expanded - sampled_neg))
-
-    return losses.mean()
-
-
 def info_nce_loss_per_proof(
     scores: torch.Tensor,
     labels: torch.Tensor,
@@ -142,7 +97,6 @@ def compute_loss(
     proof_ids: torch.Tensor = None,
     loss_type: str = "info_nce",
     temperature: float = 1.0,
-    margin: float = 0.1,
 ) -> torch.Tensor:
     """Compute loss based on configured loss type.
 
@@ -150,9 +104,8 @@ def compute_loss(
         scores: [batch_size] clause scores from model
         labels: [batch_size] binary labels
         proof_ids: [batch_size] proof membership (for per-proof loss)
-        loss_type: "info_nce" or "margin"
-        temperature: softmax temperature (for info_nce)
-        margin: margin value (for margin loss)
+        loss_type: "info_nce"
+        temperature: softmax temperature
 
     Returns:
         Scalar loss
@@ -162,7 +115,5 @@ def compute_loss(
             return info_nce_loss_per_proof(scores, labels, proof_ids, temperature)
         else:
             return info_nce_loss(scores, labels, temperature)
-    elif loss_type == "margin":
-        return margin_ranking_loss(scores, labels, margin=margin)
     else:
         raise ValueError(f"Unknown loss_type: {loss_type}")

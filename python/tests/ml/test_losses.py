@@ -5,7 +5,6 @@ import torch
 
 from proofatlas.ml.losses import (
     info_nce_loss,
-    margin_ranking_loss,
     info_nce_loss_per_proof,
 )
 
@@ -63,24 +62,6 @@ class TestInfoNCELoss:
         loss_good = info_nce_loss(scores_good, labels)
         loss_bad = info_nce_loss(scores_bad, labels)
         assert loss_good < loss_bad
-
-
-class TestMarginRankingLoss:
-    """Tests for margin ranking loss."""
-
-    def test_basic(self):
-        scores = torch.randn(10)
-        labels = torch.tensor([1, 1, 0, 0, 0, 0, 0, 0, 0, 0], dtype=torch.float)
-        loss = margin_ranking_loss(scores, labels)
-        assert loss.dim() == 0
-        assert not torch.isnan(loss)
-
-    def test_zero_margin(self):
-        """Well-separated scores with zero margin should give near-zero loss."""
-        scores = torch.tensor([10.0, 10.0, -10.0, -10.0, -10.0])
-        labels = torch.tensor([1, 1, 0, 0, 0], dtype=torch.float)
-        loss = margin_ranking_loss(scores, labels, margin=0.0)
-        assert loss.item() < 0.01
 
 
 class TestInfoNCELossPerProof:

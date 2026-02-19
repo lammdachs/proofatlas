@@ -1,20 +1,29 @@
 //! Superposition inference rule for equality reasoning
 
 use super::common::{
-    collect_literals_except, is_ordered_greater, remove_duplicate_literals, rename_clause_variables,
+    collect_scoped_literals_except, is_ordered_greater, remove_duplicate_literals,
 };
-use crate::logic::{Clause, Interner, KBOConfig, Literal, Position as FolPosition, PredicateSymbol, Substitution, Term, KBO};
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::logic::{Clause, Interner, Literal, Position, Term, KBO};
+use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
+use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
-use crate::logic::unify;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
 
-/// Position in a term/atom where unification can occur
-struct Position {
-    term: Term,
-    path: Vec<usize>, // Path to this position
+/// Resolve the subterm at a path within a literal's arguments.
+fn resolve_at_path<'a>(args: &'a [Term], path: &[usize]) -> &'a Term {
+    let mut current = &args[path[0]];
+    for &idx in &path[1..] {
+        match current {
+            Term::Function(_, fargs) => current = &fargs[idx],
+            _ => unreachable!("invalid path into non-function term"),
+        }
+    }
+    current
 }
 
 /// Apply superposition rule using literal selection
@@ -29,9 +38,9 @@ pub fn superposition(
     idx2: usize,
     selector: &dyn LiteralSelector,
     interner: &mut Interner,
+    kbo: &KBO,
 ) -> Vec<StateChange> {
     let mut results = Vec::new();
-    let kbo = KBO::new(KBOConfig::default());
 
     // Get selected literals from both clauses
     let selected_from = selector.select(from_clause);
@@ -42,13 +51,12 @@ pub fn superposition(
         return results;
     }
 
-    // Rename variables to avoid conflicts
-    let renamed_into = rename_clause_variables(into_clause, "2", interner);
-    let renamed_from = rename_clause_variables(from_clause, "1", interner);
+    // No variable renaming needed — scoped unification handles variable separation.
+    // from_clause is at scope 0, into_clause is at scope 1.
 
     // Find positive equality literals in selected literals of from_clause
     for &from_idx in &selected_from {
-        let from_lit = &renamed_from.literals[from_idx];
+        let from_lit = &from_clause.literals[from_idx];
 
         if from_lit.polarity && from_lit.is_equality(interner) {
             if let [ref left, ref right] = from_lit.args.as_slice() {
@@ -65,80 +73,88 @@ pub fn superposition(
                 for (pattern, replacement, _dir) in directions {
                     // For each selected literal in into_clause
                     for &into_idx in &selected_into {
-                        let into_lit = &renamed_into.literals[into_idx];
+                        let into_lit = &into_clause.literals[into_idx];
 
                         // Find positions where pattern can be unified with some subterm
-                        let positions = find_unifiable_positions(&into_lit.args, pattern, &kbo);
+                        // Returns only paths (no term clones)
+                        let positions = find_unifiable_positions(&into_lit.args, pattern);
 
-                        for pos in positions {
-                            // CRITICAL: l' (pos.term) must not be a variable
+                        for pos in &positions {
+                            // Resolve the subterm at this path
+                            let subterm = resolve_at_path(&into_lit.args, pos);
+
+                            // CRITICAL: l' (subterm) must not be a variable
                             // This prevents unsound inferences
-                            if matches!(pos.term, Term::Variable(_)) {
+                            if matches!(subterm, Term::Variable(_)) {
                                 continue;
                             }
 
-                            if let Ok(mgu) = unify(pattern, &pos.term) {
-                                // Apply substitution to both sides
-                                let pattern_sigma = pattern.apply_substitution(&mgu);
-                                let replacement_sigma = replacement.apply_substitution(&mgu);
+                            // Unify pattern (scope 0) with the subterm (scope 1)
+                            if let Ok(mgu) = unify_scoped(pattern, 0, subterm, 1) {
+                                // Flatten to get concrete Terms for ordering checks
+                                let mut renaming = HashMap::new();
+                                let pattern_sigma = flatten_scoped(pattern, 0, &mgu, &mut renaming, interner);
+                                let replacement_sigma = flatten_scoped(replacement, 0, &mgu, &mut renaming, interner);
 
                                 // Check ordering constraint: pattern_sigma not smaller than replacement_sigma
-                                // i.e., pattern_sigma must NOT be smaller than replacement_sigma
-                                // This ensures we're rewriting larger to smaller (simplifying)
                                 if !is_ordered_greater(&pattern_sigma, &replacement_sigma, &kbo) {
                                     continue;
                                 }
 
                                 // Additional check for superposition into equalities
                                 // The side containing l' must not be smaller than the other side
-                                if into_lit.is_equality(interner) && !pos.path.is_empty() {
+                                if into_lit.is_equality(interner) && !pos.is_empty() {
                                     let s = &into_lit.args[0];
                                     let t = &into_lit.args[1];
 
-                                    let s_sigma = s.apply_substitution(&mgu);
-                                    let t_sigma = t.apply_substitution(&mgu);
+                                    let s_sigma = flatten_scoped(s, 1, &mgu, &mut renaming, interner);
+                                    let t_sigma = flatten_scoped(t, 1, &mgu, &mut renaming, interner);
 
-                                    if pos.path[0] == 0 {
-                                        // l' is in s (left side): need s*sigma not smaller than t*sigma
+                                    if pos[0] == 0 {
                                         if !is_ordered_greater(&s_sigma, &t_sigma, &kbo) {
                                             continue;
                                         }
-                                    } else if pos.path[0] == 1 {
-                                        // l' is in t (right side): need t*sigma not smaller than s*sigma
+                                    } else if pos[0] == 1 {
                                         if !is_ordered_greater(&t_sigma, &s_sigma, &kbo) {
                                             continue;
                                         }
                                     }
                                 }
 
-                                // Apply superposition: replace pattern with replacement
-                                // Collect side literals from from_clause
-                                let mut new_literals = collect_literals_except(&renamed_from, &[from_idx], &mgu);
+                                // Collect side literals from from_clause (scope 0)
+                                let mut new_literals = collect_scoped_literals_except(
+                                    from_clause, &[from_idx], 0, &mgu, &mut renaming, interner,
+                                );
 
-                                // Add the modified literal from into_clause
-                                let into_lit_modified = replace_at_position(
-                                    into_lit.predicate,
-                                    &into_lit.args,
-                                    &pos.path,
+                                // Add the modified literal from into_clause:
+                                // flatten all args at scope 1, then replace at path
+                                let into_lit_modified = replace_at_position_scoped(
+                                    into_lit,
+                                    pos,
                                     &replacement_sigma,
+                                    1,
                                     &mgu,
-                                    into_lit.polarity,
+                                    &mut renaming,
+                                    interner,
                                 );
                                 new_literals.push(into_lit_modified);
 
-                                // Add other literals from into_clause
-                                new_literals.extend(collect_literals_except(&renamed_into, &[into_idx], &mgu));
+                                // Add other literals from into_clause (scope 1)
+                                new_literals.extend(collect_scoped_literals_except(
+                                    into_clause, &[into_idx], 1, &mgu, &mut renaming, interner,
+                                ));
 
                                 // Remove duplicates
                                 new_literals = remove_duplicate_literals(new_literals);
 
-                                let new_clause = Clause::new(new_literals);
+                                let mut new_clause = Clause::new(new_literals);
+                                orient_clause_equalities(&mut new_clause, interner);
 
                                 // Tautology check delegated to TautologyRule during forward simplification
                                 results.push(StateChange::Add(
-                                    new_clause,
+                                    Arc::new(new_clause),
                                     "Superposition".into(),
-                                    vec![FolPosition::clause(idx1), FolPosition::clause(idx2)],
+                                    vec![Position::clause(idx1), Position::clause(idx2)],
                                 ));
                             }
                         }
@@ -151,47 +167,43 @@ pub fn superposition(
     results
 }
 
-/// Find all positions in a literal's arguments where a term can potentially unify with pattern
-/// This is used to find occurrences of l in the literal that can unify with l
+/// Find all positions in a literal's arguments where a term can potentially unify with pattern.
+/// Returns only paths (no term clones). Terms are resolved at use site via `resolve_at_path`.
 ///
 /// For equalities, we search BOTH sides. The ordering constraint (s[l']*sigma not smaller than t*sigma)
 /// is checked later after computing the MGU, not here during position search.
-/// This is important because the ordering depends on the substitution, which
-/// we don't know until we find a unifier.
-fn find_unifiable_positions(args: &[Term], pattern: &Term, _kbo: &KBO) -> Vec<Position> {
+fn find_unifiable_positions(args: &[Term], pattern: &Term) -> Vec<Vec<usize>> {
     let mut positions = Vec::new();
+    let mut path = Vec::new();
 
-    // Search all arguments for potential unification positions
-    // For equalities, this searches both sides; the ordering constraint
-    // is checked later in the superposition function after computing the MGU
     for (i, arg) in args.iter().enumerate() {
-        find_positions_in_term(arg, pattern, vec![i], &mut positions);
+        path.push(i);
+        find_positions_in_term(arg, pattern, &mut path, &mut positions);
+        path.pop();
     }
 
     positions
 }
 
-/// Find positions in a term recursively
+/// Find positions in a term recursively.
+/// Uses push/pop on a shared path to avoid cloning at every branch.
 fn find_positions_in_term(
     term: &Term,
     pattern: &Term,
-    path: Vec<usize>,
-    positions: &mut Vec<Position>,
+    path: &mut Vec<usize>,
+    positions: &mut Vec<Vec<usize>>,
 ) {
     // Check if current position can unify
     if could_unify(term, pattern) {
-        positions.push(Position {
-            term: term.clone(),
-            path: path.clone(),
-        });
+        positions.push(path.clone()); // Only clone when a match is found
     }
 
     // Recurse into subterms
     if let Term::Function(_, args) = term {
         for (i, arg) in args.iter().enumerate() {
-            let mut new_path = path.clone();
-            new_path.push(i);
-            find_positions_in_term(arg, pattern, new_path, positions);
+            path.push(i);
+            find_positions_in_term(arg, pattern, path, positions);
+            path.pop();
         }
     }
 }
@@ -208,38 +220,64 @@ fn could_unify(term1: &Term, term2: &Term) -> bool {
     }
 }
 
-/// Replace a term at a specific position in a literal's arguments, returning a Literal
-fn replace_at_position(
-    predicate: PredicateSymbol,
-    args: &[Term],
+/// Replace a term at a specific position in a literal's arguments using scoped substitution.
+///
+/// Combines flatten and replace in a single traversal: flattens all args through the scoped
+/// substitution, except at the replacement path where `replacement_sigma` is inserted directly.
+/// This avoids flattening the replaced subterm only to immediately overwrite it.
+fn replace_at_position_scoped(
+    lit: &Literal,
     path: &[usize],
-    replacement: &Term,
-    subst: &Substitution,
-    polarity: bool,
+    replacement_sigma: &Term,
+    scope: u8,
+    subst: &crate::logic::unification::scoped::ScopedSubstitution,
+    renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
+    interner: &mut Interner,
 ) -> Literal {
-    let mut new_args = if path.is_empty() {
-        args.to_vec()
-    } else {
-        let mut a = args.to_vec();
-        a[path[0]] = replace_in_term(&a[path[0]], &path[1..], replacement);
-        a
-    };
-    new_args = new_args.iter().map(|a| a.apply_substitution(subst)).collect();
-    Literal { predicate, args: new_args, polarity }
+    let new_args: Vec<Term> = lit.args.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if i == path[0] {
+                flatten_and_replace(a, &path[1..], replacement_sigma, scope, subst, renaming, interner)
+            } else {
+                flatten_scoped(a, scope, subst, renaming, interner)
+            }
+        })
+        .collect();
+    Literal { predicate: lit.predicate, args: new_args, polarity: lit.polarity }
 }
 
-/// Replace a term at a specific position in another term
-fn replace_in_term(term: &Term, path: &[usize], replacement: &Term) -> Term {
+/// Flatten a term through the scoped substitution, replacing the subterm at `path` with `replacement`.
+/// Combines flatten_scoped + replace_in_term into a single traversal.
+fn flatten_and_replace(
+    term: &Term,
+    path: &[usize],
+    replacement: &Term,
+    scope: u8,
+    subst: &crate::logic::unification::scoped::ScopedSubstitution,
+    renaming: &mut HashMap<ScopedVar, crate::logic::VariableId>,
+    interner: &mut Interner,
+) -> Term {
     if path.is_empty() {
+        // At the replacement position — use the pre-computed replacement
         replacement.clone()
     } else {
         match term {
-            Term::Variable(_) | Term::Constant(_) => term.clone(),
-            Term::Function(f, args) => {
-                let mut new_args = args.clone();
-                new_args[path[0]] = replace_in_term(&new_args[path[0]], &path[1..], replacement);
-                Term::Function(*f, new_args)
-            }
+            Term::Function(f, args) => Term::Function(
+                *f,
+                args.iter()
+                    .enumerate()
+                    .map(|(i, a)| {
+                        if i == path[0] {
+                            flatten_and_replace(a, &path[1..], replacement, scope, subst, renaming, interner)
+                        } else {
+                            flatten_scoped(a, scope, subst, renaming, interner)
+                        }
+                    })
+                    .collect(),
+            ),
+            // Path is non-empty but term is not a function — shouldn't happen with valid paths
+            _ => flatten_scoped(term, scope, subst, renaming, interner),
         }
     }
 }
@@ -266,6 +304,90 @@ impl GeneratingInference for SuperpositionRule {
         "Superposition"
     }
 
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::logic::ordering::orient_equalities::orient_clause_equalities;
+
+        if premises.len() != 2 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Superposition".into(),
+                reason: format!("expected 2 premises, got {}", premises.len()),
+            });
+        }
+
+        let from_clause = &state.clauses[premises[0].clause];
+        let into_clause = &state.clauses[premises[1].clause];
+        let interner = &cm.interner;
+
+        // Try all combinations: the equation can come from either premise.
+        for (eq_clause, target_clause) in [
+            (from_clause.as_ref(), into_clause.as_ref()),
+            (into_clause.as_ref(), from_clause.as_ref()),
+        ] {
+            for (eq_idx, eq_lit) in eq_clause.literals.iter().enumerate() {
+                if !eq_lit.polarity || !eq_lit.is_equality(interner) {
+                    continue;
+                }
+                if let [ref left, ref right] = eq_lit.args.as_slice() {
+                    for (pattern, replacement) in [(left, right), (right, left)] {
+                        for (into_idx, into_lit) in target_clause.literals.iter().enumerate() {
+                            let positions = find_unifiable_positions(&into_lit.args, pattern);
+                            for pos in &positions {
+                                let subterm = resolve_at_path(&into_lit.args, pos);
+                                if matches!(subterm, Term::Variable(_)) {
+                                    continue;
+                                }
+                                if let Ok(mgu) = unify_scoped(pattern, 0, subterm, 1) {
+                                    // Use a single mutable interner clone for consistent variable renaming
+                                    let mut int = interner.clone();
+                                    let mut renaming = HashMap::new();
+                                    let replacement_sigma = flatten_scoped(
+                                        replacement, 0, &mgu, &mut renaming, &mut int,
+                                    );
+
+                                    let mut new_lits = collect_scoped_literals_except(
+                                        eq_clause, &[eq_idx], 0, &mgu, &mut renaming, &mut int,
+                                    );
+                                    let into_lit_modified = replace_at_position_scoped(
+                                        into_lit, pos, &replacement_sigma, 1, &mgu,
+                                        &mut renaming, &mut int,
+                                    );
+                                    new_lits.push(into_lit_modified);
+                                    new_lits.extend(collect_scoped_literals_except(
+                                        target_clause, &[into_idx], 1, &mgu, &mut renaming, &mut int,
+                                    ));
+                                    new_lits = remove_duplicate_literals(new_lits);
+
+                                    // Orient equalities to match what the prover does
+                                    let mut reconstructed = Clause::new(new_lits);
+                                    orient_clause_equalities(&mut reconstructed, &int);
+
+                                    if conclusion.literals.len() == reconstructed.literals.len()
+                                        && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
+                                    {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Superposition".into(),
+            reason: "no equation/position combination produces this conclusion".into(),
+        })
+    }
+
     fn generate(
         &self,
         given_idx: usize,
@@ -280,6 +402,7 @@ impl GeneratingInference for SuperpositionRule {
         let memory_limit = cm.memory_limit;
         let baseline_rss = cm.baseline_rss_mb;
         let selector = cm.literal_selector.as_ref();
+        let kbo = &cm.term_ordering;
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
 
@@ -313,16 +436,16 @@ impl GeneratingInference for SuperpositionRule {
                 }
                 if let Some(processed_clause) = state.clauses.get(processed_idx) {
                     if given_has_eq {
-                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
+                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
                     }
                     if eq_clauses.contains(&processed_idx) {
-                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
                     }
                 }
             }
 
             if given_has_eq && !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
             }
         } else {
             for &processed_idx in state.processed.iter() {
@@ -331,12 +454,12 @@ impl GeneratingInference for SuperpositionRule {
                     continue;
                 }
                 if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                    changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner));
-                    changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner));
+                    changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
+                    changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
                 }
             }
             if !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner));
+                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
             }
         }
 
@@ -347,7 +470,7 @@ impl GeneratingInference for SuperpositionRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+    use crate::logic::{Constant, FunctionSymbol, KBOConfig, PredicateSymbol, Variable};
     use crate::selection::SelectAll;
 
     struct TestContext {
@@ -413,7 +536,8 @@ mod tests {
         let clause2 = Clause::new(vec![Literal::positive(eq, vec![a.clone(), f_b.clone()])]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
+        let kbo = KBO::new(KBOConfig::default());
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner, &kbo);
 
         // Should derive: a = b
         assert!(
@@ -468,7 +592,8 @@ mod tests {
         let clause2 = Clause::new(vec![Literal::positive(p, vec![mult_ec.clone()])]);
 
         let selector = SelectAll;
-        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
+        let kbo = KBO::new(KBOConfig::default());
+        let results = superposition(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner, &kbo);
 
         // Should derive P(c)
         assert_eq!(results.len(), 1);

@@ -17,7 +17,7 @@ proofatlas/
 │   │       ├── logic/          # FOL types and manipulation
 │   │       │   ├── core/       # term.rs, literal.rs, clause.rs, position.rs
 │   │       │   ├── ordering/   # kbo.rs, orient_equalities.rs
-│   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs
+│   │       │   ├── unification/# mgu.rs, matching.rs, substitution.rs, scoped.rs
 │   │       │   ├── interner.rs # Symbol interning
 │   │       │   ├── literal_selection.rs  # LiteralSelector trait + impls
 │   │       │   ├── clause_manager.rs     # ClauseManager: interner + selector + KBO
@@ -27,16 +27,14 @@ proofatlas/
 │   │       ├── index/          # Index trait, IndexRegistry, SubsumptionChecker, SelectedLiteralIndex
 │   │       ├── prover/         # Saturation engine
 │   │       │   ├── mod.rs      # Prover struct with prove()/init()/step()/saturate()
-│   │       │   ├── profile.rs  # SaturationProfile
-│   │       │   └── trace.rs    # (reserved for future trace utilities)
+│   │       │   └── profile.rs  # SaturationProfile
 │   │       ├── selection/      # Clause selection strategies
-│   │       │   ├── clause.rs   # ProverSink, ClauseSelector traits
-│   │       │   ├── age_weight.rs # Heuristic age-weight selector
-│   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer, CachingSelector
+│   │       │   ├── clause.rs   # ProverSink trait
+│   │       │   ├── age_weight.rs # AgeWeightSink (age-weight heuristic)
+│   │       │   ├── cached.rs   # ClauseEmbedder, EmbeddingScorer traits
 │   │       │   ├── ml/         # ML model implementations (gcn, sentence, graph, features)
 │   │       │   ├── pipeline/   # Backend compute service, ChannelSink, EmbedScoreModel
-│   │       │   ├── network/    # Protocol, RemoteSelector, ScoringServer
-│   │       │   └── training/   # proof_trace.rs, npz.rs (NpzWriter for trace output)
+│   │       │   └── training/   # npz.rs (NpzWriter for trace output)
 │   │       ├── parser/         # TPTP parser with FOF→CNF conversion (with timeout)
 │   │       ├── atlas.rs        # ProofAtlas orchestrator (reusable across problems)
 │   │       ├── config.rs       # ProverConfig, LiteralSelectionStrategy
@@ -55,7 +53,7 @@ proofatlas/
 │
 ├── scripts/                    # Utility scripts
 │   ├── setup.py                # One-command project setup
-│   ├── bench.py                # Benchmark orchestration, scoring server mgmt, CLI/daemon
+│   ├── bench.py                # Benchmark orchestration, CLI/daemon
 │   ├── bench_jobs.py           # Job/daemon management, PID tracking, status display
 │   ├── bench_provers.py        # Prover execution with ProofAtlasPool (persistent workers)
 │   ├── run_all.py              # Full experiment orchestration (traces → train → eval → push)
@@ -122,7 +120,13 @@ proofatlas-bench --status                     # Check job status
 
 ## Problem Sets
 
-Problem sets are defined in `configs/tptp.json` and filter TPTP problems for benchmarking. The default is set in `defaults.problem_set`.
+Problem sets are defined in `configs/tptp.json` and filter TPTP problems for benchmarking. The default is set in `defaults.problem_set`. All sets share a base filter of CNF/FOF format with a 64kB total size limit (problem file + axiom files).
+
+| Set | Description |
+|-----|-------------|
+| `all` | All CNF/FOF problems under 64kB (13,178 problems) |
+| `bench` | Unsatisfiable and unknown problems (default, 11,094 problems) |
+| `test` | PUZ domain only (123 problems) |
 
 ### Available Filters
 
@@ -138,27 +142,21 @@ Problem sets are defined in `configs/tptp.json` and filter TPTP problems for ben
 | `max_clause_size` | int | Maximum literals per clause |
 | `has_equality` | bool | `true` = only equality, `false` = no equality |
 | `is_unit_only` | bool | `true` = only unit clauses, `false` = has non-unit |
+| `max_total_size_bytes` | int | Max combined size of problem + included axiom files |
 
-### Example Problem Set
+### TPTP GitHub Mirror
 
-```json
-{
-  "problem_sets": {
-    "unit_equality": {
-      "description": "Unit equality problems",
-      "status": ["unsatisfiable"],
-      "format": ["cnf"],
-      "has_equality": true,
-      "is_unit_only": true,
-      "max_clauses": 500,
-      "max_term_depth": 8,
-      "domains": ["GRP", "RNG", "LAT"]
-    }
-  }
-}
-```
+A CNF/FOF subset of TPTP v9.0.0 is mirrored at `lammdachs/proofatlas-tptp-subset` for the web UI. The web frontend fetches problems from `raw.githubusercontent.com` when no local server is available. Problem metadata (`file_size`, `includes`, `total_size`) is extracted by `setup_tptp.py`.
 
 ## Testing the Theorem Prover
+
+Five-layer testing strategy:
+
+1. **Proof Verification**: Every proof is independently verified — `verify_proof()` on `Prover` checks each inference step. Each rule implements `verify()` on its trait (`GeneratingInference`/`SimplifyingInference`). `VerificationError` enum in `state.rs`.
+2. **Calculus Compliance**: 41 tests in `test_calculus_compliance.rs` covering side conditions for all 8 inference rules.
+3. **Property-Based Testing**: `proptest` tests in `logic/unification/proptest_tests.rs` and `logic/ordering/proptest_tests.rs` — unification soundness/symmetry, KBO transitivity/totality, matching correctness.
+4. **TPTP Regression Suite**: 34 tests in `test_tptp_regression.rs` with `tptp_proof!`/`tptp_no_proof!` macros. Problem files in `tests/problems/`. Every proof runs `verify_proof()` automatically.
+5. **WASM Tests**: 22 `wasm-bindgen-test` tests in `crates/proofatlas-wasm/tests/wasm_tests.rs`. Run with `wasm-pack test --headless --chrome crates/proofatlas-wasm`.
 
 When testing with TPTP problems:
 - Problems are in `.tptp/TPTP-v9.0.0/Problems/`
@@ -191,8 +189,8 @@ The interner is problem-scoped (not global) for WASM compatibility and clean mem
 ### Unification
 Uses eager substitution propagation. When adding a new binding, all existing substitutions are immediately updated to prevent unsound inferences.
 
-### Variable Renaming
-Variables from different clauses are renamed to avoid capture (e.g., X becomes X_c10 for clause 10). New variable names are interned during inference.
+### Scoped Variables (Binary Inference)
+Binary inference rules (resolution, superposition) use scoped variables instead of variable renaming. Each clause's variables are tagged with a scope (u8: 0 for first clause, 1 for second). `ScopedVar{scope, id}` distinguishes same-named variables from different clauses without cloning or interning. After unification succeeds, `flatten()` converts back to concrete Terms (scope 0 keeps original IDs, others get fresh `{name}_{scope}` names). Unary inferences (factoring, equality resolution/factoring) continue using regular `Substitution`.
 
 ### Superposition Calculus
 - Only applies to positive equalities
@@ -262,8 +260,8 @@ Rules are **stateless** — they receive the full context at call time and do no
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `StateChange` values for atomic state modifications:
-- `Add(clause, rule_name, premises)`: Add new clause to N
-- `Simplify(clause_idx, replacement, rule_name, premises)`: Remove clause and optionally replace it
+- `Add(Arc<Clause>, rule_name, premises)`: Add new clause to N
+- `Simplify(clause_idx, Option<Arc<Clause>>, rule_name, premises)`: Remove clause and optionally replace it
 - `Transfer(clause_idx)`: Move clause N→U
 - `Activate(clause_idx)`: Move clause U→P
 
@@ -290,7 +288,7 @@ Literals have a flat structure with `predicate`, `args`, and `polarity` directly
 - **Sub-phase timings**: forward/backward demodulation, forward/backward subsumption
 - **Per-rule counts and timings**: resolution, superposition, factoring, equality resolution, equality factoring, demodulation
 - **Aggregate counters**: iterations, clauses generated/added/subsumed/demodulated, tautologies deleted, max set sizes
-- **Selector stats**: name, cache hits/misses, embed/score time (populated from `ClauseSelector::stats()`)
+- **Selector stats**: name, cache hits/misses, embed/score time (populated from `ProverSink::stats()`)
 
 Zero overhead when disabled: all instrumentation is gated on `Option::None`, costing a single predicted-not-taken branch per instrumentation point.
 
@@ -298,17 +296,9 @@ Zero overhead when disabled: all instrumentation is gated on `Option::None`, cos
 
 ### Clause Selection
 
-Two trait hierarchies coexist:
-
 **`ProverSink`** (`selection/clause.rs`): Signal-based interface. The prover pushes lifecycle events (`on_transfer`, `on_activate`, `on_simplify`) and requests selection via `select()`. Implementations track their own internal state from signals.
 - `AgeWeightSink`: Heuristic age-weight ratio with internal `IndexMap<usize, usize>`
 - `ChannelSink`: Sends signals via `mpsc` channel to a data processing thread (pipelined ML inference)
-- `RemoteSelectorSink`: Adapter wrapping `RemoteSelector` for backward compatibility (GPU scoring servers)
-
-**`ClauseSelector`** (`selection/clause.rs`): Legacy poll-based interface. Receives `&mut IndexSet<usize>` and `&[Arc<Clause>]` at each selection.
-- `AgeWeightSelector`: Alternates FIFO and lightest with configurable ratio
-- `CachingSelector`: ML-based with embedding cache (in-process, used for tests)
-- `RemoteSelector`: ML-based via scoring server (used for GPU inference)
 
 ### Pipelined ML Inference
 
@@ -329,18 +319,9 @@ Prover --> ChannelSink --(mpsc)--> Data Processing Thread --> BackendHandle --> 
 - **Data processing thread**: Receives `ProverSignal`s. On `Transfer`: submits clause to Backend, caches score. On `Select`: softmax-samples from cached scores.
 - **Factory**: `create_ml_pipeline(embedder, scorer, temperature) -> ChannelSink`
 
-### Scoring Server (GPU only)
-
-For GPU-accelerated inference with multiple workers, a socket-based scoring server is still used:
-
-- **`ScoringServer`** (`selection/server.rs`, ml-gated): Owns embedder+scorer behind `Arc<Mutex<>>`, 16 MiB stack per handler thread
-- **`RemoteSelector`** (`selection/remote.rs`, NOT ml-gated): Sends uncached clauses (capped at 512/request), applies softmax sampling locally. Auto-reconnects on failure.
-- **`protocol.rs`** (NOT ml-gated): `ScoringRequest`/`ScoringResponse` enums, length-prefixed bincode framing
-- **bench.py**: Only starts scoring servers when `--gpu-workers N` is set. CPU workers use the in-process pipeline.
-
 ## ML Architecture
 
-**Workflow**: Train in PyTorch --> Export to TorchScript --> Load in Backend (CPU) or ScoringServer (GPU)
+**Workflow**: Train in PyTorch --> Export to TorchScript --> Load in Backend (CPU or GPU via `use_cuda`)
 
 | Selector | Rust | PyTorch | Notes |
 |----------|------|---------|-------|

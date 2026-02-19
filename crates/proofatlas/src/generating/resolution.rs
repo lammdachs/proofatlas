@@ -1,14 +1,16 @@
 //! Binary resolution inference rule
 
 use super::common::{
-    collect_literals_except, remove_duplicate_literals, rename_clause_variables, unify_atoms,
+    collect_scoped_literals_except, remove_duplicate_literals, unify_atoms_scoped,
 };
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::{Clause, Interner, Position};
 use crate::logic::clause_manager::ClauseManager;
+use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 /// Apply binary resolution between two clauses using literal selection
@@ -31,32 +33,31 @@ pub fn resolution(
         return results;
     }
 
-    // Rename variables in clause2 to avoid conflicts
-    let renamed_clause2 = rename_clause_variables(clause2, &format!("c{}", idx2), interner);
-
-    // Only try to resolve SELECTED literals
+    // Only try to resolve SELECTED literals (no variable renaming needed — scoped unification)
     for &i in &selected1 {
         let lit1 = &clause1.literals[i];
 
         for &j in &selected2 {
-            let lit2 = &renamed_clause2.literals[j];
+            let lit2 = &clause2.literals[j];
 
             // Check if literals have opposite polarity and same predicate
             if lit1.polarity != lit2.polarity && lit1.predicate == lit2.predicate {
-                // Try to unify the atoms
-                if let Ok(mgu) = unify_atoms(lit1.predicate, &lit1.args, lit2.predicate, &lit2.args) {
+                // Try to unify the atoms with scoped variables
+                if let Ok(mgu) = unify_atoms_scoped(lit1.predicate, &lit1.args, 0, lit2.predicate, &lit2.args, 1) {
                     // Collect side literals from both clauses
-                    let mut new_literals = collect_literals_except(clause1, &[i], &mgu);
-                    new_literals.extend(collect_literals_except(&renamed_clause2, &[j], &mgu));
+                    let mut renaming = std::collections::HashMap::new();
+                    let mut new_literals = collect_scoped_literals_except(clause1, &[i], 0, &mgu, &mut renaming, interner);
+                    new_literals.extend(collect_scoped_literals_except(clause2, &[j], 1, &mgu, &mut renaming, interner));
 
                     // Remove duplicates
                     new_literals = remove_duplicate_literals(new_literals);
 
-                    let new_clause = Clause::new(new_literals);
+                    let mut new_clause = Clause::new(new_literals);
+                    orient_clause_equalities(&mut new_clause, interner);
 
                     // Tautology check delegated to TautologyRule during forward simplification
                     results.push(StateChange::Add(
-                        new_clause,
+                        Arc::new(new_clause),
                         "Resolution".into(),
                         vec![Position::clause(idx1), Position::clause(idx2)],
                     ));
@@ -88,6 +89,64 @@ impl Default for ResolutionRule {
 impl GeneratingInference for ResolutionRule {
     fn name(&self) -> &str {
         "Resolution"
+    }
+
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::logic::ordering::orient_equalities::orient_clause_equalities;
+
+        if premises.len() != 2 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Resolution".into(),
+                reason: format!("expected 2 premises, got {}", premises.len()),
+            });
+        }
+
+        let c1 = &state.clauses[premises[0].clause];
+        let c2 = &state.clauses[premises[1].clause];
+        let interner = &cm.interner;
+
+        for (i, lit1) in c1.literals.iter().enumerate() {
+            for (j, lit2) in c2.literals.iter().enumerate() {
+                if lit1.polarity != lit2.polarity && lit1.predicate == lit2.predicate {
+                    if let Ok(mgu) = super::common::unify_atoms_scoped(
+                        lit1.predicate, &lit1.args, 0,
+                        lit2.predicate, &lit2.args, 1,
+                    ) {
+                        let mut int = interner.clone();
+                        let mut renaming = std::collections::HashMap::new();
+                        let mut new_lits = super::common::collect_scoped_literals_except(
+                            c1, &[i], 0, &mgu, &mut renaming, &mut int,
+                        );
+                        new_lits.extend(super::common::collect_scoped_literals_except(
+                            c2, &[j], 1, &mgu, &mut renaming, &mut int,
+                        ));
+                        new_lits = super::common::remove_duplicate_literals(new_lits);
+
+                        let mut reconstructed = Clause::new(new_lits);
+                        orient_clause_equalities(&mut reconstructed, &int);
+
+                        if conclusion.literals.len() == reconstructed.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Resolution".into(),
+            reason: "no complementary literal pair produces this resolvent".into(),
+        })
     }
 
     fn generate(

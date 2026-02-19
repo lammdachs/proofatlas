@@ -1,5 +1,6 @@
 /** Non-UI proving logic: server detection, WASM init, prove functions. */
 import { browser } from '$app/environment';
+import { base } from '$app/paths';
 
 export interface ProveResult {
 	success: boolean;
@@ -52,7 +53,7 @@ export interface ServerStatus {
 
 export async function detectServer(): Promise<ServerStatus> {
 	try {
-		const response = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+		const response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) });
 		if (response.ok) {
 			const data = await response.json();
 			return { available: true, mlAvailable: data.ml_available || false };
@@ -67,7 +68,7 @@ export async function initWasm(): Promise<boolean> {
 	if (!browser) return false;
 	try {
 		// Check that the WASM JS file is fetchable
-		const wasmPath = ['', 'pkg', 'proofatlas_wasm_bg.wasm'].join('/');
+		const wasmPath = `${base}/pkg/proofatlas_wasm_bg.wasm`;
 		const response = await fetch(wasmPath, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
 		return response.ok;
 	} catch {
@@ -77,7 +78,7 @@ export async function initWasm(): Promise<boolean> {
 
 export async function proveViaServer(input: string, config: Record<string, unknown>, signal?: AbortSignal): Promise<ProveResult> {
 	const body = { input, ...config };
-	const response = await fetch('/api/prove', {
+	const response = await fetch(`${base}/api/prove`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body),
@@ -114,11 +115,12 @@ export async function proveViaWasm(input: string, config: Record<string, unknown
 	stopWasmProver();
 
 	const options = configToWasmOptions(config);
-	const workerPath = ['', 'prover-worker.js'].join('/');
+	const workerPath = `${base}/prover-worker.js`;
 
 	return new Promise((resolve, reject) => {
 		const worker = new Worker(workerPath, { type: 'module' });
 		activeWorker = worker;
+		worker.postMessage({ type: 'init', basePath: base });
 
 		worker.onmessage = (e) => {
 			activeWorker = null;

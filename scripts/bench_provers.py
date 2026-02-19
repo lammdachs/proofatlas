@@ -38,8 +38,7 @@ class BenchResult:
 
 def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                           weights_path: str = None, collect_trace: bool = False,
-                          trace_preset: str = None, use_cuda: bool = False,
-                          socket_path: str = None) -> BenchResult:
+                          trace_preset: str = None, use_cuda: bool = False) -> BenchResult:
     """Inner function that actually runs ProofAtlas (called in subprocess)."""
     from proofatlas import ProofAtlas
 
@@ -67,8 +66,6 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
         atlas_kwargs["scorer"] = scorer
         atlas_kwargs["weights_path"] = weights_path
         atlas_kwargs["use_cuda"] = use_cuda
-        if socket_path:
-            atlas_kwargs["socket_path"] = socket_path
     else:
         atlas_kwargs["age_weight_ratio"] = float(age_weight_ratio)
 
@@ -86,9 +83,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
         err_msg = str(e).lower()
         if "timed out" in err_msg or "memory limit" in err_msg:
             return BenchResult(problem=problem.name, status="resource_limit", time_s=elapsed)
-        # When using a scoring server, connection/communication failures are
-        # resource issues (server died/restarting), not problem-level errors.
-        status = "resource_limit" if socket_path else "error"
+        status = "error"
         return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
     elapsed = time.time() - start
@@ -106,8 +101,7 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
 
 
 def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_path,
-                    collect_trace, trace_preset, result_queue, use_cuda=False,
-                    socket_path=None):
+                    collect_trace, trace_preset, result_queue, use_cuda=False):
     """Worker function that runs in subprocess and sends result via queue."""
     # Ensure forked workers never initialize CUDA (the scoring server handles GPU).
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -124,7 +118,6 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
         result = _run_proofatlas_inner(
             Path(problem_str), Path(base_dir_str), preset, Path(tptp_root_str),
             weights_path, collect_trace, trace_preset, use_cuda,
-            socket_path=socket_path,
         )
         result_queue.put((result.status, result.time_s))
     except Exception as e:
@@ -134,7 +127,7 @@ def _worker_process(problem_str, base_dir_str, preset, tptp_root_str, weights_pa
 def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
                    weights_path: str = None, collect_trace: bool = False,
                    trace_preset: str = None,
-                   use_cuda: bool = False, socket_path: str = None) -> BenchResult:
+                   use_cuda: bool = False) -> BenchResult:
     """Run ProofAtlas on a problem in a subprocess.
 
     Uses multiprocessing to isolate crashes (e.g., stack overflow on deeply
@@ -155,7 +148,6 @@ def run_proofatlas(problem: Path, base_dir: Path, preset: dict, tptp_root: Path,
         target=_worker_process,
         args=(str(problem), str(base_dir), preset, str(tptp_root),
               weights_path, collect_trace, trace_preset, result_queue, use_cuda),
-        kwargs={"socket_path": socket_path},
     )
 
     start = time.time()
@@ -332,7 +324,7 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
     return BenchResult(problem=problem.name, status=status, time_s=elapsed)
 
 
-def run_single_problem(args, socket_path=None):
+def run_single_problem(args):
     """Worker function for execution. Handles caching and timeout→resource_limit remapping."""
     problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda = args
 
@@ -350,7 +342,7 @@ def run_single_problem(args, socket_path=None):
                 problem, base_dir, preset, tptp_root,
                 weights_path=weights_path, collect_trace=collect_trace,
                 trace_preset=trace_preset,
-                use_cuda=use_cuda, socket_path=socket_path,
+                use_cuda=use_cuda,
             )
         elif prover == "vampire":
             result = run_vampire(problem, base_dir, preset, binary, tptp_root)
@@ -380,7 +372,7 @@ def run_single_problem(args, socket_path=None):
 
 
 def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
-                       use_cuda: bool = False, socket_path: str = None,
+                       use_cuda: bool = False,
                        collect_trace: bool = False) -> dict:
     """Build ProofAtlas constructor kwargs from a preset config."""
     ml = _get_ml()
@@ -403,8 +395,6 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
         kwargs["scorer"] = preset["scorer"]
         kwargs["weights_path"] = weights_path
         kwargs["use_cuda"] = use_cuda
-        if socket_path:
-            kwargs["socket_path"] = socket_path
     else:
         kwargs["age_weight_ratio"] = float(preset.get("age_weight_ratio", 0.5))
 
@@ -421,10 +411,8 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
 def _atlas_worker_loop(task_queue, result_queue, atlas_kwargs, base_dir_str,
                        collect_trace, trace_preset):
     """Persistent worker: create ProofAtlas once, solve problems in a loop."""
-    # Block CUDA unless the atlas needs in-process GPU (use_cuda without socket_path).
-    # When using a scoring server (socket_path set), the server handles GPU;
-    # workers must not initialize CUDA to avoid fork-inherited context corruption.
-    if not atlas_kwargs.get("use_cuda") or atlas_kwargs.get("socket_path"):
+    # Block CUDA unless the atlas needs in-process GPU.
+    if not atlas_kwargs.get("use_cuda"):
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -556,15 +544,14 @@ class ProofAtlasPool:
     """
 
     def __init__(self, n_workers, preset, base_dir, tptp_root,
-                 weights_path=None, use_cuda=False, socket_paths=None,
+                 weights_path=None, use_cuda=False,
                  collect_trace=False, trace_preset=None):
         timeout = preset.get("timeout", 10)
         self.process_timeout = max(timeout * 3, timeout + 60)
 
         self.workers = []
         for i in range(n_workers):
-            sp = socket_paths[i % len(socket_paths)] if socket_paths else None
-            kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda, sp,
+            kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda,
                                         collect_trace=collect_trace)
             worker = AtlasWorker(kwargs, base_dir, collect_trace, trace_preset)
             self.workers.append(worker)

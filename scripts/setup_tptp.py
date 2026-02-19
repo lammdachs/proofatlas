@@ -2,7 +2,7 @@
 """
 Setup TPTP library and extract problem metadata.
 
-Downloads TPTP to .tptp/ and extracts metadata to .data/problem_metadata.json
+Downloads TPTP to .tptp/ and writes .tptp/index.json
 
 Usage:
     python scripts/setup_tptp.py
@@ -10,22 +10,24 @@ Usage:
 """
 
 import json
+import re
 import tarfile
 import time
 import urllib.request
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
+
+
+INCLUDE_RE = re.compile(r"^include\('([^']+)'\s*(?:,\s*\[[^\]]*\])?\s*\)\.", re.MULTILINE)
 
 
 def get_project_root() -> Path:
-    """Get the project root directory."""
     return Path(__file__).parent.parent
 
 
 def load_tptp_config() -> dict:
-    """Load TPTP configuration."""
     config_path = get_project_root() / "configs" / "tptp.json"
     with open(config_path) as f:
         return json.load(f)
@@ -36,10 +38,7 @@ def load_tptp_config() -> dict:
 # =============================================================================
 
 def download_tptp(force: bool = False) -> Path:
-    """Download and extract TPTP library.
-
-    Returns the path to the Problems directory.
-    """
+    """Download and extract TPTP library. Returns the Problems directory."""
     config = load_tptp_config()
     version = config["version"]
     source = config["source"]
@@ -55,34 +54,28 @@ def download_tptp(force: bool = False) -> Path:
     print(f"Target:  {target_dir}")
     print()
 
-    # Check if already installed
     if problems_dir.exists() and not force:
         print(f"TPTP v{version} is already installed.")
         print("Use --force to re-download.")
         return problems_dir
 
-    # Create target directory
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download
     archive_path = target_dir / f"TPTP-v{version}.tgz"
     if not archive_path.exists() or force:
         print(f"Downloading TPTP v{version}...")
         urllib.request.urlretrieve(source, archive_path, _download_progress)
-        print()  # newline after progress
+        print()
     else:
         print("Archive already exists, skipping download.")
 
-    # Extract
     print("Extracting...")
     with tarfile.open(archive_path, "r:gz") as tar:
         tar.extractall(target_dir)
 
-    # Verify
     if not problems_dir.exists():
         raise RuntimeError("Installation verification failed - Problems directory not found")
 
-    # Count problems
     problem_count = sum(1 for _ in problems_dir.rglob("*.p"))
     print(f"\nTPTP v{version} installed successfully!")
     print(f"Problems directory: {problems_dir}")
@@ -92,7 +85,6 @@ def download_tptp(force: bool = False) -> Path:
 
 
 def _download_progress(block_num: int, block_size: int, total_size: int):
-    """Progress callback for urlretrieve."""
     if total_size > 0:
         downloaded = block_num * block_size
         percent = min(100, downloaded * 100 / total_size)
@@ -106,32 +98,81 @@ def _download_progress(block_num: int, block_size: int, total_size: int):
 
 # =============================================================================
 # Metadata Extraction
+#
+# All metadata is extracted from the TPTP header comments and include
+# directives — we do not parse clause bodies.
 # =============================================================================
 
 @dataclass
 class ProblemMetadata:
     path: str
     domain: str
-    status: str  # unsatisfiable, satisfiable, unknown
-    format: str  # cnf, fof
+    status: str       # unsatisfiable, satisfiable, unknown
+    format: str       # cnf, fof
     has_equality: bool
-    is_unit_only: bool
     rating: float
-    num_clauses: int
-    num_axioms: int
-    num_conjectures: int
-    max_clause_size: int
-    num_predicates: int
-    num_functions: int
-    num_constants: int
-    max_term_depth: int
+    file_size: int
+    includes: List[str]
+    total_size: int
 
 
-def extract_header_info(content: str) -> Tuple[str, float]:
-    """Extract status and rating from the header comments."""
+def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMetadata]:
+    """Extract metadata from header comments and include directives."""
+    try:
+        content = problem_path.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return None
+
+    # Determine format — reject tff/thf
+    fmt = _detect_format(content)
+    if fmt is None:
+        return None
+
+    status, rating, has_equality = _parse_header(content)
+
+    file_size = problem_path.stat().st_size
+    includes, axiom_size = _resolve_includes(content, tptp_root)
+
+    problems_dir = tptp_root / "Problems"
+    return ProblemMetadata(
+        path=str(problem_path.relative_to(problems_dir)),
+        domain=problem_path.parent.name,
+        status=status,
+        format=fmt,
+        has_equality=has_equality,
+        rating=rating,
+        file_size=file_size,
+        includes=includes,
+        total_size=file_size + axiom_size,
+    )
+
+
+def _detect_format(content: str) -> Optional[str]:
+    """Return 'cnf' or 'fof' if the file uses only those formats, else None."""
+    # Check first 8KB for a quick decision; fall back to full scan for
+    # files where formulas start late (many include directives).
+    probe = content[:8192]
+    if 'tff(' in probe or 'thf(' in probe:
+        return None
+    if 'fof(' in probe:
+        return 'fof'
+    if 'cnf(' in probe:
+        return 'cnf'
+
+    # Full scan for files with large headers
+    if 'tff(' in content or 'thf(' in content:
+        return None
+    if 'fof(' in content:
+        return 'fof'
+    if 'cnf(' in content:
+        return 'cnf'
+    return None
+
+
+def _parse_header(content: str) -> Tuple[str, float, bool]:
+    """Extract status, rating, and has_equality from TPTP header comments."""
     header = content[:4096]
 
-    # Extract status
     status = 'unknown'
     idx = header.lower().find('% status')
     if idx != -1:
@@ -142,7 +183,6 @@ def extract_header_info(content: str) -> Tuple[str, float]:
         elif 'satisfiable' in line or 'countersatisfiable' in line:
             status = 'satisfiable'
 
-    # Extract rating
     rating = 0.0
     idx = header.lower().find('% rating')
     if idx != -1:
@@ -161,245 +201,38 @@ def extract_header_info(content: str) -> Tuple[str, float]:
                 except ValueError:
                     pass
 
-    return status, rating
-
-
-def quick_format_check(content: str) -> Optional[str]:
-    """Check format from first 8KB of content."""
-    header = content[:8192]
-
-    if 'tff(' in header or 'thf(' in header:
-        return None
-
-    if 'fof(' in header:
-        return 'fof'
-    elif 'cnf(' in header:
-        return 'cnf'
-
-    return None
-
-
-def parse_clauses_fast(content: str) -> Tuple[int, int, int, int, bool, bool, int, Set[str], Set[str], Set[str]]:
-    """Fast single-pass parser for TPTP clauses."""
-    num_clauses = 0
-    num_axioms = 0
-    num_conjectures = 0
-    max_clause_size = 0
-    all_unit = True
+    # "N equ" in the syntax section where N > 0 means equality is present
     has_equality = False
-    max_depth = 0
+    equ_match = re.search(r'(\d+)\s+equ', header)
+    if equ_match and int(equ_match.group(1)) > 0:
+        has_equality = True
 
-    predicates: Set[str] = set()
-    functions: Set[str] = set()
-    constants: Set[str] = set()
-
-    i = 0
-    n = len(content)
-
-    while i < n:
-        while i < n and content[i] in ' \t\n\r':
-            i += 1
-
-        if i >= n:
-            break
-
-        if content[i] == '%':
-            while i < n and content[i] != '\n':
-                i += 1
-            continue
-
-        if content[i:i+7] == 'include':
-            while i < n and content[i] != '.':
-                i += 1
-            i += 1
-            continue
-
-        is_cnf = content[i:i+4] == 'cnf('
-        is_fof = content[i:i+4] == 'fof('
-
-        if not is_cnf and not is_fof:
-            while i < n and content[i] != '\n':
-                i += 1
-            continue
-
-        i += 4
-        num_clauses += 1
-
-        while i < n and content[i] != ',':
-            i += 1
-        i += 1
-
-        while i < n and content[i] in ' \t\n\r':
-            i += 1
-
-        role_start = i
-        while i < n and content[i] not in ', \t\n\r':
-            i += 1
-        role = content[role_start:i].lower()
-
-        if role in ('axiom', 'hypothesis', 'definition', 'lemma'):
-            num_axioms += 1
-        elif role in ('conjecture', 'negated_conjecture'):
-            num_conjectures += 1
-
-        while i < n and content[i] != ',':
-            i += 1
-        i += 1
-
-        paren_depth = 0
-        literal_count = 1
-        current_max_depth = 0
-        ident = ''
-        prev_non_space = ''
-
-        while i < n:
-            c = content[i]
-
-            if c == '(':
-                paren_depth += 1
-                current_max_depth = max(current_max_depth, paren_depth)
-                if ident:
-                    if prev_non_space in ('', '(', '|', '&', '~', ',', '['):
-                        predicates.add(ident)
-                    else:
-                        functions.add(ident)
-                    ident = ''
-                prev_non_space = c
-                i += 1
-
-            elif c == ')':
-                if paren_depth == 0:
-                    break
-                paren_depth -= 1
-                if ident and ident[0].islower():
-                    if ident not in predicates and ident not in functions:
-                        if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                            constants.add(ident)
-                ident = ''
-                prev_non_space = c
-                i += 1
-
-            elif c == '|' and paren_depth == 0:
-                literal_count += 1
-                if ident and ident[0].islower():
-                    if ident not in predicates and ident not in functions:
-                        if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                            constants.add(ident)
-                ident = ''
-                prev_non_space = c
-                i += 1
-
-            elif c == '=' and i + 1 < n:
-                next_c = content[i + 1] if i + 1 < n else ''
-                prev_c = content[i - 1] if i > 0 else ''
-                if prev_c not in ('<', '!', '=') and next_c not in ('>', '='):
-                    has_equality = True
-                if prev_c == '!' and next_c != '>':
-                    has_equality = True
-                if ident and ident[0].islower():
-                    if ident not in predicates and ident not in functions:
-                        if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                            constants.add(ident)
-                ident = ''
-                prev_non_space = c
-                i += 1
-
-            elif c.isalnum() or c == '_':
-                ident += c
-                i += 1
-
-            elif c in ' \t\n\r':
-                if ident and ident[0].islower():
-                    j = i
-                    while j < n and content[j] in ' \t\n\r':
-                        j += 1
-                    if j < n and content[j] == '(':
-                        pass
-                    else:
-                        if ident not in predicates and ident not in functions:
-                            if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                                constants.add(ident)
-                        ident = ''
-                i += 1
-
-            elif c == ',':
-                if ident and ident[0].islower():
-                    if ident not in predicates and ident not in functions:
-                        if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                            constants.add(ident)
-                ident = ''
-                prev_non_space = c
-                i += 1
-
-            else:
-                if ident and ident[0].islower():
-                    if ident not in predicates and ident not in functions:
-                        if ident not in ('true', 'false', 'and', 'or', 'not', 'implies'):
-                            constants.add(ident)
-                ident = ''
-                if c not in ' \t\n\r':
-                    prev_non_space = c
-                i += 1
-
-        while i < n and content[i] != '.':
-            i += 1
-        i += 1
-
-        max_clause_size = max(max_clause_size, literal_count)
-        max_depth = max(max_depth, current_max_depth)
-
-        if literal_count > 1:
-            all_unit = False
-
-    return (num_clauses, num_axioms, num_conjectures, max_clause_size,
-            all_unit, has_equality, max_depth, predicates, functions, constants)
+    return status, rating, has_equality
 
 
-def extract_metadata(problem_path: Path, tptp_root: Path) -> Optional[ProblemMetadata]:
-    """Extract metadata from a single problem file."""
-    try:
-        content = problem_path.read_text(encoding='utf-8', errors='ignore')
-    except Exception:
-        return None
-
-    fmt = quick_format_check(content)
-    if fmt is None:
-        return None
-
-    if 'tff(' in content or 'thf(' in content:
-        return None
-
-    status, rating = extract_header_info(content)
-
-    (num_clauses, num_axioms, num_conjectures, max_clause_size,
-     all_unit, has_equality, max_depth, predicates, functions, constants) = parse_clauses_fast(content)
-
-    relative_path = problem_path.relative_to(tptp_root)
-    domain = problem_path.parent.name
-
-    return ProblemMetadata(
-        path=str(relative_path),
-        domain=domain,
-        status=status,
-        format=fmt,
-        has_equality=has_equality,
-        is_unit_only=all_unit and num_clauses > 0,
-        rating=rating,
-        num_clauses=num_clauses,
-        num_axioms=num_axioms,
-        num_conjectures=num_conjectures,
-        max_clause_size=max_clause_size,
-        num_predicates=len(predicates),
-        num_functions=len(functions),
-        num_constants=len(constants),
-        max_term_depth=max_depth,
-    )
+def _resolve_includes(content: str, tptp_root: Path) -> Tuple[List[str], int]:
+    """Extract include directives and sum referenced axiom file sizes."""
+    includes = []
+    axiom_size = 0
+    for m in INCLUDE_RE.finditer(content):
+        rel_path = m.group(1)
+        includes.append(rel_path)
+        ax_path = tptp_root / rel_path
+        if ax_path.exists():
+            axiom_size += ax_path.stat().st_size
+    return includes, axiom_size
 
 
-def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
+# =============================================================================
+# Batch extraction
+# =============================================================================
+
+def extract_all_metadata(problems_dir: Path) -> Tuple[List[ProblemMetadata], float]:
     """Extract metadata from all TPTP problems."""
     print("\nExtracting problem metadata...")
     print("=" * 50)
+
+    tptp_root = problems_dir.parent
 
     all_files = []
     domains = sorted([d for d in problems_dir.iterdir() if d.is_dir()])
@@ -414,12 +247,11 @@ def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
 
     for i, problem_file in enumerate(all_files):
         pct = 100 * (i + 1) / total_files
-        bar_len = 30
-        filled = int(bar_len * (i + 1) / total_files)
-        bar = "█" * filled + "░" * (bar_len - filled)
+        filled = int(30 * (i + 1) / total_files)
+        bar = "█" * filled + "░" * (30 - filled)
         print(f"\r[{bar}] {pct:5.1f}% ({i+1}/{total_files})", end="", flush=True)
 
-        metadata = extract_metadata(problem_file, problems_dir)
+        metadata = extract_metadata(problem_file, tptp_root)
         if metadata is not None:
             problems.append(metadata)
 
@@ -429,42 +261,28 @@ def extract_all_metadata(problems_dir: Path) -> List[ProblemMetadata]:
     return problems, elapsed
 
 
-def save_metadata(problems: List[ProblemMetadata], elapsed: float):
-    """Save extracted metadata to JSON."""
-    output_path = get_project_root() / ".data" / "problem_metadata.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Summary statistics
-    num_cnf = sum(1 for p in problems if p.format == 'cnf')
-    num_fof = sum(1 for p in problems if p.format == 'fof')
-    num_unsat = sum(1 for p in problems if p.status == 'unsatisfiable')
-    num_sat = sum(1 for p in problems if p.status == 'satisfiable')
-    num_unknown = sum(1 for p in problems if p.status == 'unknown')
-    num_with_eq = sum(1 for p in problems if p.has_equality)
-    num_unit = sum(1 for p in problems if p.is_unit_only)
+def save_metadata(problems: List[ProblemMetadata], tptp_dir: Path, elapsed: float):
+    """Save extracted metadata to .tptp/index.json."""
+    output_path = tptp_dir / "index.json"
 
     output = {
-        "version": "1.0",
         "tptp_version": "9.0.0",
         "generated": datetime.now().isoformat(),
-        "num_problems": len(problems),
-        "summary": {
-            "total": len(problems),
-            "by_format": {"cnf": num_cnf, "fof": num_fof},
-            "by_status": {"unsatisfiable": num_unsat, "satisfiable": num_sat, "unknown": num_unknown},
-            "with_equality": num_with_eq,
-            "unit_only": num_unit,
-        },
         "problems": [asdict(p) for p in problems],
     }
 
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
 
+    num_cnf = sum(1 for p in problems if p.format == 'cnf')
+    num_fof = sum(1 for p in problems if p.format == 'fof')
+    num_unsat = sum(1 for p in problems if p.status == 'unsatisfiable')
+    num_sat = sum(1 for p in problems if p.status == 'satisfiable')
+    num_unknown = sum(1 for p in problems if p.status == 'unknown')
+
     print(f"\nExtracted metadata for {len(problems)} problems in {elapsed:.1f}s")
     print(f"  CNF: {num_cnf}, FOF: {num_fof}")
     print(f"  Unsatisfiable: {num_unsat}, Satisfiable: {num_sat}, Unknown: {num_unknown}")
-    print(f"  With equality: {num_with_eq}, Unit only: {num_unit}")
     print(f"\nSaved to {output_path}")
 
 
@@ -491,13 +309,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Download TPTP
     problems_dir = download_tptp(force=args.force)
 
-    # Extract metadata
     if not args.skip_metadata:
         problems, elapsed = extract_all_metadata(problems_dir)
-        save_metadata(problems, elapsed)
+        save_metadata(problems, problems_dir.parent, elapsed)
 
     print("\nSetup complete!")
 

@@ -3,7 +3,7 @@
 //! Deletes clauses that are tautologies (contain complementary literals or
 //! reflexive equalities like t=t).
 
-use crate::logic::{Clause, Interner, PredicateId};
+use crate::logic::{Clause, Interner, Position, PredicateId};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
@@ -47,6 +47,37 @@ impl SimplifyingInference for TautologyRule {
             Some(StateChange::Simplify(clause_idx, None, self.name().into(), vec![]))
         } else {
             None
+        }
+    }
+
+    fn verify(
+        &self,
+        clause_idx: usize,
+        replacement: Option<&Clause>,
+        _premises: &[Position],
+        state: &SaturationState,
+        _cm: &ClauseManager,
+    ) -> Result<(), crate::state::VerificationError> {
+        use crate::state::VerificationError;
+
+        // Tautology deletion: no replacement, and the clause must be a tautology
+        if replacement.is_some() {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Tautology".into(),
+                reason: "tautology deletion should not produce a replacement clause".into(),
+            });
+        }
+
+        let clause = &state.clauses[clause_idx];
+        if self.is_tautology(clause) {
+            Ok(())
+        } else {
+            Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Tautology".into(),
+                reason: "clause is not a tautology".into(),
+            })
         }
     }
 }

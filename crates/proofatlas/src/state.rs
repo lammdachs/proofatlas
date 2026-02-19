@@ -9,7 +9,44 @@ use crate::index::IndexRegistry;
 use indexmap::IndexSet;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::Arc;
+
+// =============================================================================
+// Verification
+// =============================================================================
+
+/// Errors that can occur during proof verification.
+#[derive(Debug, Clone)]
+pub enum VerificationError {
+    /// A premise clause index is out of range
+    InvalidPremise { step_idx: usize, premise_idx: usize },
+    /// The conclusion clause doesn't follow from the premises for the stated rule
+    InvalidConclusion { step_idx: usize, rule: String, reason: String },
+    /// The stated rule name is not recognized
+    UnknownRule { step_idx: usize, rule: String },
+    /// An input clause was not found in the original problem
+    InputNotFound { step_idx: usize, clause_idx: usize },
+}
+
+impl fmt::Display for VerificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VerificationError::InvalidPremise { step_idx, premise_idx } => {
+                write!(f, "Step {}: premise clause {} is out of range", step_idx, premise_idx)
+            }
+            VerificationError::InvalidConclusion { step_idx, rule, reason } => {
+                write!(f, "Step {} ({}): {}", step_idx, rule, reason)
+            }
+            VerificationError::UnknownRule { step_idx, rule } => {
+                write!(f, "Step {}: unknown rule '{}'", step_idx, rule)
+            }
+            VerificationError::InputNotFound { step_idx, clause_idx } => {
+                write!(f, "Step {}: input clause {} not found in problem", step_idx, clause_idx)
+            }
+        }
+    }
+}
 
 // =============================================================================
 // Proof
@@ -21,7 +58,7 @@ pub struct ProofStep {
     pub clause_idx: usize,
     pub rule_name: String,
     pub premises: Vec<Position>,
-    pub conclusion: Clause,
+    pub conclusion: Arc<Clause>,
 }
 
 // =============================================================================
@@ -37,10 +74,10 @@ pub struct ProofStep {
 #[derive(Debug, Clone, Serialize)]
 pub enum StateChange {
     /// New clause added to N (from inference or input): (clause, rule_name, premises)
-    Add(Clause, String, Vec<Position>),
+    Add(Arc<Clause>, String, Vec<Position>),
     /// Clause simplified: removed and optionally replaced.
     /// (clause_idx, replacement, rule_name, premises)
-    Simplify(usize, Option<Clause>, String, Vec<Position>),
+    Simplify(usize, Option<Arc<Clause>>, String, Vec<Position>),
     /// Clause transferred from N to U (survived forward simplification)
     Transfer(usize),
     /// Clause selected and transferred from U to P
@@ -86,6 +123,22 @@ pub trait SimplifyingInference: Send + Sync {
     ) -> Vec<StateChange> {
         vec![]
     }
+
+    /// Verify that a simplification step is correct.
+    ///
+    /// Given the simplified clause index, its optional replacement, and the premises,
+    /// check that the conclusion follows from the premises according to this rule.
+    fn verify(
+        &self,
+        _clause_idx: usize,
+        _replacement: Option<&Clause>,
+        _premises: &[Position],
+        _state: &SaturationState,
+        _cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        // Default: skip verification (for rules where verification is not yet implemented)
+        Ok(())
+    }
 }
 
 /// Trait for generating inference rules (resolution, superposition, factoring, etc.).
@@ -104,6 +157,21 @@ pub trait GeneratingInference: Send + Sync {
         cm: &mut ClauseManager,
         indices: &IndexRegistry,
     ) -> Vec<StateChange>;
+
+    /// Verify that a generating inference step is correct.
+    ///
+    /// Given the conclusion clause and its premises, check that the conclusion
+    /// follows from the premises according to this rule.
+    fn verify(
+        &self,
+        _conclusion: &Clause,
+        _premises: &[Position],
+        _state: &SaturationState,
+        _cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        // Default: skip verification (for rules where verification is not yet implemented)
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -196,7 +264,7 @@ impl SaturationState {
                     clause_idx: idx,
                     rule_name,
                     premises,
-                    conclusion: (*self.clauses[idx]).clone(),
+                    conclusion: Arc::clone(&self.clauses[idx]),
                 }
             })
             .collect()

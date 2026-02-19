@@ -311,22 +311,6 @@ impl crate::selection::cached::ClauseEmbedder for SentenceEncoder {
     }
 }
 
-/// Sentence selector with GPU acceleration
-#[cfg(feature = "ml")]
-pub type SentenceSelector = crate::selection::cached::CachingSelector<SentenceEmbedder, PassThroughScorer>;
-
-/// Load sentence selector
-#[cfg(feature = "ml")]
-pub fn load_sentence_selector<P: AsRef<Path>>(
-    model_path: P,
-    tokenizer_path: P,
-    use_cuda: bool,
-) -> Result<SentenceSelector, String> {
-    let embedder = SentenceEmbedder::new(&model_path, &tokenizer_path, use_cuda)?;
-    let scorer = PassThroughScorer;
-    Ok(crate::selection::cached::CachingSelector::new(embedder, scorer))
-}
-
 /// Load a standalone sentence embedder (for use with ScoringServer).
 #[cfg(feature = "ml")]
 pub fn load_sentence_embedder<P: AsRef<Path>>(
@@ -461,26 +445,5 @@ impl crate::selection::pipeline::backend::Model for MiniLMEncoderModel {
             results.push((id, Box::new(embs) as Box<dyn std::any::Any + Send>));
         }
         results
-    }
-}
-
-#[cfg(test)]
-#[cfg(feature = "ml")]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sentence_selector_creation() {
-        // Skip if model doesn't exist
-        let model_path = std::path::Path::new(".weights/sentence_encoder.pt");
-        let tokenizer_path = std::path::Path::new(".weights/sentence_tokenizer/tokenizer.json");
-
-        if !model_path.exists() || !tokenizer_path.exists() {
-            println!("Skipping test: sentence model not found");
-            return;
-        }
-
-        let selector = load_sentence_selector(model_path, tokenizer_path, false);
-        assert!(selector.is_ok(), "Failed to create selector: {:?}", selector);
     }
 }

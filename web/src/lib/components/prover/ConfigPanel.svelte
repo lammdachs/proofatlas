@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { BUILTIN_PRESETS } from '$lib/prover';
+	import { base } from '$app/paths';
 	import type { Snippet } from 'svelte';
 
 	let {
@@ -28,10 +29,10 @@
 		try {
 			let response;
 			if (serverAvailable) {
-				response = await fetch('/configs/proofatlas.json');
+				response = await fetch(`${base}/configs/proofatlas.json`);
 			}
 			if (!response || !response.ok) {
-				response = await fetch('/configs/proofatlas.json');
+				response = await fetch(`${base}/configs/proofatlas.json`);
 			}
 			if (response?.ok) {
 				const data = await response.json();
@@ -112,11 +113,11 @@
 		{/if}
 	</div>
 
-	<details class="card" bind:open={configOpen}>
-		<summary class="px-6 py-5 cursor-pointer text-sm text-text-muted hover:text-text select-none transition-colors">
-			Config JSON
+	<details bind:open={configOpen}>
+		<summary class="py-2 cursor-pointer text-xs uppercase tracking-wide text-green font-mono hover:text-text select-none transition-colors">
+			// config json
 		</summary>
-		<div class="px-6 pb-6 border-t border-surface-lighter/50">
+		<div class="pt-2">
 			<textarea
 				class="input w-full mt-4 p-4 font-mono text-sm resize-none"
 				style="field-sizing: content; tab-size: 2; border-radius: 0;"

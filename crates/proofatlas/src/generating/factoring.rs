@@ -2,10 +2,11 @@
 
 use super::common::{collect_literals_except, remove_duplicate_literals, unify_atoms};
 use crate::logic::{Clause, Position};
-use crate::state::{SaturationState, StateChange, GeneratingInference};
+use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
+use std::sync::Arc;
 
 /// Apply factoring to a clause using literal selection
 pub fn factoring(
@@ -45,7 +46,7 @@ pub fn factoring(
 
                         // Tautology check delegated to TautologyRule during forward simplification
                         results.push(StateChange::Add(
-                            new_clause,
+                            Arc::new(new_clause),
                             "Factoring".into(),
                             vec![Position::clause(idx)],
                         ));
@@ -80,6 +81,73 @@ impl GeneratingInference for FactoringRule {
         "Factoring"
     }
 
+    fn verify(
+        &self,
+        conclusion: &Clause,
+        premises: &[Position],
+        state: &SaturationState,
+        _cm: &ClauseManager,
+    ) -> Result<(), VerificationError> {
+        use crate::state::VerificationError;
+
+        if premises.len() != 1 {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Factoring".into(),
+                reason: format!("expected 1 premise, got {}", premises.len()),
+            });
+        }
+
+        let premise = &state.clauses[premises[0].clause];
+
+        // Factoring: two literals in the premise unify, producing a clause with one fewer literal.
+        // The conclusion must be strictly smaller than the premise.
+        if conclusion.literals.len() >= premise.literals.len() {
+            return Err(VerificationError::InvalidConclusion {
+                step_idx: 0,
+                rule: "Factoring".into(),
+                reason: "conclusion must have fewer literals than premise".into(),
+            });
+        }
+
+        // Verify that some pair of literals in the premise can be unified to produce the conclusion.
+        for i in 0..premise.literals.len() {
+            let lit1 = &premise.literals[i];
+            for j in (i + 1)..premise.literals.len() {
+                let lit2 = &premise.literals[j];
+                if lit1.polarity == lit2.polarity && lit1.predicate == lit2.predicate {
+                    if let Ok(mgu) = super::common::unify_atoms(
+                        lit1.predicate, &lit1.args, lit2.predicate, &lit2.args,
+                    ) {
+                        let new_lits = super::common::remove_duplicate_literals(
+                            super::common::collect_literals_except(premise, &[j], &mgu),
+                        );
+                        if conclusion.literals.len() == new_lits.len()
+                            && conclusion.literals.iter().all(|cl| new_lits.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                        // Also try removing i instead of j
+                        let new_lits2 = super::common::remove_duplicate_literals(
+                            super::common::collect_literals_except(premise, &[i], &mgu),
+                        );
+                        if conclusion.literals.len() == new_lits2.len()
+                            && conclusion.literals.iter().all(|cl| new_lits2.contains(cl))
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VerificationError::InvalidConclusion {
+            step_idx: 0,
+            rule: "Factoring".into(),
+            reason: "no literal pair produces this factor".into(),
+        })
+    }
+
     fn generate(
         &self,
         given_idx: usize,
@@ -89,7 +157,14 @@ impl GeneratingInference for FactoringRule {
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
-        factoring(given, given_idx, selector)
+        let mut changes = factoring(given, given_idx, selector);
+        // Orient after selector borrow ends (NLL)
+        for change in &mut changes {
+            if let StateChange::Add(ref mut arc, _, _) = change {
+                cm.orient_equalities(Arc::get_mut(arc).expect("refcount must be 1"));
+            }
+        }
+        changes
     }
 }
 

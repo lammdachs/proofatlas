@@ -55,12 +55,11 @@ impl PyOrchestrator {
     ///     memory_limit: Memory limit in MB
     ///     use_cuda: Whether to use CUDA (default: false)
     ///     enable_profiling: Enable structured profiling (default: false)
-    ///     socket_path: Path to scoring server Unix socket
     ///     include_dir: Directory for resolving TPTP include() directives
     ///     max_clause_size: Maximum clause size (default: 100)
     ///     enable_trace: Enable MiniLM backend for trace embedding (default: false)
     #[new]
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, socket_path=None, include_dir=None, max_clause_size=None, enable_trace=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None))]
     pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
@@ -72,7 +71,6 @@ impl PyOrchestrator {
         memory_limit: Option<usize>,
         use_cuda: Option<bool>,
         enable_profiling: Option<bool>,
-        socket_path: Option<String>,
         include_dir: Option<String>,
         max_clause_size: Option<usize>,
         enable_trace: Option<bool>,
@@ -118,9 +116,6 @@ impl PyOrchestrator {
         }
         if let Some(ratio) = age_weight_ratio {
             builder = builder.age_weight_ratio(ratio);
-        }
-        if let Some(path) = socket_path {
-            builder = builder.socket_path(path);
         }
         if let Some(trace) = enable_trace {
             builder = builder.enable_trace(trace);
@@ -879,73 +874,6 @@ impl PyProver {
     }
 }
 
-/// Start a scoring server that blocks until the process is terminated.
-#[cfg(feature = "ml")]
-#[pyfunction]
-#[pyo3(signature = (encoder, scorer, weights_path, socket_path, use_cuda=None))]
-fn start_scoring_server(
-    encoder: &str,
-    scorer: &str,
-    weights_path: &str,
-    socket_path: &str,
-    use_cuda: Option<bool>,
-) -> PyResult<()> {
-    let weights_dir = std::path::PathBuf::from(weights_path);
-    let model_name = format!("{}_{}", encoder, scorer);
-    let cuda = use_cuda.unwrap_or(false);
-
-    let (embedder, scorer_box): (
-        Box<dyn crate::selection::cached::ClauseEmbedder>,
-        Box<dyn crate::selection::cached::EmbeddingScorer>,
-    ) = if encoder == "sentence" {
-        let model_path = weights_dir.join(format!("{}.pt", model_name));
-        let tokenizer_path = weights_dir.join(format!("{}_tokenizer/tokenizer.json", model_name));
-        if !model_path.exists() {
-            return Err(PyValueError::new_err(format!(
-                "Model not found at {}",
-                model_path.display()
-            )));
-        }
-        let emb = crate::selection::load_sentence_embedder(&model_path, &tokenizer_path, cuda)
-            .map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-        (
-            Box::new(emb),
-            Box::new(crate::selection::PassThroughScorer),
-        )
-    } else if encoder == "features" {
-        let model_path = weights_dir.join(format!("{}.pt", model_name));
-        if !model_path.exists() {
-            return Err(PyValueError::new_err(format!(
-                "Model not found at {}",
-                model_path.display()
-            )));
-        }
-        let emb = crate::selection::load_features_embedder(&model_path, cuda)
-            .map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-        (Box::new(emb), Box::new(crate::selection::GcnScorer))
-    } else {
-        let model_path = weights_dir.join(format!("{}.pt", model_name));
-        if !model_path.exists() {
-            return Err(PyValueError::new_err(format!(
-                "Model not found at {}",
-                model_path.display()
-            )));
-        }
-        let emb = crate::selection::load_gcn_embedder(&model_path, cuda)
-            .map_err(|e| PyValueError::new_err(format!("Failed to load model: {}", e)))?;
-        (Box::new(emb), Box::new(crate::selection::GcnScorer))
-    };
-
-    let server = crate::selection::ScoringServer::new(
-        embedder,
-        scorer_box,
-        socket_path.to_string(),
-    );
-
-    server.run();
-    Ok(())
-}
-
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOrchestrator>()?;
@@ -953,7 +881,5 @@ fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ProofStep>()?;
     #[cfg(feature = "ml")]
     m.add_class::<PyMiniLMBackend>()?;
-    #[cfg(feature = "ml")]
-    m.add_function(wrap_pyfunction!(start_scoring_server, m)?)?;
     Ok(())
 }

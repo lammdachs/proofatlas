@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 
 	interface EpochData {
 		epoch: number;
@@ -47,7 +48,7 @@
 	async function loadRuns() {
 		try {
 			const cb = `?t=${Date.now()}`;
-			const resp = await fetch(`/data/training/index.json${cb}`);
+			const resp = await fetch(`${base}/data/training/index.json${cb}`);
 			if (!resp.ok) { noData = true; loading = false; return; }
 			const index = await resp.json();
 			const names: string[] = index.runs || [];
@@ -56,7 +57,7 @@
 			const loaded: Record<string, RunData> = {};
 			for (const name of names) {
 				try {
-					const r = await fetch(`/data/training/${name}.json${cb}`);
+					const r = await fetch(`${base}/data/training/${name}.json${cb}`);
 					if (r.ok) loaded[name] = await r.json();
 				} catch { /* skip */ }
 			}
@@ -224,8 +225,7 @@
 	{:else if noData}
 		<div class="text-center py-10 text-text-muted">
 			<h3 class="font-semibold text-lg mb-2">No Training Data Available</h3>
-			<p class="mb-3">Training results will appear here after running experiments.</p>
-			<p>See <a href="/docs" class="text-blue-400 hover:underline">documentation</a> for training instructions.</p>
+			<p>Training results will appear here after running experiments.</p>
 		</div>
 	{:else}
 		<!-- Run selector -->

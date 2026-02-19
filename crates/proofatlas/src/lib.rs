@@ -31,7 +31,7 @@ pub use logic::{
 // Re-export state types
 pub use state::{
     clause_indices, EventLog, ProofResult, ProofStep,
-    SaturationState, StateChange,
+    SaturationState, StateChange, VerificationError,
 };
 
 // Re-export config types
@@ -47,9 +47,9 @@ pub use generating::{
 
 // Re-export selection types
 pub use selection::{
-    AgeWeightSelector, AgeWeightSink, ClauseSelector, FIFOSelector, LiteralSelector,
+    AgeWeightSink, LiteralSelector,
     ProverSink, SelectAll, SelectMaximal, SelectNegMaxWeightOrMaximal,
-    SelectUniqueMaximalOrNegOrMaximal, WeightSelector,
+    SelectUniqueMaximalOrNegOrMaximal,
 };
 
 #[cfg(feature = "ml")]

@@ -16,7 +16,7 @@ use crate::logic::Clause;
 use super::graph::GraphBuilder;
 
 #[cfg(feature = "ml")]
-use crate::selection::cached::{CachingSelector, ClauseEmbedder, EmbeddingScorer};
+use crate::selection::cached::{ClauseEmbedder, EmbeddingScorer};
 
 /// GCN embedder using PyTorch for inference
 ///
@@ -247,31 +247,6 @@ impl EmbeddingScorer for GcnScorer {
     fn name(&self) -> &str {
         "gcn_scorer"
     }
-}
-
-/// GCN selector with embedding caching
-///
-/// This type alias combines the GCN embedder with the caching infrastructure.
-/// Embeddings (scores) are computed once per clause and cached by clause string.
-#[cfg(feature = "ml")]
-pub type GcnSelector = CachingSelector<GcnEmbedder, GcnScorer>;
-
-/// Load a GCN selector from a TorchScript model
-///
-/// # Arguments
-/// * `model_path` - Path to the TorchScript model (.pt file)
-/// * `use_cuda` - Whether to use CUDA for inference
-///
-/// # Returns
-/// A GCN selector with embedding caching enabled
-#[cfg(feature = "ml")]
-pub fn load_gcn_selector<P: AsRef<Path>>(
-    model_path: P,
-    use_cuda: bool,
-) -> Result<GcnSelector, String> {
-    let embedder = GcnEmbedder::new(model_path, use_cuda)?;
-    let scorer = GcnScorer;
-    Ok(CachingSelector::new(embedder, scorer))
 }
 
 /// GCN encoder that returns real embeddings (not scores)
@@ -579,31 +554,6 @@ impl EmbeddingScorer for TorchScriptScorer {
     }
 }
 
-/// GCN selector with split encoder/scorer architecture
-#[cfg(feature = "ml")]
-pub type GcnCrossAttentionSelector = CachingSelector<GcnEncoder, TorchScriptScorer>;
-
-/// Load a GCN cross-attention selector from separate encoder and scorer models
-///
-/// # Arguments
-/// * `encoder_path` - Path to the encoder TorchScript model
-/// * `scorer_path` - Path to the scorer TorchScript model
-/// * `hidden_dim` - Embedding dimension (must match model)
-/// * `cross_attention` - Whether the scorer uses cross-attention
-/// * `use_cuda` - Whether to use CUDA for inference
-#[cfg(feature = "ml")]
-pub fn load_gcn_cross_attention_selector<P: AsRef<Path>>(
-    encoder_path: P,
-    scorer_path: P,
-    hidden_dim: usize,
-    cross_attention: bool,
-    use_cuda: bool,
-) -> Result<GcnCrossAttentionSelector, String> {
-    let encoder = GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
-    let scorer = TorchScriptScorer::new(scorer_path, hidden_dim, cross_attention, use_cuda)?;
-    Ok(CachingSelector::new(encoder, scorer))
-}
-
 /// Load a standalone GCN embedder (for use with ScoringServer).
 #[cfg(feature = "ml")]
 pub fn load_gcn_embedder<P: AsRef<Path>>(
@@ -625,87 +575,4 @@ pub fn load_gcn_encoder_scorer<P: AsRef<Path>>(
     let encoder = GcnEncoder::new(encoder_path, hidden_dim, use_cuda)?;
     let scorer = TorchScriptScorer::new(scorer_path, hidden_dim, cross_attention, use_cuda)?;
     Ok((encoder, scorer))
-}
-
-#[cfg(test)]
-#[cfg(feature = "ml")]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_gcn_selector_creation() {
-        // Skip if model doesn't exist
-        let model_path = std::path::Path::new(".weights/gcn_model.pt");
-        if !model_path.exists() {
-            println!("Skipping test: gcn_model.pt not found");
-            return;
-        }
-
-        let selector = load_gcn_selector(model_path, false);
-        assert!(
-            selector.is_ok(),
-            "Failed to create selector: {:?}",
-            selector
-        );
-    }
-
-    #[test]
-    fn test_gcn_selector_caching() {
-        use crate::logic::{Interner, Literal, PredicateSymbol, Term, Constant};
-        use crate::selection::ClauseSelector;
-        use indexmap::IndexSet;
-
-        // Skip if model doesn't exist
-        let model_path = std::path::Path::new(".weights/gcn_model.pt");
-        if !model_path.exists() {
-            println!("Skipping test: gcn_model.pt not found");
-            return;
-        }
-
-        let mut interner = Interner::new();
-        let mut selector = load_gcn_selector(model_path, false).unwrap();
-
-        // Create test clauses
-        let p = PredicateSymbol {
-            id: interner.intern_predicate("P"),
-            arity: 1,
-        };
-        let a = Term::Constant(Constant {
-            id: interner.intern_constant("a"),
-        });
-        let b = Term::Constant(Constant {
-            id: interner.intern_constant("b"),
-        });
-
-        let clause1 = Clause::new(vec![Literal::positive(
-            p.clone(),
-            vec![a.clone()],
-        )]);
-        let clause2 = Clause::new(vec![Literal::positive(
-            p.clone(),
-            vec![b.clone()],
-        )]);
-        let clause3 = Clause::new(vec![Literal::positive(
-            p.clone(),
-            vec![a.clone()],
-        ), Literal::positive(
-            p.clone(),
-            vec![b.clone()],
-        )]);
-
-        let clauses: Vec<std::sync::Arc<Clause>> = vec![
-            std::sync::Arc::new(clause1),
-            std::sync::Arc::new(clause2),
-            std::sync::Arc::new(clause3),
-        ];
-        let mut unprocessed: IndexSet<usize> = (0..3).collect();
-
-        // First selection should populate cache
-        let _ = selector.select(&mut unprocessed, &clauses);
-        assert_eq!(selector.cache_size(), 3);
-
-        // Reset should clear cache
-        selector.reset();
-        assert_eq!(selector.cache_size(), 0);
-    }
 }

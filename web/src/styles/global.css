@@ -87,8 +87,8 @@
   --color-accent: var(--color-blue-300);
   --color-accent-dark: var(--color-blue-400);
 
-  --color-surface: var(--color-gray-900);
-  --color-surface-light: var(--color-gray-800);
+  --color-surface: var(--color-gray-800);
+  --color-surface-light: #2C2725;
   --color-surface-lighter: var(--color-gray-700);
 
   --color-text: var(--color-gray-100);
@@ -98,7 +98,7 @@
   --color-green: var(--color-green-400);
   --color-green-dark: var(--color-green-500);
 
-  --color-card: var(--color-gray-800);
+  --color-card: var(--color-gray-900);
   --color-card-border: var(--color-gray-700);
 
   /* Fonts */
@@ -111,20 +111,20 @@
    SEMANTIC TOKENS - Light Mode
    ======================================== */
 [data-theme="light"] {
-  --color-primary: var(--color-berry-800);
-  --color-primary-light: var(--color-berry-900);
-  --color-primary-dark: var(--color-berry-700);
+  --color-primary: var(--color-berry-700);
+  --color-primary-light: var(--color-berry-800);
+  --color-primary-dark: var(--color-berry-600);
   --color-on-primary: var(--color-gray-100);
 
   --color-secondary: var(--color-berry-600);
   --color-secondary-light: var(--color-berry-700);
 
-  --color-accent: var(--color-blue-700);
-  --color-accent-dark: var(--color-blue-600);
+  --color-accent: var(--color-blue-600);
+  --color-accent-dark: var(--color-blue-500);
 
   --color-surface: var(--color-gray-100);
   --color-surface-light: var(--color-gray-200);
-  --color-surface-lighter: var(--color-gray-300);
+  --color-surface-lighter: var(--color-gray-400);
 
   --color-text: var(--color-gray-900);
   --color-text-muted: var(--color-gray-700);
@@ -133,7 +133,7 @@
   --color-green: var(--color-green-600);
   --color-green-dark: var(--color-green-500);
 
-  --color-card: var(--color-gray-200);
+  --color-card: #F5F3F0;
   --color-card-border: var(--color-gray-300);
 }
 
@@ -256,6 +256,14 @@ h1, h2, h3, h4, h5, h6 {
   animation: blob 7s ease-in-out infinite;
 }
 
+.blobs {
+  opacity: 0.3;
+}
+
+[data-theme="light"] .blobs {
+  opacity: 0.35;
+}
+
 /* ========================================
    GLOW EFFECTS (from website)
    ======================================== */
@@ -271,7 +279,7 @@ h1, h2, h3, h4, h5, h6 {
    CARD STYLES (from website)
    ======================================== */
 .card {
-  background: color-mix(in srgb, var(--color-surface-light) 50%, transparent);
+  background: color-mix(in srgb, var(--color-surface-light) 75%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-surface-lighter) 50%, transparent);
   border-radius: 1rem;
   transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
@@ -283,9 +291,15 @@ h1, h2, h3, h4, h5, h6 {
   border-color: rgba(240, 200, 96, 0.4);
 }
 
+[data-theme="light"] .card {
+  background: var(--color-card);
+  border: 1px solid var(--color-card-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 12px 24px rgba(92, 8, 36, 0.1);
-  border-color: rgba(92, 8, 36, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: var(--color-gray-400);
 }
 
 /* ========================================
@@ -357,7 +371,7 @@ h1, h2, h3, h4, h5, h6 {
    FORM INPUT STYLES (from website)
    ======================================== */
 .input {
-  background: var(--color-surface-light);
+  background: var(--color-card);
   border: 1px solid var(--color-surface-lighter);
   border-radius: 0.75rem;
   color: var(--color-text);

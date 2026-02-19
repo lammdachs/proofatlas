@@ -1,12 +1,13 @@
 // Web Worker that runs the WASM prover off the main thread.
-// Receives { type: 'prove', input, options } messages.
+// Receives { type: 'init', basePath } then { type: 'prove', input, options } messages.
 // Posts back { type: 'result', result } or { type: 'error', message }.
 
 let wasm = null;
+let basePath = '';
 
 async function initWasm() {
 	if (wasm) return wasm;
-	const mod = await import('/pkg/proofatlas_wasm.js');
+	const mod = await import(`${basePath}/pkg/proofatlas_wasm.js`);
 	await mod.default();
 	wasm = new mod.ProofAtlasWasm();
 	return wasm;
@@ -14,6 +15,12 @@ async function initWasm() {
 
 self.onmessage = async (e) => {
 	const { type, input, options } = e.data;
+
+	if (type === 'init') {
+		basePath = e.data.basePath || '';
+		return;
+	}
+
 	if (type !== 'prove') return;
 
 	try {
