@@ -387,7 +387,7 @@ pub trait SimplifyingInference: Send + Sync {
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        indices: &IndexRegistry,
+        indices: &mut IndexRegistry,
     ) -> Option<StateChange>;
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
@@ -396,7 +396,7 @@ pub trait SimplifyingInference: Send + Sync {
         _clause_idx: usize,
         _state: &SaturationState,
         _cm: &ClauseManager,
-        _indices: &IndexRegistry,
+        _indices: &mut IndexRegistry,
     ) -> Vec<StateChange> {
         vec![]
     }

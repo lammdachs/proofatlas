@@ -216,7 +216,9 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 - Timeout returns error, not silent failure
 
 ### Subsumption
-Tiered approach: duplicates → variants → units → small clauses → greedy
+Tiered approach: duplicates → variants → units → small clauses → greedy.
+
+Candidate filtering uses a literal discrimination tree (`index/disc_tree.rs` shared core, `index/subsumption.rs` wrapper). Each literal is indexed under its (predicate, polarity) pair. Forward subsumption uses hit-count filtering with interleaved early exit and generation-counter dedup. Backward subsumption uses sorted Vec intersection across per-literal instance retrieval results. `MatchSubst` in `simplifying/subsumption.rs` is a flat-array matching substitution (`Vec<Option<&Term>>` indexed by VariableId) for zero-clone matching.
 
 ### Architecture
 
@@ -245,8 +247,8 @@ The prover is organized around a central `ProofAtlas` struct (`prover/mod.rs`) t
 Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events via methods that mirror `StateChange` variants: `on_add`, `on_transfer`, `on_delete`, `on_activate`.
 
 **SimplifyingInference trait** (`state.rs`):
-- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry) -> Option<StateChange>`: Simplify/delete clause in N using U∪P
-- `simplify_backward(clause_idx, &SaturationState, &ClauseManager, &IndexRegistry)`: Simplify clauses in U∪P using new clause
+- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &mut IndexRegistry) -> Option<StateChange>`: Simplify/delete clause in N using U∪P
+- `simplify_backward(clause_idx, &SaturationState, &ClauseManager, &mut IndexRegistry)`: Simplify clauses in U∪P using new clause
 - Implementations in `simplifying/`: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
 
 **GeneratingInference trait** (`state.rs`):
@@ -254,7 +256,7 @@ Rules are **stateless** — they receive the full context at call time and do no
 - Implementations in `generating/`: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
 
 **IndexRegistry** (`index/mod.rs`): Central registry owning all indices, routes clause lifecycle events:
-- `SubsumptionChecker` (`index/subsumption.rs`): Feature vector index + clause keys + unit tracking for subsumption
+- `SubsumptionChecker` (`index/subsumption.rs`): Literal discrimination tree + clause keys + unit tracking for subsumption
 - `UnitEqualitiesIndex`: Tracks unit positive equalities for backward demodulation
 - `DiscriminationTree` (`index/discrimination_tree.rs`): Trie index on rewrite rule LHS terms for O(|term|) forward demodulation candidate filtering (replaces linear scan of all unit equalities)
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering

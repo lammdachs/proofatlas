@@ -40,7 +40,7 @@ impl SimplifyingInference for TautologyRule {
         clause_idx: usize,
         state: &SaturationState,
         _cm: &ClauseManager,
-        _indices: &IndexRegistry,
+        _indices: &mut IndexRegistry,
     ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         if self.is_tautology(clause) {

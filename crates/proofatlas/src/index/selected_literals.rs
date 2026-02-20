@@ -87,19 +87,19 @@ impl Index for SelectedLiteralIndex {
         IndexKind::SelectedLiterals
     }
 
-    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {
         // Only interested in activated clauses
     }
 
-    fn on_transfer(&mut self, _idx: usize, _clause: &Clause) {
+    fn on_transfer(&mut self, _idx: usize, _clause: &Arc<Clause>) {
         // Only interested in activated clauses (U -> P transition)
     }
 
-    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.purge_clause(idx);
     }
 
-    fn on_activate(&mut self, idx: usize, clause: &Clause) {
+    fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
         let selected: Vec<usize> = self.selector.select(clause).into_iter().collect();
 
         for &lit_idx in &selected {
@@ -126,6 +126,10 @@ impl Index for SelectedLiteralIndex {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +153,8 @@ mod tests {
             Literal::positive(PredicateSymbol::new(p_id, 1), vec![Term::Constant(Constant::new(a_id))]),
             Literal::negative(PredicateSymbol::new(q_id, 1), vec![Term::Constant(Constant::new(a_id))]),
         ]);
+
+        let clause = Arc::new(clause);
 
         // Process clause
         index.on_activate(0, &clause);
@@ -184,6 +190,8 @@ mod tests {
             ),
         ]);
 
+        let clause = Arc::new(clause);
+
         index.on_activate(0, &clause);
         assert!(index.equality_clauses().contains(&0));
 
@@ -208,6 +216,8 @@ mod tests {
                 vec![Term::Constant(Constant::new(a_id)), Term::Constant(Constant::new(b_id))],
             ),
         ]);
+
+        let clause = Arc::new(clause);
 
         index.on_activate(0, &clause);
         assert!(!index.equality_clauses().contains(&0));

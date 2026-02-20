@@ -8,37 +8,12 @@
 //! Both sides of each unit equality are inserted (orientation is checked later
 //! by `demodulate()` via KBO). Deletion is lazy via an `active` set.
 
+use crate::index::disc_tree::{self, DiscTreeNode};
 use crate::index::{Index, IndexKind};
-use crate::logic::{Clause, ConstantId, FunctionId, Interner, PredicateId, Term};
+use crate::logic::{Clause, Interner, PredicateId, Term};
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
-
-// =============================================================================
-// Flat key for preorder term representation
-// =============================================================================
-
-/// Key type for a single node in the flattened preorder traversal of a term.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum FlatKey {
-    /// Function symbol with arity (arity needed for skip counts during Star traversal)
-    Func(FunctionId, u8),
-    /// Constant symbol
-    Const(ConstantId),
-    /// Wildcard: any variable in the indexed term (pattern side)
-    Star,
-}
-
-// =============================================================================
-// Trie node
-// =============================================================================
-
-#[derive(Debug, Default)]
-struct DiscTreeNode {
-    /// Children keyed by flat key
-    children: HashMap<FlatKey, DiscTreeNode>,
-    /// Clause indices stored at this node (leaf entries)
-    entries: Vec<usize>,
-}
+use std::collections::HashSet;
+use std::sync::Arc;
 
 // =============================================================================
 // DiscriminationTree
@@ -83,27 +58,8 @@ impl DiscriminationTree {
     /// Insert a term into the trie, associating it with the given clause index.
     fn insert(&mut self, clause_idx: usize, term: &Term) {
         let mut keys = Vec::new();
-        Self::flatten_insert(term, &mut keys);
-
-        let mut node = &mut self.root;
-        for key in keys {
-            node = node.children.entry(key).or_default();
-        }
-        node.entries.push(clause_idx);
-    }
-
-    /// Flatten a term for insertion: preorder traversal, variables become Star.
-    fn flatten_insert(term: &Term, keys: &mut Vec<FlatKey>) {
-        match term {
-            Term::Variable(_) => keys.push(FlatKey::Star),
-            Term::Constant(c) => keys.push(FlatKey::Const(c.id)),
-            Term::Function(f, args) => {
-                keys.push(FlatKey::Func(f.id, f.arity));
-                for arg in args {
-                    Self::flatten_insert(arg, keys);
-                }
-            }
-        }
+        disc_tree::flatten_insert(term, &mut keys);
+        disc_tree::trie_insert(&mut self.root, &keys, clause_idx);
     }
 
     /// Retrieve candidate clause indices for a query term.
@@ -114,79 +70,12 @@ impl DiscriminationTree {
     /// skip).
     fn retrieve(&self, term: &Term) -> Vec<usize> {
         let mut query_keys = Vec::new();
-        Self::flatten_query(term, &mut query_keys);
+        disc_tree::flatten_insert(term, &mut query_keys);
 
         let mut results = Vec::new();
-        self.retrieve_recursive(&self.root, &query_keys, 0, &mut results);
+        disc_tree::retrieve_generalizations(&self.root, &query_keys, 0, &mut results);
+        results.retain(|idx| self.active.contains(idx));
         results
-    }
-
-    /// Flatten a term for querying: preorder traversal, variables become
-    /// a query-side representation (we just use the same flattening, but
-    /// variables in the query can match Star in the trie).
-    fn flatten_query(term: &Term, keys: &mut Vec<FlatKey>) {
-        // For the query side, we flatten identically. Variables in the query
-        // can match any path in the trie (but for demodulation, the query is
-        // a ground or partially-ground subterm of the clause being simplified,
-        // and the pattern in the trie has Stars for variables). We handle
-        // query-side variables by letting them match Star nodes.
-        Self::flatten_insert(term, keys);
-    }
-
-    /// Recursive retrieval: traverse the trie matching against query keys.
-    fn retrieve_recursive(
-        &self,
-        node: &DiscTreeNode,
-        query_keys: &[FlatKey],
-        pos: usize,
-        results: &mut Vec<usize>,
-    ) {
-        if pos == query_keys.len() {
-            // Reached end of query — collect active entries
-            for &idx in &node.entries {
-                if self.active.contains(&idx) {
-                    results.push(idx);
-                }
-            }
-            return;
-        }
-
-        let key = query_keys[pos];
-
-        // Branch 1: exact match on the query key
-        if let Some(child) = node.children.get(&key) {
-            self.retrieve_recursive(child, query_keys, pos + 1, results);
-        }
-
-        // Branch 2: Star branch in the trie (pattern variable matches any query subterm).
-        // For one-way matching, only pattern variables can be substituted.
-        // A query variable can only be matched by a pattern Star (covered here
-        // since Star-in-trie matches ANY query key including query Stars).
-        // Query variables must NOT match concrete trie nodes — that would be
-        // unification, not matching.
-        if key != FlatKey::Star {
-            if let Some(star_child) = node.children.get(&FlatKey::Star) {
-                let skip = Self::subterm_size(query_keys, pos);
-                self.retrieve_recursive(star_child, query_keys, pos + skip, results);
-            }
-        }
-    }
-
-    /// Compute the number of flat keys a subterm occupies starting at `pos`.
-    fn subterm_size(keys: &[FlatKey], pos: usize) -> usize {
-        if pos >= keys.len() {
-            return 0;
-        }
-        match keys[pos] {
-            FlatKey::Star | FlatKey::Const(_) => 1,
-            FlatKey::Func(_, arity) => {
-                let mut size = 1;
-                for _ in 0..arity {
-                    size += Self::subterm_size(keys, pos + size);
-                }
-                size
-            }
-        }
     }
 
     /// Retrieve all candidate clause indices for demodulating a clause.
@@ -227,11 +116,11 @@ impl Index for DiscriminationTree {
         IndexKind::DiscriminationTree
     }
 
-    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {
         // No-op: unit equalities are only tracked after transfer
     }
 
-    fn on_transfer(&mut self, idx: usize, clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
         if !self.is_unit_equality(clause) {
             return;
         }
@@ -245,11 +134,15 @@ impl Index for DiscriminationTree {
         }
     }
 
-    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.active.remove(&idx);
     }
 
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -303,7 +196,7 @@ mod tests {
         let mut ctx = TestCtx::new();
         let a = ctx.const_("a");
         let b = ctx.const_("b");
-        let eq = ctx.unit_eq(a.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(a.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -328,7 +221,7 @@ mod tests {
         let a = ctx.const_("a");
         let b = ctx.const_("b");
         let fa = ctx.func("f", vec![a.clone()]);
-        let eq = ctx.unit_eq(fa.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(fa.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -350,7 +243,7 @@ mod tests {
         let b = ctx.const_("b");
         let fx = ctx.func("f", vec![x.clone()]);
         // Rule: f(X) = b
-        let eq = ctx.unit_eq(fx.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(fx.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -373,7 +266,7 @@ mod tests {
         let mut ctx = TestCtx::new();
         let a = ctx.const_("a");
         let b = ctx.const_("b");
-        let eq = ctx.unit_eq(a.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(a.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -398,9 +291,9 @@ mod tests {
         let fb = ctx.func("f", vec![b.clone()]);
 
         // Rule 0: f(a) = b
-        let eq0 = ctx.unit_eq(fa.clone(), b.clone());
+        let eq0 = Arc::new(ctx.unit_eq(fa.clone(), b.clone()));
         // Rule 1: f(b) = c
-        let eq1 = ctx.unit_eq(fb.clone(), c.clone());
+        let eq1 = Arc::new(ctx.unit_eq(fb.clone(), c.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq0);
@@ -425,7 +318,7 @@ mod tests {
         let fa = ctx.func("f", vec![a.clone()]);
 
         // Rule: f(a) = b
-        let eq = ctx.unit_eq(fa.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(fa.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -449,7 +342,7 @@ mod tests {
         let b = ctx.const_("b");
         let fxy = ctx.func("f", vec![x.clone(), y.clone()]);
         // Rule: f(X, Y) = b
-        let eq = ctx.unit_eq(fxy.clone(), b.clone());
+        let eq = Arc::new(ctx.unit_eq(fxy.clone(), b.clone()));
 
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &eq);
@@ -474,6 +367,7 @@ mod tests {
             Literal::positive(PredicateSymbol::new(p_id, 1), vec![a.clone()]),
         ]);
 
+        let clause = Arc::new(clause);
         let mut tree = DiscriminationTree::new(&ctx.interner);
         tree.on_transfer(0, &clause);
 

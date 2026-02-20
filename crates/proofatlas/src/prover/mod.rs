@@ -348,7 +348,7 @@ impl Prover {
                     clause_idx,
                     &self.state,
                     &self.clause_manager,
-                    &self.index_registry,
+                    &mut self.index_registry,
                 );
 
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
@@ -385,7 +385,7 @@ impl Prover {
                     clause_idx,
                     &self.state,
                     &self.clause_manager,
-                    &self.index_registry,
+                    &mut self.index_registry,
                 );
 
                 let count = changes.len();

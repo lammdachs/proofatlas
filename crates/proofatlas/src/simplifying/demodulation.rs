@@ -271,7 +271,7 @@ impl SimplifyingInference for DemodulationRule {
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        indices: &IndexRegistry,
+        indices: &mut IndexRegistry,
     ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;
@@ -307,7 +307,7 @@ impl SimplifyingInference for DemodulationRule {
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        _indices: &IndexRegistry,
+        _indices: &mut IndexRegistry,
     ) -> Vec<StateChange> {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;

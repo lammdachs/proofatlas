@@ -8,7 +8,7 @@
 //! ## Index Types
 //!
 //! - `UnitEqualities`: Unit positive equalities for demodulation
-//! - `Subsumption`: Feature-vector-based subsumption checker
+//! - `Subsumption`: Literal discrimination tree-based subsumption checker
 //! - `SelectedLiterals`: Selected literal index for generating inference candidate filtering
 //!
 //! ## Design
@@ -18,8 +18,8 @@
 //! - Indices are created once and shared across rules that need them
 //! - Lifecycle events are routed atomically to all indices
 
+pub mod disc_tree;
 pub mod discrimination_tree;
-pub mod feature_vector;
 pub mod selected_literals;
 pub mod subsumption;
 
@@ -27,9 +27,9 @@ use crate::logic::{Clause, Interner, PredicateId};
 use indexmap::IndexSet;
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub use discrimination_tree::DiscriminationTree;
-pub use feature_vector::FeatureIndex;
 pub use selected_literals::SelectedLiteralIndex;
 pub use subsumption::SubsumptionChecker;
 
@@ -67,25 +67,28 @@ pub trait Index: Send + Sync {
     fn kind(&self) -> IndexKind;
 
     /// Called on `Add`: clause added to N (pending, not yet active).
-    fn on_add(&mut self, idx: usize, clause: &Clause);
+    fn on_add(&mut self, idx: usize, clause: &Arc<Clause>);
 
     /// Called on `Transfer`: clause transferred from N to U.
     /// Most indices start tracking the clause here.
-    fn on_transfer(&mut self, idx: usize, clause: &Clause);
+    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>);
 
     /// Called on `Delete`: clause removed from U or P.
     /// Indices should stop tracking the clause.
-    fn on_delete(&mut self, idx: usize, clause: &Clause);
+    fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>);
 
     /// Called on `Activate`: clause moved from U to P (processed).
     /// Used by SelectedLiteralIndex to index clauses by their selected literals.
-    fn on_activate(&mut self, _idx: usize, _clause: &Clause) {}
+    fn on_activate(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
 
     /// Initialize the index with all input clauses (for pre-computing symbol tables, etc.)
     fn initialize(&mut self, _clauses: &[Clause]) {}
 
     /// Get as Any for downcasting
     fn as_any(&self) -> &dyn Any;
+
+    /// Get as mutable Any for downcasting
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 // =============================================================================
@@ -148,21 +151,25 @@ impl Index for UnitEqualitiesIndex {
         IndexKind::UnitEqualities
     }
 
-    fn on_add(&mut self, _idx: usize, _clause: &Clause) {
+    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {
         // Unit equalities are only tracked when transferred
     }
 
-    fn on_transfer(&mut self, idx: usize, clause: &Clause) {
+    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
         if self.is_unit_equality(clause) {
             self.unit_equalities.insert(idx);
         }
     }
 
-    fn on_delete(&mut self, idx: usize, _clause: &Clause) {
+    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.unit_equalities.shift_remove(&idx);
     }
 
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -212,28 +219,28 @@ impl IndexRegistry {
     }
 
     /// Route an Add event to all indices.
-    pub fn on_add(&mut self, idx: usize, clause: &Clause) {
+    pub fn on_add(&mut self, idx: usize, clause: &Arc<Clause>) {
         for index in self.indices.values_mut() {
             index.on_add(idx, clause);
         }
     }
 
     /// Route a Transfer event (N → U) to all indices.
-    pub fn on_transfer(&mut self, idx: usize, clause: &Clause) {
+    pub fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
         for index in self.indices.values_mut() {
             index.on_transfer(idx, clause);
         }
     }
 
     /// Route a Delete event to all indices.
-    pub fn on_delete(&mut self, idx: usize, clause: &Clause) {
+    pub fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>) {
         for index in self.indices.values_mut() {
             index.on_delete(idx, clause);
         }
     }
 
     /// Route an Activate event (U → P) to all indices.
-    pub fn on_activate(&mut self, idx: usize, clause: &Clause) {
+    pub fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
         for index in self.indices.values_mut() {
             index.on_activate(idx, clause);
         }
@@ -265,6 +272,13 @@ impl IndexRegistry {
         self.indices
             .get(&IndexKind::Subsumption)
             .and_then(|idx| idx.as_any().downcast_ref())
+    }
+
+    /// Get mutable SubsumptionChecker (for methods needing scratch buffer access)
+    pub fn subsumption_checker_mut(&mut self) -> Option<&mut SubsumptionChecker> {
+        self.indices
+            .get_mut(&IndexKind::Subsumption)
+            .and_then(|idx| idx.as_any_mut().downcast_mut())
     }
 
     /// Get the SelectedLiteralIndex if it was created
@@ -322,8 +336,8 @@ mod tests {
     #[test]
     fn test_unit_equalities_index() {
         let mut interner = create_test_interner();
-        let eq_clause = create_unit_equality(&mut interner);
-        let non_eq = create_unit_clause(&mut interner);
+        let eq_clause = Arc::new(create_unit_equality(&mut interner));
+        let non_eq = Arc::new(create_unit_clause(&mut interner));
 
         // Create index after interning all symbols
         let mut index = UnitEqualitiesIndex::new(&interner);
