@@ -9,9 +9,7 @@
 //! by `demodulate()` via KBO). Deletion is lazy via an `active` set.
 
 use crate::index::disc_tree::{self, DiscTreeNode};
-use crate::index::{Index, IndexKind};
 use crate::logic::{Clause, Interner, PredicateId, Term};
-use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -107,20 +105,8 @@ impl DiscriminationTree {
     }
 }
 
-// =============================================================================
-// Index trait implementation
-// =============================================================================
-
-impl Index for DiscriminationTree {
-    fn kind(&self) -> IndexKind {
-        IndexKind::DiscriminationTree
-    }
-
-    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {
-        // No-op: unit equalities are only tracked after transfer
-    }
-
-    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
+impl DiscriminationTree {
+    pub fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
         if !self.is_unit_equality(clause) {
             return;
         }
@@ -134,16 +120,8 @@ impl Index for DiscriminationTree {
         }
     }
 
-    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
+    pub fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.active.remove(&idx);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

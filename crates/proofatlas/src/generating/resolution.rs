@@ -4,10 +4,10 @@ use super::common::{
     collect_scoped_literals_except, remove_duplicate_literals, unify_atoms_scoped,
 };
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
-use crate::logic::{Clause, Interner, Position};
+use crate::logic::{Clause, Interner, Position, PredicateId};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
-use crate::index::IndexRegistry;
+use crate::index::SelectedLiteralIndex;
 use crate::selection::LiteralSelector;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -71,18 +71,16 @@ pub fn resolution(
 
 /// Resolution inference rule.
 ///
-/// Generates resolvents between the given clause and processed clauses.
-pub struct ResolutionRule;
-
-impl ResolutionRule {
-    pub fn new() -> Self {
-        ResolutionRule
-    }
+/// Owns a SelectedLiteralIndex for candidate filtering.
+pub struct ResolutionRule {
+    selected_literals: SelectedLiteralIndex,
 }
 
-impl Default for ResolutionRule {
-    fn default() -> Self {
-        Self::new()
+impl ResolutionRule {
+    pub fn new(literal_selector: Arc<dyn LiteralSelector>, eq_pred_id: Option<PredicateId>) -> Self {
+        ResolutionRule {
+            selected_literals: SelectedLiteralIndex::new(literal_selector, eq_pred_id),
+        }
     }
 }
 
@@ -150,11 +148,10 @@ impl GeneratingInference for ResolutionRule {
     }
 
     fn generate(
-        &self,
+        &mut self,
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let cancel = cm.cancel.clone();
@@ -185,50 +182,43 @@ impl GeneratingInference for ResolutionRule {
             false
         };
 
-        if let Some(sli) = indices.selected_literals() {
-            // Collect unique candidate clause indices from index
-            let given_selected = selector.select(given);
-            let mut candidate_set: BTreeSet<usize> = BTreeSet::new();
-            for &lit_idx in &given_selected {
-                let lit = &given.literals[lit_idx];
-                // Look for clauses with complementary polarity
-                for &(clause_idx, _) in sli.candidates_by_predicate(lit.predicate.id, !lit.polarity) {
-                    candidate_set.insert(clause_idx);
-                }
-            }
+        let sli = &self.selected_literals;
 
-            for &partner_idx in &candidate_set {
-                if stopped() { break; }
-                if let Some(partner) = state.clauses.get(partner_idx) {
-                    changes.extend(resolution(given, partner, given_idx, partner_idx, selector, interner));
-                    if partner_idx != given_idx {
-                        changes.extend(resolution(partner, given, partner_idx, given_idx, selector, interner));
-                    }
-                }
-            }
-
-            // Self-resolution if given wasn't already a candidate
-            if !candidate_set.contains(&given_idx) && !stopped() {
-                changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
-            }
-        } else {
-            // Fallback: iterate all processed clauses
-            for &processed_idx in state.processed.iter() {
-                if stopped() { break; }
-                if processed_idx == given_idx {
-                    continue;
-                }
-                if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                    changes.extend(resolution(given, processed_clause, given_idx, processed_idx, selector, interner));
-                    changes.extend(resolution(processed_clause, given, processed_idx, given_idx, selector, interner));
-                }
-            }
-            if !stopped() {
-                changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+        // Collect unique candidate clause indices from index
+        let given_selected = selector.select(given);
+        let mut candidate_set: BTreeSet<usize> = BTreeSet::new();
+        for &lit_idx in &given_selected {
+            let lit = &given.literals[lit_idx];
+            // Look for clauses with complementary polarity
+            for &(clause_idx, _) in sli.candidates_by_predicate(lit.predicate.id, !lit.polarity) {
+                candidate_set.insert(clause_idx);
             }
         }
 
+        for &partner_idx in &candidate_set {
+            if stopped() { break; }
+            if let Some(partner) = state.clauses.get(partner_idx) {
+                changes.extend(resolution(given, partner, given_idx, partner_idx, selector, interner));
+                if partner_idx != given_idx {
+                    changes.extend(resolution(partner, given, partner_idx, given_idx, selector, interner));
+                }
+            }
+        }
+
+        // Self-resolution if given wasn't already a candidate
+        if !candidate_set.contains(&given_idx) && !stopped() {
+            changes.extend(resolution(given, given, given_idx, given_idx, selector, interner));
+        }
+
         changes
+    }
+
+    fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.selected_literals.on_activate(idx, clause);
+    }
+
+    fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.selected_literals.on_delete(idx, clause);
     }
 }
 

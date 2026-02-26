@@ -5,7 +5,6 @@
 
 use crate::logic::{Clause, Position};
 use crate::logic::clause_manager::ClauseManager;
-use crate::index::IndexRegistry;
 use indexmap::IndexSet;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -375,31 +374,40 @@ pub fn build_trace(events: &[StateChange], format_clause: impl Fn(&Clause) -> St
 
 /// Trait for simplification rules (tautology, subsumption, demodulation).
 ///
-/// Rules receive the full saturation state, clause manager, and index registry
-/// at call time. They do not maintain internal state tracking clause lifecycle.
+/// Each rule owns its own index (if needed) and maintains it via lifecycle methods.
 pub trait SimplifyingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
 
     /// Forward simplification: try to simplify/delete a clause in N using U∪P.
     fn simplify_forward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        indices: &mut IndexRegistry,
     ) -> Option<StateChange>;
 
     /// Backward simplification: simplify clauses in U∪P using this clause.
     fn simplify_backward(
-        &self,
+        &mut self,
         _clause_idx: usize,
         _state: &SaturationState,
         _cm: &ClauseManager,
-        _indices: &mut IndexRegistry,
     ) -> Vec<StateChange> {
         vec![]
     }
+
+    /// Called when a clause is added to N.
+    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is transferred from N to U.
+    fn on_transfer(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is deleted from U or P.
+    fn on_delete(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is activated from U to P.
+    fn on_activate(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
 
     /// Verify that a simplification step is correct.
     ///
@@ -420,20 +428,30 @@ pub trait SimplifyingInference: Send + Sync {
 
 /// Trait for generating inference rules (resolution, superposition, factoring, etc.).
 ///
-/// Rules receive the full saturation state, clause manager, and index registry
-/// at call time. They do not maintain internal state tracking clause lifecycle.
+/// Each rule owns its own index (if needed) and maintains it via lifecycle methods.
 pub trait GeneratingInference: Send + Sync {
     /// Get the name of this rule
     fn name(&self) -> &str;
 
     /// Generate inferences with the given clause.
     fn generate(
-        &self,
+        &mut self,
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        indices: &IndexRegistry,
     ) -> Vec<StateChange>;
+
+    /// Called when a clause is added to N.
+    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is transferred from N to U.
+    fn on_transfer(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is deleted from U or P.
+    fn on_delete(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
+
+    /// Called when a clause is activated from U to P.
+    fn on_activate(&mut self, _idx: usize, _clause: &Arc<Clause>) {}
 
     /// Verify that a generating inference step is correct.
     ///

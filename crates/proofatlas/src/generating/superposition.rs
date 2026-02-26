@@ -3,13 +3,13 @@
 use super::common::{
     collect_scoped_literals_except, is_ordered_greater, remove_duplicate_literals,
 };
-use crate::logic::{Clause, Interner, Literal, Position, Term, KBO};
+use crate::logic::{Clause, Interner, Literal, Position, PredicateId, Term, KBO};
 use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
-use crate::index::IndexRegistry;
-use crate::selection::LiteralSelector;
+use crate::index::SelectedLiteralIndex;
+use crate::logic::literal_selection::LiteralSelector;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -284,18 +284,16 @@ fn flatten_and_replace(
 
 /// Superposition inference rule.
 ///
-/// Generates superposition inferences between the given clause and processed clauses.
-pub struct SuperpositionRule;
-
-impl SuperpositionRule {
-    pub fn new() -> Self {
-        SuperpositionRule
-    }
+/// Owns a SelectedLiteralIndex for candidate filtering.
+pub struct SuperpositionRule {
+    selected_literals: SelectedLiteralIndex,
 }
 
-impl Default for SuperpositionRule {
-    fn default() -> Self {
-        Self::new()
+impl SuperpositionRule {
+    pub fn new(literal_selector: Arc<dyn LiteralSelector>, eq_pred_id: Option<PredicateId>) -> Self {
+        SuperpositionRule {
+            selected_literals: SelectedLiteralIndex::new(literal_selector, eq_pred_id),
+        }
     }
 }
 
@@ -389,11 +387,10 @@ impl GeneratingInference for SuperpositionRule {
     }
 
     fn generate(
-        &self,
+        &mut self,
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let cancel = cm.cancel.clone();
@@ -425,45 +422,38 @@ impl GeneratingInference for SuperpositionRule {
             false
         };
 
-        if let Some(sli) = indices.selected_literals() {
-            let eq_clauses = sli.equality_clauses();
-            let given_has_eq = eq_clauses.contains(&given_idx);
+        let sli = &self.selected_literals;
+        let eq_clauses = sli.equality_clauses();
+        let given_has_eq = eq_clauses.contains(&given_idx);
 
-            for &processed_idx in state.processed.iter() {
-                if stopped() { break; }
-                if processed_idx == given_idx {
-                    continue;
-                }
-                if let Some(processed_clause) = state.clauses.get(processed_idx) {
-                    if given_has_eq {
-                        changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
-                    }
-                    if eq_clauses.contains(&processed_idx) {
-                        changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
-                    }
-                }
+        for &processed_idx in state.processed.iter() {
+            if stopped() { break; }
+            if processed_idx == given_idx {
+                continue;
             }
-
-            if given_has_eq && !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
-            }
-        } else {
-            for &processed_idx in state.processed.iter() {
-                if stopped() { break; }
-                if processed_idx == given_idx {
-                    continue;
-                }
-                if let Some(processed_clause) = state.clauses.get(processed_idx) {
+            if let Some(processed_clause) = state.clauses.get(processed_idx) {
+                if given_has_eq {
                     changes.extend(superposition(given, processed_clause, given_idx, processed_idx, selector, interner, kbo));
+                }
+                if eq_clauses.contains(&processed_idx) {
                     changes.extend(superposition(processed_clause, given, processed_idx, given_idx, selector, interner, kbo));
                 }
             }
-            if !stopped() {
-                changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
-            }
+        }
+
+        if given_has_eq && !stopped() {
+            changes.extend(superposition(given, given, given_idx, given_idx, selector, interner, kbo));
         }
 
         changes
+    }
+
+    fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.selected_literals.on_activate(idx, clause);
+    }
+
+    fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.selected_literals.on_delete(idx, clause);
     }
 }
 

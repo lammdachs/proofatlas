@@ -4,10 +4,8 @@
 //! pairs so that generating rules (resolution, superposition) can query only
 //! relevant candidates instead of iterating all processed clauses.
 
-use super::{Index, IndexKind};
 use crate::logic::literal_selection::LiteralSelector;
 use crate::logic::{Clause, PredicateId};
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -82,24 +80,12 @@ impl std::fmt::Debug for SelectedLiteralIndex {
     }
 }
 
-impl Index for SelectedLiteralIndex {
-    fn kind(&self) -> IndexKind {
-        IndexKind::SelectedLiterals
-    }
-
-    fn on_add(&mut self, _idx: usize, _clause: &Arc<Clause>) {
-        // Only interested in activated clauses
-    }
-
-    fn on_transfer(&mut self, _idx: usize, _clause: &Arc<Clause>) {
-        // Only interested in activated clauses (U -> P transition)
-    }
-
-    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
+impl SelectedLiteralIndex {
+    pub fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.purge_clause(idx);
     }
 
-    fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
+    pub fn on_activate(&mut self, idx: usize, clause: &Arc<Clause>) {
         let selected: Vec<usize> = self.selector.select(clause).into_iter().collect();
 
         for &lit_idx in &selected {
@@ -121,14 +107,6 @@ impl Index for SelectedLiteralIndex {
         }
 
         self.selections.insert(idx, selected);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

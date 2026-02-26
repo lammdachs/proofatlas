@@ -39,10 +39,11 @@
 
 use crate::logic::{Clause, Literal, Term, VariableId, Interner};
 use crate::logic::clause_manager::ClauseManager;
-use crate::index::IndexRegistry;
 use crate::logic::Position;
+use crate::index::SubsumptionChecker;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // =============================================================================
 // SubsumptionRule (stateless rule adapter)
@@ -50,19 +51,24 @@ use std::collections::HashMap;
 
 /// Forward/backward subsumption rule.
 ///
-/// Deletes clauses that are subsumed by existing clauses in U∪P.
-/// Queries the SubsumptionChecker from the IndexRegistry.
-pub struct SubsumptionRule;
+/// Owns a SubsumptionChecker and maintains it via lifecycle methods.
+pub struct SubsumptionRule {
+    checker: SubsumptionChecker,
+}
 
 impl SubsumptionRule {
     pub fn new(_interner: &Interner) -> Self {
-        SubsumptionRule
+        SubsumptionRule {
+            checker: SubsumptionChecker::new(),
+        }
     }
 }
 
 impl Default for SubsumptionRule {
     fn default() -> Self {
-        SubsumptionRule
+        SubsumptionRule {
+            checker: SubsumptionChecker::new(),
+        }
     }
 }
 
@@ -114,36 +120,27 @@ impl SimplifyingInference for SubsumptionRule {
     }
 
     fn simplify_forward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         _cm: &ClauseManager,
-        indices: &mut IndexRegistry,
     ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
-        if let Some(checker) = indices.subsumption_checker_mut() {
-            if let Some(subsumer_idx) = checker.find_subsumer(clause) {
-                return Some(StateChange::Simplify(clause_idx, None, self.name().into(), vec![Position::clause(subsumer_idx)]));
-            }
+        if let Some(subsumer_idx) = self.checker.find_subsumer(clause) {
+            return Some(StateChange::Simplify(clause_idx, None, self.name().into(), vec![Position::clause(subsumer_idx)]));
         }
         None
     }
 
     fn simplify_backward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         _cm: &ClauseManager,
-        indices: &mut IndexRegistry,
     ) -> Vec<StateChange> {
-        let checker = match indices.subsumption_checker_mut() {
-            Some(c) => c,
-            None => return vec![],
-        };
-
         // Find clauses subsumed by this clause
         // (find_subsumed_by uses the literal tree's active set, not candidate_indices)
-        let subsumed = checker.find_subsumed_by(clause_idx, &[]);
+        let subsumed = self.checker.find_subsumed_by(clause_idx, &[]);
 
         let rule_name: String = self.name().into();
         subsumed
@@ -151,6 +148,18 @@ impl SimplifyingInference for SubsumptionRule {
             .filter(|&idx| state.processed.contains(&idx) || state.unprocessed.contains(&idx))
             .map(|idx| StateChange::Simplify(idx, None, rule_name.clone(), vec![Position::clause(clause_idx)]))
             .collect()
+    }
+
+    fn on_add(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.checker.on_add(idx, clause);
+    }
+
+    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.checker.on_transfer(idx, clause);
+    }
+
+    fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.checker.on_delete(idx, clause);
     }
 }
 

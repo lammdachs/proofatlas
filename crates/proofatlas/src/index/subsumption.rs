@@ -5,12 +5,10 @@
 //! implementation.
 
 use crate::index::disc_tree::{self, DiscTreeNode};
-use crate::index::{Index, IndexKind};
 use crate::logic::{Clause, ClauseKey, PredicateId};
 use crate::simplifying::subsumption::{
     are_variants, subsumes, subsumes_greedy, subsumes_unit,
 };
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -493,12 +491,8 @@ impl Default for SubsumptionChecker {
     }
 }
 
-impl Index for SubsumptionChecker {
-    fn kind(&self) -> IndexKind {
-        IndexKind::Subsumption
-    }
-
-    fn on_add(&mut self, idx: usize, clause: &Arc<Clause>) {
+impl SubsumptionChecker {
+    pub fn on_add(&mut self, idx: usize, clause: &Arc<Clause>) {
         // Add clause to internal store + literal tree
         self.literal_tree.insert(idx, clause);
         // Ensure vecs are large enough
@@ -510,7 +504,7 @@ impl Index for SubsumptionChecker {
         self.pred_signatures[idx] = compute_pred_signature(clause);
     }
 
-    fn on_transfer(&mut self, idx: usize, _clause: &Arc<Clause>) {
+    pub fn on_transfer(&mut self, idx: usize, _clause: &Arc<Clause>) {
         if self.active.contains(&idx) {
             return;
         }
@@ -530,7 +524,7 @@ impl Index for SubsumptionChecker {
         }
     }
 
-    fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
+    pub fn on_delete(&mut self, idx: usize, _clause: &Arc<Clause>) {
         self.active.remove(&idx);
         self.literal_tree.deactivate(idx);
 
@@ -543,14 +537,6 @@ impl Index for SubsumptionChecker {
 
         // Remove from units
         self.units.retain(|(_, unit_idx)| *unit_idx != idx);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

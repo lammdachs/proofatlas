@@ -4,7 +4,6 @@ use super::common::{collect_literals_except, remove_duplicate_literals, unify_at
 use crate::logic::{Clause, Position};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
-use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use std::sync::Arc;
 
@@ -149,11 +148,10 @@ impl GeneratingInference for FactoringRule {
     }
 
     fn generate(
-        &self,
+        &mut self,
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();

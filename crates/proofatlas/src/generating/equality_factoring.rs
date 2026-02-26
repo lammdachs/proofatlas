@@ -5,7 +5,6 @@ use crate::logic::{Clause, Interner, Literal, Position, PredicateSymbol, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
-use crate::index::IndexRegistry;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
 use std::sync::Arc;
@@ -218,11 +217,10 @@ impl GeneratingInference for EqualityFactoringRule {
     }
 
     fn generate(
-        &self,
+        &mut self,
         given_idx: usize,
         state: &SaturationState,
         cm: &mut ClauseManager,
-        _indices: &IndexRegistry,
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();

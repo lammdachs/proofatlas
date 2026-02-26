@@ -8,7 +8,7 @@ use crate::logic::Position;
 use crate::logic::match_term;
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::ordering::orient_equalities::orient_clause_equalities;
-use crate::index::IndexRegistry;
+use crate::index::DiscriminationTree;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
 use std::sync::Arc;
 
@@ -156,16 +156,19 @@ fn rewrite_term(term: &Term, lhs: &Term, rhs: &Term, kbo: &KBO) -> Term {
 
 /// Demodulation rule (rewriting with unit equalities).
 ///
-/// Stateless rule that queries the UnitEqualitiesIndex from the IndexRegistry.
+/// Owns a DiscriminationTree for candidate filtering.
 pub struct DemodulationRule {
     /// Predicate ID for equality (cached for performance, None if "=" not interned)
     equality_pred_id: Option<PredicateId>,
+    /// Discrimination tree index for efficient candidate retrieval
+    tree: DiscriminationTree,
 }
 
 impl DemodulationRule {
     pub fn new(interner: &Interner) -> Self {
         DemodulationRule {
             equality_pred_id: interner.get_predicate("="),
+            tree: DiscriminationTree::new(interner),
         }
     }
 
@@ -179,14 +182,6 @@ impl DemodulationRule {
                 && clause.literals[0].predicate.arity == 2
         } else {
             false
-        }
-    }
-}
-
-impl Default for DemodulationRule {
-    fn default() -> Self {
-        DemodulationRule {
-            equality_pred_id: None,
         }
     }
 }
@@ -267,18 +262,16 @@ impl SimplifyingInference for DemodulationRule {
     }
 
     fn simplify_forward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        indices: &mut IndexRegistry,
     ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;
 
         // Use discrimination tree for candidate filtering
-        let disc_tree = indices.discrimination_tree()?;
-        let candidates = disc_tree.retrieve_clause_candidates(clause);
+        let candidates = self.tree.retrieve_clause_candidates(clause);
 
         // Try to demodulate using only structurally compatible unit equalities
         // Check cancel/timeout to avoid overshooting resource limits
@@ -303,11 +296,10 @@ impl SimplifyingInference for DemodulationRule {
     }
 
     fn simplify_backward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         cm: &ClauseManager,
-        _indices: &mut IndexRegistry,
     ) -> Vec<StateChange> {
         let clause = &state.clauses[clause_idx];
         let interner = &cm.interner;
@@ -343,6 +335,14 @@ impl SimplifyingInference for DemodulationRule {
         }
 
         changes
+    }
+
+    fn on_transfer(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.tree.on_transfer(idx, clause);
+    }
+
+    fn on_delete(&mut self, idx: usize, clause: &Arc<Clause>) {
+        self.tree.on_delete(idx, clause);
     }
 }
 

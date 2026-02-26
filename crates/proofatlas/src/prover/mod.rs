@@ -16,7 +16,6 @@ use crate::state::{
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
 use self::profile::SaturationProfile;
-use crate::index::{IndexKind, IndexRegistry, SelectedLiteralIndex};
 use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +29,6 @@ use crate::selection::{
 };
 use crate::selection::clause::ProverSink;
 use crate::logic::time_compat::Instant;
-use std::collections::HashSet;
 
 /// Per-problem saturation engine.
 ///
@@ -47,8 +45,6 @@ pub struct Prover {
     simplifying_inferences: Vec<Box<dyn SimplifyingInference>>,
     /// Generating inference rules (resolution, superposition, factoring, etc.)
     generating_inferences: Vec<Box<dyn GeneratingInference>>,
-    /// Central registry for shared indices
-    index_registry: IndexRegistry,
     /// Clause selection sink (signal-based interface)
     sink: Box<dyn ProverSink>,
     /// Profiling data (None if profiling disabled)
@@ -77,22 +73,6 @@ impl Prover {
     ) -> Self {
         let initial_clause_count = initial_clauses.len();
 
-        // Initialize simplification rules (stateless — no lifecycle methods)
-        let simplifying_inferences: Vec<Box<dyn SimplifyingInference>> = vec![
-            Box::new(TautologyRule::new(&interner)),
-            Box::new(DemodulationRule::new(&interner)),
-            Box::new(SubsumptionRule::new(&interner)),
-        ];
-
-        // Create IndexRegistry with all required indices
-        let required_indices: HashSet<IndexKind> = [
-            IndexKind::UnitEqualities,
-            IndexKind::DiscriminationTree,
-            IndexKind::Subsumption,
-        ].into_iter().collect();
-        let mut index_registry = IndexRegistry::new(&required_indices, &interner);
-        index_registry.initialize(&initial_clauses);
-
         // Create literal selector based on configuration
         let literal_selector: Arc<dyn crate::selection::LiteralSelector> =
             match config.literal_selection {
@@ -104,13 +84,17 @@ impl Prover {
                 LiteralSelectionStrategy::Sel22 => Arc::new(SelectNegMaxWeightOrMaximal::new()),
             };
 
-        // Register SelectedLiteralIndex
         let eq_pred_id = interner.get_predicate("=");
-        let sl_index = SelectedLiteralIndex::new(literal_selector.clone(), eq_pred_id);
-        index_registry.add_index(Box::new(sl_index));
+
+        // Initialize simplification rules (each owns its own index)
+        let simplifying_inferences: Vec<Box<dyn SimplifyingInference>> = vec![
+            Box::new(TautologyRule::new(&interner)),
+            Box::new(DemodulationRule::new(&interner)),
+            Box::new(SubsumptionRule::new(&interner)),
+        ];
 
         // Create clause manager
-        let mut clause_manager = ClauseManager::new(interner, literal_selector);
+        let mut clause_manager = ClauseManager::new(interner, literal_selector.clone());
         clause_manager.memory_limit = config.memory_limit;
         clause_manager.baseline_rss_mb = crate::config::process_memory_mb().unwrap_or(0);
 
@@ -118,13 +102,13 @@ impl Prover {
         let mut sink = sink;
         sink.reset();
 
-        // Initialize generating rules
+        // Initialize generating rules (resolution & superposition each own a SelectedLiteralIndex)
         let generating_inferences: Vec<Box<dyn GeneratingInference>> = vec![
             Box::new(FactoringRule::new()),
             Box::new(EqualityResolutionRule::new()),
             Box::new(EqualityFactoringRule::new()),
-            Box::new(ResolutionRule::new()),
-            Box::new(SuperpositionRule::new()),
+            Box::new(ResolutionRule::new(literal_selector.clone(), eq_pred_id)),
+            Box::new(SuperpositionRule::new(literal_selector, eq_pred_id)),
         ];
 
         let profile = if config.enable_profiling {
@@ -152,7 +136,6 @@ impl Prover {
             state,
             simplifying_inferences,
             generating_inferences,
-            index_registry,
             sink,
             profile,
             start_time: None,
@@ -340,19 +323,18 @@ impl Prover {
 
             // 1a: Apply forward simplification rules
             let mut forward_change: Option<StateChange> = None;
-            for rule in self.simplifying_inferences.iter() {
-                let rule_name = rule.name();
+            for rule in self.simplifying_inferences.iter_mut() {
+                let rule_name = rule.name().to_string();
                 let t_rule = self.profile.as_ref().map(|_| Instant::now());
 
                 let change = rule.simplify_forward(
                     clause_idx,
                     &self.state,
                     &self.clause_manager,
-                    &mut self.index_registry,
                 );
 
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
-                    p.record_simplification_forward_attempt(rule_name, change.is_some(), t.elapsed());
+                    p.record_simplification_forward_attempt(&rule_name, change.is_some(), t.elapsed());
                     p.forward_simplify_time += t.elapsed();
                 }
 
@@ -377,21 +359,20 @@ impl Prover {
             // 1d: Apply backward simplification rules
             let mut all_backward_changes: Vec<StateChange> = Vec::new();
 
-            for rule in self.simplifying_inferences.iter() {
-                let rule_name = rule.name();
+            for rule in self.simplifying_inferences.iter_mut() {
+                let rule_name = rule.name().to_string();
                 let t_rule = self.profile.as_ref().map(|_| Instant::now());
 
                 let changes = rule.simplify_backward(
                     clause_idx,
                     &self.state,
                     &self.clause_manager,
-                    &mut self.index_registry,
                 );
 
                 let count = changes.len();
 
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
-                    p.record_simplification_backward_attempt(rule_name, count, t.elapsed());
+                    p.record_simplification_backward_attempt(&rule_name, count, t.elapsed());
                     p.backward_simplify_time += t.elapsed();
                 }
 
@@ -529,7 +510,12 @@ impl Prover {
                     clause.derivation_rule = Clause::rule_name_to_id(&rule_name);
                 }
 
-                self.index_registry.on_add(new_idx, &arc_clause);
+                for rule in &mut self.simplifying_inferences {
+                    rule.on_add(new_idx, &arc_clause);
+                }
+                for rule in &mut self.generating_inferences {
+                    rule.on_add(new_idx, &arc_clause);
+                }
                 let is_empty = arc_clause.is_empty();
 
                 self.state.clauses.push(Arc::clone(&arc_clause));
@@ -581,11 +567,21 @@ impl Prover {
                     self.state.new.pop();
                 } else if self.state.unprocessed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
-                    self.index_registry.on_delete(clause_idx, clause);
+                    for rule in &mut self.simplifying_inferences {
+                        rule.on_delete(clause_idx, clause);
+                    }
+                    for rule in &mut self.generating_inferences {
+                        rule.on_delete(clause_idx, clause);
+                    }
                     self.sink.on_simplify(clause_idx);
                 } else if self.state.processed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
-                    self.index_registry.on_delete(clause_idx, clause);
+                    for rule in &mut self.simplifying_inferences {
+                        rule.on_delete(clause_idx, clause);
+                    }
+                    for rule in &mut self.generating_inferences {
+                        rule.on_delete(clause_idx, clause);
+                    }
                     self.sink.on_simplify(clause_idx);
                 }
 
@@ -609,7 +605,12 @@ impl Prover {
                         clause.derivation_rule = Clause::rule_name_to_id(&rule_name);
                     }
 
-                    self.index_registry.on_add(new_idx, &repl);
+                    for rule in &mut self.simplifying_inferences {
+                        rule.on_add(new_idx, &repl);
+                    }
+                    for rule in &mut self.generating_inferences {
+                        rule.on_add(new_idx, &repl);
+                    }
                     let is_empty = repl.is_empty();
 
                     self.state.clauses.push(Arc::clone(&repl));
@@ -661,7 +662,13 @@ impl Prover {
                     self.state.new.pop();
                 }
                 self.state.unprocessed.insert(clause_idx);
-                self.index_registry.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
+                let clause = &self.state.clauses[clause_idx];
+                for rule in &mut self.simplifying_inferences {
+                    rule.on_transfer(clause_idx, clause);
+                }
+                for rule in &mut self.generating_inferences {
+                    rule.on_transfer(clause_idx, clause);
+                }
                 self.sink.on_transfer(clause_idx, &self.state.clauses[clause_idx]);
                 self.state.event_log.push(StateChange::Transfer(clause_idx));
             }
@@ -669,7 +676,13 @@ impl Prover {
                 // U → P
                 self.state.unprocessed.shift_remove(&clause_idx);
                 self.state.processed.insert(clause_idx);
-                self.index_registry.on_activate(clause_idx, &self.state.clauses[clause_idx]);
+                let clause = &self.state.clauses[clause_idx];
+                for rule in &mut self.simplifying_inferences {
+                    rule.on_activate(clause_idx, clause);
+                }
+                for rule in &mut self.generating_inferences {
+                    rule.on_activate(clause_idx, clause);
+                }
                 self.sink.on_activate(clause_idx);
                 self.state.event_log.push(StateChange::Activate(clause_idx));
 
@@ -698,10 +711,10 @@ impl Prover {
 
         // Take generating_inferences out of self to avoid borrow conflict
         // (we need &self.state and &mut self.clause_manager simultaneously)
-        let generating_inferences = std::mem::take(&mut self.generating_inferences);
+        let mut generating_inferences = std::mem::take(&mut self.generating_inferences);
 
-        for rule in &generating_inferences {
-            let rule_name = rule.name();
+        for rule in &mut generating_inferences {
+            let rule_name = rule.name().to_string();
             let t0 = self.profile.as_ref().map(|_| Instant::now());
             let before = results.len();
 
@@ -709,14 +722,13 @@ impl Prover {
                 given_idx,
                 &self.state,
                 &mut self.clause_manager,
-                &self.index_registry,
             );
 
             results.extend(changes);
 
             if let (Some(p), Some(t)) = (self.profile.as_mut(), t0) {
                 let count = results.len() - before;
-                p.record_generating_rule(rule_name, count, t.elapsed());
+                p.record_generating_rule(&rule_name, count, t.elapsed());
             }
         }
 

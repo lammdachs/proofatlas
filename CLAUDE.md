@@ -24,7 +24,7 @@ proofatlas/
 │   │       │   └── time_compat.rs        # WASM-compatible Instant
 │   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
-│   │       ├── index/          # Index trait, IndexRegistry, SubsumptionChecker, SelectedLiteralIndex
+│   │       ├── index/          # SubsumptionChecker, DiscriminationTree, SelectedLiteralIndex
 │   │       ├── prover/         # Saturation engine
 │   │       │   ├── mod.rs      # Prover struct with prove()/init()/step()/saturate()
 │   │       │   └── profile.rs  # SaturationProfile
@@ -242,23 +242,28 @@ The prover is organized around a central `ProofAtlas` struct (`prover/mod.rs`) t
 - `new`, `unprocessed`, `processed` clause sets (N/U/P)
 - `event_log: Vec<StateChange>` (all modifications)
 
-### Polymorphic Rule Architecture
+### Rule Architecture
 
-Rules are **stateless** — they receive the full context at call time and do not maintain internal state or lifecycle hooks. The `IndexRegistry` handles all clause lifecycle events via methods that mirror `StateChange` variants: `on_add`, `on_transfer`, `on_delete`, `on_activate`.
+Each rule owns its own index (if needed) and maintains it via lifecycle methods (`on_add`, `on_transfer`, `on_delete`, `on_activate`) with default no-ops. The prover routes clause lifecycle events to all rules in `apply_change()`.
 
 **SimplifyingInference trait** (`state.rs`):
-- `simplify_forward(clause_idx, &SaturationState, &ClauseManager, &mut IndexRegistry) -> Option<StateChange>`: Simplify/delete clause in N using U∪P
-- `simplify_backward(clause_idx, &SaturationState, &ClauseManager, &mut IndexRegistry)`: Simplify clauses in U∪P using new clause
-- Implementations in `simplifying/`: `TautologyRule`, `DemodulationRule`, `SubsumptionRule`
+- `simplify_forward(&mut self, clause_idx, &SaturationState, &ClauseManager) -> Option<StateChange>`: Simplify/delete clause in N using U∪P
+- `simplify_backward(&mut self, clause_idx, &SaturationState, &ClauseManager)`: Simplify clauses in U∪P using new clause
+- Implementations in `simplifying/`:
+  - `TautologyRule`: Stateless (no index)
+  - `SubsumptionRule`: Owns `SubsumptionChecker` (lifecycle: on_add, on_transfer, on_delete)
+  - `DemodulationRule`: Owns `DiscriminationTree` (lifecycle: on_transfer, on_delete)
 
 **GeneratingInference trait** (`state.rs`):
-- `generate(given_idx, &SaturationState, &mut ClauseManager, &IndexRegistry)`: Generate inferences with given clause and clauses in P
-- Implementations in `generating/`: `ResolutionRule`, `SuperpositionRule`, `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`
+- `generate(&mut self, given_idx, &SaturationState, &mut ClauseManager)`: Generate inferences with given clause and clauses in P
+- Implementations in `generating/`:
+  - `ResolutionRule`: Owns `SelectedLiteralIndex` (lifecycle: on_activate, on_delete)
+  - `SuperpositionRule`: Owns `SelectedLiteralIndex` (lifecycle: on_activate, on_delete)
+  - `FactoringRule`, `EqualityResolutionRule`, `EqualityFactoringRule`: Stateless (no index)
 
-**IndexRegistry** (`index/mod.rs`): Central registry owning all indices, routes clause lifecycle events:
+**Index types** (`index/`): Concrete data structures with inherent `pub fn` lifecycle methods (no shared `Index` trait):
 - `SubsumptionChecker` (`index/subsumption.rs`): Literal discrimination tree + clause keys + unit tracking for subsumption
-- `UnitEqualitiesIndex`: Tracks unit positive equalities for backward demodulation
-- `DiscriminationTree` (`index/discrimination_tree.rs`): Trie index on rewrite rule LHS terms for O(|term|) forward demodulation candidate filtering (replaces linear scan of all unit equalities)
+- `DiscriminationTree` (`index/discrimination_tree.rs`): Trie index on rewrite rule LHS terms for O(|term|) forward demodulation candidate filtering
 - `SelectedLiteralIndex` (`index/selected_literals.rs`): Maps (PredicateId, polarity) to processed clause entries for generating inference candidate filtering
 
 All rules return `StateChange` values for atomic state modifications:

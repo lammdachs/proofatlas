@@ -5,7 +5,6 @@
 
 use crate::logic::{Clause, Interner, Position, PredicateId};
 use crate::logic::clause_manager::ClauseManager;
-use crate::index::IndexRegistry;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
 
 /// Tautology deletion rule.
@@ -36,11 +35,10 @@ impl SimplifyingInference for TautologyRule {
     }
 
     fn simplify_forward(
-        &self,
+        &mut self,
         clause_idx: usize,
         state: &SaturationState,
         _cm: &ClauseManager,
-        _indices: &mut IndexRegistry,
     ) -> Option<StateChange> {
         let clause = &state.clauses[clause_idx];
         if self.is_tautology(clause) {
