@@ -4,7 +4,6 @@ use super::common::collect_literals_except;
 use crate::logic::{Clause, Interner, Position};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
-use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
 use std::sync::Arc;
@@ -38,9 +37,9 @@ pub fn equality_resolution(
                 if let Ok(mgu) = unify(s, t) {
                     // The negative equality disappears, leaving the remaining literals
                     let new_literals = collect_literals_except(clause, &[i], &mgu);
-                    let mut new_clause = Clause::new(new_literals);
-                    orient_clause_equalities(&mut new_clause, interner);
+                    let new_clause = Clause::new(new_literals);
 
+                    // Orientation and normalization handled by apply_change
                     results.push(StateChange::Add(
                         Arc::new(new_clause),
                         "EqualityResolution".into(),
@@ -101,9 +100,13 @@ impl GeneratingInference for EqualityResolutionRule {
             if !lit.polarity && lit.is_equality(interner) {
                 if let [ref s, ref t] = lit.args.as_slice() {
                     if let Ok(mgu) = crate::logic::unify(s, t) {
+                        let mut int = interner.clone();
                         let new_lits = super::common::collect_literals_except(premise, &[i], &mgu);
-                        if conclusion.literals.len() == new_lits.len()
-                            && conclusion.literals.iter().all(|cl| new_lits.contains(cl))
+                        let mut reconstructed = Clause::new(new_lits);
+                        reconstructed.normalize_variables(&mut int);
+                        crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
+                        if conclusion.literals.len() == reconstructed.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
                         {
                             return Ok(());
                         }

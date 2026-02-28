@@ -49,10 +49,9 @@ pub fn demodulate(
     match kbo.compare(lhs, rhs) {
         TermOrdering::Greater => {
             // Try rewriting lhs -> rhs
-            if let Some(new_clause) = demodulate_clause(target, lhs, rhs, &kbo) {
-                let mut new_clause = new_clause;
+            if let Some(mut new_clause) = demodulate_clause(target, lhs, rhs, &kbo) {
                 new_clause.id = None;
-                orient_clause_equalities(&mut new_clause, interner);
+                // Orientation and normalization handled by apply_change
                 results.push(StateChange::Add(
                     Arc::new(new_clause),
                     "Demodulation".into(),
@@ -62,10 +61,9 @@ pub fn demodulate(
         }
         TermOrdering::Less => {
             // Try rewriting rhs -> lhs
-            if let Some(new_clause) = demodulate_clause(target, rhs, lhs, &kbo) {
-                let mut new_clause = new_clause;
+            if let Some(mut new_clause) = demodulate_clause(target, rhs, lhs, &kbo) {
                 new_clause.id = None;
-                orient_clause_equalities(&mut new_clause, interner);
+                // Orientation and normalization handled by apply_change
                 results.push(StateChange::Add(
                     Arc::new(new_clause),
                     "Demodulation".into(),
@@ -242,10 +240,14 @@ impl SimplifyingInference for DemodulationRule {
                 // Try to reproduce the demodulation
                 let target_clause = &state.clauses[target_pos.clause];
                 let results = demodulate(unit_clause, target_clause, unit_pos.clause, target_pos.clause, interner);
+                let mut int = interner.clone();
                 for result in &results {
                     if let StateChange::Add(ref result_clause, _, _) = result {
-                        if replacement.literals.len() == result_clause.literals.len()
-                            && replacement.literals.iter().all(|cl| result_clause.literals.contains(cl))
+                        let mut reconstructed = (**result_clause).clone();
+                        reconstructed.normalize_variables(&mut int);
+                        orient_clause_equalities(&mut reconstructed, &int);
+                        if replacement.literals.len() == reconstructed.literals.len()
+                            && replacement.literals.iter().all(|cl| reconstructed.literals.contains(cl))
                         {
                             return Ok(());
                         }

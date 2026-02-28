@@ -1,9 +1,10 @@
 //! Clauses and CNF formulas
 
-use crate::logic::interner::Interner;
+use crate::logic::interner::{Interner, VariableId};
 use super::literal::Literal;
 use super::term::Term;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
@@ -266,6 +267,84 @@ impl Clause {
         }
     }
 
+    /// Normalize variables to canonical sequential form (X0, X1, X2, ...)
+    /// based on first-occurrence order (left-to-right, depth-first).
+    ///
+    /// This ensures α-equivalent clauses have identical representations,
+    /// prevents cascading variable names from binary inference (X_1_1_1...),
+    /// and keeps interner size bounded.
+    pub fn normalize_variables(&mut self, interner: &mut Interner) {
+        // Phase 1: Collect variables in first-occurrence order
+        let mut seen = HashMap::new();
+        let mut order = Vec::new();
+        for lit in &self.literals {
+            for arg in &lit.args {
+                collect_variable_order(arg, &mut seen, &mut order);
+            }
+        }
+        if order.is_empty() {
+            return;
+        }
+
+        // Phase 2: Build old_id → new_id mapping
+        let mut remap = HashMap::with_capacity(order.len());
+        let mut all_canonical = true;
+        for (i, old_id) in order.iter().enumerate() {
+            let new_id = interner.intern_variable(&format!("X{}", i));
+            if *old_id != new_id {
+                all_canonical = false;
+            }
+            remap.insert(*old_id, new_id);
+        }
+        if all_canonical {
+            return;
+        }
+
+        // Phase 3: Apply remapping in-place
+        for lit in &mut self.literals {
+            for arg in &mut lit.args {
+                remap_term_variables(arg, &remap);
+            }
+        }
+    }
+}
+
+/// Collect variable IDs in depth-first, left-to-right first-occurrence order.
+fn collect_variable_order(
+    term: &Term,
+    seen: &mut HashMap<VariableId, ()>,
+    order: &mut Vec<VariableId>,
+) {
+    match term {
+        Term::Variable(v) => {
+            if seen.insert(v.id, ()).is_none() {
+                order.push(v.id);
+            }
+        }
+        Term::Constant(_) => {}
+        Term::Function(_, args) => {
+            for arg in args {
+                collect_variable_order(arg, seen, order);
+            }
+        }
+    }
+}
+
+/// Remap all variable IDs in a term in-place.
+fn remap_term_variables(term: &mut Term, remap: &HashMap<VariableId, VariableId>) {
+    match term {
+        Term::Variable(v) => {
+            if let Some(&new_id) = remap.get(&v.id) {
+                v.id = new_id;
+            }
+        }
+        Term::Constant(_) => {}
+        Term::Function(_, args) => {
+            for arg in args {
+                remap_term_variables(arg, remap);
+            }
+        }
+    }
 }
 
 impl Clause {
@@ -398,5 +477,144 @@ impl ClauseKey {
             .collect();
         literals.sort();
         ClauseKey { literals }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::{Constant, FunctionSymbol, PredicateSymbol, Variable};
+
+    struct TestContext {
+        interner: Interner,
+    }
+
+    impl TestContext {
+        fn new() -> Self {
+            TestContext {
+                interner: Interner::new(),
+            }
+        }
+
+        fn var(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_variable(name);
+            Term::Variable(Variable::new(id))
+        }
+
+        fn const_(&mut self, name: &str) -> Term {
+            let id = self.interner.intern_constant(name);
+            Term::Constant(Constant::new(id))
+        }
+
+        fn func(&mut self, name: &str, args: Vec<Term>) -> Term {
+            let id = self.interner.intern_function(name);
+            Term::Function(FunctionSymbol::new(id, args.len() as u8), args)
+        }
+
+        fn pred(&mut self, name: &str, arity: u8) -> PredicateSymbol {
+            let id = self.interner.intern_predicate(name);
+            PredicateSymbol::new(id, arity)
+        }
+    }
+
+    #[test]
+    fn test_normalize_simple() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 2);
+        let y = ctx.var("Y");
+        let x = ctx.var("X");
+        // P(Y, X) → P(X0, X1)
+        let mut clause = Clause::new(vec![Literal::positive(p, vec![y, x])]);
+        clause.normalize_variables(&mut ctx.interner);
+
+        let x0 = ctx.var("X0");
+        let x1 = ctx.var("X1");
+        let expected = Clause::new(vec![Literal::positive(p, vec![x0, x1])]);
+        assert_eq!(clause.literals, expected.literals);
+    }
+
+    #[test]
+    fn test_normalize_with_functions() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 2);
+        let z = ctx.var("Z");
+        let y = ctx.var("Y");
+        let fz = ctx.func("f", vec![z.clone()]);
+        let gyz = ctx.func("g", vec![y, z]);
+        // P(f(Z), g(Y, Z)) → P(f(X0), g(X1, X0))
+        let mut clause = Clause::new(vec![Literal::positive(p, vec![fz, gyz])]);
+        clause.normalize_variables(&mut ctx.interner);
+
+        let x0 = ctx.var("X0");
+        let x1 = ctx.var("X1");
+        let fx0 = ctx.func("f", vec![x0.clone()]);
+        let gx1x0 = ctx.func("g", vec![x1, x0]);
+        let expected = Clause::new(vec![Literal::positive(p, vec![fx0, gx1x0])]);
+        assert_eq!(clause.literals, expected.literals);
+    }
+
+    #[test]
+    fn test_normalize_cascading_names() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 2);
+        let x_1_1 = ctx.var("X_1_1");
+        let x_1 = ctx.var("X_1");
+        // P(X_1_1, X_1) → P(X0, X1)
+        let mut clause = Clause::new(vec![Literal::positive(p, vec![x_1_1, x_1])]);
+        clause.normalize_variables(&mut ctx.interner);
+
+        let x0 = ctx.var("X0");
+        let x1 = ctx.var("X1");
+        let expected = Clause::new(vec![Literal::positive(p, vec![x0, x1])]);
+        assert_eq!(clause.literals, expected.literals);
+    }
+
+    #[test]
+    fn test_normalize_ground_clause() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 2);
+        let a = ctx.const_("a");
+        let b = ctx.const_("b");
+        let mut clause = Clause::new(vec![Literal::positive(p, vec![a.clone(), b.clone()])]);
+        clause.normalize_variables(&mut ctx.interner);
+
+        let expected = Clause::new(vec![Literal::positive(p, vec![a, b])]);
+        assert_eq!(clause.literals, expected.literals);
+    }
+
+    #[test]
+    fn test_normalize_idempotent() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 2);
+        let y = ctx.var("Y");
+        let x = ctx.var("X");
+        let mut clause = Clause::new(vec![Literal::positive(p, vec![y, x])]);
+        clause.normalize_variables(&mut ctx.interner);
+        let after_first = clause.literals.clone();
+        clause.normalize_variables(&mut ctx.interner);
+        assert_eq!(clause.literals, after_first);
+    }
+
+    #[test]
+    fn test_normalize_multiple_literals() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 1);
+        let q = ctx.pred("Q", 2);
+        let y = ctx.var("Y");
+        let x = ctx.var("X");
+        // P(Y) | Q(X, Y) → P(X0) | Q(X1, X0)
+        let mut clause = Clause::new(vec![
+            Literal::positive(p, vec![y.clone()]),
+            Literal::positive(q, vec![x, y]),
+        ]);
+        clause.normalize_variables(&mut ctx.interner);
+
+        let x0 = ctx.var("X0");
+        let x1 = ctx.var("X1");
+        let expected = Clause::new(vec![
+            Literal::positive(p, vec![x0.clone()]),
+            Literal::positive(q, vec![x1, x0]),
+        ]);
+        assert_eq!(clause.literals, expected.literals);
     }
 }

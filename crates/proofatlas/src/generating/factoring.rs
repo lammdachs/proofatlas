@@ -85,7 +85,7 @@ impl GeneratingInference for FactoringRule {
         conclusion: &Clause,
         premises: &[Position],
         state: &SaturationState,
-        _cm: &ClauseManager,
+        cm: &ClauseManager,
     ) -> Result<(), VerificationError> {
         use crate::state::VerificationError;
 
@@ -118,11 +118,15 @@ impl GeneratingInference for FactoringRule {
                     if let Ok(mgu) = super::common::unify_atoms(
                         lit1.predicate, &lit1.args, lit2.predicate, &lit2.args,
                     ) {
+                        let mut int = cm.interner.clone();
                         let new_lits = super::common::remove_duplicate_literals(
                             super::common::collect_literals_except(premise, &[j], &mgu),
                         );
-                        if conclusion.literals.len() == new_lits.len()
-                            && conclusion.literals.iter().all(|cl| new_lits.contains(cl))
+                        let mut reconstructed = Clause::new(new_lits);
+                        reconstructed.normalize_variables(&mut int);
+                        crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
+                        if conclusion.literals.len() == reconstructed.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
                         {
                             return Ok(());
                         }
@@ -130,8 +134,11 @@ impl GeneratingInference for FactoringRule {
                         let new_lits2 = super::common::remove_duplicate_literals(
                             super::common::collect_literals_except(premise, &[i], &mgu),
                         );
-                        if conclusion.literals.len() == new_lits2.len()
-                            && conclusion.literals.iter().all(|cl| new_lits2.contains(cl))
+                        let mut reconstructed2 = Clause::new(new_lits2);
+                        reconstructed2.normalize_variables(&mut int);
+                        crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed2, &int);
+                        if conclusion.literals.len() == reconstructed2.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed2.literals.contains(cl))
                         {
                             return Ok(());
                         }
@@ -155,14 +162,8 @@ impl GeneratingInference for FactoringRule {
     ) -> Vec<StateChange> {
         let given = &state.clauses[given_idx];
         let selector = cm.literal_selector.as_ref();
-        let mut changes = factoring(given, given_idx, selector);
-        // Orient after selector borrow ends (NLL)
-        for change in &mut changes {
-            if let StateChange::Add(ref mut arc, _, _) = change {
-                cm.orient_equalities(Arc::get_mut(arc).expect("refcount must be 1"));
-            }
-        }
-        changes
+        // Orientation and normalization handled by apply_change
+        factoring(given, given_idx, selector)
     }
 }
 

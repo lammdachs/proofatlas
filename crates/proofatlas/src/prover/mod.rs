@@ -474,6 +474,7 @@ impl Prover {
     pub fn init(&mut self) -> Option<ProofResult> {
         let initial_clauses = std::mem::take(&mut self.initial_clauses);
         for mut clause in initial_clauses {
+            clause.normalize_variables(&mut self.clause_manager.interner);
             self.clause_manager.orient_equalities(&mut clause);
             if let Some(result) = self.apply_change(StateChange::Add(Arc::new(clause), "Input".into(), vec![])) {
                 return Some(result);
@@ -500,10 +501,11 @@ impl Prover {
                 let new_idx = self.state.clauses.len();
 
                 // Arc has refcount=1 (just created by caller), so get_mut succeeds.
-                // Clause is already oriented at creation — only set metadata here.
                 {
                     let clause = Arc::get_mut(&mut arc_clause)
                         .expect("Arc refcount must be 1 in apply_change/Add");
+                    clause.normalize_variables(&mut self.clause_manager.interner);
+                    self.clause_manager.orient_equalities(clause);
                     clause.id = Some(new_idx);
                     clause.age = self.state.current_iteration;
                     clause.role = crate::logic::ClauseRole::Derived;
@@ -595,10 +597,11 @@ impl Prover {
                     let new_idx = self.state.clauses.len();
 
                     // Arc has refcount=1, so get_mut succeeds.
-                    // Clause is already oriented at creation — only set metadata here.
                     {
                         let clause = Arc::get_mut(&mut repl)
                             .expect("Arc refcount must be 1 in apply_change/Simplify");
+                        clause.normalize_variables(&mut self.clause_manager.interner);
+                        self.clause_manager.orient_equalities(clause);
                         clause.id = Some(new_idx);
                         clause.age = self.state.current_iteration;
                         clause.role = crate::logic::ClauseRole::Derived;

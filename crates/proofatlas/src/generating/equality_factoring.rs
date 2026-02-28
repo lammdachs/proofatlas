@@ -4,7 +4,6 @@ use super::common::{collect_literals_except, is_ordered_greater};
 use crate::logic::{Clause, Interner, Literal, Position, PredicateSymbol, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
-use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::selection::LiteralSelector;
 use crate::logic::unify;
 use std::sync::Arc;
@@ -81,9 +80,9 @@ pub fn equality_factoring(
                     // Add all other literals from C (except the two equalities we're factoring)
                     new_literals.extend(collect_literals_except(clause, &[idx1, idx2], &sigma));
 
-                    let mut conclusion = Clause::new(new_literals);
-                    orient_clause_equalities(&mut conclusion, interner);
+                    let conclusion = Clause::new(new_literals);
 
+                    // Orientation and normalization handled by apply_change
                     results.push(StateChange::Add(
                         Arc::new(conclusion),
                         "EqualityFactoring".into(),
@@ -199,9 +198,14 @@ impl GeneratingInference for EqualityFactoringRule {
                         premise, &[idx1, idx2], &sigma,
                     ));
 
-                    // Check if conclusion matches (allowing reorientation of equalities)
-                    if conclusion.literals.len() == expected_lits.len()
-                        && conclusion.literals.iter().all(|cl| expected_lits.contains(cl))
+                    let mut int = interner.clone();
+                    let mut reconstructed = Clause::new(expected_lits);
+                    reconstructed.normalize_variables(&mut int);
+                    crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
+
+                    // Check if conclusion matches
+                    if conclusion.literals.len() == reconstructed.literals.len()
+                        && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
                     {
                         return Ok(());
                     }

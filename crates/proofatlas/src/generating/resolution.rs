@@ -6,7 +6,6 @@ use super::common::{
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::{Clause, Interner, Position, PredicateId};
 use crate::logic::clause_manager::ClauseManager;
-use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::SelectedLiteralIndex;
 use crate::selection::LiteralSelector;
 use std::collections::BTreeSet;
@@ -52,10 +51,9 @@ pub fn resolution(
                     // Remove duplicates
                     new_literals = remove_duplicate_literals(new_literals);
 
-                    let mut new_clause = Clause::new(new_literals);
-                    orient_clause_equalities(&mut new_clause, interner);
+                    let new_clause = Clause::new(new_literals);
 
-                    // Tautology check delegated to TautologyRule during forward simplification
+                    // Orientation and normalization handled by apply_change
                     results.push(StateChange::Add(
                         Arc::new(new_clause),
                         "Resolution".into(),
@@ -128,6 +126,7 @@ impl GeneratingInference for ResolutionRule {
                         new_lits = super::common::remove_duplicate_literals(new_lits);
 
                         let mut reconstructed = Clause::new(new_lits);
+                        reconstructed.normalize_variables(&mut int);
                         orient_clause_equalities(&mut reconstructed, &int);
 
                         if conclusion.literals.len() == reconstructed.literals.len()

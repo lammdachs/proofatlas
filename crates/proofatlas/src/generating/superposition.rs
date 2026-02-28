@@ -7,7 +7,6 @@ use crate::logic::{Clause, Interner, Literal, Position, PredicateId, Term, KBO};
 use crate::logic::unification::scoped::{ScopedVar, flatten_scoped, unify_scoped};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
-use crate::logic::ordering::orient_equalities::orient_clause_equalities;
 use crate::index::SelectedLiteralIndex;
 use crate::logic::literal_selection::LiteralSelector;
 use std::collections::HashMap;
@@ -147,10 +146,9 @@ pub fn superposition(
                                 // Remove duplicates
                                 new_literals = remove_duplicate_literals(new_literals);
 
-                                let mut new_clause = Clause::new(new_literals);
-                                orient_clause_equalities(&mut new_clause, interner);
+                                let new_clause = Clause::new(new_literals);
 
-                                // Tautology check delegated to TautologyRule during forward simplification
+                                // Orientation and normalization handled by apply_change
                                 results.push(StateChange::Add(
                                     Arc::new(new_clause),
                                     "Superposition".into(),
@@ -362,8 +360,9 @@ impl GeneratingInference for SuperpositionRule {
                                     ));
                                     new_lits = remove_duplicate_literals(new_lits);
 
-                                    // Orient equalities to match what the prover does
+                                    // Normalize and orient to match what the prover does
                                     let mut reconstructed = Clause::new(new_lits);
+                                    reconstructed.normalize_variables(&mut int);
                                     orient_clause_equalities(&mut reconstructed, &int);
 
                                     if conclusion.literals.len() == reconstructed.literals.len()
