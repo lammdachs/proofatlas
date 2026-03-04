@@ -64,12 +64,12 @@ pub fn superposition(
                 // 2. Find occurrences of right, replace with left (right -> left)
                 // The ordering constraint is checked AFTER computing the MGU
 
-                let directions: [(_, _, &str); 2] = [
-                    (left, right, "l->r"),
-                    (right, left, "r->l"),
+                let directions: [(_, _, usize); 2] = [
+                    (left, right, 0),
+                    (right, left, 1),
                 ];
 
-                for (pattern, replacement, _dir) in directions {
+                for (pattern, replacement, pattern_arg_idx) in directions {
                     // For each selected literal in into_clause
                     for &into_idx in &selected_into {
                         let into_lit = &into_clause.literals[into_idx];
@@ -85,6 +85,13 @@ pub fn superposition(
                             // CRITICAL: l' (subterm) must not be a variable
                             // This prevents unsound inferences
                             if matches!(subterm, Term::Variable(_)) {
+                                continue;
+                            }
+
+                            // Skip superposing a term into the same position in the same
+                            // literal of the same clause — this always yields a tautology
+                            // (e.g. l=r into itself at l's position gives r=r).
+                            if idx1 == idx2 && from_idx == into_idx && pos == &[pattern_arg_idx] {
                                 continue;
                             }
 
