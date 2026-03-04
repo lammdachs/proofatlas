@@ -16,7 +16,7 @@ use crate::state::{
 };
 use crate::config::{LiteralSelectionStrategy, ProverConfig};
 use self::profile::SaturationProfile;
-use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule};
+use crate::simplifying::{TautologyRule, SubsumptionRule, DemodulationRule, CondensationRule};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::generating::{
@@ -87,10 +87,15 @@ impl Prover {
         let eq_pred_id = interner.get_predicate("=");
 
         // Initialize simplification rules (each owns its own index)
+        let mut subsumption_rule = SubsumptionRule::new(&interner);
+        if config.enable_profiling {
+            subsumption_rule.enable_profiling();
+        }
         let simplifying_inferences: Vec<Box<dyn SimplifyingInference>> = vec![
             Box::new(TautologyRule::new(&interner)),
             Box::new(DemodulationRule::new(&interner)),
-            Box::new(SubsumptionRule::new(&interner)),
+            Box::new(CondensationRule::new()),
+            Box::new(subsumption_rule),
         ];
 
         // Create clause manager
@@ -360,6 +365,11 @@ impl Prover {
             let mut all_backward_changes: Vec<StateChange> = Vec::new();
 
             for rule in self.simplifying_inferences.iter_mut() {
+                // Check timeout/cancel between backward simplification rules
+                if self.clause_manager.is_cancelled() {
+                    return Some(ProofResult::ResourceLimit);
+                }
+
                 let rule_name = rule.name().to_string();
                 let t_rule = self.profile.as_ref().map(|_| Instant::now());
 
@@ -374,6 +384,16 @@ impl Prover {
                 if let (Some(p), Some(t)) = (self.profile.as_mut(), t_rule) {
                     p.record_simplification_backward_attempt(&rule_name, count, t.elapsed());
                     p.backward_simplify_time += t.elapsed();
+                }
+
+                // Drain backward subsumption breakdown if available
+                if let Some(p) = self.profile.as_mut() {
+                    if let Some(buckets) = rule.drain_backward_breakdown() {
+                        for (i, &(hits, time)) in buckets.iter().enumerate() {
+                            let lit_count = match i { 0 => 1, 1 => 2, _ => 3 };
+                            p.record_backward_subsumption_bucket(lit_count, hits, time);
+                        }
+                    }
                 }
 
                 if !changes.is_empty() {

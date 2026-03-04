@@ -29,6 +29,22 @@ impl Serialize for RuleStats {
     }
 }
 
+/// Backward subsumption breakdown by subsumer literal count.
+#[derive(Debug, Clone, Default)]
+pub struct BackwardSubsumptionBucket {
+    pub hits: usize,
+    pub time: Duration,
+}
+
+impl Serialize for BackwardSubsumptionBucket {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut s = serializer.serialize_struct("BackwardSubsumptionBucket", 2)?;
+        s.serialize_field("hits", &self.hits)?;
+        s.serialize_field("time", &secs(&self.time))?;
+        s.end()
+    }
+}
+
 /// Statistics for a simplification rule (with forward and backward phases).
 #[derive(Debug, Clone, Default)]
 pub struct SimplificationStats {
@@ -44,11 +60,13 @@ pub struct SimplificationStats {
     pub backward_attempts: usize,
     /// Total time spent on all backward simplification attempts
     pub backward_attempt_time: Duration,
+    /// Backward subsumption breakdown by subsumer literal count: unit (1), binary (2), 3+
+    pub backward_by_size: [BackwardSubsumptionBucket; 3],
 }
 
 impl Serialize for SimplificationStats {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SimplificationStats", 8)?;
+        let mut s = serializer.serialize_struct("SimplificationStats", 11)?;
         s.serialize_field("forward_count", &self.forward_count)?;
         s.serialize_field("forward_time", &secs(&self.forward_time))?;
         s.serialize_field("backward_count", &self.backward_count)?;
@@ -57,6 +75,9 @@ impl Serialize for SimplificationStats {
         s.serialize_field("forward_attempt_time", &secs(&self.forward_attempt_time))?;
         s.serialize_field("backward_attempts", &self.backward_attempts)?;
         s.serialize_field("backward_attempt_time", &secs(&self.backward_attempt_time))?;
+        s.serialize_field("backward_unit", &self.backward_by_size[0])?;
+        s.serialize_field("backward_binary", &self.backward_by_size[1])?;
+        s.serialize_field("backward_3plus", &self.backward_by_size[2])?;
         s.end()
     }
 }
@@ -137,6 +158,19 @@ impl SaturationProfile {
             stats.backward_count += count;
             stats.backward_time += time;
         }
+    }
+
+    /// Record backward subsumption breakdown by subsumer literal count.
+    /// `subsumer_lit_count` is the number of literals in the subsumer clause.
+    pub fn record_backward_subsumption_bucket(&mut self, subsumer_lit_count: usize, hits: usize, time: Duration) {
+        let stats = self.simplification_rules.entry("Subsumption".to_string()).or_default();
+        let bucket = match subsumer_lit_count {
+            1 => 0,
+            2 => 1,
+            _ => 2,
+        };
+        stats.backward_by_size[bucket].hits += hits;
+        stats.backward_by_size[bucket].time += time;
     }
 }
 

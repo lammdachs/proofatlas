@@ -10,6 +10,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 // =============================================================================
 // Verification
@@ -423,6 +424,13 @@ pub trait SimplifyingInference: Send + Sync {
     ) -> Result<(), VerificationError> {
         // Default: skip verification (for rules where verification is not yet implemented)
         Ok(())
+    }
+
+    /// Drain backward breakdown stats (hits, time) by subsumer size bucket.
+    /// Returns `[(unit_hits, unit_time), (binary_hits, binary_time), (3+_hits, 3+_time)]`.
+    /// Default returns None (no breakdown tracking).
+    fn drain_backward_breakdown(&mut self) -> Option<[(usize, Duration); 3]> {
+        None
     }
 }
 

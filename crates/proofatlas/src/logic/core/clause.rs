@@ -263,6 +263,7 @@ impl Clause {
             "EqualityResolution" => 4,
             "EqualityFactoring" => 5,
             "Demodulation" | "Forward Demodulation" | "Backward Demodulation" => 6,
+            "Condensation" => 7,
             _ => 0, // Unknown rules default to input
         }
     }

@@ -67,8 +67,16 @@ fn signature_leq(subsumer_sig: &PredSignature, target_sig: &PredSignature) -> bo
 struct LiteralDiscTree {
     /// Trie roots keyed by (predicate, polarity)
     roots: HashMap<(PredicateId, bool), DiscTreeNode>,
+    /// Flat entry lists per (predicate, polarity) for backward subsumption.
+    /// Each entry is a clause index; duplicates are OK (gen counter handles dedup).
+    /// Periodically compacted to remove deactivated entries.
+    flat_entries: HashMap<(PredicateId, bool), Vec<usize>>,
+    /// Total entries across all flat_entries lists (for compaction threshold).
+    flat_total: usize,
     /// Active clause indices (bitset for O(1) lookup)
     active: Vec<bool>,
+    /// Number of active clauses (for compaction threshold).
+    active_count: usize,
     /// Clause literal counts (for hit-count filtering)
     clause_lens: Vec<u16>,
     /// Reusable scratch buffers for hit-count filtering (avoids per-call allocation).
@@ -80,18 +88,17 @@ impl LiteralDiscTree {
     fn new() -> Self {
         LiteralDiscTree {
             roots: HashMap::new(),
+            flat_entries: HashMap::new(),
+            flat_total: 0,
             active: Vec::new(),
+            active_count: 0,
             clause_lens: Vec::new(),
             hit_counts: Vec::new(),
             last_gen: Vec::new(),
         }
     }
 
-    fn is_active(&self, idx: usize) -> bool {
-        idx < self.active.len() && self.active[idx]
-    }
-
-    /// Insert all literals of a clause into the tree.
+    /// Insert all literals of a clause into the tree and flat index.
     fn insert(&mut self, clause_idx: usize, clause: &Clause) {
         if clause_idx >= self.clause_lens.len() {
             self.clause_lens.resize(clause_idx + 1, 0);
@@ -106,6 +113,10 @@ impl LiteralDiscTree {
                 disc_tree::flatten_insert(arg, &mut keys);
             }
             disc_tree::trie_insert(root, &keys, clause_idx);
+
+            // Also add to flat index for fast backward subsumption
+            self.flat_entries.entry(key).or_default().push(clause_idx);
+            self.flat_total += 1;
         }
     }
 
@@ -114,14 +125,30 @@ impl LiteralDiscTree {
         if idx >= self.active.len() {
             self.active.resize(idx + 1, false);
         }
-        self.active[idx] = true;
+        if !self.active[idx] {
+            self.active[idx] = true;
+            self.active_count += 1;
+        }
     }
 
     /// Mark a clause as inactive.
     fn deactivate(&mut self, idx: usize) {
-        if idx < self.active.len() {
+        if idx < self.active.len() && self.active[idx] {
             self.active[idx] = false;
+            self.active_count -= 1;
         }
+    }
+
+    /// Compact flat_entries by removing deactivated entries.
+    /// Called when the flat list has grown too large relative to the active set.
+    fn compact_flat_entries(&mut self) {
+        let active = &self.active;
+        let mut new_total = 0;
+        for entries in self.flat_entries.values_mut() {
+            entries.retain(|&idx| idx < active.len() && active[idx]);
+            new_total += entries.len();
+        }
+        self.flat_total = new_total;
     }
 
     /// Find subsumer candidates using interleaved hit-count filtering.
@@ -196,63 +223,98 @@ impl LiteralDiscTree {
 
     /// Find candidate subsumed clauses (backward subsumption).
     ///
-    /// For each literal in the subsumer clause, performs instance retrieval using
-    /// `flatten_insert` (subsumer variables -> Star). Returns the **intersection**
-    /// of active candidates across all literals — a subsumed clause must contain
-    /// an instance of every literal in the subsumer.
+    /// Hybrid approach: for each subsumer literal, chooses between:
+    /// - Flat entry list: when all arguments are variables (Star fan-out makes
+    ///   trie traversal O(trie_size) with poor cache locality)
+    /// - Disc tree `retrieve_instances`: when some arguments are concrete
+    ///   (trie prunes to matching branches efficiently)
     ///
-    /// Uses sorted Vec intersection (merge-scan) instead of HashSet to avoid
-    /// hashing overhead and allocation churn.
-    fn find_subsumed_candidates(&self, clause: &Clause) -> Vec<usize> {
-        let mut result: Option<Vec<usize>> = None;
+    /// Hit-count intersection with generation-counter dedup then filters to
+    /// candidates where every subsumer literal found a match.
+    fn find_subsumed_candidates(&mut self, clause: &Clause) -> Vec<usize> {
+        // Compact when flat lists grow too large relative to active set
+        if self.flat_total > self.active_count * 9 + 1000 {
+            self.compact_flat_entries();
+        }
+
+        let needed_len = self.clause_lens.len();
+        if self.hit_counts.len() < needed_len {
+            self.hit_counts.resize(needed_len, 0);
+            self.last_gen.resize(needed_len, 0);
+        }
+        let hit_counts = &mut self.hit_counts;
+        let last_gen = &mut self.last_gen;
+        let active = &self.active;
+
+        let subsumer_len = clause.literals.len() as u16;
+        let mut touched = Vec::new();
+        let mut gen: u16 = 0;
 
         for lit in &clause.literals {
+            gen = gen.wrapping_add(1);
             let key = (lit.predicate.id, lit.polarity);
-            let candidates = if let Some(root) = self.roots.get(&key) {
-                let mut query_keys = Vec::new();
-                for arg in &lit.args {
-                    disc_tree::flatten_insert(arg, &mut query_keys);
-                }
-                let mut results = Vec::new();
-                disc_tree::retrieve_instances(root, &query_keys, 0, &mut results);
-                // Filter active + sort + dedup for merge intersection
-                results.retain(|&idx| self.is_active(idx));
-                results.sort_unstable();
-                results.dedup();
-                results
-            } else {
-                // No root for this (pred, polarity) -> no clauses can match
-                return Vec::new();
-            };
 
-            result = Some(match result {
-                None => candidates,
-                Some(prev) => {
-                    // Sorted merge intersection
-                    let mut out = Vec::with_capacity(prev.len().min(candidates.len()));
-                    let (mut i, mut j) = (0, 0);
-                    while i < prev.len() && j < candidates.len() {
-                        match prev[i].cmp(&candidates[j]) {
-                            std::cmp::Ordering::Less => i += 1,
-                            std::cmp::Ordering::Greater => j += 1,
-                            std::cmp::Ordering::Equal => {
-                                out.push(prev[i]);
-                                i += 1;
-                                j += 1;
+            // Check if literal has any concrete (non-variable) arguments
+            let has_concrete_args = lit.args.iter().any(|arg| !matches!(arg, crate::logic::Term::Variable(_)));
+
+            if has_concrete_args {
+                // Use disc tree — concrete args prune branches efficiently
+                if let Some(root) = self.roots.get(&key) {
+                    let mut query_keys = Vec::new();
+                    for arg in &lit.args {
+                        disc_tree::flatten_insert(arg, &mut query_keys);
+                    }
+                    let mut results = Vec::new();
+                    disc_tree::retrieve_instances(root, &query_keys, 0, &mut results);
+
+                    for idx in results {
+                        let is_active = idx < active.len() && active[idx];
+                        if is_active && last_gen[idx] != gen {
+                            last_gen[idx] = gen;
+                            if hit_counts[idx] == 0 {
+                                touched.push(idx);
                             }
+                            hit_counts[idx] += 1;
                         }
                     }
-                    out
+                } else {
+                    for idx in touched { hit_counts[idx] = 0; }
+                    return Vec::new();
                 }
-            });
-
-            // Early exit if intersection is already empty
-            if result.as_ref().map_or(true, |s| s.is_empty()) {
-                return Vec::new();
+            } else {
+                // Use flat list — all args are variables, trie provides no filtering
+                if let Some(entries) = self.flat_entries.get(&key) {
+                    for &idx in entries {
+                        let is_active = idx < active.len() && active[idx];
+                        if is_active && last_gen[idx] != gen {
+                            last_gen[idx] = gen;
+                            if hit_counts[idx] == 0 {
+                                touched.push(idx);
+                            }
+                            hit_counts[idx] += 1;
+                        }
+                    }
+                } else {
+                    for idx in touched { hit_counts[idx] = 0; }
+                    return Vec::new();
+                }
             }
         }
 
-        result.unwrap_or_default()
+        // Collect candidates where all subsumer literals matched
+        let mut candidates = Vec::new();
+        for idx in &touched {
+            if hit_counts[*idx] == subsumer_len {
+                candidates.push(*idx);
+            }
+        }
+
+        // Sparse cleanup
+        for idx in touched {
+            hit_counts[idx] = 0;
+        }
+
+        candidates
     }
 }
 
@@ -450,8 +512,9 @@ impl SubsumptionChecker {
         let subsumer = &self.clauses[subsumer_idx];
         let mut subsumed = Vec::new();
 
-        // Tree intersection gives the tight candidate set (already filtered by active)
         let tree_candidates = self.literal_tree.find_subsumed_candidates(subsumer);
+
+        let subsumer_sig = &self.pred_signatures[subsumer_idx];
 
         for idx in tree_candidates {
             if idx == subsumer_idx {
@@ -462,6 +525,11 @@ impl SubsumptionChecker {
 
             // Quick check: subsumer can't be larger
             if subsumer.literals.len() > candidate.literals.len() {
+                continue;
+            }
+
+            // Predicate-polarity signature filter (precomputed, no allocation)
+            if !signature_leq(subsumer_sig, &self.pred_signatures[idx]) {
                 continue;
             }
 

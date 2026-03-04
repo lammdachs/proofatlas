@@ -40,27 +40,55 @@
 use crate::logic::{Clause, Literal, Term, VariableId, Interner};
 use crate::logic::clause_manager::ClauseManager;
 use crate::logic::Position;
+use crate::logic::time_compat::Instant;
 use crate::index::SubsumptionChecker;
 use crate::state::{SaturationState, SimplifyingInference, StateChange};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 // =============================================================================
 // SubsumptionRule (stateless rule adapter)
 // =============================================================================
+
+/// Backward subsumption breakdown by subsumer size (unit/binary/3+).
+#[derive(Debug, Clone, Default)]
+pub struct BackwardSubsumptionBreakdown {
+    /// (hits, time) per bucket: [0]=unit, [1]=binary, [2]=3+
+    pub buckets: [(usize, Duration); 3],
+    /// Whether profiling is enabled
+    pub enabled: bool,
+}
+
+impl BackwardSubsumptionBreakdown {
+    /// Take and reset the breakdown, returning the accumulated values.
+    pub fn take(&mut self) -> [(usize, Duration); 3] {
+        let result = self.buckets;
+        self.buckets = Default::default();
+        result
+    }
+}
 
 /// Forward/backward subsumption rule.
 ///
 /// Owns a SubsumptionChecker and maintains it via lifecycle methods.
 pub struct SubsumptionRule {
     checker: SubsumptionChecker,
+    /// Per-call backward subsumption breakdown (accumulated, drained by prover)
+    pub backward_breakdown: BackwardSubsumptionBreakdown,
 }
 
 impl SubsumptionRule {
     pub fn new(_interner: &Interner) -> Self {
         SubsumptionRule {
             checker: SubsumptionChecker::new(),
+            backward_breakdown: BackwardSubsumptionBreakdown::default(),
         }
+    }
+
+    /// Enable profiling for backward subsumption breakdown.
+    pub fn enable_profiling(&mut self) {
+        self.backward_breakdown.enabled = true;
     }
 }
 
@@ -68,6 +96,7 @@ impl Default for SubsumptionRule {
     fn default() -> Self {
         SubsumptionRule {
             checker: SubsumptionChecker::new(),
+            backward_breakdown: BackwardSubsumptionBreakdown::default(),
         }
     }
 }
@@ -138,9 +167,28 @@ impl SimplifyingInference for SubsumptionRule {
         state: &SaturationState,
         _cm: &ClauseManager,
     ) -> Vec<StateChange> {
+        let profiling = self.backward_breakdown.enabled;
+        let t0 = if profiling { Some(Instant::now()) } else { None };
+
         // Find clauses subsumed by this clause
         // (find_subsumed_by uses the literal tree's active set, not candidate_indices)
         let subsumed = self.checker.find_subsumed_by(clause_idx, &[]);
+
+        let hits = subsumed.iter()
+            .filter(|&&idx| state.processed.contains(&idx) || state.unprocessed.contains(&idx))
+            .count();
+
+        if let Some(t0) = t0 {
+            let elapsed = t0.elapsed();
+            let subsumer_len = state.clauses[clause_idx].literals.len();
+            let bucket = match subsumer_len {
+                1 => 0,
+                2 => 1,
+                _ => 2,
+            };
+            self.backward_breakdown.buckets[bucket].0 += hits;
+            self.backward_breakdown.buckets[bucket].1 += elapsed;
+        }
 
         let rule_name: String = self.name().into();
         subsumed
@@ -148,6 +196,14 @@ impl SimplifyingInference for SubsumptionRule {
             .filter(|&idx| state.processed.contains(&idx) || state.unprocessed.contains(&idx))
             .map(|idx| StateChange::Simplify(idx, None, rule_name.clone(), vec![Position::clause(clause_idx)]))
             .collect()
+    }
+
+    fn drain_backward_breakdown(&mut self) -> Option<[(usize, std::time::Duration); 3]> {
+        if self.backward_breakdown.enabled {
+            Some(self.backward_breakdown.take())
+        } else {
+            None
+        }
     }
 
     fn on_add(&mut self, idx: usize, clause: &Arc<Clause>) {

@@ -6,7 +6,9 @@
 pub mod tautology;
 pub mod subsumption;
 pub mod demodulation;
+pub mod condensation;
 
 pub use tautology::TautologyRule;
 pub use subsumption::SubsumptionRule;
 pub use demodulation::DemodulationRule;
+pub use condensation::CondensationRule;

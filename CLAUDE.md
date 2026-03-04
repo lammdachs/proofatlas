@@ -22,7 +22,7 @@ proofatlas/
 │   │       │   ├── literal_selection.rs  # LiteralSelector trait + impls
 │   │       │   ├── clause_manager.rs     # ClauseManager: interner + selector + KBO
 │   │       │   └── time_compat.rs        # WASM-compatible Instant
-│   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation)
+│   │       ├── simplifying/    # SimplifyingInference impls (tautology, subsumption, demodulation, condensation)
 │   │       ├── generating/     # GeneratingInference impls (resolution, superposition, factoring, etc.)
 │   │       ├── index/          # SubsumptionChecker, DiscriminationTree, SelectedLiteralIndex
 │   │       ├── prover/         # Saturation engine
@@ -218,7 +218,10 @@ Four strategies (Hoder et al. "Selecting the selection" 2016):
 ### Subsumption
 Tiered approach: duplicates → variants → units → small clauses → greedy.
 
-Candidate filtering uses a literal discrimination tree (`index/disc_tree.rs` shared core, `index/subsumption.rs` wrapper). Each literal is indexed under its (predicate, polarity) pair. Forward subsumption uses hit-count filtering with interleaved early exit and generation-counter dedup. Backward subsumption uses sorted Vec intersection across per-literal instance retrieval results. `MatchSubst` in `simplifying/subsumption.rs` is a flat-array matching substitution (`Vec<Option<&Term>>` indexed by VariableId) for zero-clone matching.
+Candidate filtering uses a literal discrimination tree (`index/disc_tree.rs` shared core, `index/subsumption.rs` wrapper). Each literal is indexed under its (predicate, polarity) pair. Forward subsumption uses hit-count filtering with interleaved early exit and generation-counter dedup. Backward subsumption uses hybrid candidate generation: per-literal, if all arguments are variables (Star fan-out makes trie O(trie_size)), candidates come from a flat `Vec<usize>` per (predicate, polarity); if some arguments are concrete, the disc tree's `retrieve_instances` prunes efficiently. Flat lists are periodically compacted to remove deactivated entries. `MatchSubst` in `simplifying/subsumption.rs` is a flat-array matching substitution (`Vec<Option<&Term>>` indexed by VariableId) for zero-clone matching.
+
+### Condensation
+`CondensationRule` (`simplifying/condensation.rs`): stateless simplifying inference. For clauses with ≥ 2 literals, tries removing each literal L by checking if some other literal L' in the clause can match L (i.e., σ(L') = L). If so, applies σ to the remaining literals to produce a shorter clause. Uses pairwise literal matching — not full clause subsumption. Repeated application is automatic via the prover's simplification restart loop.
 
 ### Architecture
 
@@ -253,6 +256,7 @@ Each rule owns its own index (if needed) and maintains it via lifecycle methods 
   - `TautologyRule`: Stateless (no index)
   - `SubsumptionRule`: Owns `SubsumptionChecker` (lifecycle: on_add, on_transfer, on_delete)
   - `DemodulationRule`: Owns `DiscriminationTree` (lifecycle: on_transfer, on_delete)
+  - `CondensationRule`: Stateless (no index)
 
 **GeneratingInference trait** (`state.rs`):
 - `generate(&mut self, given_idx, &SaturationState, &mut ClauseManager)`: Generate inferences with given clause and clauses in P
