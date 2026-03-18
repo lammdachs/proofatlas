@@ -58,8 +58,9 @@ impl PyOrchestrator {
     ///     include_dir: Directory for resolving TPTP include() directives
     ///     max_clause_size: Maximum clause size (default: 100)
     ///     enable_trace: Enable MiniLM backend for trace embedding (default: false)
+    ///     temperature: Softmax temperature for ML clause selection (default: 1.0)
     #[new]
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, temperature=None))]
     pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
@@ -74,6 +75,7 @@ impl PyOrchestrator {
         include_dir: Option<String>,
         max_clause_size: Option<usize>,
         enable_trace: Option<bool>,
+        temperature: Option<f32>,
     ) -> PyResult<Self> {
         let timeout_dur = timeout
             .map(|s| Duration::from_secs_f64(s))
@@ -119,6 +121,9 @@ impl PyOrchestrator {
         }
         if let Some(trace) = enable_trace {
             builder = builder.enable_trace(trace);
+        }
+        if let Some(temp) = temperature {
+            builder = builder.temperature(temp);
         }
 
         let atlas = builder.build()

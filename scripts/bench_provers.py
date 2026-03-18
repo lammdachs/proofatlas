@@ -66,6 +66,9 @@ def _run_proofatlas_inner(problem: Path, base_dir: Path, preset: dict, tptp_root
         atlas_kwargs["scorer"] = scorer
         atlas_kwargs["weights_path"] = weights_path
         atlas_kwargs["use_cuda"] = use_cuda
+        temperature = preset.get("temperature")
+        if temperature is not None:
+            atlas_kwargs["temperature"] = float(temperature)
     else:
         atlas_kwargs["age_weight_ratio"] = float(age_weight_ratio)
 
@@ -395,6 +398,9 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
         kwargs["scorer"] = preset["scorer"]
         kwargs["weights_path"] = weights_path
         kwargs["use_cuda"] = use_cuda
+        temperature = preset.get("temperature")
+        if temperature is not None:
+            kwargs["temperature"] = float(temperature)
     else:
         kwargs["age_weight_ratio"] = float(preset.get("age_weight_ratio", 0.5))
 

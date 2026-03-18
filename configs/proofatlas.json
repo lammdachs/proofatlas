@@ -120,6 +120,42 @@
       "memory_limit": 1024
     },
 
+    "gcn_struct_attention_t05": {
+      "description": "GCN (structural) + Attention (temp=0.5)",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024,
+      "temperature": 0.5
+    },
+
+    "gcn_struct_attention_t03": {
+      "description": "GCN (structural) + Attention (temp=0.3)",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024,
+      "temperature": 0.3
+    },
+
+    "gcn_struct_attention_t01": {
+      "description": "GCN (structural) + Attention (temp=0.1)",
+      "timeout": 300,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 1024,
+      "temperature": 0.1
+    },
+
     "gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer",
       "timeout": 300,

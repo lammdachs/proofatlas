@@ -173,9 +173,7 @@ impl DataProcessor for GcnEmbeddingProcessor {
         };
 
         let selected = softmax_sample_vec(&u_indices, &scores, self.temperature, &mut self.rng_state);
-        if let Some(idx) = selected {
-            self.u_embeddings.shift_remove(&idx);
-        }
+        // Don't remove from u_embeddings here — on_activate will move it to p_embeddings
         selected
     }
 }
@@ -325,9 +323,7 @@ impl DataProcessor for SentenceEmbeddingProcessor {
         };
 
         let selected = softmax_sample_vec(&u_indices, &scores, self.temperature, &mut self.rng_state);
-        if let Some(idx) = selected {
-            self.u_embeddings.shift_remove(&idx);
-        }
+        // Don't remove from u_embeddings here — on_activate will move it to p_embeddings
         selected
     }
 }
@@ -474,9 +470,7 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
         };
 
         let selected = softmax_sample_vec(&u_indices, &scores, self.temperature, &mut self.rng_state);
-        if let Some(idx) = selected {
-            self.u_embeddings.shift_remove(&idx);
-        }
+        // Don't remove from u_embeddings here — on_activate will move it to p_embeddings
         selected
     }
 }
