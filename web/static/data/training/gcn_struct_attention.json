@@ -1,12 +1,12 @@
 {
-  "generated": "2026-02-14T14:25:19.231054",
+  "generated": "2026-02-14T23:59:39.312266",
   "name": "gcn_struct_attention",
-  "start_time": "2026-02-14T14:25:19.231061",
-  "end_time": "2026-02-14T14:25:25.172849",
-  "total_time_seconds": 5.945548057556152,
-  "termination_reason": "completed",
-  "best_epoch": 1,
-  "best_val_loss": 0.0,
+  "start_time": "2026-02-14T23:59:39.312296",
+  "end_time": "2026-02-15T01:21:23.634374",
+  "total_time_seconds": 4908.66194486618,
+  "termination_reason": "early_stopped",
+  "best_epoch": 16,
+  "best_val_loss": 0.004895606927708191,
   "model": {
     "type": "gcn",
     "hidden_dim": 64,
@@ -18,18 +18,218 @@
     "batch_size_bytes": 65536,
     "accumulate_steps": 1,
     "learning_rate": 0.0003,
-    "max_epochs": 1,
+    "max_epochs": 100,
     "optimizer": "adamw",
     "weight_decay": 0.0001,
     "margin": 0.1,
-    "cpu_workers": 2,
-    "gpu_workers": 1
+    "cpu_workers": 32,
+    "gpu_workers": 4
   },
   "epochs": [
     {
       "epoch": 1,
-      "train_loss": 0.7444438934326172,
-      "val_loss": 0.0,
+      "train_loss": 0.2598535163519352,
+      "val_loss": 0.2720857738325505,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.16254087686716953,
+      "val_loss": 0.36764781952476705,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.12657011123523518,
+      "val_loss": 0.3477480175145544,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.12377204360941908,
+      "val_loss": 0.39212305737225644,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.19378965368875511,
+      "val_loss": 0.09807419780310865,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.1089189188968445,
+      "val_loss": 0.03422642021946313,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.13633851619216397,
+      "val_loss": 0.06756812766726121,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.056685088199247335,
+      "val_loss": 0.04417573604123721,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.20719161381804627,
+      "val_loss": 0.014334617501374911,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.11840795505819375,
+      "val_loss": 0.07637500762941905,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.023671702554469758,
+      "val_loss": 0.01606793343035907,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.08444928272886697,
+      "val_loss": 0.42352579630381565,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.11950962866882099,
+      "val_loss": 0.26707007966787305,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.043094996535959856,
+      "val_loss": 0.36160490085867353,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.09133628594880658,
+      "val_loss": 0.2893865514697356,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.017635999528335174,
+      "val_loss": 0.004895606927708191,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.060185055984483475,
+      "val_loss": 0.12663740270285895,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.08714436853454127,
+      "val_loss": 0.3691583240733611,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 19,
+      "train_loss": 0.002520400486751479,
+      "val_loss": 0.40805749459704094,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 20,
+      "train_loss": 0.02873774408742084,
+      "val_loss": 0.7866617838541692,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 21,
+      "train_loss": 0.336716869167923,
+      "val_loss": 0.01774559025311529,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 22,
+      "train_loss": 0.10182887963070623,
+      "val_loss": 0.23419854436495302,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 23,
+      "train_loss": 0.1979976536369176,
+      "val_loss": 0.04589819908154307,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 24,
+      "train_loss": 0.023399761982161593,
+      "val_loss": 0.5220105912950304,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 25,
+      "train_loss": 0.2846438109425637,
+      "val_loss": 0.07204308976622117,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0003
+    },
+    {
+      "epoch": 26,
+      "train_loss": 0.26256730279295487,
+      "val_loss": 0.26683618040645823,
       "val_acc": null,
       "val_mrr": null,
       "learning_rate": 0.0003

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-02-18T09:20:05.926499",
+  "generated": "2026-03-17T23:00:04.841761",
   "runs": [
     "proofatlas_age_weight",
     "proofatlas_features_attention",
@@ -8,6 +8,7 @@
     "proofatlas_gcn_attention",
     "proofatlas_gcn_mlp",
     "proofatlas_gcn_struct_attention",
+    "proofatlas_gcn_struct_attention_t05",
     "proofatlas_gcn_struct_mlp",
     "proofatlas_gcn_struct_transformer",
     "proofatlas_gcn_transformer",
@@ -26,12 +27,7 @@
     "proofatlas_time_sentence_attention",
     "proofatlas_time_sentence_mlp",
     "proofatlas_time_sentence_transformer",
-    "spass_age_weight_sel20",
-    "spass_age_weight_sel21",
     "spass_spass_time",
-    "vampire_age_weight_sel0",
-    "vampire_age_weight_sel20",
-    "vampire_age_weight_sel21",
     "vampire_vampire_time"
   ]
 }
