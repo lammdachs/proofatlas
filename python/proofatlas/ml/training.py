@@ -343,7 +343,7 @@ def _run_training_inner(
     is_sentence_model_type = (embedding_type == "string")
 
     if batch_size is None:
-        default_batch_size = 64 * 1024
+        default_batch_size = 4 * 1024 * 1024  # 4 MB — fits ~50-500 problems per batch
         resolved_batch_size = config.get("batch_size_bytes", default_batch_size)
     else:
         resolved_batch_size = batch_size
@@ -358,12 +358,17 @@ def _run_training_inner(
     log_msg(f"Batch: {batch_str} bytes, {accumulate_steps} accumulation steps, {cpu_workers} workers")
 
     # Create datasets using ProofBatchDataset
-    log_msg(f"Loading training data ({output_type} format)...")
+    # Skip loading node_embeddings for models that don't use them (e.g. gcn_struct)
+    node_info = embedding_arch.get("node_info", "both")
+    need_node_emb = node_info != "features"
+
+    log_msg(f"Loading training data ({output_type} format, node_emb={need_node_emb})...")
     train_ds = ProofBatchDataset(
         files=train_files,
         output_type=output_type,
         batch_size=resolved_batch_size,
         shuffle=True,
+        need_node_emb=need_node_emb,
     )
 
     val_ds = None
@@ -374,6 +379,7 @@ def _run_training_inner(
             output_type=output_type,
             batch_size=resolved_batch_size,
             shuffle=False,
+            need_node_emb=need_node_emb,
         )
 
     log_msg(f"Train: {train_ds.num_problems} problems, Val: {val_ds.num_problems if val_ds else 0} problems")
@@ -445,6 +451,24 @@ def _run_training_inner(
         raise ValueError(f"Unknown optimizer: {optimizer_type}")
 
     max_epochs = max_epochs_override if max_epochs_override is not None else config.get("max_epochs", 100)
+
+    # LR scheduler: cosine annealing with optional warmup
+    warmup_epochs = config.get("warmup_epochs", 5)
+    use_scheduler = config.get("lr_schedule", "cosine") != "none"
+    scheduler = None
+    if use_scheduler:
+        from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+        schedulers = []
+        milestones = []
+        if warmup_epochs > 0:
+            schedulers.append(LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs))
+            milestones.append(warmup_epochs)
+        schedulers.append(CosineAnnealingLR(optimizer, T_max=max(1, max_epochs - warmup_epochs)))
+        if len(schedulers) > 1:
+            scheduler = SequentialLR(optimizer, schedulers, milestones=milestones)
+        else:
+            scheduler = schedulers[0]
+        log_msg(f"LR schedule: cosine with {warmup_epochs} warmup epochs")
 
     # Initialize web logger for live updates (rank 0 only)
     web_logger = None
@@ -574,6 +598,11 @@ def _run_training_inner(
         else:
             log_msg(f"Epoch {epoch}/{max_epochs} | train={train_loss:.4f}")
 
+        # Step LR scheduler
+        current_lr = optimizer.param_groups[0]["lr"]
+        if scheduler is not None:
+            scheduler.step()
+
         # Log to web for live updates
         if web_logger:
             web_logger.log_epoch(
@@ -581,7 +610,7 @@ def _run_training_inner(
                 train_loss=train_loss,
                 val_loss=val_loss if val_loader is not None else None,
                 val_acc=None,
-                lr=lr,
+                lr=current_lr,
             )
 
         if log_callback and is_main:

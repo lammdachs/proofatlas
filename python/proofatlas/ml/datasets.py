@@ -55,7 +55,7 @@ def _reconstruct_sets(npz, k: int):
     return u_idx, p_idx, selected_idx
 
 
-def _load_and_sample_graph(trace_file: Path) -> Optional[Dict]:
+def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True) -> Optional[Dict]:
     """Load per-problem graph NPZ, sample random step k, reconstruct U_k/P_k."""
     try:
         npz = np.load(trace_file)
@@ -81,8 +81,8 @@ def _load_and_sample_graph(trace_file: Path) -> Optional[Dict]:
         clause_features = npz["clause_features"]
         labels = npz["labels"]
 
-        has_node_emb = "node_embeddings" in npz
-        has_sentinel = "node_sentinel_type" in npz
+        has_node_emb = need_node_emb and "node_embeddings" in npz
+        has_sentinel = need_node_emb and "node_sentinel_type" in npz
 
         def _extract_clause_graph(i):
             n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
@@ -193,6 +193,9 @@ class ProofBatchDataset(IterableDataset):
         output_type: "graph" for GNN models, "sentence" for sentence models
         batch_size: Maximum tensor bytes per micro-batch (default: 64 KiB)
         shuffle: Whether to shuffle files each epoch
+        need_node_emb: Whether to load pre-computed node embeddings from NPZ.
+            Set False for models that don't use symbol embeddings (e.g. gcn_struct
+            with node_info="features") to avoid inflating byte estimates.
     """
 
     def __init__(
@@ -201,11 +204,13 @@ class ProofBatchDataset(IterableDataset):
         output_type: str = "graph",
         batch_size: int = 64 * 1024,
         shuffle: bool = True,
+        need_node_emb: bool = True,
     ):
         self.files = list(files)
         self.output_type = output_type
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.need_node_emb = need_node_emb
 
         if not self.files:
             raise ValueError("No trace files provided")
@@ -241,7 +246,7 @@ class ProofBatchDataset(IterableDataset):
         if self.output_type == "sentence":
             return _load_and_sample_sentence(f)
         else:
-            return _load_and_sample_graph(f)
+            return _load_and_sample_graph(f, need_node_emb=self.need_node_emb)
 
     def _collate(self, items: List[Dict]) -> Optional[Dict]:
         """Collate pre-sampled items into a batch."""
