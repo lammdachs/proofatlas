@@ -24,6 +24,7 @@
 		training: Record<string, unknown>;
 		epochs: EpochData[];
 		evaluations: EvalData[];
+		start_time: string | null;
 		best_epoch: number | null;
 		best_val_loss: number | null;
 		total_time_seconds: number | null;
@@ -167,6 +168,12 @@
 		requestAnimationFrame(() => renderCharts());
 	}
 
+	function formatDate(iso: string | null | undefined): string {
+		if (!iso) return 'N/A';
+		const d = new Date(iso);
+		return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+	}
+
 	function formatTime(seconds: number | null | undefined): string {
 		if (!seconds) return 'N/A';
 		if (seconds < 60) return `${seconds.toFixed(0)}s`;
@@ -251,7 +258,11 @@
 			<!-- Run info -->
 			<div class="bg-surface-light rounded border border-card-border p-5">
 				<h3 class="font-display font-semibold text-lg text-text mb-3">{currentRunData.name || selectedRun}</h3>
-				<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+				<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+					<div class="p-3 bg-surface rounded border border-card-border">
+						<div class="text-xs text-text-muted uppercase">Start Time</div>
+						<div class="text-sm font-semibold text-text">{formatDate(currentRunData.start_time)}</div>
+					</div>
 					<div class="p-3 bg-surface rounded border border-card-border">
 						<div class="text-xs text-text-muted uppercase">Model Type</div>
 						<div class="text-sm font-semibold text-text">{currentRunData.model?.type || 'N/A'}</div>

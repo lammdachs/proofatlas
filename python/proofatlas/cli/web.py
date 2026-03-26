@@ -134,8 +134,37 @@ class ProofAtlasHandler(http.server.SimpleHTTPRequestHandler):
             self.serve_tptp_problem()
         elif self.path.startswith("/configs/"):
             self.serve_config_file()
+        elif self.path.startswith("/data/"):
+            self.serve_static_data()
         else:
             super().do_GET()
+
+    def serve_static_data(self):
+        """Serve /data/ requests from web/static/data/ for live updates."""
+        import urllib.parse
+        # Strip query string and normalize
+        clean = urllib.parse.urlparse(self.path).path
+        rel = clean[len("/data/"):]
+        if ".." in rel or rel.startswith("/"):
+            self.send_error(403, "Forbidden")
+            return
+
+        static_path = self.project_root / "web" / "static" / "data" / rel
+        if not static_path.is_file():
+            self.send_error(404, f"Not found: {clean}")
+            return
+
+        try:
+            content = static_path.read_bytes()
+            self.send_response(200)
+            ct = "application/json" if static_path.suffix == ".json" else "application/octet-stream"
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self.send_error(500, str(e))
 
     def serve_tptp_problem(self):
         """Serve a TPTP problem from the .tptp directory."""
