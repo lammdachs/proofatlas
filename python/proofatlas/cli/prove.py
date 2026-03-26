@@ -170,6 +170,9 @@ def main():
         atlas_kwargs["encoder"] = encoder
         atlas_kwargs["scorer"] = scorer
         atlas_kwargs["weights_path"] = str(weights_path) if weights_path else None
+        temperature = preset.get("temperature")
+        if temperature is not None:
+            atlas_kwargs["temperature"] = float(temperature)
     else:
         atlas_kwargs["age_weight_ratio"] = age_weight_ratio
 

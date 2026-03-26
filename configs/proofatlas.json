@@ -106,7 +106,8 @@
       "encoder": "gcn_struct",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "temperature": 0.5
     },
 
     "gcn_struct_attention": {
@@ -117,7 +118,8 @@
       "encoder": "gcn_struct",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "temperature": 0.5
     },
 
     "gcn_struct_attention_t05": {

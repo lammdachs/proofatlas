@@ -55,8 +55,13 @@ def _reconstruct_sets(npz, k: int):
     return u_idx, p_idx, selected_idx
 
 
-def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True) -> Optional[Dict]:
-    """Load per-problem graph NPZ, sample random step k, reconstruct U_k/P_k."""
+def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True,
+                           fixed_seed: int = None) -> Optional[Dict]:
+    """Load per-problem graph NPZ, sample random step k, reconstruct U_k/P_k.
+
+    If fixed_seed is given, step k is chosen deterministically based on
+    hash(fixed_seed, filename) so validation loss is stable across epochs.
+    """
     try:
         npz = np.load(trace_file)
     except Exception:
@@ -67,7 +72,11 @@ def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True) -> Opti
         if num_steps == 0:
             return None
 
-        k = random.randint(0, num_steps - 1)
+        if fixed_seed is not None:
+            h = hash((fixed_seed, trace_file.name))
+            k = h % num_steps
+        else:
+            k = random.randint(0, num_steps - 1)
         result = _reconstruct_sets(npz, k)
         if result is None:
             return None
@@ -130,8 +139,11 @@ def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True) -> Opti
         npz.close()
 
 
-def _load_and_sample_sentence(trace_file: Path) -> Optional[Dict]:
-    """Load per-problem sentence NPZ, sample step k, gather embeddings by index."""
+def _load_and_sample_sentence(trace_file: Path, fixed_seed: int = None) -> Optional[Dict]:
+    """Load per-problem sentence NPZ, sample step k, gather embeddings by index.
+
+    If fixed_seed is given, step k is chosen deterministically.
+    """
     try:
         npz = np.load(trace_file)
     except Exception:
@@ -142,7 +154,11 @@ def _load_and_sample_sentence(trace_file: Path) -> Optional[Dict]:
         if num_steps == 0:
             return None
 
-        k = random.randint(0, num_steps - 1)
+        if fixed_seed is not None:
+            h = hash((fixed_seed, trace_file.name))
+            k = h % num_steps
+        else:
+            k = random.randint(0, num_steps - 1)
         result = _reconstruct_sets(npz, k)
         if result is None:
             return None
@@ -205,12 +221,16 @@ class ProofBatchDataset(IterableDataset):
         batch_size: int = 64 * 1024,
         shuffle: bool = True,
         need_node_emb: bool = True,
+        fixed_seed: int = None,
+        samples_per_problem: int = 1,
     ):
         self.files = list(files)
         self.output_type = output_type
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.need_node_emb = need_node_emb
+        self.fixed_seed = fixed_seed
+        self.samples_per_problem = samples_per_problem
 
         if not self.files:
             raise ValueError("No trace files provided")
@@ -244,9 +264,10 @@ class ProofBatchDataset(IterableDataset):
     def _load_and_sample(self, f: Path) -> Optional[Dict]:
         """Load and sample a single trace file."""
         if self.output_type == "sentence":
-            return _load_and_sample_sentence(f)
+            return _load_and_sample_sentence(f, fixed_seed=self.fixed_seed)
         else:
-            return _load_and_sample_graph(f, need_node_emb=self.need_node_emb)
+            return _load_and_sample_graph(f, need_node_emb=self.need_node_emb,
+                                          fixed_seed=self.fixed_seed)
 
     def _collate(self, items: List[Dict]) -> Optional[Dict]:
         """Collate pre-sampled items into a batch."""
@@ -266,23 +287,24 @@ class ProofBatchDataset(IterableDataset):
         buffer_bytes = 0
 
         for f in files:
-            item = self._load_and_sample(f)
-            if item is None:
-                continue
+            for _sample in range(self.samples_per_problem):
+                item = self._load_and_sample(f)
+                if item is None:
+                    continue
 
-            item_bytes = self._estimate_item_bytes(item)
+                item_bytes = self._estimate_item_bytes(item)
 
-            if buffer_bytes + item_bytes > self.batch_size:
-                if buffer:
-                    batch = self._collate(buffer)
-                    if batch is not None:
-                        yield batch
-                    buffer, buffer_bytes = [], 0
-                if item_bytes > self.batch_size:
-                    continue  # drop oversized item
+                if buffer_bytes + item_bytes > self.batch_size:
+                    if buffer:
+                        batch = self._collate(buffer)
+                        if batch is not None:
+                            yield batch
+                        buffer, buffer_bytes = [], 0
+                    if item_bytes > self.batch_size:
+                        continue  # drop oversized item
 
-            buffer.append(item)
-            buffer_bytes += item_bytes
+                buffer.append(item)
+                buffer_bytes += item_bytes
 
         if buffer:
             batch = self._collate(buffer)
@@ -306,6 +328,7 @@ def collate_sentence_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor
     all_proof_ids = []
     all_p_embeddings = []
     all_p_cf = []
+    all_p_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
         if item is None:
@@ -321,7 +344,9 @@ def collate_sentence_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor
             all_u_embeddings.append(item["u_embeddings"])
 
         if "p_clause_features" in item:
+            n_p = len(item["p_clause_features"])
             all_p_cf.append(item["p_clause_features"])
+            all_p_proof_ids.extend([proof_idx] * n_p)
         if "p_embeddings" in item:
             all_p_embeddings.append(item["p_embeddings"])
 
@@ -349,6 +374,9 @@ def collate_sentence_batch(batch: List[Dict]) -> Optional[Dict[str, torch.Tensor
             np.concatenate(all_p_embeddings), dtype=torch.float32
         )
 
+    if all_p_proof_ids:
+        result["p_proof_ids"] = torch.tensor(all_p_proof_ids, dtype=torch.long)
+
     return result
 
 
@@ -360,6 +388,7 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
     all_p_graphs = []
     all_u_labels = []
     all_proof_ids = []
+    all_p_proof_ids = []
 
     for proof_idx, item in enumerate(batch):
         if item is None:
@@ -376,6 +405,7 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
 
         for g in p_graphs:
             all_p_graphs.append(g)
+            all_p_proof_ids.append(proof_idx)
 
     if not all_u_graphs:
         return None
@@ -405,6 +435,7 @@ def collate_proof_batch(batch: List[Dict]) -> Optional[Dict[str, Any]]:
         result["p_adj"] = p_batched["adj"]
         result["p_pool_matrix"] = p_batched["pool_matrix"]
         result["p_clause_features"] = p_batched.get("clause_features")
+        result["p_proof_ids"] = torch.tensor(all_p_proof_ids, dtype=torch.long)
         if "node_names" in p_batched:
             result["p_node_names"] = p_batched["node_names"]
         if "node_embeddings" in p_batched:

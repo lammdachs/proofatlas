@@ -20,6 +20,7 @@ import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 from ..selectors import create_model
+from ..selectors.scorers import MLPScorer
 
 from .losses import compute_loss
 from .datasets import ProofBatchDataset, scan_trace_files
@@ -69,6 +70,32 @@ def _build_sym_emb(model, batch, prefix, device):
         return None, batch.get(f"{prefix}_node_names")
 
 
+def _score_with_context(scorer, u_emb, p_emb, batch, device):
+    """Score U clauses with per-problem P context for attention/transformer scorers.
+
+    MLP scorers ignore p_emb, so they get the fast path (single call).
+    Attention/transformer scorers need per-problem P context: each U clause
+    should only attend to P clauses from the same problem.
+    """
+    if p_emb is None or isinstance(scorer, MLPScorer):
+        return scorer(u_emb, p_emb)
+
+    # Per-problem scoring for attention/transformer
+    proof_ids = batch["proof_ids"].to(device)
+    p_proof_ids = batch.get("p_proof_ids")
+    if p_proof_ids is None:
+        return scorer(u_emb, p_emb)
+    p_proof_ids = p_proof_ids.to(device)
+
+    scores = torch.zeros(u_emb.size(0), device=device)
+    for pid in proof_ids.unique():
+        u_mask = proof_ids == pid
+        p_mask = p_proof_ids == pid
+        p_slice = p_emb[p_mask] if p_mask.any() else None
+        scores[u_mask] = scorer(u_emb[u_mask], p_slice)
+    return scores
+
+
 def _forward_pass(model, batch, device, is_sentence_model, is_features_model=False):
     """Run forward pass through model, returning scores.
 
@@ -95,7 +122,7 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
             p_raw = batch["p_embeddings"].to(device)
             p_emb = model.projection(p_raw)
 
-        return model.scorer(u_emb, p_emb)
+        return _score_with_context(model.scorer, u_emb, p_emb, batch, device)
     elif is_features_model:
         u_cf = batch["u_clause_features"].to(device)
         u_emb = model.encode(u_cf)
@@ -105,7 +132,7 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
             p_cf = batch["p_clause_features"].to(device)
             p_emb = model.encode(p_cf)
 
-        return model.scorer(u_emb, p_emb)
+        return _score_with_context(model.scorer, u_emb, p_emb, batch, device)
     else:
         u_x = batch["u_node_features"].to(device)
         u_adj = _edge_list_to(batch["u_adj"], device)
@@ -129,7 +156,7 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
             p_sym_emb, p_node_names = _build_sym_emb(model, batch, "p", device)
             p_emb = model.encode(p_x, p_adj, p_pool, p_cf, node_names=p_node_names, sym_emb=p_sym_emb)
 
-        return model.scorer(u_emb, p_emb)
+        return _score_with_context(model.scorer, u_emb, p_emb, batch, device)
 
 
 # =============================================================================
@@ -163,7 +190,7 @@ def run_training(
         configs_dir: Directory containing config files (embeddings.json, etc.)
         problem_names: Optional set of problem names to filter traces
         log_callback: Optional callback(epoch, max_epochs, train_loss) for logging
-        web_data_dir: Directory for web data (web/data/) - enables live web updates
+        web_data_dir: Directory for web data (web/static/data/) - enables live web updates
         log_file: File object for logging (e.g., bench.log)
         cpu_workers: Number of DataLoader workers (default: 0)
         rank: GPU rank for DDP (default: 0)
@@ -362,13 +389,15 @@ def _run_training_inner(
     node_info = embedding_arch.get("node_info", "both")
     need_node_emb = node_info != "features"
 
-    log_msg(f"Loading training data ({output_type} format, node_emb={need_node_emb})...")
+    samples_per_problem = config.get("samples_per_problem", 1)
+    log_msg(f"Loading training data ({output_type} format, node_emb={need_node_emb}, samples/prob={samples_per_problem})...")
     train_ds = ProofBatchDataset(
         files=train_files,
         output_type=output_type,
         batch_size=resolved_batch_size,
         shuffle=True,
         need_node_emb=need_node_emb,
+        samples_per_problem=samples_per_problem,
     )
 
     val_ds = None
@@ -380,6 +409,7 @@ def _run_training_inner(
             batch_size=resolved_batch_size,
             shuffle=False,
             need_node_emb=need_node_emb,
+            fixed_seed=42,
         )
 
     log_msg(f"Train: {train_ds.num_problems} problems, Val: {val_ds.num_problems if val_ds else 0} problems")
