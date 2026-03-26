@@ -216,7 +216,7 @@ def setup_external_tools():
 def build_wasm():
     """Build the WASM package for the web interface."""
     wasm_crate = PROJECT_ROOT / "crates" / "proofatlas-wasm"
-    web_pkg = PROJECT_ROOT / "web" / "pkg"
+    web_pkg = PROJECT_ROOT / "web" / "static" / "pkg"
 
     if not (wasm_crate / "Cargo.toml").exists():
         print("  Warning: proofatlas-wasm crate not found, skipping")

@@ -361,7 +361,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
         mp.spawn(
             _ddp_train_worker,
             args=(preset, trace_dir, weights_dir, base_dir / "configs",
-                  problem_names, base_dir / "web" / "data", args.cpu_workers,
+                  problem_names, base_dir / "web" / "static" / "data", args.cpu_workers,
                   args.gpu_workers, batch_size, accumulate_batches,
                   args.max_epochs),
             nprocs=args.gpu_workers,
@@ -374,7 +374,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             weights_dir=weights_dir,
             configs_dir=base_dir / "configs",
             problem_names=problem_names,
-            web_data_dir=base_dir / "web" / "data",
+            web_data_dir=base_dir / "web" / "static" / "data",
             log_file=sys.stdout,
             cpu_workers=args.cpu_workers,
             batch_size=batch_size,

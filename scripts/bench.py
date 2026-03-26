@@ -267,8 +267,8 @@ def save_run_result(base_dir: Path, prover: str, preset_name: str, result: Bench
 
 def export_benchmark_progress(base_dir: Path, prover: str, preset_name: str,
                                stats: dict, completed: int, total: int):
-    """Export current benchmark progress to web/data/benchmarks/<prover>_<preset>.json"""
-    output_dir = base_dir / "web" / "data" / "benchmarks"
+    """Export current benchmark progress to web/static/data/benchmarks/<prover>_<preset>.json"""
+    output_dir = base_dir / "web" / "static" / "data" / "benchmarks"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"{prover}_{preset_name}.json"
 

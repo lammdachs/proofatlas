@@ -1,0 +1,16 @@
+{
+  "runs": [
+    "features_attention",
+    "features_mlp",
+    "features_transformer",
+    "gcn_attention",
+    "gcn_mlp",
+    "gcn_struct_attention",
+    "gcn_struct_mlp",
+    "gcn_struct_transformer",
+    "gcn_transformer",
+    "sentence_attention",
+    "sentence_mlp",
+    "sentence_transformer"
+  ]
+}

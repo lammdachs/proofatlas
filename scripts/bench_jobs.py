@@ -316,9 +316,9 @@ def daemonize(log_file_path: Path):
 
 
 def sync_all_run_results(base_dir: Path):
-    """Combine per-problem JSONs from .data/runs/ into single files in web/data/runs/."""
+    """Combine per-problem JSONs from .data/runs/ into single files in web/static/data/runs/."""
     runs_src = base_dir / ".data" / "runs"
-    runs_dst = base_dir / "web" / "data" / "runs"
+    runs_dst = base_dir / "web" / "static" / "data" / "runs"
     runs_dst.mkdir(parents=True, exist_ok=True)
 
     if not runs_src.exists():
@@ -366,7 +366,7 @@ def sync_all_run_results(base_dir: Path):
                 json.dump(combined, f, separators=(",", ":"))
 
             index_entries.append(run_key)
-            log(f"[{run_key}] Wrote {len(results)} results to web/data/runs/")
+            log(f"[{run_key}] Wrote {len(results)} results to web/static/data/runs/")
 
     # Write index
     with open(runs_dst / "index.json", "w") as f:
@@ -376,7 +376,7 @@ def sync_all_run_results(base_dir: Path):
 
 
 def push_results(base_dir: Path, configs: list[str]) -> bool:
-    """Git add, pull, commit, push web/data/. Returns True if pushed successfully.
+    """Git add, pull, commit, push web/static/data/. Returns True if pushed successfully.
 
     Uses file locking to prevent race conditions on shared storage.
     """
@@ -393,7 +393,7 @@ def push_results(base_dir: Path, configs: list[str]) -> bool:
             # Acquire exclusive lock (blocking)
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-            subprocess.run(["git", "add", "web/data/"], cwd=str(base_dir))
+            subprocess.run(["git", "add", "web/static/data/"], cwd=str(base_dir))
 
             commit_msg = f"[skip ci] Update results: {', '.join(configs)}"
             result = subprocess.run(

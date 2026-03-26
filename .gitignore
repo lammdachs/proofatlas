@@ -22,8 +22,6 @@ Cargo.lock
 *.pyd
 
 # WASM build outputs
-/web/pkg/
-/web/dist/
 /web/static/pkg/
 
 # SvelteKit

@@ -13,7 +13,7 @@ from typing import Dict, Optional, Any
 class JSONLogger:
     """Logger that writes metrics to JSON for web visualization.
 
-    Writes to web/data/training/{run_name}.json and updates index.json.
+    Writes to web/static/data/training/{run_name}.json and updates index.json.
     The web interface reads these files to display training progress.
     """
 
@@ -21,7 +21,7 @@ class JSONLogger:
         """Initialize logger.
 
         Args:
-            web_data_dir: Path to web/data directory
+            web_data_dir: Path to web/static/data directory
             run_name: Name for this training run (used as filename)
         """
         self.web_data_dir = Path(web_data_dir)
