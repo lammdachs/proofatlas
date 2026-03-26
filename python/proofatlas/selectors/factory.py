@@ -49,6 +49,7 @@ def create_model(
         'scorer_type': kwargs.get('scorer_type', 'mlp'),
         'scorer_num_heads': kwargs.get('scorer_num_heads', 4),
         'scorer_num_layers': kwargs.get('scorer_num_layers', 2),
+        'scorer_ffn_dim': kwargs.get('scorer_ffn_dim'),
     }
 
     # New architecture parameters

@@ -241,6 +241,7 @@ def create_scorer(
     hidden_dim: int,
     num_heads: int = 4,
     num_layers: int = 2,
+    ffn_dim: int = None,
 ) -> nn.Module:
     """
     Factory function to create a scorer.
@@ -250,6 +251,7 @@ def create_scorer(
         hidden_dim: Hidden dimension of clause embeddings
         num_heads: Number of attention heads (for attention-based scorers)
         num_layers: Number of transformer layers (for transformer scorer)
+        ffn_dim: FFN hidden dimension (transformer only, default: hidden_dim * 4)
 
     Returns:
         Scorer module
@@ -259,7 +261,8 @@ def create_scorer(
     elif scorer_type == "attention":
         return AttentionScorer(hidden_dim, num_heads=num_heads)
     elif scorer_type == "transformer":
-        return TransformerScorer(hidden_dim, num_layers=num_layers, num_heads=num_heads)
+        return TransformerScorer(hidden_dim, num_layers=num_layers, num_heads=num_heads,
+                                ffn_dim=ffn_dim)
     else:
         raise ValueError(f"Unknown scorer type: {scorer_type}. "
                         f"Available: mlp, attention, transformer")

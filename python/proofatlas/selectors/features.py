@@ -59,6 +59,7 @@ class ClauseFeatures(nn.Module):
         scorer_type: str = "mlp",
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
+        scorer_ffn_dim: int = None,
     ):
         super().__init__()
         self.sin_dim = sin_dim
@@ -81,6 +82,7 @@ class ClauseFeatures(nn.Module):
             hidden_dim,
             num_heads=scorer_num_heads,
             num_layers=scorer_num_layers,
+            ffn_dim=scorer_ffn_dim,
         )
 
     def sinusoidal_encode(self, values: torch.Tensor) -> torch.Tensor:

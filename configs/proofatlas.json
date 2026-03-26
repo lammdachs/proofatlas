@@ -159,14 +159,15 @@
     },
 
     "gcn_struct_transformer": {
-      "description": "GCN (structural) + Transformer",
+      "description": "GCN (structural) + Transformer (1L)",
       "timeout": 300,
       "max_iterations": 256,
       "literal_selection": 21,
       "encoder": "gcn_struct",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "temperature": 0.5
     },
 
     "sentence_attention": {

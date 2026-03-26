@@ -50,6 +50,7 @@ class SentenceEncoder(nn.Module):
         scorer_type: str = "mlp",
         scorer_num_heads: int = 4,
         scorer_num_layers: int = 2,
+        scorer_ffn_dim: int = None,
         use_clause_features: bool = False,
         sin_dim: int = 8,
     ):
@@ -104,6 +105,7 @@ class SentenceEncoder(nn.Module):
             hidden_dim,
             num_heads=scorer_num_heads,
             num_layers=scorer_num_layers,
+            ffn_dim=scorer_ffn_dim,
         )
 
     def encode(self, clause_strings: List[str]) -> torch.Tensor:

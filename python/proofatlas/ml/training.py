@@ -447,6 +447,7 @@ def _run_training_inner(
         scorer_type=scorer_config.get("type", "mlp"),
         scorer_num_heads=scorer_config.get("num_heads", 4),
         scorer_num_layers=scorer_config.get("num_layers", 2),
+        scorer_ffn_dim=scorer_config.get("ffn_dim"),
         freeze_encoder=emb_config.get("freeze_encoder", False),
         node_info=emb_config.get("node_info", "features"),
         use_clause_features=emb_config.get("use_clause_features", True),
