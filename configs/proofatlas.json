@@ -2,7 +2,6 @@
   "defaults": {
     "preset": "time"
   },
-
   "presets": {
     "time": {
       "description": "10s timeout",
@@ -11,7 +10,6 @@
       "age_weight_ratio": 0.5,
       "memory_limit": 1024
     },
-
     "age_weight": {
       "description": "Age-weight baseline (256 iterations)",
       "timeout": 300,
@@ -20,7 +18,6 @@
       "age_weight_ratio": 0.5,
       "memory_limit": 1024
     },
-
     "gcn_mlp": {
       "description": "GCN + MLP",
       "timeout": 300,
@@ -31,7 +28,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "gcn_attention": {
       "description": "GCN + attention",
       "timeout": 300,
@@ -42,7 +38,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "gcn_transformer": {
       "description": "GCN + transformer",
       "timeout": 300,
@@ -53,7 +48,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "sentence_mlp": {
       "description": "Sentence + MLP",
       "timeout": 300,
@@ -64,7 +58,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "features_mlp": {
       "description": "Features + MLP",
       "timeout": 300,
@@ -75,7 +68,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "features_attention": {
       "description": "Features + Attention",
       "timeout": 300,
@@ -86,7 +78,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "features_transformer": {
       "description": "Features + Transformer",
       "timeout": 300,
@@ -97,7 +88,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "gcn_struct_mlp": {
       "description": "GCN (structural) + MLP",
       "timeout": 300,
@@ -109,7 +99,6 @@
       "memory_limit": 1024,
       "temperature": 0.5
     },
-
     "gcn_struct_attention": {
       "description": "GCN (structural) + Attention",
       "timeout": 300,
@@ -121,7 +110,6 @@
       "memory_limit": 1024,
       "temperature": 0.5
     },
-
     "gcn_struct_attention_t05": {
       "description": "GCN (structural) + Attention (temp=0.5)",
       "timeout": 300,
@@ -133,7 +121,6 @@
       "memory_limit": 1024,
       "temperature": 0.5
     },
-
     "gcn_struct_attention_t03": {
       "description": "GCN (structural) + Attention (temp=0.3)",
       "timeout": 300,
@@ -145,7 +132,6 @@
       "memory_limit": 1024,
       "temperature": 0.3
     },
-
     "gcn_struct_attention_t01": {
       "description": "GCN (structural) + Attention (temp=0.1)",
       "timeout": 300,
@@ -157,7 +143,6 @@
       "memory_limit": 1024,
       "temperature": 0.1
     },
-
     "gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer (1L)",
       "timeout": 300,
@@ -169,7 +154,6 @@
       "memory_limit": 1024,
       "temperature": 0.5
     },
-
     "sentence_attention": {
       "description": "Sentence + Attention",
       "timeout": 300,
@@ -180,7 +164,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "sentence_transformer": {
       "description": "Sentence + Transformer",
       "timeout": 300,
@@ -191,7 +174,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_mlp": {
       "description": "GCN + MLP (10s wall-time)",
       "timeout": 10,
@@ -201,7 +183,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_attention": {
       "description": "GCN + Attention (10s wall-time)",
       "timeout": 10,
@@ -211,7 +192,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_transformer": {
       "description": "GCN + Transformer (10s wall-time)",
       "timeout": 10,
@@ -221,7 +201,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_struct_mlp": {
       "description": "GCN (structural) + MLP (10s wall-time)",
       "timeout": 10,
@@ -231,7 +210,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_struct_attention": {
       "description": "GCN (structural) + Attention (10s wall-time)",
       "timeout": 10,
@@ -241,7 +219,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer (10s wall-time)",
       "timeout": 10,
@@ -251,7 +228,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_sentence_mlp": {
       "description": "Sentence + MLP (10s wall-time)",
       "timeout": 10,
@@ -261,7 +237,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_sentence_attention": {
       "description": "Sentence + Attention (10s wall-time)",
       "timeout": 10,
@@ -271,7 +246,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_sentence_transformer": {
       "description": "Sentence + Transformer (10s wall-time)",
       "timeout": 10,
@@ -281,7 +255,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_features_mlp": {
       "description": "Features + MLP (10s wall-time)",
       "timeout": 10,
@@ -291,7 +264,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_features_attention": {
       "description": "Features + Attention (10s wall-time)",
       "timeout": 10,
@@ -301,7 +273,6 @@
       "traces": "age_weight",
       "memory_limit": 1024
     },
-
     "time_features_transformer": {
       "description": "Features + Transformer (10s wall-time)",
       "timeout": 10,

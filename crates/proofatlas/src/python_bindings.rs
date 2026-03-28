@@ -485,14 +485,20 @@ impl PyProver {
     ///
     /// If the ProofAtlas was built with `enable_trace=True`, pre-computes
     /// 384-D MiniLM embeddings for node names (graph) and clause strings (sentence).
+    /// Save a proof trace for training.
+    ///
+    /// If `external_labels` is provided, those labels are used instead of deriving
+    /// them from this run's proof. This allows saving traces for failed runs using
+    /// labels from a different proof (e.g., the baseline).
     #[cfg(feature = "ml")]
-    #[pyo3(signature = (traces_dir, preset, problem, time_seconds))]
+    #[pyo3(signature = (traces_dir, preset, problem, time_seconds, external_labels=None))]
     pub fn save_trace(
         &self,
         traces_dir: &str,
         preset: &str,
         problem: &str,
         time_seconds: f64,
+        external_labels: Option<Vec<u8>>,
     ) -> PyResult<()> {
         use crate::selection::ml::graph::GraphBuilder;
         use crate::selection::training::npz::NpzWriter;
@@ -506,8 +512,8 @@ impl PyProver {
             return Ok(());
         }
 
-        // Only save traces for proofs
-        if self.empty_clause_idx().is_none() {
+        // When no external labels, require a proof to derive labels from
+        if external_labels.is_none() && self.empty_clause_idx().is_none() {
             return Ok(());
         }
 
@@ -525,10 +531,20 @@ impl PyProver {
             self.build_clause_lifecycle();
 
         // --- Proof labels ---
-        let proof_clauses = self.get_proof_clause_set();
-        let labels: Vec<u8> = (0..num_clauses)
-            .map(|i| if proof_clauses.contains(&i) { 1 } else { 0 })
-            .collect();
+        let labels: Vec<u8> = if let Some(ext) = external_labels {
+            if ext.len() != num_clauses {
+                return Err(PyValueError::new_err(format!(
+                    "external_labels length {} does not match clause count {}",
+                    ext.len(), num_clauses
+                )));
+            }
+            ext
+        } else {
+            let proof_clauses = self.get_proof_clause_set();
+            (0..num_clauses)
+                .map(|i| if proof_clauses.contains(&i) { 1 } else { 0 })
+                .collect()
+        };
 
         // --- Clause features [C, 9] ---
         let clause_features_flat = self.compute_clause_features_flat();
