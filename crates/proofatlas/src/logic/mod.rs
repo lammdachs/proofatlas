@@ -12,7 +12,7 @@ pub mod time_compat;
 pub mod unification;
 
 // Re-export commonly used types
-pub use core::clause::{CNFFormula, Clause, ClauseDisplay, ClauseKey, ClauseRole};
+pub use core::clause::{CNFFormula, Clause, ClauseDisplay, ClauseRole};
 pub use core::literal::{Literal, LiteralDisplay, PredicateSymbol};
 pub use core::position::Position;
 pub use core::term::{Constant, FunctionSymbol, Term, TermDisplay, Variable};

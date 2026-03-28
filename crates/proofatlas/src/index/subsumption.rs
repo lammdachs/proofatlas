@@ -5,7 +5,7 @@
 //! implementation.
 
 use crate::index::disc_tree::{self, DiscTreeNode};
-use crate::logic::{Clause, ClauseKey, PredicateId};
+use crate::logic::{Clause, Literal, PredicateId};
 use crate::simplifying::subsumption::{
     are_variants, subsumes, subsumes_greedy, subsumes_unit,
 };
@@ -327,8 +327,8 @@ impl LiteralDiscTree {
 /// Maintains internal indices (literal discrimination tree, clause keys, unit
 /// clauses) and tracks the clause lifecycle via the `Index` trait.
 pub struct SubsumptionChecker {
-    /// Map from clause key to clause index (for active clauses, used by find_subsumer)
-    clause_key_to_idx: HashMap<ClauseKey, usize>,
+    /// Map from clause literals to clause index (for exact duplicate detection)
+    clause_key_to_idx: HashMap<Vec<Literal>, usize>,
 
     /// Unit clauses for unit subsumption
     units: Vec<(Arc<Clause>, usize)>,
@@ -362,8 +362,7 @@ impl SubsumptionChecker {
     /// Returns None if no active clause subsumes it.
     pub fn find_subsumer(&mut self, clause: &Clause) -> Option<usize> {
         // 1. Check for exact duplicates (very fast with structural hashing)
-        let clause_key = ClauseKey::from_clause(clause);
-        if let Some(&idx) = self.clause_key_to_idx.get(&clause_key) {
+        if let Some(&idx) = self.clause_key_to_idx.get(clause.literals.as_slice()) {
             return Some(idx);
         }
 
@@ -582,9 +581,8 @@ impl SubsumptionChecker {
         // Use the stored (oriented) clause for keys and units
         let clause = &self.clauses[idx];
 
-        // Add to key index
-        let clause_key = ClauseKey::from_clause(clause);
-        self.clause_key_to_idx.insert(clause_key, idx);
+        // Add to duplicate detection index
+        self.clause_key_to_idx.insert(clause.literals.to_vec(), idx);
 
         // Add to unit index if applicable
         if clause.literals.len() == 1 {
@@ -596,11 +594,10 @@ impl SubsumptionChecker {
         self.active.remove(&idx);
         self.literal_tree.deactivate(idx);
 
-        // Remove from clause_key_to_idx
+        // Remove from duplicate detection index
         let clause = &self.clauses[idx];
-        let clause_key = ClauseKey::from_clause(clause);
-        if self.clause_key_to_idx.get(&clause_key) == Some(&idx) {
-            self.clause_key_to_idx.remove(&clause_key);
+        if self.clause_key_to_idx.get(clause.literals.as_slice()) == Some(&idx) {
+            self.clause_key_to_idx.remove(clause.literals.as_slice());
         }
 
         // Remove from units
