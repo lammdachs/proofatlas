@@ -200,7 +200,7 @@ impl GeneratingInference for EqualityFactoringRule {
 
                     let mut int = interner.clone();
                     let mut reconstructed = Clause::new(expected_lits);
-                    reconstructed.normalize_variables(&mut int);
+                    reconstructed.normalize(&mut int);
                     crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
 
                     // Check if conclusion matches

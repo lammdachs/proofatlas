@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A variable in first-order logic
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Variable {
     pub id: VariableId,
 }
@@ -23,7 +23,7 @@ impl Variable {
 }
 
 /// A constant symbol
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Constant {
     pub id: ConstantId,
 }
@@ -41,7 +41,7 @@ impl Constant {
 }
 
 /// A function symbol with arity
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FunctionSymbol {
     pub id: FunctionId,
     pub arity: u8,
@@ -60,7 +60,7 @@ impl FunctionSymbol {
 }
 
 /// A term in first-order logic
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Term {
     Variable(Variable),
     Constant(Constant),

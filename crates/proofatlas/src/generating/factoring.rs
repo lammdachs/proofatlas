@@ -123,7 +123,7 @@ impl GeneratingInference for FactoringRule {
                             super::common::collect_literals_except(premise, &[j], &mgu),
                         );
                         let mut reconstructed = Clause::new(new_lits);
-                        reconstructed.normalize_variables(&mut int);
+                        reconstructed.normalize(&mut int);
                         crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
                         if conclusion.literals.len() == reconstructed.literals.len()
                             && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
@@ -135,7 +135,7 @@ impl GeneratingInference for FactoringRule {
                             super::common::collect_literals_except(premise, &[i], &mgu),
                         );
                         let mut reconstructed2 = Clause::new(new_lits2);
-                        reconstructed2.normalize_variables(&mut int);
+                        reconstructed2.normalize(&mut int);
                         crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed2, &int);
                         if conclusion.literals.len() == reconstructed2.literals.len()
                             && conclusion.literals.iter().all(|cl| reconstructed2.literals.contains(cl))

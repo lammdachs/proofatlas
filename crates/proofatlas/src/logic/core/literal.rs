@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A predicate symbol with arity
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PredicateSymbol {
     pub id: PredicateId,
     pub arity: u8,
@@ -25,11 +25,11 @@ impl PredicateSymbol {
 }
 
 /// A literal (positive or negative atomic formula)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Literal {
+    pub polarity: bool, // true = positive, false = negative (false < true: negatives sort first)
     pub predicate: PredicateSymbol,
     pub args: Vec<Term>,
-    pub polarity: bool, // true = positive, false = negative
 }
 
 impl Literal {

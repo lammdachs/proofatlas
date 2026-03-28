@@ -244,7 +244,7 @@ impl SimplifyingInference for DemodulationRule {
                 for result in &results {
                     if let StateChange::Add(ref result_clause, _, _) = result {
                         let mut reconstructed = (**result_clause).clone();
-                        reconstructed.normalize_variables(&mut int);
+                        reconstructed.normalize(&mut int);
                         orient_clause_equalities(&mut reconstructed, &int);
                         if replacement.literals.len() == reconstructed.literals.len()
                             && replacement.literals.iter().all(|cl| reconstructed.literals.contains(cl))

@@ -126,7 +126,7 @@ impl GeneratingInference for ResolutionRule {
                         new_lits = super::common::remove_duplicate_literals(new_lits);
 
                         let mut reconstructed = Clause::new(new_lits);
-                        reconstructed.normalize_variables(&mut int);
+                        reconstructed.normalize(&mut int);
                         orient_clause_equalities(&mut reconstructed, &int);
 
                         if conclusion.literals.len() == reconstructed.literals.len()

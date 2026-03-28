@@ -369,7 +369,7 @@ impl GeneratingInference for SuperpositionRule {
 
                                     // Normalize and orient to match what the prover does
                                     let mut reconstructed = Clause::new(new_lits);
-                                    reconstructed.normalize_variables(&mut int);
+                                    reconstructed.normalize(&mut int);
                                     orient_clause_equalities(&mut reconstructed, &int);
 
                                     if conclusion.literals.len() == reconstructed.literals.len()

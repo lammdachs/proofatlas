@@ -494,7 +494,7 @@ impl Prover {
     pub fn init(&mut self) -> Option<ProofResult> {
         let initial_clauses = std::mem::take(&mut self.initial_clauses);
         for mut clause in initial_clauses {
-            clause.normalize_variables(&mut self.clause_manager.interner);
+            clause.normalize(&mut self.clause_manager.interner);
             self.clause_manager.orient_equalities(&mut clause);
             if let Some(result) = self.apply_change(StateChange::Add(Arc::new(clause), "Input".into(), vec![])) {
                 return Some(result);
@@ -524,7 +524,7 @@ impl Prover {
                 {
                     let clause = Arc::get_mut(&mut arc_clause)
                         .expect("Arc refcount must be 1 in apply_change/Add");
-                    clause.normalize_variables(&mut self.clause_manager.interner);
+                    clause.normalize(&mut self.clause_manager.interner);
                     self.clause_manager.orient_equalities(clause);
                     clause.id = Some(new_idx);
                     clause.age = self.state.current_iteration;
@@ -620,7 +620,7 @@ impl Prover {
                     {
                         let clause = Arc::get_mut(&mut repl)
                             .expect("Arc refcount must be 1 in apply_change/Simplify");
-                        clause.normalize_variables(&mut self.clause_manager.interner);
+                        clause.normalize(&mut self.clause_manager.interner);
                         self.clause_manager.orient_equalities(clause);
                         clause.id = Some(new_idx);
                         clause.age = self.state.current_iteration;

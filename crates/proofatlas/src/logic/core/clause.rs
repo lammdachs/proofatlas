@@ -268,6 +268,16 @@ impl Clause {
         }
     }
 
+    /// Sort literals into canonical order and normalize variables.
+    ///
+    /// After this call, the clause's display string is a canonical representation:
+    /// two clauses with the same literals (in any order) and α-equivalent variables
+    /// will produce identical strings.
+    pub fn normalize(&mut self, interner: &mut Interner) {
+        self.literals.sort();
+        self.normalize_variables(interner);
+    }
+
     /// Normalize variables to canonical sequential form (X0, X1, X2, ...)
     /// based on first-occurrence order (left-to-right, depth-first).
     ///
@@ -469,14 +479,13 @@ pub struct ClauseKey {
 impl ClauseKey {
     /// Create a ClauseKey from a clause.
     ///
-    /// The literals are sorted to produce a canonical representation.
+    /// Assumes literals are already in canonical order (from Clause::normalize).
     pub fn from_clause(clause: &Clause) -> Self {
-        let mut literals: Vec<LiteralKey> = clause
+        let literals: Vec<LiteralKey> = clause
             .literals
             .iter()
             .map(LiteralKey::from_literal)
             .collect();
-        literals.sort();
         ClauseKey { literals }
     }
 }
@@ -526,7 +535,7 @@ mod tests {
         let x = ctx.var("X");
         // P(Y, X) → P(X0, X1)
         let mut clause = Clause::new(vec![Literal::positive(p, vec![y, x])]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
 
         let x0 = ctx.var("X0");
         let x1 = ctx.var("X1");
@@ -544,7 +553,7 @@ mod tests {
         let gyz = ctx.func("g", vec![y, z]);
         // P(f(Z), g(Y, Z)) → P(f(X0), g(X1, X0))
         let mut clause = Clause::new(vec![Literal::positive(p, vec![fz, gyz])]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
 
         let x0 = ctx.var("X0");
         let x1 = ctx.var("X1");
@@ -562,7 +571,7 @@ mod tests {
         let x_1 = ctx.var("X_1");
         // P(X_1_1, X_1) → P(X0, X1)
         let mut clause = Clause::new(vec![Literal::positive(p, vec![x_1_1, x_1])]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
 
         let x0 = ctx.var("X0");
         let x1 = ctx.var("X1");
@@ -577,7 +586,7 @@ mod tests {
         let a = ctx.const_("a");
         let b = ctx.const_("b");
         let mut clause = Clause::new(vec![Literal::positive(p, vec![a.clone(), b.clone()])]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
 
         let expected = Clause::new(vec![Literal::positive(p, vec![a, b])]);
         assert_eq!(clause.literals, expected.literals);
@@ -590,9 +599,9 @@ mod tests {
         let y = ctx.var("Y");
         let x = ctx.var("X");
         let mut clause = Clause::new(vec![Literal::positive(p, vec![y, x])]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
         let after_first = clause.literals.clone();
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
         assert_eq!(clause.literals, after_first);
     }
 
@@ -608,7 +617,7 @@ mod tests {
             Literal::positive(p, vec![y.clone()]),
             Literal::positive(q, vec![x, y]),
         ]);
-        clause.normalize_variables(&mut ctx.interner);
+        clause.normalize(&mut ctx.interner);
 
         let x0 = ctx.var("X0");
         let x1 = ctx.var("X1");
