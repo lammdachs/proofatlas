@@ -414,8 +414,41 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
     return kwargs
 
 
+def _save_fallback_trace(prover, problem, base_dir, trace_preset,
+                         fallback_configs, include_dir):
+    """Save ML trace for a failed proof using fallback config's proof labels.
+
+    Looks up proof clause strings from fallback configs' .strings.json files
+    (written by save_trace during baseline evaluation). Falls back to re-proving
+    if no strings file exists.
+    """
+    import json
+
+    ml_strings = [s.clause_string for s in prover.all_steps()]
+    if not ml_strings:
+        return
+
+    stem = Path(problem.name).stem
+
+    # Try to load proof strings from fallback config traces
+    for fb_name in fallback_configs:
+        strings_path = base_dir / ".data" / "traces" / fb_name / f"{stem}.strings.json"
+        if not strings_path.exists():
+            continue
+
+        with open(strings_path) as f:
+            proof_strings = set(json.load(f))
+
+        labels = [1 if s in proof_strings else 0 for s in ml_strings]
+        if sum(labels) > 0:
+            traces_dir = str(base_dir / ".data" / "traces")
+            prover.save_trace(traces_dir, trace_preset, problem.name, 0.0,
+                              external_labels=labels)
+            return
+
+
 def _atlas_worker_loop(task_queue, result_queue, atlas_kwargs, base_dir_str,
-                       collect_trace, trace_preset):
+                       collect_trace, trace_preset, fallback_configs=None):
     """Persistent worker: create ProofAtlas once, solve problems in a loop."""
     # Block CUDA unless the atlas needs in-process GPU.
     if not atlas_kwargs.get("use_cuda"):
@@ -444,10 +477,15 @@ def _atlas_worker_loop(task_queue, result_queue, atlas_kwargs, base_dir_str,
             elapsed = time.time() - start
             status = prover.status
 
-            if collect_trace and prover.proof_found and trace_preset:
+            if collect_trace and trace_preset:
                 try:
-                    traces_dir = str(base_dir / ".data" / "traces")
-                    prover.save_trace(traces_dir, trace_preset, problem.name, elapsed)
+                    if prover.proof_found:
+                        traces_dir = str(base_dir / ".data" / "traces")
+                        prover.save_trace(traces_dir, trace_preset, problem.name, elapsed)
+                    elif fallback_configs:
+                        include_dir = atlas_kwargs.get("include_dir", "")
+                        _save_fallback_trace(prover, problem, base_dir,
+                                             trace_preset, fallback_configs, include_dir)
                 except Exception:
                     pass
 
@@ -468,11 +506,13 @@ class AtlasWorker:
     (a lock serializes access to the underlying queues).
     """
 
-    def __init__(self, atlas_kwargs, base_dir, collect_trace, trace_preset):
+    def __init__(self, atlas_kwargs, base_dir, collect_trace, trace_preset,
+                 fallback_configs=None):
         self.atlas_kwargs = atlas_kwargs
         self.base_dir_str = str(base_dir)
         self.collect_trace = collect_trace
         self.trace_preset = trace_preset
+        self.fallback_configs = fallback_configs
         self.task_queue = multiprocessing.Queue()
         self.result_queue = multiprocessing.Queue()
         self._lock = threading.Lock()
@@ -482,7 +522,8 @@ class AtlasWorker:
         self.proc = multiprocessing.Process(
             target=_atlas_worker_loop,
             args=(self.task_queue, self.result_queue, self.atlas_kwargs,
-                  self.base_dir_str, self.collect_trace, self.trace_preset),
+                  self.base_dir_str, self.collect_trace, self.trace_preset,
+                  self.fallback_configs),
         )
         self.proc.start()
 
@@ -551,7 +592,8 @@ class ProofAtlasPool:
 
     def __init__(self, n_workers, preset, base_dir, tptp_root,
                  weights_path=None, use_cuda=False,
-                 collect_trace=False, trace_preset=None):
+                 collect_trace=False, trace_preset=None,
+                 fallback_configs=None):
         timeout = preset.get("timeout", 10)
         self.process_timeout = max(timeout * 3, timeout + 60)
 
@@ -559,7 +601,8 @@ class ProofAtlasPool:
         for i in range(n_workers):
             kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda,
                                         collect_trace=collect_trace)
-            worker = AtlasWorker(kwargs, base_dir, collect_trace, trace_preset)
+            worker = AtlasWorker(kwargs, base_dir, collect_trace, trace_preset,
+                                 fallback_configs=fallback_configs)
             self.workers.append(worker)
 
     def start(self):

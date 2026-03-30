@@ -345,7 +345,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False, n_jobs: int = 1,
                    use_cuda: bool = False,
-                   collect_traces: bool = False):
+                   collect_traces: bool = False,
+                   fallback_configs: list = None):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
     ml = _get_ml()
@@ -369,6 +370,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
             tptp_root=tptp_root, weights_path=weights_path,
             use_cuda=use_cuda,
             collect_trace=collect_trace, trace_preset=trace_preset,
+            fallback_configs=fallback_configs if collect_trace else None,
         )
         pool.start()
 
@@ -509,6 +511,8 @@ def main():
                        help="Override per-problem timeout (seconds)")
     parser.add_argument("--trace", action="store_true",
                        help="Collect training traces (.npz) for successful proofs")
+    parser.add_argument("--fallback", nargs="*", default=None,
+                       help="Fallback config(s) for labeling failed traces (requires --trace)")
 
     # Job management
     parser.add_argument("--status", action="store_true",
@@ -738,10 +742,32 @@ def main():
                     log(f"[{preset_name}] Found weights: {existing_weights}")
                     weights_path = existing_weights
                 else:
-                    log(f"[{preset_name}] ERROR: No weights found in {weights_dir}")
-                    log(f"[{preset_name}] Train first with: proofatlas-train --config {preset_name}")
+                    log(f"[{preset_name}] No weights found, training...")
                     sys.stdout.flush()
-                    continue
+                    train_cmd = [
+                        sys.executable, "-m", "proofatlas.cli.train",
+                        "--config", preset_name, "--foreground",
+                    ]
+                    if args.cuda:
+                        train_cmd.append("--use-cuda")
+                    if args.cpu_workers > 1:
+                        train_cmd.extend(["--cpu-workers", str(args.cpu_workers)])
+
+                    import subprocess
+                    rc = subprocess.run(train_cmd, cwd=str(base_dir)).returncode
+                    if rc != 0:
+                        log(f"[{preset_name}] Training FAILED (exit {rc}), skipping")
+                        sys.stdout.flush()
+                        continue
+
+                    existing_weights = ml.find_weights(weights_dir, preset)
+                    if not existing_weights:
+                        log(f"[{preset_name}] Training produced no weights, skipping")
+                        sys.stdout.flush()
+                        continue
+
+                    log(f"[{preset_name}] Training complete: {existing_weights}")
+                    weights_path = existing_weights
                 sys.stdout.flush()
             elif prover == "proofatlas":
                 log(f"[{preset_name}] Heuristic selector (no training needed)")
@@ -764,6 +790,7 @@ def main():
                 rerun=args.rerun, n_jobs=args.cpu_workers,
                 use_cuda=use_cuda_eval,
                 collect_traces=args.trace,
+                fallback_configs=args.fallback,
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()

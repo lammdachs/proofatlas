@@ -697,6 +697,24 @@ impl PyProver {
                 .map_err(|e| PyValueError::new_err(format!("NPZ finish error: {}", e)))?;
         }
 
+        // --- Write proof clause strings (for cross-run clause matching) ---
+        {
+            let proof_strings: Vec<String> = clauses
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| labels[*i] == 1)
+                .map(|(_, c)| c.display(interner).to_string())
+                .collect();
+
+            if !proof_strings.is_empty() {
+                let strings_path = preset_dir.join(format!("{}.strings.json", stem));
+                let json = serde_json::to_string(&proof_strings)
+                    .map_err(|e| PyValueError::new_err(format!("JSON error: {}", e)))?;
+                std::fs::write(&strings_path, json)
+                    .map_err(|e| PyValueError::new_err(format!("Failed to write strings: {}", e)))?;
+            }
+        }
+
         let _ = time_seconds; // reserved for future metadata
 
         Ok(())
