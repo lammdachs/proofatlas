@@ -754,7 +754,9 @@ def main():
                         train_cmd.extend(["--cpu-workers", str(args.cpu_workers)])
 
                     import subprocess
-                    rc = subprocess.run(train_cmd, cwd=str(base_dir)).returncode
+                    train_env = os.environ.copy()
+                    train_env.pop("CUDA_VISIBLE_DEVICES", None)
+                    rc = subprocess.run(train_cmd, cwd=str(base_dir), env=train_env).returncode
                     if rc != 0:
                         log(f"[{preset_name}] Training FAILED (exit {rc}), skipping")
                         sys.stdout.flush()
