@@ -27,19 +27,10 @@ OUTPUT:
 
 import os
 
-# Limit torch/MKL threads before any imports that load libtorch.
-# Without this, parallel workers (--cpu-workers>1) cause massive thread contention
-# as each subprocess inherits multithreaded libtorch from the parent fork.
+# Limit torch/MKL threads — prover threads should use 1 thread each;
+# the Backend thread handles GPU compute.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
-
-# Prevent CUDA initialization in the daemon and its forked worker subprocesses.
-# Without this, importing proofatlas loads libtorch_cuda.so which initializes a
-# CUDA context. Each multiprocessing.Process(fork) child inherits this context,
-# and after ~340 forks the accumulated GPU memory corruption crashes the scoring
-# server. Only the scoring server subprocess (started via Popen with its own env
-# setting CUDA_VISIBLE_DEVICES=<gpu_id>) should touch the GPU.
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 import argparse
 import json
@@ -58,7 +49,7 @@ from bench_jobs import (
     clear_job_status, clear_pids, daemonize, get_job_file, get_job_status,
     get_log_file, kill_job, log, print_job_status, save_job_status,
 )
-from bench_provers import BenchResult, run_single_problem
+from bench_provers import BenchResult
 
 # Lazy imports for ML functionality (avoid loading PyTorch for --list)
 _ml_module = None
@@ -362,7 +353,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     collect_trace = collect_traces and (prover == "proofatlas")
 
     if prover == "proofatlas":
-        # Persistent worker pool — reuses ProofAtlas (and ML model) across problems
         from bench_provers import ProofAtlasPool
 
         pool = ProofAtlasPool(
@@ -372,92 +362,57 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
             collect_trace=collect_trace, trace_preset=trace_preset,
             fallback_configs=fallback_configs if collect_trace else None,
         )
-        pool.start()
 
         try:
-            if n_jobs > 1:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                import threading
+            # Filter to problems that need evaluation
+            to_run = []
+            for i, problem in enumerate(problems, 1):
+                existing = load_run_result(base_dir, prover, preset_name, problem)
+                if existing and not rerun:
+                    _log_result(existing, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=True)
+                else:
+                    to_run.append(problem)
 
-                problem_iter = iter(enumerate(problems, 1))
-                iter_lock = threading.Lock()
-                log_lock = threading.Lock()
-                completed_count = [0]
+            # Submit all problems
+            for problem in to_run:
+                pool.submit(problem)
 
-                def _pool_worker_fn(worker_idx):
-                    worker = pool.workers[worker_idx]
-                    while True:
-                        with iter_lock:
-                            try:
-                                i, problem = next(problem_iter)
-                            except StopIteration:
-                                return
-
-                        existing = load_run_result(base_dir, prover, preset_name, problem)
-                        if existing and not rerun:
-                            with log_lock:
-                                completed_count[0] += 1
-                                _log_result(existing, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=True)
-                            continue
-
-                        try:
-                            result = worker.submit(problem, pool.process_timeout)
-                            if result.status == "timeout":
-                                result.status = "resource_limit"
-                            save_run_result(base_dir, prover, preset_name, result)
-                        except Exception as e:
-                            result = BenchResult(problem=problem.name, status="error", time_s=0)
-                            print(f"ERROR: {e}")
-
-                        with log_lock:
-                            completed_count[0] += 1
-                            _log_result(result, stats, completed_count[0], len(problems), log_file, base_dir, prover, preset_name, cached=False)
-
-                with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                    futures = [executor.submit(_pool_worker_fn, i) for i in range(n_jobs)]
-                    for f in as_completed(futures):
-                        try:
-                            f.result()
-                        except Exception as e:
-                            print(f"ERROR in pool worker: {e}")
-                            stats["error"] += 1
-            else:
-                # Sequential execution with persistent worker
-                for i, problem in enumerate(problems, 1):
-                    existing = load_run_result(base_dir, prover, preset_name, problem)
-                    if existing and not rerun:
-                        _log_result(existing, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=True)
-                        continue
-
-                    try:
-                        result = pool.workers[0].submit(problem, pool.process_timeout)
-                        if result.status == "timeout":
-                            result.status = "resource_limit"
-                        save_run_result(base_dir, prover, preset_name, result)
-                        _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=False)
-                    except Exception as e:
-                        print(f"ERROR processing {problem.name}: {e}")
-                        sys.stdout.flush()
-                        import traceback
-                        traceback.print_exc()
-                        sys.stdout.flush()
+            # Collect results
+            for i in range(len(to_run)):
+                result = pool.collect(timeout=pool.process_timeout)
+                if result is None:
+                    continue
+                save_run_result(base_dir, prover, preset_name, result)
+                count = len(problems) - len(to_run) + i + 1
+                _log_result(result, stats, count, len(problems), log_file, base_dir, prover, preset_name, cached=False)
         finally:
             pool.shutdown()
 
     else:
         # External provers (Vampire, SPASS): subprocess per problem
-        work_items = [
-            (problem, base_dir, prover, preset, tptp_root, weights_path, collect_trace, trace_preset, binary, preset_name, rerun, use_cuda)
-            for problem in problems
-        ]
+        from bench_provers import run_vampire, run_spass
+
+        def _run_external(problem):
+            existing = load_run_result(base_dir, prover, preset_name, problem)
+            if existing and not rerun:
+                return "skip", existing
+            if prover == "vampire":
+                result = run_vampire(problem, base_dir, preset, binary, tptp_root)
+            elif prover == "spass":
+                result = run_spass(problem, base_dir, preset, binary, tptp_root)
+            else:
+                result = BenchResult(problem=problem.name, status="error", time_s=0)
+            if result.status == "timeout":
+                result.status = "resource_limit"
+            save_run_result(base_dir, prover, preset_name, result)
+            return "run", result
 
         if n_jobs > 1:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
             with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-                futures = {executor.submit(run_single_problem, item): i for i, item in enumerate(work_items)}
+                futures = {executor.submit(_run_external, p): p for p in problems}
                 completed = 0
-
                 for future in as_completed(futures):
                     completed += 1
                     try:
@@ -467,19 +422,12 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                         print(f"ERROR: {e}")
                         stats["error"] += 1
         else:
-            for i, item in enumerate(work_items, 1):
-                if i % 100 == 0:
-                    import gc
-                    gc.collect()
-
+            for i, problem in enumerate(problems, 1):
                 try:
-                    status, result = run_single_problem(item)
+                    status, result = _run_external(problem)
                     _log_result(result, stats, i, len(problems), log_file, base_dir, prover, preset_name, cached=(status == "skip"))
                 except Exception as e:
-                    print(f"ERROR processing {item[0].name}: {e}")
-                    sys.stdout.flush()
-                    import traceback
-                    traceback.print_exc()
+                    print(f"ERROR processing {problem.name}: {e}")
                     sys.stdout.flush()
 
     # Print summary (individual results saved to .data/runs/)
@@ -502,8 +450,8 @@ def main():
                        help="Problem set from tptp.json (default: from config)")
     parser.add_argument("--rerun", action="store_true",
                        help="Re-evaluate problems even if cached results exist")
-    parser.add_argument("--cpu-workers", type=int, default=1,
-                       help="Number of parallel CPU workers (default: 1)")
+    parser.add_argument("--workers", "--cpu-workers", type=int, default=1, dest="cpu_workers",
+                       help="Number of parallel workers (default: 1)")
     parser.add_argument("--cuda", action="store_true",
                        help="Use CUDA for ML inference")
 
