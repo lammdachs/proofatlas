@@ -837,7 +837,7 @@ impl PyMiniLMBackend {
         }
         let resp = self
             .handle
-            .submit_sync(0, "minilm".to_string(), Box::new(strings), false)
+            .submit_sync(0, "minilm".to_string(), Box::new(strings), true)
             .expect("MiniLM backend submission failed");
         *resp.data.downcast::<Vec<Vec<f32>>>().expect("unexpected response type")
     }
@@ -972,7 +972,7 @@ impl PyProver {
         }
         const BATCH_SIZE: usize = 1024;
         if strings.len() <= BATCH_SIZE {
-            match handle.submit_sync(0, "minilm".to_string(), Box::new(strings), false) {
+            match handle.submit_sync(0, "minilm".to_string(), Box::new(strings), true) {
                 Ok(resp) => *resp.data.downcast::<Vec<Vec<f32>>>().unwrap_or(Box::new(vec![])),
                 Err(_) => vec![],
             }
@@ -980,7 +980,7 @@ impl PyProver {
             let mut all_embs = Vec::with_capacity(strings.len());
             for chunk in strings.chunks(BATCH_SIZE) {
                 let batch: Vec<String> = chunk.to_vec();
-                match handle.submit_sync(0, "minilm".to_string(), Box::new(batch), false) {
+                match handle.submit_sync(0, "minilm".to_string(), Box::new(batch), true) {
                     Ok(resp) => {
                         let embs = *resp.data.downcast::<Vec<Vec<f32>>>().unwrap_or(Box::new(vec![]));
                         all_embs.extend(embs);
