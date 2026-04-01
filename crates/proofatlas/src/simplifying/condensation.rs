@@ -110,22 +110,31 @@ impl SimplifyingInference for CondensationRule {
 
                 // Try to match Li onto Lj: find σ where Liσ = Lj
                 if let Some(sigma) = match_literal(&lits[i], &lits[j]) {
-                    // Apply σ to all literals and collect unique results
-                    let mut new_lits: Vec<Literal> = Vec::with_capacity(lits.len());
-                    for lit in lits {
-                        let new_lit = lit.apply_substitution(&sigma);
-                        if !new_lits.contains(&new_lit) {
-                            new_lits.push(new_lit);
-                        }
-                    }
+                    // Check Cσ ⊂ C: every literal in Cσ must be a literal in C.
+                    // This guarantees Cσ subsumes C by construction.
+                    let all_in_c = lits.iter().all(|lit| {
+                        let mapped = lit.apply_substitution(&sigma);
+                        lits.contains(&mapped)
+                    });
 
-                    if new_lits.len() < lits.len() {
-                        return Some(StateChange::Simplify(
-                            clause_idx,
-                            Some(Arc::new(Clause::new(new_lits))),
-                            "Condensation".into(),
-                            vec![Position::clause(clause_idx)],
-                        ));
+                    if all_in_c {
+                        // Collect unique literals of Cσ
+                        let mut new_lits: Vec<Literal> = Vec::with_capacity(lits.len());
+                        for lit in lits {
+                            let new_lit = lit.apply_substitution(&sigma);
+                            if !new_lits.contains(&new_lit) {
+                                new_lits.push(new_lit);
+                            }
+                        }
+
+                        if new_lits.len() < lits.len() {
+                            return Some(StateChange::Simplify(
+                                clause_idx,
+                                Some(Arc::new(Clause::new(new_lits))),
+                                "Condensation".into(),
+                                vec![Position::clause(clause_idx)],
+                            ));
+                        }
                     }
                 }
             }
@@ -388,8 +397,10 @@ mod tests {
     }
 
     #[test]
-    fn test_condensation_propagates_to_other_literals() {
-        // P(X) | P(a) | Q(X) -> P(a) | Q(a) because σ={X→a} applies to ALL literals
+    fn test_no_condensation_when_sigma_loses_generality() {
+        // P(X) | P(a) | Q(X): σ={X→a} would give P(a)|Q(a), but that
+        // doesn't subsume the original (Q(a) can't match Q(X) backwards).
+        // Condensation must be rejected.
         let mut ctx = Ctx::new();
         let p = ctx.pred("P", 1);
         let q = ctx.pred("Q", 1);
@@ -407,18 +418,7 @@ mod tests {
         let mut rule = CondensationRule::new();
 
         let result = rule.simplify_forward(0, &state, &cm);
-        assert!(result.is_some());
-
-        if let Some(StateChange::Simplify(_, Some(replacement), _, _)) = result {
-            assert_eq!(replacement.literals.len(), 2);
-            // Q(X) should become Q(a) under σ={X→a}
-            let q_lit = replacement
-                .literals
-                .iter()
-                .find(|l| l.predicate == q)
-                .unwrap();
-            assert_eq!(q_lit.args, vec![a]);
-        }
+        assert!(result.is_none(), "condensation should be rejected: result loses generality");
     }
 
     #[test]
