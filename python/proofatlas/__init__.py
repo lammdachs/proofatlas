@@ -15,7 +15,7 @@ import sys
 __version__ = "0.3.0"
 __author__ = "ProofAtlas Contributors"
 
-__all__ = ['ProofAtlas', 'ProofStep', 'MiniLMBackend', 'WorkerPool', 'BatchResult']
+__all__ = ['ProofAtlas', 'ProofStep', 'MiniLMBackend', 'BatchResult']
 
 
 def _setup_torch_libs():
@@ -47,7 +47,6 @@ def _setup_torch_libs():
 _ProofAtlas = None
 _ProofStep = None
 _MiniLMBackend = None
-_WorkerPool = None
 _BatchResult = None
 
 
@@ -57,10 +56,10 @@ def _load_rust_ext():
     if _ProofAtlas is None:
         _setup_torch_libs()
         try:
-            from .proofatlas import ProofAtlas as _PA, ProofStep as _PS, WorkerPool as _WP, BatchResult as _BR
+            from .proofatlas import ProofAtlas as _PA, ProofStep as _PS, BatchResult as _BR
         except ImportError:
-            from proofatlas import ProofAtlas as _PA, ProofStep as _PS, WorkerPool as _WP, BatchResult as _BR
-        _ProofAtlas, _ProofStep, _WorkerPool, _BatchResult = _PA, _PS, _WP, _BR
+            from proofatlas import ProofAtlas as _PA, ProofStep as _PS, BatchResult as _BR
+        _ProofAtlas, _ProofStep, _BatchResult = _PA, _PS, _BR
         # MiniLMBackend may not exist (requires ml feature)
         try:
             try:
@@ -73,14 +72,12 @@ def _load_rust_ext():
 
 
 def __getattr__(name):
-    if name in ("ProofAtlas", "ProofStep", "MiniLMBackend", "WorkerPool", "BatchResult"):
+    if name in ("ProofAtlas", "ProofStep", "MiniLMBackend", "BatchResult"):
         _load_rust_ext()
         if name == "ProofAtlas":
             return _ProofAtlas
         elif name == "ProofStep":
             return _ProofStep
-        elif name == "WorkerPool":
-            return _WorkerPool
         elif name == "BatchResult":
             return _BatchResult
         elif name == "MiniLMBackend":

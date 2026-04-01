@@ -27,7 +27,7 @@ pub struct ProofStep {
 }
 
 // =============================================================================
-// PyOrchestrator — Python-facing "ProofAtlas" class
+// PyProofAtlas — Python-facing "ProofAtlas" class
 // =============================================================================
 
 /// Python-accessible orchestrator — wraps Rust ProofAtlas.
@@ -35,14 +35,18 @@ pub struct ProofStep {
 /// Created once with config, reused across multiple problems.
 /// Each `prove()` call returns a `Prover` with the result.
 #[pyclass(name = "ProofAtlas", unsendable)]
-pub struct PyOrchestrator {
+pub struct PyProofAtlas {
     atlas: Arc<ProofAtlas>,
     /// Initial clause count from the last prove() call
     initial_count: Option<usize>,
+    /// Worker pool (created by start_workers, None initially)
+    pool_tx: Option<crossbeam_channel::Sender<WorkerTask>>,
+    pool_rx: Option<crossbeam_channel::Receiver<WorkerResult>>,
+    pool_threads: Vec<std::thread::JoinHandle<()>>,
 }
 
 #[pymethods]
-impl PyOrchestrator {
+impl PyProofAtlas {
     /// Create a new ProofAtlas orchestrator.
     ///
     /// Args:
@@ -130,9 +134,12 @@ impl PyOrchestrator {
         let atlas = builder.build()
             .map_err(|e| PyValueError::new_err(e))?;
 
-        Ok(PyOrchestrator {
+        Ok(PyProofAtlas {
             atlas: Arc::new(atlas),
             initial_count: None,
+            pool_tx: None,
+            pool_rx: None,
+            pool_threads: Vec::new(),
         })
     }
 
@@ -167,9 +174,96 @@ impl PyOrchestrator {
         let parsed = self.parse_string_threaded(content)?;
         self.run_prover(parsed)
     }
+
+    // ── Worker pool ──────────────────────────────────────────────────
+
+    /// Start N prover threads sharing this atlas's Backend.
+    #[pyo3(signature = (n_workers, collect_traces=false))]
+    pub fn start_workers(&mut self, n_workers: usize, collect_traces: bool) -> PyResult<()> {
+        if self.pool_tx.is_some() {
+            return Err(PyValueError::new_err("Workers already started"));
+        }
+
+        let (task_tx, task_rx) = crossbeam_channel::unbounded::<WorkerTask>();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded::<WorkerResult>();
+
+        for i in 0..n_workers {
+            let atlas = Arc::clone(&self.atlas);
+            let task_rx = task_rx.clone();
+            let result_tx = result_tx.clone();
+
+            let thread = std::thread::Builder::new()
+                .name(format!("prover-worker-{}", i))
+                .stack_size(128 * 1024 * 1024)
+                .spawn(move || {
+                    worker_loop(&atlas, &task_rx, &result_tx, collect_traces, None);
+                })
+                .map_err(|e| PyValueError::new_err(format!("Failed to spawn worker: {}", e)))?;
+
+            self.pool_threads.push(thread);
+        }
+
+        self.pool_tx = Some(task_tx);
+        self.pool_rx = Some(result_rx);
+        Ok(())
+    }
+
+    /// Submit a problem to the worker pool.
+    pub fn submit(&self, path: String) -> PyResult<()> {
+        self.pool_tx.as_ref()
+            .ok_or_else(|| PyValueError::new_err("No workers started. Call start_workers() first."))?
+            .send(WorkerTask::Prove(path))
+            .map_err(|_| PyValueError::new_err("Worker channel closed"))
+    }
+
+    /// Collect one result from the worker pool. Blocks until available or timeout.
+    #[pyo3(signature = (timeout=None))]
+    pub fn collect(&self, py: Python<'_>, timeout: Option<f64>) -> PyResult<Option<PyBatchResult>> {
+        let rx = self.pool_rx.as_ref()
+            .ok_or_else(|| PyValueError::new_err("No workers started. Call start_workers() first."))?;
+
+        let deadline = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
+
+        loop {
+            match rx.try_recv() {
+                Ok(r) => return Ok(Some(PyBatchResult {
+                    problem: r.problem,
+                    status: r.status,
+                    time_s: r.time_s,
+                    clause_strings: r.clause_strings,
+                    num_clauses: r.num_clauses,
+                })),
+                Err(crossbeam_channel::TryRecvError::Empty) => {},
+                Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(None),
+            }
+
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Ok(None);
+                }
+            }
+
+            py.check_signals()?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Shut down the worker pool.
+    pub fn shutdown_workers(&mut self) {
+        if let Some(tx) = self.pool_tx.take() {
+            for _ in &self.pool_threads {
+                let _ = tx.send(WorkerTask::Shutdown);
+            }
+            drop(tx);
+        }
+        self.pool_rx = None;
+        for thread in self.pool_threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
 }
 
-impl PyOrchestrator {
+impl PyProofAtlas {
     /// Parse in a large-stack thread, polling for Python signals.
     fn parse_file_threaded(&self, path: &str) -> PyResult<crate::parser::ParsedProblem> {
         let include_dirs: Vec<String> = self.atlas.include_dirs().to_vec();
@@ -266,6 +360,12 @@ impl PyOrchestrator {
             #[cfg(feature = "ml")]
             backend_handle,
         })
+    }
+}
+
+impl Drop for PyProofAtlas {
+    fn drop(&mut self) {
+        self.shutdown_workers();
     }
 }
 
@@ -1035,122 +1135,13 @@ struct WorkerResult {
     num_clauses: usize,
 }
 
-/// Pool of prover threads sharing a single Backend.
-///
-/// All threads share one ProofAtlas (and its Backend) via Arc.
-/// The Backend handles GPU access; prover threads only do CPU work.
-#[pyclass(name = "WorkerPool", unsendable)]
-pub struct PyWorkerPool {
-    task_tx: Option<crossbeam_channel::Sender<WorkerTask>>,
-    result_rx: crossbeam_channel::Receiver<WorkerResult>,
-    threads: Vec<std::thread::JoinHandle<()>>,
-}
-
-#[pymethods]
-impl PyWorkerPool {
-    /// Create a worker pool from an existing ProofAtlas.
-    ///
-    /// Args:
-    ///     atlas: The ProofAtlas orchestrator (shared across all workers)
-    ///     n_workers: Number of prover threads
-    ///     collect_traces: Whether to collect clause strings for trace fallback
-    #[new]
-    #[pyo3(signature = (atlas, n_workers, collect_traces=false))]
-    pub fn new(atlas: &PyOrchestrator, n_workers: usize, collect_traces: bool) -> PyResult<Self> {
-        let (task_tx, task_rx) = crossbeam_channel::unbounded::<WorkerTask>();
-        let (result_tx, result_rx) = crossbeam_channel::unbounded::<WorkerResult>();
-
-        let mut threads = Vec::with_capacity(n_workers);
-        for i in 0..n_workers {
-            let atlas = Arc::clone(&atlas.atlas);
-            let task_rx = task_rx.clone();
-            let result_tx = result_tx.clone();
-
-            let thread = std::thread::Builder::new()
-                .name(format!("prover-worker-{}", i))
-                .stack_size(128 * 1024 * 1024)
-                .spawn(move || {
-                    Self::worker_loop(&atlas, &task_rx, &result_tx, collect_traces);
-                })
-                .map_err(|e| PyValueError::new_err(format!("Failed to spawn worker: {}", e)))?;
-
-            threads.push(thread);
-        }
-
-        Ok(PyWorkerPool {
-            task_tx: Some(task_tx),
-            result_rx,
-            threads,
-        })
-    }
-
-    /// Submit a problem for proving.
-    pub fn submit(&self, path: String) -> PyResult<()> {
-        self.task_tx.as_ref()
-            .ok_or_else(|| PyValueError::new_err("Pool is shut down"))?
-            .send(WorkerTask::Prove(path))
-            .map_err(|_| PyValueError::new_err("Worker channel closed"))
-    }
-
-    /// Collect one result. Blocks until available or timeout.
-    /// Returns None on timeout.
-    #[pyo3(signature = (timeout=None))]
-    pub fn collect(&self, py: Python<'_>, timeout: Option<f64>) -> PyResult<Option<PyBatchResult>> {
-        let deadline = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
-
-        loop {
-            // Try non-blocking receive
-            match self.result_rx.try_recv() {
-                Ok(r) => return Ok(Some(PyBatchResult {
-                    problem: r.problem,
-                    status: r.status,
-                    time_s: r.time_s,
-                    clause_strings: r.clause_strings,
-                    num_clauses: r.num_clauses,
-                })),
-                Err(crossbeam_channel::TryRecvError::Empty) => {},
-                Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(None),
-            }
-
-            // Check timeout
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Ok(None);
-                }
-            }
-
-            // Check Python signals and yield
-            py.check_signals()?;
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    /// Shut down all workers.
-    pub fn shutdown(&mut self) {
-        if let Some(tx) = self.task_tx.take() {
-            for _ in &self.threads {
-                let _ = tx.send(WorkerTask::Shutdown);
-            }
-            drop(tx);
-        }
-        for thread in self.threads.drain(..) {
-            let _ = thread.join();
-        }
-    }
-}
-
-impl Drop for PyWorkerPool {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-
-impl PyWorkerPool {
-    fn worker_loop(
+/// Worker loop for prover threads (used by PyProofAtlas::start_workers).
+fn worker_loop(
         atlas: &ProofAtlas,
         task_rx: &crossbeam_channel::Receiver<WorkerTask>,
         result_tx: &crossbeam_channel::Sender<WorkerResult>,
         collect_traces: bool,
+        trace_config: Option<&(String, String)>,
     ) {
         while let Ok(task) = task_rx.recv() {
             match task {
@@ -1166,11 +1157,15 @@ impl PyWorkerPool {
                     let (status, clause_strings, num_clauses) = match result {
                         Ok(Ok((proof_result, prover))) => {
                             use crate::state::ProofResult;
+                            let proof_found = matches!(proof_result, ProofResult::Proof { .. });
                             let status = match proof_result {
                                 ProofResult::Proof { .. } => "proof",
                                 ProofResult::Saturated => "saturated",
                                 ProofResult::ResourceLimit => "resource_limit",
                             };
+
+                            let _ = (proof_found, trace_config); // trace saving handled by Python
+
                             let strings = if collect_traces {
                                 let interner = prover.interner();
                                 let clauses = prover.clauses();
@@ -1210,14 +1205,12 @@ impl PyWorkerPool {
             }
         }
     }
-}
 
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyOrchestrator>()?;
+    m.add_class::<PyProofAtlas>()?;
     m.add_class::<PyProver>()?;
     m.add_class::<ProofStep>()?;
-    m.add_class::<PyWorkerPool>()?;
     m.add_class::<PyBatchResult>()?;
     #[cfg(feature = "ml")]
     m.add_class::<PyMiniLMBackend>()?;
