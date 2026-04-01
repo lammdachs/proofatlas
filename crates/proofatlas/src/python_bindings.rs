@@ -178,9 +178,10 @@ impl PyProofAtlas {
     // ── Worker pool ──────────────────────────────────────────────────
 
     /// Start N prover threads sharing this atlas's Backend.
-    #[pyo3(signature = (n_workers, collect_traces=false, traces_dir=None, trace_preset=None))]
+    #[pyo3(signature = (n_workers, collect_traces=false, traces_dir=None, trace_preset=None, fallback_dirs=None))]
     pub fn start_workers(&mut self, n_workers: usize, collect_traces: bool,
-                         traces_dir: Option<String>, trace_preset: Option<String>) -> PyResult<()> {
+                         traces_dir: Option<String>, trace_preset: Option<String>,
+                         fallback_dirs: Option<Vec<String>>) -> PyResult<()> {
         if self.pool_tx.is_some() {
             return Err(PyValueError::new_err("Workers already started"));
         }
@@ -188,7 +189,14 @@ impl PyProofAtlas {
         let (task_tx, task_rx) = crossbeam_channel::unbounded::<WorkerTask>();
         let (result_tx, result_rx) = crossbeam_channel::unbounded::<WorkerResult>();
 
-        let trace_config = traces_dir.zip(trace_preset);
+        let trace_config = match (traces_dir, trace_preset) {
+            (Some(dir), Some(preset)) => Some(TraceConfig {
+                traces_dir: dir,
+                preset,
+                fallback_dirs: fallback_dirs.unwrap_or_default(),
+            }),
+            _ => None,
+        };
 
         for i in 0..n_workers {
             let atlas = Arc::clone(&self.atlas);
@@ -681,6 +689,13 @@ pub struct PyBatchResult {
     pub num_clauses: usize,
 }
 
+#[derive(Clone)]
+struct TraceConfig {
+    traces_dir: String,
+    preset: String,
+    fallback_dirs: Vec<String>, // dirs to search for .strings.json fallback labels
+}
+
 enum WorkerTask {
     Prove(String), // problem path
     Shutdown,
@@ -700,7 +715,7 @@ fn worker_loop(
         task_rx: &crossbeam_channel::Receiver<WorkerTask>,
         result_tx: &crossbeam_channel::Sender<WorkerResult>,
         collect_traces: bool,
-        trace_config: Option<&(String, String)>,
+        trace_config: Option<&TraceConfig>,
     ) {
         while let Ok(task) = task_rx.recv() {
             match task {
@@ -723,19 +738,54 @@ fn worker_loop(
                                 ProofResult::ResourceLimit => "resource_limit",
                             };
 
-                            // Save trace for successful proofs
+                            // Save trace
                             #[cfg(feature = "ml")]
-                            if proof_found {
-                                if let Some((traces_dir, preset)) = trace_config {
-                                    let problem_name = std::path::Path::new(&path)
-                                        .file_name()
-                                        .map(|f| f.to_string_lossy().to_string())
-                                        .unwrap_or_default();
-                                    let handle = atlas.backend_handle();
+                            if let Some(tc) = trace_config {
+                                let problem_name = std::path::Path::new(&path)
+                                    .file_name()
+                                    .map(|f| f.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                let handle = atlas.backend_handle();
+
+                                if proof_found {
+                                    // ML solved: save trace with own proof labels
                                     let _ = crate::selection::training::trace::save_trace(
                                         &prover, &proof_result, handle.as_ref(),
-                                        traces_dir, preset, &problem_name, None,
+                                        &tc.traces_dir, &tc.preset, &problem_name, None,
                                     );
+                                } else if !tc.fallback_dirs.is_empty() {
+                                    // ML failed: try fallback labeling from .strings.json
+                                    let stem = std::path::Path::new(&problem_name)
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(&problem_name);
+                                    let interner = prover.interner();
+                                    let clauses = prover.clauses();
+
+                                    for fb_dir in &tc.fallback_dirs {
+                                        let strings_path = std::path::PathBuf::from(fb_dir)
+                                            .join(format!("{}.strings.json", stem));
+                                        if let Ok(data) = std::fs::read_to_string(&strings_path) {
+                                            if let Ok(proof_strings) = serde_json::from_str::<Vec<String>>(&data) {
+                                                let proof_set: std::collections::HashSet<&str> =
+                                                    proof_strings.iter().map(|s| s.as_str()).collect();
+                                                let labels: Vec<u8> = clauses.iter()
+                                                    .map(|c| {
+                                                        let s = c.display(interner).to_string();
+                                                        if proof_set.contains(s.as_str()) { 1 } else { 0 }
+                                                    })
+                                                    .collect();
+                                                if labels.iter().any(|&l| l == 1) {
+                                                    let _ = crate::selection::training::trace::save_trace(
+                                                        &prover, &proof_result, handle.as_ref(),
+                                                        &tc.traces_dir, &tc.preset, &problem_name,
+                                                        Some(labels),
+                                                    );
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             #[cfg(not(feature = "ml"))]

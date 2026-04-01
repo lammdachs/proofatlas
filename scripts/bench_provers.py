@@ -128,9 +128,15 @@ class ProofAtlasPool:
                                     collect_trace=collect_trace)
         self.atlas = ProofAtlas(**kwargs)
         traces_dir = str(base_dir / ".data" / "traces") if collect_trace else None
+        fallback_trace_dirs = None
+        if collect_trace and fallback_configs:
+            fallback_trace_dirs = [
+                str(base_dir / ".data" / "traces" / fb) for fb in fallback_configs
+            ]
         self.atlas.start_workers(
             n_workers, collect_traces=collect_trace,
             traces_dir=traces_dir, trace_preset=trace_preset,
+            fallback_dirs=fallback_trace_dirs,
         )
 
     def start(self):
