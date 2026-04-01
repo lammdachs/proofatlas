@@ -962,6 +962,7 @@ impl PyProver {
 #[cfg(feature = "ml")]
 impl PyProver {
     /// Encode strings to 384-D MiniLM embeddings via the backend handle.
+    /// Batches large inputs to avoid OOM.
     fn encode_strings_via_handle(
         handle: &crate::selection::BackendHandle,
         strings: Vec<String>,
@@ -969,11 +970,30 @@ impl PyProver {
         if strings.is_empty() {
             return vec![];
         }
-        match handle.submit_sync(0, "minilm".to_string(), Box::new(strings), false) {
-            Ok(resp) => {
-                *resp.data.downcast::<Vec<Vec<f32>>>().unwrap_or(Box::new(vec![]))
+        const BATCH_SIZE: usize = 1024;
+        if strings.len() <= BATCH_SIZE {
+            match handle.submit_sync(0, "minilm".to_string(), Box::new(strings), false) {
+                Ok(resp) => *resp.data.downcast::<Vec<Vec<f32>>>().unwrap_or(Box::new(vec![])),
+                Err(_) => vec![],
             }
-            Err(_) => vec![],
+        } else {
+            let mut all_embs = Vec::with_capacity(strings.len());
+            for chunk in strings.chunks(BATCH_SIZE) {
+                let batch: Vec<String> = chunk.to_vec();
+                match handle.submit_sync(0, "minilm".to_string(), Box::new(batch), false) {
+                    Ok(resp) => {
+                        let embs = *resp.data.downcast::<Vec<Vec<f32>>>().unwrap_or(Box::new(vec![]));
+                        all_embs.extend(embs);
+                    }
+                    Err(_) => {
+                        // Fill with zeros on failure
+                        for _ in chunk {
+                            all_embs.push(vec![0.0; 384]);
+                        }
+                    }
+                }
+            }
+            all_embs
         }
     }
 }
