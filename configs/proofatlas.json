@@ -26,7 +26,10 @@
       "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_attention": {
       "description": "GCN + attention",
@@ -36,7 +39,10 @@
       "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_transformer": {
       "description": "GCN + transformer",
@@ -46,7 +52,10 @@
       "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "sentence_mlp": {
       "description": "Sentence + MLP",
@@ -56,7 +65,10 @@
       "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "features_mlp": {
       "description": "Features + MLP",
@@ -66,7 +78,10 @@
       "encoder": "features",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "features_attention": {
       "description": "Features + Attention",
@@ -76,7 +91,10 @@
       "encoder": "features",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "features_transformer": {
       "description": "Features + Transformer",
@@ -86,7 +104,10 @@
       "encoder": "features",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_mlp": {
       "description": "GCN (structural) + MLP",
@@ -95,9 +116,12 @@
       "literal_selection": 21,
       "encoder": "gcn_struct",
       "scorer": "mlp",
-      "traces": "gcn_struct_mlp_r1",
+      "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.5
+      "temperature": 0.5,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_attention": {
       "description": "GCN (structural) + Attention",
@@ -108,7 +132,10 @@
       "scorer": "attention",
       "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.5
+      "temperature": 0.5,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_attention_t05": {
       "description": "GCN (structural) + Attention (temp=0.5)",
@@ -119,7 +146,10 @@
       "scorer": "attention",
       "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.5
+      "temperature": 0.5,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_attention_t03": {
       "description": "GCN (structural) + Attention (temp=0.3)",
@@ -130,7 +160,10 @@
       "scorer": "attention",
       "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.3
+      "temperature": 0.3,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_attention_t01": {
       "description": "GCN (structural) + Attention (temp=0.1)",
@@ -141,7 +174,10 @@
       "scorer": "attention",
       "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.1
+      "temperature": 0.1,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer (1L)",
@@ -152,7 +188,10 @@
       "scorer": "transformer",
       "traces": "age_weight",
       "memory_limit": 1024,
-      "temperature": 0.5
+      "temperature": 0.5,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "sentence_attention": {
       "description": "Sentence + Attention",
@@ -162,7 +201,10 @@
       "encoder": "sentence",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "sentence_transformer": {
       "description": "Sentence + Transformer",
@@ -172,7 +214,10 @@
       "encoder": "sentence",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_mlp": {
       "description": "GCN + MLP (10s wall-time)",
@@ -181,7 +226,10 @@
       "encoder": "gcn",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_attention": {
       "description": "GCN + Attention (10s wall-time)",
@@ -190,7 +238,10 @@
       "encoder": "gcn",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_transformer": {
       "description": "GCN + Transformer (10s wall-time)",
@@ -199,7 +250,10 @@
       "encoder": "gcn",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_struct_mlp": {
       "description": "GCN (structural) + MLP (10s wall-time)",
@@ -208,7 +262,10 @@
       "encoder": "gcn_struct",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_struct_attention": {
       "description": "GCN (structural) + Attention (10s wall-time)",
@@ -217,7 +274,10 @@
       "encoder": "gcn_struct",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer (10s wall-time)",
@@ -226,7 +286,10 @@
       "encoder": "gcn_struct",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_sentence_mlp": {
       "description": "Sentence + MLP (10s wall-time)",
@@ -235,7 +298,10 @@
       "encoder": "sentence",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_sentence_attention": {
       "description": "Sentence + Attention (10s wall-time)",
@@ -244,7 +310,10 @@
       "encoder": "sentence",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_sentence_transformer": {
       "description": "Sentence + Transformer (10s wall-time)",
@@ -253,7 +322,10 @@
       "encoder": "sentence",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_features_mlp": {
       "description": "Features + MLP (10s wall-time)",
@@ -262,7 +334,10 @@
       "encoder": "features",
       "scorer": "mlp",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_features_attention": {
       "description": "Features + Attention (10s wall-time)",
@@ -271,7 +346,10 @@
       "encoder": "features",
       "scorer": "attention",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
     },
     "time_features_transformer": {
       "description": "Features + Transformer (10s wall-time)",
@@ -280,7 +358,25 @@
       "encoder": "features",
       "scorer": "transformer",
       "traces": "age_weight",
-      "memory_limit": 1024
+      "memory_limit": 1024,
+      "fallback": [
+        "age_weight"
+      ]
+    },
+    "gcn_struct_mlp_r1": {
+      "description": "GCN (structural) + MLP, round 1",
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "mlp",
+      "traces": "gcn_struct_mlp",
+      "memory_limit": 1024,
+      "temperature": 0.5,
+      "fallback": [
+        "gcn_struct_mlp",
+        "age_weight"
+      ]
     }
   }
 }

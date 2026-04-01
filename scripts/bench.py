@@ -739,8 +739,8 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.cpu_workers,
                 use_cuda=use_cuda_eval,
-                collect_traces=args.trace,
-                fallback_configs=args.fallback,
+                collect_traces=args.trace or bool(preset.get("fallback")),
+                fallback_configs=args.fallback or preset.get("fallback"),
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()
