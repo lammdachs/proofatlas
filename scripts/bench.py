@@ -684,7 +684,7 @@ def main():
                 sys.stdout.flush()
 
                 weights_dir = base_dir / ".weights"
-                existing_weights = ml.find_weights(weights_dir, preset)
+                existing_weights = ml.find_weights(weights_dir, preset, preset_name)
 
                 if existing_weights:
                     log(f"[{preset_name}] Found weights: {existing_weights}")
@@ -710,7 +710,7 @@ def main():
                         sys.stdout.flush()
                         continue
 
-                    existing_weights = ml.find_weights(weights_dir, preset)
+                    existing_weights = ml.find_weights(weights_dir, preset, preset_name)
                     if not existing_weights:
                         log(f"[{preset_name}] Training produced no weights, skipping")
                         sys.stdout.flush()

@@ -301,7 +301,7 @@ def handle_kill(base_dir):
 
 def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem_names,
                       web_data_dir, cpu_workers, world_size, batch_size,
-                      accumulate_batches, max_epochs):
+                      accumulate_batches, max_epochs, preset_name=None):
     """DDP worker function at module level so it can be pickled by mp.spawn."""
     from proofatlas.ml.training import run_training
 
@@ -319,6 +319,7 @@ def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem
         batch_size=batch_size,
         accumulate_batches=accumulate_batches,
         max_epochs=max_epochs,
+        preset_name=preset_name,
     )
 
 
@@ -363,7 +364,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             args=(preset, trace_dir, weights_dir, base_dir / "configs",
                   problem_names, base_dir / "web" / "static" / "data", args.cpu_workers,
                   args.gpu_workers, batch_size, accumulate_batches,
-                  args.max_epochs),
+                  args.max_epochs, args.config),
             nprocs=args.gpu_workers,
             join=True,
         )
@@ -381,6 +382,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
             accumulate_batches=accumulate_batches,
             force_cpu=not args.use_cuda,
             max_epochs=args.max_epochs,
+            preset_name=args.config,
         )
 
     log(f"Training complete! Weights saved to: {weights_dir}")
@@ -466,7 +468,7 @@ def main():
     # Check for existing weights
     weights_dir = Path(args.weights_dir) if args.weights_dir else base_dir / ".weights"
     from proofatlas.ml.weights import find_weights
-    existing_weights = find_weights(weights_dir, preset)
+    existing_weights = find_weights(weights_dir, preset, args.config)
     if existing_weights:
         log(f"Found existing weights: {existing_weights}")
         log("Will overwrite with new training run")

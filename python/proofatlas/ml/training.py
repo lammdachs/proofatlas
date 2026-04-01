@@ -180,6 +180,7 @@ def run_training(
     accumulate_batches: Optional[int] = None,
     force_cpu: bool = False,
     max_epochs: Optional[int] = None,
+    preset_name: Optional[str] = None,
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -340,7 +341,7 @@ def _run_training_inner(
         # Both "graph" and "features" use graph.npz traces
         output_type = "graph"
 
-    model_name = get_model_name(preset)
+    model_name = preset_name or get_model_name(preset)
 
     # Get per-problem trace files (flat: STEM.graph.npz or STEM.sentence.npz)
     trace_dir = Path(trace_dir)
