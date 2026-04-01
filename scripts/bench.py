@@ -714,7 +714,7 @@ def main():
             prover_config = run["config"]
 
             config_label = f"{prover}/{preset_name}"
-            trace_preset = preset.get("traces") or preset_name
+            trace_preset = preset_name
 
             # Log config progress for --status parsing
             print(f"CONFIG:{config_label}:{run_idx}:{num_runs}")
