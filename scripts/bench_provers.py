@@ -127,7 +127,11 @@ class ProofAtlasPool:
         kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda,
                                     collect_trace=collect_trace)
         self.atlas = ProofAtlas(**kwargs)
-        self.atlas.start_workers(n_workers, collect_traces=collect_trace)
+        traces_dir = str(base_dir / ".data" / "traces") if collect_trace else None
+        self.atlas.start_workers(
+            n_workers, collect_traces=collect_trace,
+            traces_dir=traces_dir, trace_preset=trace_preset,
+        )
 
     def start(self):
         pass  # Workers start in __init__
