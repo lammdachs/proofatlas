@@ -12,14 +12,16 @@
 //! ```
 //!
 //! - **ModelSpec**: model_id + factory closure — stored until first request triggers loading.
-//! - **BackendHandle**: cheaply cloneable, wraps `mpsc::Sender` to backend.
+//! - **BackendHandle**: cheaply cloneable, wraps `crossbeam_channel::Sender` to backend.
+//!   `Sender` is `Send + Sync`, making `BackendHandle` and `ProofAtlas` `Sync` —
+//!   multiple prover threads can share a single Backend.
 //! - **Worker**: receives requests, lazily loads models, groups by model, executes batches.
 //!
 //! Lifecycle: When all `BackendHandle`s are dropped, the request channel closes
 //! and the worker drains remaining work then exits.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::mpsc;
+use crossbeam_channel as channel;
 use std::thread::JoinHandle;
 
 // =============================================================================
@@ -35,7 +37,7 @@ pub struct BackendRequest {
     /// Type-erased input data for the model.
     pub data: Box<dyn std::any::Any + Send>,
     /// Channel to send the response back to the requester.
-    pub response_tx: mpsc::Sender<BackendResponse>,
+    pub response_tx: channel::Sender<BackendResponse>,
     /// Device hint for lazy model loading. Only used on first request
     /// for this model_id; subsequent requests use the already-loaded model.
     pub use_cuda: bool,
@@ -109,7 +111,7 @@ impl ModelSpec {
 /// and the worker shuts down after draining remaining work.
 #[derive(Clone)]
 pub struct BackendHandle {
-    tx: mpsc::Sender<BackendRequest>,
+    tx: channel::Sender<BackendRequest>,
 }
 
 impl BackendHandle {
@@ -131,7 +133,7 @@ impl BackendHandle {
         data: Box<dyn std::any::Any + Send>,
         use_cuda: bool,
     ) -> Result<BackendResponse, String> {
-        let (resp_tx, resp_rx) = mpsc::channel();
+        let (resp_tx, resp_rx) = channel::unbounded();
         self.submit(BackendRequest {
             id,
             model_id,
@@ -169,7 +171,7 @@ impl Backend {
     /// Spawns a single worker thread with a 16 MiB stack (required for
     /// libtorch operations).
     pub fn new(specs: Vec<ModelSpec>) -> Self {
-        let (tx, rx) = mpsc::channel::<BackendRequest>();
+        let (tx, rx) = channel::unbounded::<BackendRequest>();
 
         let worker = std::thread::Builder::new()
             .name("backend-worker".to_string())
@@ -200,7 +202,7 @@ impl Backend {
 
     /// Worker loop: receive requests, lazily load models, execute batches.
     fn worker_loop(
-        rx: mpsc::Receiver<BackendRequest>,
+        rx: channel::Receiver<BackendRequest>,
         specs: Vec<ModelSpec>,
     ) {
         type Factory = Box<dyn FnOnce(bool) -> Result<Box<dyn Model>, String> + Send>;
@@ -281,7 +283,7 @@ impl Backend {
 
             // Separate response channels from data
             let requests: Vec<BackendRequest> = queue.drain(..).collect();
-            let mut response_txs: Vec<(u64, mpsc::Sender<BackendResponse>)> =
+            let mut response_txs: Vec<(u64, channel::Sender<BackendResponse>)> =
                 Vec::with_capacity(requests.len());
             let mut batch_data: Vec<(u64, Box<dyn std::any::Any + Send>)> =
                 Vec::with_capacity(requests.len());
@@ -308,6 +310,13 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Compile-time assert: BackendHandle must be Send + Sync
+    // so that ProofAtlas can be shared across threads.
+    const _: () = {
+        fn assert_send_sync<T: Send + Sync>() {}
+        fn check() { assert_send_sync::<BackendHandle>(); }
+    };
 
     /// Simple test model that doubles a f32 value.
     struct DoublerModel;
@@ -366,8 +375,8 @@ mod tests {
         let handle = backend.handle();
 
         // Submit multiple requests
-        let (tx1, rx1) = mpsc::channel();
-        let (tx2, rx2) = mpsc::channel();
+        let (tx1, rx1) = channel::unbounded();
+        let (tx2, rx2) = channel::unbounded();
         handle.submit(BackendRequest { id: 1, model_id: "doubler".to_string(), data: Box::new(5.0f32), response_tx: tx1, use_cuda: false }).unwrap();
         handle.submit(BackendRequest { id: 2, model_id: "doubler".to_string(), data: Box::new(7.0f32), response_tx: tx2, use_cuda: false }).unwrap();
 

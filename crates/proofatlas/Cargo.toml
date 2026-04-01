@@ -30,6 +30,9 @@ tch = { version = ">=0.22", optional = true }
 # Tokenizers (for sentence encoder)
 tokenizers = { version = "0.20", optional = true }
 
+# Channels (Sync senders for shared-backend architecture)
+crossbeam-channel = "0.5"
+
 # NPZ trace writing
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
