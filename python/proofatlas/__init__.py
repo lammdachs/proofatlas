@@ -15,7 +15,7 @@ import sys
 __version__ = "0.3.0"
 __author__ = "ProofAtlas Contributors"
 
-__all__ = ['ProofAtlas', 'ProofStep', 'MiniLMBackend']
+__all__ = ['ProofAtlas', 'ProofStep', 'MiniLMBackend', 'WorkerPool', 'BatchResult']
 
 
 def _setup_torch_libs():
@@ -47,18 +47,20 @@ def _setup_torch_libs():
 _ProofAtlas = None
 _ProofStep = None
 _MiniLMBackend = None
+_WorkerPool = None
+_BatchResult = None
 
 
 def _load_rust_ext():
     """Load the Rust extension module, setting up torch libs first."""
-    global _ProofAtlas, _ProofStep, _MiniLMBackend
+    global _ProofAtlas, _ProofStep, _MiniLMBackend, _WorkerPool, _BatchResult
     if _ProofAtlas is None:
         _setup_torch_libs()
         try:
-            from .proofatlas import ProofAtlas as _PA, ProofStep as _PS
+            from .proofatlas import ProofAtlas as _PA, ProofStep as _PS, WorkerPool as _WP, BatchResult as _BR
         except ImportError:
-            from proofatlas import ProofAtlas as _PA, ProofStep as _PS
-        _ProofAtlas, _ProofStep = _PA, _PS
+            from proofatlas import ProofAtlas as _PA, ProofStep as _PS, WorkerPool as _WP, BatchResult as _BR
+        _ProofAtlas, _ProofStep, _WorkerPool, _BatchResult = _PA, _PS, _WP, _BR
         # MiniLMBackend may not exist (requires ml feature)
         try:
             try:
@@ -71,12 +73,16 @@ def _load_rust_ext():
 
 
 def __getattr__(name):
-    if name in ("ProofAtlas", "ProofStep", "MiniLMBackend"):
+    if name in ("ProofAtlas", "ProofStep", "MiniLMBackend", "WorkerPool", "BatchResult"):
         _load_rust_ext()
         if name == "ProofAtlas":
             return _ProofAtlas
         elif name == "ProofStep":
             return _ProofStep
+        elif name == "WorkerPool":
+            return _WorkerPool
+        elif name == "BatchResult":
+            return _BatchResult
         elif name == "MiniLMBackend":
             if _MiniLMBackend is None:
                 raise AttributeError("MiniLMBackend requires the 'ml' feature")

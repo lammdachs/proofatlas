@@ -555,3 +555,19 @@ fn load_embedder_scorer(
         _ => Err(format!("Unknown encoder for MLP path: '{}'", enc)),
     }
 }
+
+#[cfg(test)]
+mod sync_tests {
+    fn assert_sync<T: Sync>() {}
+    fn assert_send<T: Send>() {}
+    
+    #[test]
+    fn proof_atlas_is_send() {
+        assert_send::<super::ProofAtlas>();
+    }
+    
+    #[test]
+    fn proof_atlas_is_sync() {
+        assert_sync::<super::ProofAtlas>();
+    }
+}

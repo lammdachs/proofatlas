@@ -3,6 +3,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::logic::{Clause, Interner};
@@ -35,7 +36,7 @@ pub struct ProofStep {
 /// Each `prove()` call returns a `Prover` with the result.
 #[pyclass(name = "ProofAtlas", unsendable)]
 pub struct PyOrchestrator {
-    atlas: ProofAtlas,
+    atlas: Arc<ProofAtlas>,
     /// Initial clause count from the last prove() call
     initial_count: Option<usize>,
 }
@@ -130,7 +131,7 @@ impl PyOrchestrator {
             .map_err(|e| PyValueError::new_err(e))?;
 
         Ok(PyOrchestrator {
-            atlas,
+            atlas: Arc::new(atlas),
             initial_count: None,
         })
     }
@@ -998,11 +999,226 @@ impl PyProver {
     }
 }
 
+// =============================================================================
+// PyWorkerPool — shared-backend parallel proving
+// =============================================================================
+
+/// Result from a worker pool problem.
+#[pyclass(name = "BatchResult")]
+#[derive(Clone)]
+pub struct PyBatchResult {
+    #[pyo3(get)]
+    pub problem: String,
+    #[pyo3(get)]
+    pub status: String,
+    #[pyo3(get)]
+    pub time_s: f64,
+    /// Clause strings from the prover (for trace fallback labeling).
+    /// Only populated when trace collection is enabled.
+    #[pyo3(get)]
+    pub clause_strings: Option<Vec<String>>,
+    /// Number of clauses in the prover state.
+    #[pyo3(get)]
+    pub num_clauses: usize,
+}
+
+enum WorkerTask {
+    Prove(String), // problem path
+    Shutdown,
+}
+
+struct WorkerResult {
+    problem: String,
+    status: String,
+    time_s: f64,
+    clause_strings: Option<Vec<String>>,
+    num_clauses: usize,
+}
+
+/// Pool of prover threads sharing a single Backend.
+///
+/// All threads share one ProofAtlas (and its Backend) via Arc.
+/// The Backend handles GPU access; prover threads only do CPU work.
+#[pyclass(name = "WorkerPool", unsendable)]
+pub struct PyWorkerPool {
+    task_tx: Option<crossbeam_channel::Sender<WorkerTask>>,
+    result_rx: crossbeam_channel::Receiver<WorkerResult>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+#[pymethods]
+impl PyWorkerPool {
+    /// Create a worker pool from an existing ProofAtlas.
+    ///
+    /// Args:
+    ///     atlas: The ProofAtlas orchestrator (shared across all workers)
+    ///     n_workers: Number of prover threads
+    ///     collect_traces: Whether to collect clause strings for trace fallback
+    #[new]
+    #[pyo3(signature = (atlas, n_workers, collect_traces=false))]
+    pub fn new(atlas: &PyOrchestrator, n_workers: usize, collect_traces: bool) -> PyResult<Self> {
+        let (task_tx, task_rx) = crossbeam_channel::unbounded::<WorkerTask>();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded::<WorkerResult>();
+
+        let mut threads = Vec::with_capacity(n_workers);
+        for i in 0..n_workers {
+            let atlas = Arc::clone(&atlas.atlas);
+            let task_rx = task_rx.clone();
+            let result_tx = result_tx.clone();
+
+            let thread = std::thread::Builder::new()
+                .name(format!("prover-worker-{}", i))
+                .stack_size(128 * 1024 * 1024)
+                .spawn(move || {
+                    Self::worker_loop(&atlas, &task_rx, &result_tx, collect_traces);
+                })
+                .map_err(|e| PyValueError::new_err(format!("Failed to spawn worker: {}", e)))?;
+
+            threads.push(thread);
+        }
+
+        Ok(PyWorkerPool {
+            task_tx: Some(task_tx),
+            result_rx,
+            threads,
+        })
+    }
+
+    /// Submit a problem for proving.
+    pub fn submit(&self, path: String) -> PyResult<()> {
+        self.task_tx.as_ref()
+            .ok_or_else(|| PyValueError::new_err("Pool is shut down"))?
+            .send(WorkerTask::Prove(path))
+            .map_err(|_| PyValueError::new_err("Worker channel closed"))
+    }
+
+    /// Collect one result. Blocks until available or timeout.
+    /// Returns None on timeout.
+    #[pyo3(signature = (timeout=None))]
+    pub fn collect(&self, py: Python<'_>, timeout: Option<f64>) -> PyResult<Option<PyBatchResult>> {
+        let deadline = timeout.map(|t| Instant::now() + Duration::from_secs_f64(t));
+
+        loop {
+            // Try non-blocking receive
+            match self.result_rx.try_recv() {
+                Ok(r) => return Ok(Some(PyBatchResult {
+                    problem: r.problem,
+                    status: r.status,
+                    time_s: r.time_s,
+                    clause_strings: r.clause_strings,
+                    num_clauses: r.num_clauses,
+                })),
+                Err(crossbeam_channel::TryRecvError::Empty) => {},
+                Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(None),
+            }
+
+            // Check timeout
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Ok(None);
+                }
+            }
+
+            // Check Python signals and yield
+            py.check_signals()?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Shut down all workers.
+    pub fn shutdown(&mut self) {
+        if let Some(tx) = self.task_tx.take() {
+            for _ in &self.threads {
+                let _ = tx.send(WorkerTask::Shutdown);
+            }
+            drop(tx);
+        }
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for PyWorkerPool {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl PyWorkerPool {
+    fn worker_loop(
+        atlas: &ProofAtlas,
+        task_rx: &crossbeam_channel::Receiver<WorkerTask>,
+        result_tx: &crossbeam_channel::Sender<WorkerResult>,
+        collect_traces: bool,
+    ) {
+        while let Ok(task) = task_rx.recv() {
+            match task {
+                WorkerTask::Shutdown => break,
+                WorkerTask::Prove(path) => {
+                    let start = Instant::now();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        atlas.prove_file(&path)
+                    }));
+
+                    let elapsed = start.elapsed().as_secs_f64();
+
+                    let (status, clause_strings, num_clauses) = match result {
+                        Ok(Ok((proof_result, prover))) => {
+                            use crate::state::ProofResult;
+                            let status = match proof_result {
+                                ProofResult::Proof { .. } => "proof",
+                                ProofResult::Saturated => "saturated",
+                                ProofResult::ResourceLimit => "resource_limit",
+                            };
+                            let strings = if collect_traces {
+                                let interner = prover.interner();
+                                let clauses = prover.clauses();
+                                Some(clauses.iter()
+                                    .map(|c| c.display(interner).to_string())
+                                    .collect())
+                            } else {
+                                None
+                            };
+                            let nc = prover.clauses().len();
+                            (status.to_string(), strings, nc)
+                        }
+                        Ok(Err(e)) => {
+                            let s = e.to_lowercase();
+                            if s.contains("timed out") || s.contains("memory limit") {
+                                ("resource_limit".to_string(), None, 0)
+                            } else {
+                                ("error".to_string(), None, 0)
+                            }
+                        }
+                        Err(_) => ("error".to_string(), None, 0),
+                    };
+
+                    let problem = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or(path.clone());
+
+                    let _ = result_tx.send(WorkerResult {
+                        problem,
+                        status,
+                        time_s: elapsed,
+                        clause_strings,
+                        num_clauses,
+                    });
+                }
+            }
+        }
+    }
+}
+
 #[pymodule]
 fn proofatlas(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOrchestrator>()?;
     m.add_class::<PyProver>()?;
     m.add_class::<ProofStep>()?;
+    m.add_class::<PyWorkerPool>()?;
+    m.add_class::<PyBatchResult>()?;
     #[cfg(feature = "ml")]
     m.add_class::<PyMiniLMBackend>()?;
     Ok(())
