@@ -3,7 +3,7 @@
 use crate::logic::{Clause, Interner, Literal, PredicateSymbol, Substitution, Term, TermOrdering, KBO};
 use crate::logic::unify;
 use crate::logic::unification::scoped::{
-    ScopedSubstitution, ScopedVar, flatten_scoped, unify_scoped_extend,
+    ScopedSubstitution, ScopedVar, apply_scoped_term, flatten_scoped, lift, unify_scoped_terms,
 };
 use std::collections::HashMap;
 
@@ -99,7 +99,9 @@ pub fn unify_atoms_scoped(
 
     let mut subst = ScopedSubstitution::new();
     for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-        unify_scoped_extend(arg1, scope1, arg2, scope2, &mut subst)?;
+        let st1 = apply_scoped_term(&lift(arg1, scope1), &subst);
+        let st2 = apply_scoped_term(&lift(arg2, scope2), &subst);
+        unify_scoped_terms(&st1, &st2, &mut subst)?;
     }
 
     Ok(subst)
