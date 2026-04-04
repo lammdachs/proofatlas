@@ -2,7 +2,7 @@
   "defaults": {
     "batch_size": 32,
     "max_epochs": 100,
-    "val_ratio": 0.2,
+    "val_ratio": 0.1,
     "patience": 20,
     "margin": 0.1,
 
@@ -19,13 +19,13 @@
     "quick": {
       "description": "Quick training with validation",
       "max_epochs": 20,
-      "val_ratio": 0.2
+      "val_ratio": 0.1
     },
 
     "long": {
       "description": "Extended training for better convergence",
       "max_epochs": 200,
-      "val_ratio": 0.2
+      "val_ratio": 0.1
     }
   }
 }
