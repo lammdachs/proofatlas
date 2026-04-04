@@ -299,7 +299,7 @@ def handle_kill(base_dir):
     pid_file.unlink(missing_ok=True)
 
 
-def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem_names,
+def _ddp_train_worker(rank, preset, trace_dirs, weights_dir, configs_dir, problem_names,
                       web_data_dir, cpu_workers, world_size, batch_size,
                       accumulate_batches, max_epochs, preset_name=None):
     """DDP worker function at module level so it can be pickled by mp.spawn."""
@@ -307,7 +307,7 @@ def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem
 
     run_training(
         preset=preset,
-        trace_dir=trace_dir,
+        trace_dir=trace_dirs,
         weights_dir=weights_dir,
         configs_dir=configs_dir,
         problem_names=problem_names,
@@ -326,27 +326,31 @@ def _ddp_train_worker(rank, preset, trace_dir, weights_dir, configs_dir, problem
 def run_training_job(args, base_dir, preset, problems, tptp_config):
     """Run the actual training (called directly or as daemon)."""
     from proofatlas.ml.training import run_training
-    from proofatlas.ml.weights import get_model_name
 
-    model_name = get_model_name(preset)
+    model_name = args.config
     weights_dir = Path(args.weights_dir) if args.weights_dir else base_dir / ".weights"
     weights_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate CLI args
     batch_size, accumulate_batches = validate_args(args, preset)
 
-    # Resolve trace directory
-    trace_preset = preset.get("traces") or args.config
+    # Resolve trace directories
     if args.trace_dir:
-        trace_dir = Path(args.trace_dir)
+        trace_dirs = [Path(args.trace_dir)]
     else:
-        trace_dir = base_dir / ".data" / "traces" / trace_preset
+        traces = preset.get("traces") or args.config
+        if isinstance(traces, str):
+            traces = [traces]
+        trace_dirs = [base_dir / ".data" / "traces" / t for t in traces]
 
     # Check that traces exist
-    if not trace_dir.exists() or not any(trace_dir.glob("**/*.npz")):
-        log(f"Error: No .npz trace files found in {trace_dir}")
+    missing = [d for d in trace_dirs if not d.exists() or not any(d.glob("**/*.npz"))]
+    if len(missing) == len(trace_dirs):
+        log(f"Error: No .npz trace files found in {trace_dirs}")
         log(f"Collect traces first with: proofatlas-bench --config age_weight --trace")
         sys.exit(1)
+    if missing:
+        log(f"Warning: No traces in {[str(d) for d in missing]}, using remaining dirs")
 
     # Train model
     problem_names = {p.stem for p in problems}
@@ -361,7 +365,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
 
         mp.spawn(
             _ddp_train_worker,
-            args=(preset, trace_dir, weights_dir, base_dir / "configs",
+            args=(preset, trace_dirs, weights_dir, base_dir / "configs",
                   problem_names, base_dir / "web" / "static" / "data", args.cpu_workers,
                   args.gpu_workers, batch_size, accumulate_batches,
                   args.max_epochs, args.config),
@@ -371,7 +375,7 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     else:
         weights_path = run_training(
             preset=preset,
-            trace_dir=trace_dir,
+            trace_dir=trace_dirs,
             weights_dir=weights_dir,
             configs_dir=base_dir / "configs",
             problem_names=problem_names,
@@ -451,8 +455,7 @@ def main():
         print(f"Error: Config '{args.config}' is not an ML selector (no encoder/scorer)")
         sys.exit(1)
 
-    model_name = f"{preset['encoder']}_{preset['scorer']}"
-    log(f"Training model: {model_name}")
+    log(f"Training model: {args.config}")
 
     # Determine problem set
     problem_set = args.problem_set

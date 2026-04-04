@@ -65,6 +65,7 @@ impl ProofAtlas {
             include_dirs: Vec::new(),
             encoder: None,
             scorer: None,
+            model_name: None,
             weights_path: None,
             use_cuda: false,
             temperature: 1.0,
@@ -211,6 +212,7 @@ pub struct ProofAtlasBuilder {
     include_dirs: Vec<String>,
     encoder: Option<String>,
     scorer: Option<String>,
+    model_name: Option<String>,
     weights_path: Option<String>,
     use_cuda: bool,
     temperature: f32,
@@ -234,6 +236,13 @@ impl ProofAtlasBuilder {
     /// Set the scorer type (e.g., "mlp", "attention", "transformer").
     pub fn scorer(mut self, scorer: impl Into<String>) -> Self {
         self.scorer = Some(scorer.into());
+        self
+    }
+
+    /// Set the model name for weight files (e.g., "gcn_struct_mlp_r1").
+    /// Defaults to "{encoder}_{scorer}" if not set.
+    pub fn model_name(mut self, name: impl Into<String>) -> Self {
+        self.model_name = Some(name.into());
         self
     }
 
@@ -316,13 +325,16 @@ impl ProofAtlasBuilder {
                     self.weights_path.as_deref().unwrap_or(".weights")
                 );
 
+                let model_name = self.model_name
+                    .ok_or_else(|| "model_name required when encoder is set".to_string())?;
+
                 // Create model specs with lazy-loading factories.
                 // The Backend loads each model on the device specified by the
                 // first request (from the DataProcessor's embed_cuda/score_cuda).
                 let mut specs = if is_mlp {
-                    make_combined_spec(enc, scorer_name, &weights_dir)?
+                    make_combined_spec(enc, &model_name, &weights_dir)?
                 } else {
-                    make_split_specs(enc, scorer_name, &weights_dir)?
+                    make_split_specs(enc, scorer_name, &model_name, &weights_dir)?
                 };
 
                 // Append MiniLM spec for trace embedding if enabled
@@ -367,12 +379,11 @@ impl ProofAtlasBuilder {
 #[cfg(feature = "ml")]
 fn make_combined_spec(
     enc: &str,
-    scorer_name: &str,
+    model_name: &str,
     weights_dir: &std::path::Path,
 ) -> Result<Vec<crate::selection::pipeline::backend::ModelSpec>, String> {
     use crate::selection::pipeline::backend::ModelSpec;
 
-    let model_name = format!("{}_{}", enc, scorer_name);
     let model_path = weights_dir.join(format!("{}.pt", model_name));
     if !model_path.exists() {
         return Err(format!("Model not found at {}", model_path.display()));
@@ -398,11 +409,11 @@ fn make_combined_spec(
 fn make_split_specs(
     enc: &str,
     scorer_name: &str,
+    model_name: &str,
     weights_dir: &std::path::Path,
 ) -> Result<Vec<crate::selection::pipeline::backend::ModelSpec>, String> {
     use crate::selection::pipeline::backend::ModelSpec;
 
-    let model_name = format!("{}_{}", enc, scorer_name);
     let encoder_path = weights_dir.join(format!("{}_encoder.pt", model_name));
     let scorer_path = weights_dir.join(format!("{}_scorer.pt", model_name));
 
@@ -424,7 +435,7 @@ fn make_split_specs(
     let enc_owned = enc.to_string();
     let encoder_path_clone = encoder_path.clone();
     let weights_dir_owned = weights_dir.to_path_buf();
-    let model_name_clone = model_name.clone();
+    let model_name_clone = model_name.to_string();
     let embed_spec = ModelSpec {
         model_id: "embed".to_string(),
         factory: Box::new(move |use_cuda| {

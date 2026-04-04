@@ -1,0 +1,29 @@
+{
+  "generated": "2026-04-04T03:00:56.602200",
+  "name": "gcn_struct_mlp_r1",
+  "start_time": "2026-04-04T03:00:56.602207",
+  "end_time": null,
+  "total_time_seconds": null,
+  "termination_reason": null,
+  "best_epoch": null,
+  "best_val_loss": null,
+  "model": {
+    "type": "gcn",
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "input_dim": 8,
+    "scorer_type": "mlp"
+  },
+  "training": {
+    "batch_size_bytes": 4194304,
+    "accumulate_steps": 1,
+    "learning_rate": 0.0003,
+    "max_epochs": 100,
+    "optimizer": "adamw",
+    "weight_decay": 0.0001,
+    "cpu_workers": 8,
+    "gpu_workers": 1
+  },
+  "epochs": [],
+  "evaluations": []
+}

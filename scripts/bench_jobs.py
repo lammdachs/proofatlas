@@ -173,6 +173,9 @@ def kill_job(base_dir: Path) -> bool:
             break
         time.sleep(0.2)
 
+    # Kill training subprocesses
+    subprocess.run(["pkill", "-9", "-f", "proofatlas.cli.train"], capture_output=True)
+
     # Kill any remaining prover processes from this project
     subprocess.run(["pkill", "-9", "-f", str(base_dir / ".vampire")], capture_output=True)
     subprocess.run(["pkill", "-9", "-f", str(base_dir / ".spass")], capture_output=True)

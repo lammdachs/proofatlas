@@ -135,17 +135,16 @@ def main():
     if encoder and scorer:
         from proofatlas.ml import find_weights
 
-        model_name = f"{encoder}_{scorer}"
         weights_dir = base_dir / ".weights"
-        weights_path = find_weights(weights_dir, preset)
+        weights_path = find_weights(weights_dir, preset, args.config)
 
         if not weights_path:
-            print(f"Error: Model weights not found for {model_name}", file=sys.stderr)
+            print(f"Error: Model weights not found for {args.config}", file=sys.stderr)
             print(f"Train with: proofatlas-bench --config {args.config} --retrain", file=sys.stderr)
             sys.exit(1)
 
         if args.verbose:
-            print(f"Using ML selector: {model_name}")
+            print(f"Using ML selector: {args.config}")
             print(f"  Weights: {weights_path}")
 
     # Find TPTP root for includes
@@ -170,6 +169,8 @@ def main():
         atlas_kwargs["encoder"] = encoder
         atlas_kwargs["scorer"] = scorer
         atlas_kwargs["weights_path"] = str(weights_path) if weights_path else None
+        if args.config:
+            atlas_kwargs["model_name"] = args.config
         temperature = preset.get("temperature")
         if temperature is not None:
             atlas_kwargs["temperature"] = float(temperature)

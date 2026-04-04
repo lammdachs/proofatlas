@@ -343,7 +343,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     ml = _get_ml()
 
     if prover == "proofatlas":
-        model_label = f"{preset['encoder']}_{preset['scorer']}" if ml.is_learned_selector(preset) else "age_weight"
+        model_label = preset_name if ml.is_learned_selector(preset) else "age_weight"
         print(f"\nEvaluating {len(problems)} problems with {model_label}" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
         if weights_path:
             print(f"Weights: {weights_path}")
@@ -361,6 +361,7 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
             use_cuda=use_cuda,
             collect_trace=collect_trace, trace_preset=trace_preset,
             fallback_configs=fallback_configs if collect_trace else None,
+            preset_name=preset_name,
         )
 
         try:
@@ -678,9 +679,8 @@ def main():
             # Check weights for ML selectors (training now handled by scripts/train.py)
             ml = _get_ml()
             if prover == "proofatlas" and ml.is_learned_selector(preset):
-                model_name = f"{preset['encoder']}_{preset['scorer']}"
                 encoder_type = ml.get_encoder_type(preset)
-                log(f"[{preset_name}] Learned selector: {model_name} (encoder: {encoder_type})")
+                log(f"[{preset_name}] Learned selector: {preset_name} (encoder: {encoder_type})")
                 sys.stdout.flush()
 
                 weights_dir = base_dir / ".weights"

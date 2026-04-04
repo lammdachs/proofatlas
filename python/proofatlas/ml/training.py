@@ -166,7 +166,7 @@ def _forward_pass(model, batch, device, is_sentence_model, is_features_model=Fal
 
 def run_training(
     preset: dict,
-    trace_dir: Path,
+    trace_dir: "Path | list[Path]",
     weights_dir: Path,
     configs_dir: Path,
     problem_names: Optional[set] = None,
@@ -180,7 +180,7 @@ def run_training(
     accumulate_batches: Optional[int] = None,
     force_cpu: bool = False,
     max_epochs: Optional[int] = None,
-    preset_name: Optional[str] = None,
+    preset_name: str = "",
 ) -> Path:
     """Train a model and return the weights path.
 
@@ -208,7 +208,7 @@ def run_training(
     import torch.optim as optim
     from torch.utils.data import DataLoader
 
-    from .weights import get_model_name, get_encoder_type
+    from .weights import get_encoder_type
 
     start_time = time.time()
     is_main = rank == 0
@@ -262,6 +262,7 @@ def run_training(
             accumulate_batches=accumulate_batches,
             start_time=start_time,
             max_epochs_override=max_epochs,
+            preset_name=preset_name,
         )
     finally:
         if use_ddp:
@@ -289,6 +290,7 @@ def _run_training_inner(
     accumulate_batches,
     start_time,
     max_epochs_override=None,
+    preset_name="",
 ):
     """Inner training loop, separated for clean DDP cleanup."""
     import random
@@ -297,7 +299,7 @@ def _run_training_inner(
     import torch.optim as optim
     from torch.utils.data import DataLoader
 
-    from .weights import get_model_name, get_encoder_type
+    from .weights import get_encoder_type
 
     # Load configs
     configs_dir = Path(configs_dir)
@@ -341,24 +343,27 @@ def _run_training_inner(
         # Both "graph" and "features" use graph.npz traces
         output_type = "graph"
 
-    model_name = preset_name or get_model_name(preset)
+    model_name = preset_name
 
     # Get per-problem trace files (flat: STEM.graph.npz or STEM.sentence.npz)
-    trace_dir = Path(trace_dir)
     suffix = "sentence.npz" if embedding_type == "string" else "graph.npz"
-    trace_files = sorted(trace_dir.glob(f"*.{suffix}"))
+    trace_dirs = trace_dir if isinstance(trace_dir, list) else [Path(trace_dir)]
+    trace_files = []
+    for td in trace_dirs:
+        trace_files.extend(td.glob(f"*.{suffix}"))
     if problem_names is not None:
         trace_files = [f for f in trace_files if f.stem.rsplit(".", 1)[0] in problem_names]
+    trace_files.sort()
 
     if not trace_files:
-        raise ValueError(f"No trace files found in {trace_dir} (looking for *.{suffix})")
+        raise ValueError(f"No trace files found in {trace_dirs} (looking for *.{suffix})")
 
     log_msg(f"Found {len(trace_files)} problem traces")
 
-    # Problem-level split
+    # Problem-level split (deduplicate problem names across trace dirs)
     val_ratio = config.get("val_ratio", 0.0)
     random.seed(42)
-    problem_list = sorted(f.stem.rsplit(".", 1)[0] for f in trace_files)
+    problem_list = sorted(set(f.stem.rsplit(".", 1)[0] for f in trace_files))
     random.shuffle(problem_list)
     n_val_problems = int(len(problem_list) * val_ratio)
     val_problem_set = set(problem_list[:n_val_problems])

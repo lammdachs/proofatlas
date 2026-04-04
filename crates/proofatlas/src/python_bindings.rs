@@ -63,9 +63,10 @@ impl PyProofAtlas {
     ///     include_dir: Directory for resolving TPTP include() directives
     ///     max_clause_size: Maximum clause size (default: 100)
     ///     enable_trace: Enable MiniLM backend for trace embedding (default: false)
+    ///     model_name: Model name for weight files (default: "{encoder}_{scorer}")
     ///     temperature: Softmax temperature for ML clause selection (default: 1.0)
     #[new]
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, temperature=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, model_name=None, temperature=None))]
     pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
@@ -80,6 +81,7 @@ impl PyProofAtlas {
         include_dir: Option<String>,
         max_clause_size: Option<usize>,
         enable_trace: Option<bool>,
+        model_name: Option<String>,
         temperature: Option<f32>,
     ) -> PyResult<Self> {
         let timeout_dur = timeout
@@ -117,6 +119,9 @@ impl PyProofAtlas {
         }
         if let Some(path) = weights_path {
             builder = builder.weights_path(path);
+        }
+        if let Some(name) = model_name {
+            builder = builder.model_name(name);
         }
         if let Some(cuda) = use_cuda {
             builder = builder.use_cuda(cuda);

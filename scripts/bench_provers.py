@@ -39,7 +39,8 @@ class BenchResult:
 
 def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
                        use_cuda: bool = False,
-                       collect_trace: bool = False) -> dict:
+                       collect_trace: bool = False,
+                       preset_name: str = None) -> dict:
     """Build ProofAtlas constructor kwargs from a preset config."""
     ml = _get_ml()
     is_learned = ml.is_learned_selector(preset)
@@ -61,6 +62,8 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
         kwargs["scorer"] = preset["scorer"]
         kwargs["weights_path"] = weights_path
         kwargs["use_cuda"] = use_cuda
+        if preset_name:
+            kwargs["model_name"] = preset_name
         temperature = preset.get("temperature")
         if temperature is not None:
             kwargs["temperature"] = float(temperature)
@@ -114,7 +117,7 @@ class ProofAtlasPool:
     def __init__(self, n_workers, preset, base_dir, tptp_root,
                  weights_path=None, use_cuda=False,
                  collect_trace=False, trace_preset=None,
-                 fallback_configs=None):
+                 fallback_configs=None, preset_name=None):
         from proofatlas import ProofAtlas
 
         timeout = preset.get("timeout", 10)
@@ -125,7 +128,8 @@ class ProofAtlasPool:
         self.base_dir = Path(base_dir)
 
         kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda,
-                                    collect_trace=collect_trace)
+                                    collect_trace=collect_trace,
+                                    preset_name=preset_name)
         self.atlas = ProofAtlas(**kwargs)
         traces_dir = str(base_dir / ".data" / "traces") if collect_trace else None
         fallback_trace_dirs = None

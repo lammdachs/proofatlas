@@ -32,7 +32,6 @@ from .training import (
 from .weights import (
     find_weights,
     is_learned_selector,
-    get_model_name,
     get_encoder_type,
 )
 
@@ -55,6 +54,5 @@ __all__ = [
     # Weights
     "find_weights",
     "is_learned_selector",
-    "get_model_name",
     "get_encoder_type",
 ]

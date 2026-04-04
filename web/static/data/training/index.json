@@ -7,6 +7,7 @@
     "gcn_mlp",
     "gcn_struct_attention",
     "gcn_struct_mlp",
+    "gcn_struct_mlp_r1",
     "gcn_struct_transformer",
     "gcn_transformer",
     "sentence_attention",

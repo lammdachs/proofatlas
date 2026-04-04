@@ -370,7 +370,7 @@
       "literal_selection": 21,
       "encoder": "gcn_struct",
       "scorer": "mlp",
-      "traces": "gcn_struct_mlp",
+      "traces": ["age_weight", "gcn_struct_mlp"],
       "memory_limit": 1024,
       "temperature": 0.5,
       "fallback": [
