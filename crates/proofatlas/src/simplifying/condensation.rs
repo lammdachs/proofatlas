@@ -247,6 +247,7 @@ mod tests {
             event_log: Vec::new(),
             current_iteration: 0,
             initial_clause_count: len,
+            clause_bytes: 0,
         }
     }
 

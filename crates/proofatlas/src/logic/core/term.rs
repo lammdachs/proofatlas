@@ -68,6 +68,17 @@ pub enum Term {
 }
 
 impl Term {
+    /// Estimate heap bytes owned by this term (Vec backing stores, recursive).
+    pub fn heap_size(&self) -> usize {
+        match self {
+            Term::Variable(_) | Term::Constant(_) => 0,
+            Term::Function(_, args) => {
+                std::mem::size_of::<Term>() * args.capacity()
+                    + args.iter().map(|a| a.heap_size()).sum::<usize>()
+            }
+        }
+    }
+
     /// Get all variable IDs in this term
     pub fn variable_ids(&self) -> Vec<VariableId> {
         match self {

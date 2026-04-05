@@ -518,6 +518,8 @@ pub struct SaturationState {
     pub current_iteration: usize,
     /// Number of initial input clauses
     pub initial_clause_count: usize,
+    /// Cumulative heap bytes allocated for clause storage
+    pub clause_bytes: usize,
 }
 
 impl SaturationState {

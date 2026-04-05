@@ -70,6 +70,12 @@ pub struct CNFFormula {
 }
 
 impl Clause {
+    /// Estimate heap bytes owned by this clause (literal Vec + nested term Vecs).
+    pub fn heap_size(&self) -> usize {
+        std::mem::size_of::<Literal>() * self.literals.capacity()
+            + self.literals.iter().map(|l| l.heap_size()).sum::<usize>()
+    }
+
     /// Create a new clause from literals
     pub fn new(literals: Vec<Literal>) -> Self {
         Clause {

@@ -33,6 +33,31 @@
       "format": ["cnf", "fof"],
       "max_total_size_bytes": 65536,
       "domains": ["PUZ"]
+    },
+
+    "concurrency_debug": {
+      "description": "Problems that prove in isolation but fail under concurrent workers",
+      "problems": [
+        "BOO/BOO008-2.p", "BOO/BOO009-2.p", "BOO/BOO010-2.p", "BOO/BOO010-4.p",
+        "BOO/BOO011-1.p", "BOO/BOO012-2.p", "BOO/BOO072-1.p", "BOO/BOO074-1.p",
+        "COL/COL045-1.p", "COL/COL058-1.p",
+        "GEO/GEO014-2.p", "GEO/GEO015-2.p", "GEO/GEO015-3.p",
+        "GEO/GEO016-2.p", "GEO/GEO016-3.p",
+        "GRP/GRP140-1.p", "GRP/GRP167-5.p", "GRP/GRP169-1.p", "GRP/GRP169-2.p",
+        "GRP/GRP172-1.p", "GRP/GRP172-2.p", "GRP/GRP451-1.p", "GRP/GRP466-1.p",
+        "GRP/GRP584-1.p", "GRP/GRP588-1.p", "GRP/GRP591-1.p", "GRP/GRP592-1.p",
+        "GRP/GRP601-1.p", "GRP/GRP603-1.p", "GRP/GRP604-1.p", "GRP/GRP605-1.p",
+        "GRP/GRP606-1.p", "GRP/GRP665-12.p", "GRP/GRP671-1.p",
+        "GRP/GRP680-1.p", "GRP/GRP682-10.p", "GRP/GRP682-11.p", "GRP/GRP683-10.p",
+        "GRP/GRP702-10.p", "GRP/GRP702-11.p", "GRP/GRP702-12.p",
+        "GRP/GRP703-10.p", "GRP/GRP703-11.p", "GRP/GRP703-12.p",
+        "GRP/GRP704-10.p", "GRP/GRP704-11.p", "GRP/GRP704-12.p",
+        "GRP/GRP707-1.p",
+        "HEN/HEN012-3.p", "HWC/HWC001-1.p",
+        "HWV/HWV009-1.p", "HWV/HWV009-2.p", "HWV/HWV009-3.p", "HWV/HWV009-4.p",
+        "HWV/HWV010-1.p", "HWV/HWV010-2.p", "HWV/HWV010-3.p", "HWV/HWV011-1.p",
+        "MGT/MGT036-3.p", "SWV/SWV308-2.p"
+      ]
     }
   }
 }

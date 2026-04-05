@@ -171,6 +171,10 @@ def get_problems(base_dir: Path, tptp_config: dict, problem_set_name: str) -> li
     if not problems_dir.exists():
         raise FileNotFoundError(f"TPTP problems not found: {problems_dir}")
 
+    # Explicit problem list — bypass all other filters
+    if "problems" in filters:
+        return [problems_dir / p for p in filters["problems"] if (problems_dir / p).exists()]
+
     # Load metadata from index.json alongside Problems/
     index_path = problems_dir.parent / "index.json"
     metadata = {}

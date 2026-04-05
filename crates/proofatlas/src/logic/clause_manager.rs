@@ -26,10 +26,6 @@ pub struct ClauseManager {
     pub timeout: Duration,
     /// Start time of the proof search
     pub start_time: Option<Instant>,
-    /// Memory limit in MB (delta from baseline RSS)
-    pub memory_limit: Option<usize>,
-    /// Baseline RSS in MB at construction time
-    pub baseline_rss_mb: usize,
 }
 
 impl ClauseManager {
@@ -43,8 +39,6 @@ impl ClauseManager {
             cancel: Arc::new(AtomicBool::new(false)),
             timeout: Duration::from_secs(600),
             start_time: None,
-            memory_limit: None,
-            baseline_rss_mb: 0,
         }
     }
 

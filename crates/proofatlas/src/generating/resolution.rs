@@ -156,8 +156,6 @@ impl GeneratingInference for ResolutionRule {
         let cancel = cm.cancel.clone();
         let start_time = cm.start_time;
         let timeout = cm.timeout;
-        let memory_limit = cm.memory_limit;
-        let baseline_rss = cm.baseline_rss_mb;
         let selector = cm.literal_selector.as_ref();
         let interner = &mut cm.interner;
         let mut changes = Vec::new();
@@ -168,14 +166,6 @@ impl GeneratingInference for ResolutionRule {
                 if start.elapsed() > timeout {
                     cancel.store(true, AtomicOrdering::Relaxed);
                     return true;
-                }
-            }
-            if let Some(limit) = memory_limit {
-                if let Some(rss) = crate::config::process_memory_mb() {
-                    if rss.saturating_sub(baseline_rss) >= limit {
-                        cancel.store(true, AtomicOrdering::Relaxed);
-                        return true;
-                    }
                 }
             }
             false

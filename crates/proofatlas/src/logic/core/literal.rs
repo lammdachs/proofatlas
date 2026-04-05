@@ -51,6 +51,12 @@ impl Literal {
         }
     }
 
+    /// Estimate heap bytes owned by this literal.
+    pub fn heap_size(&self) -> usize {
+        std::mem::size_of::<Term>() * self.args.capacity()
+            + self.args.iter().map(|a| a.heap_size()).sum::<usize>()
+    }
+
     /// Check if this is an equality literal
     pub fn is_equality(&self, interner: &Interner) -> bool {
         interner.resolve_predicate(self.predicate.id) == "=" && self.predicate.arity == 2

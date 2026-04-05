@@ -100,8 +100,6 @@ impl Prover {
 
         // Create clause manager
         let mut clause_manager = ClauseManager::new(interner, literal_selector.clone());
-        clause_manager.memory_limit = config.memory_limit;
-        clause_manager.baseline_rss_mb = crate::config::process_memory_mb().unwrap_or(0);
 
         // Reset sink state
         let mut sink = sink;
@@ -130,6 +128,7 @@ impl Prover {
             event_log: Vec::new(),
             current_iteration: 0,
             initial_clause_count,
+            clause_bytes: 0,
         };
 
         let cancel = Arc::new(AtomicBool::new(false));
@@ -540,6 +539,7 @@ impl Prover {
                 }
                 let is_empty = arc_clause.is_empty();
 
+                self.state.clause_bytes += arc_clause.heap_size() + std::mem::size_of::<Clause>();
                 self.state.clauses.push(Arc::clone(&arc_clause));
                 self.state.new.push(new_idx);
                 self.state.event_log.push(StateChange::Add(arc_clause, rule_name, premises));
@@ -561,17 +561,15 @@ impl Prover {
                     return Some(ProofResult::ResourceLimit);
                 }
 
-                // memory + timeout + cancel: every 10th Add (amortize /proc read)
-                if num_clauses % 10 == 0 {
-                    if let Some(limit_mb) = self.config.memory_limit {
-                        if let Some(rss) = crate::config::process_memory_mb() {
-                            let baseline = self.clause_manager.baseline_rss_mb;
-                            if rss.saturating_sub(baseline) >= limit_mb {
-                                return Some(ProofResult::ResourceLimit);
-                            }
-                        }
+                // clause storage memory limit (per-prover, no process-wide RSS)
+                if let Some(limit_mb) = self.config.memory_limit {
+                    if self.state.clause_bytes / (1024 * 1024) >= limit_mb {
+                        return Some(ProofResult::ResourceLimit);
                     }
+                }
 
+                // timeout + cancel: every 10th Add
+                if num_clauses % 10 == 0 {
                     if self.cancel.load(Ordering::Relaxed) {
                         return Some(ProofResult::ResourceLimit);
                     }
@@ -636,6 +634,7 @@ impl Prover {
                     }
                     let is_empty = repl.is_empty();
 
+                    self.state.clause_bytes += repl.heap_size() + std::mem::size_of::<Clause>();
                     self.state.clauses.push(Arc::clone(&repl));
                     self.state.new.push(new_idx);
 
@@ -655,15 +654,12 @@ impl Prover {
                     if self.config.max_clauses > 0 && num_clauses >= self.config.max_clauses {
                         return Some(ProofResult::ResourceLimit);
                     }
-                    if num_clauses % 10 == 0 {
-                        if let Some(limit_mb) = self.config.memory_limit {
-                            if let Some(rss) = crate::config::process_memory_mb() {
-                                let baseline = self.clause_manager.baseline_rss_mb;
-                                if rss.saturating_sub(baseline) >= limit_mb {
-                                    return Some(ProofResult::ResourceLimit);
-                                }
-                            }
+                    if let Some(limit_mb) = self.config.memory_limit {
+                        if self.state.clause_bytes / (1024 * 1024) >= limit_mb {
+                            return Some(ProofResult::ResourceLimit);
                         }
+                    }
+                    if num_clauses % 10 == 0 {
                         if self.cancel.load(Ordering::Relaxed) {
                             return Some(ProofResult::ResourceLimit);
                         }
