@@ -137,20 +137,6 @@
         "age_weight"
       ]
     },
-    "gcn_struct_attention_t05": {
-      "description": "GCN (structural) + Attention (temp=0.5)",
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "scorer": "attention",
-      "traces": "age_weight",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "fallback": [
-        "age_weight"
-      ]
-    },
     "gcn_struct_attention_t03": {
       "description": "GCN (structural) + Attention (temp=0.3)",
       "timeout": 60,

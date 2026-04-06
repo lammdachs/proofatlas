@@ -340,7 +340,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
                    binary: Path = None, trace_preset: str = None,
                    rerun: bool = False, n_jobs: int = 1,
                    use_cuda: bool = False,
-                   collect_traces: bool = False,
                    fallback_configs: list = None):
     """Run evaluation on problems with the specified prover."""
     stats = {"proof": 0, "saturated": 0, "resource_limit": 0, "error": 0, "skip": 0}
@@ -354,8 +353,6 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
     else:
         print(f"\nEvaluating {len(problems)} problems" + (f" ({n_jobs} jobs)" if n_jobs > 1 else ""))
 
-    collect_trace = collect_traces and (prover == "proofatlas")
-
     if prover == "proofatlas":
         from bench_provers import ProofAtlasPool
 
@@ -363,8 +360,8 @@ def run_evaluation(base_dir: Path, problems: list[Path], tptp_root: Path,
             n_workers=n_jobs, preset=preset, base_dir=base_dir,
             tptp_root=tptp_root, weights_path=weights_path,
             use_cuda=use_cuda,
-            collect_trace=collect_trace, trace_preset=trace_preset,
-            fallback_configs=fallback_configs if collect_trace else None,
+            collect_trace=True, trace_preset=trace_preset,
+            fallback_configs=fallback_configs,
             preset_name=preset_name,
         )
 
@@ -462,10 +459,10 @@ def main():
 
     parser.add_argument("--timeout", type=float, default=None,
                        help="Override per-problem timeout (seconds)")
-    parser.add_argument("--trace", action="store_true",
-                       help="Collect training traces (.npz) for successful proofs")
     parser.add_argument("--fallback", nargs="*", default=None,
-                       help="Fallback config(s) for labeling failed traces (requires --trace)")
+                       help="Fallback config(s) for labeling failed traces")
+    parser.add_argument("--retrain", action="store_true",
+                       help="Force retraining even if weights already exist")
 
     # Job management
     parser.add_argument("--status", action="store_true",
@@ -583,28 +580,27 @@ def main():
 
     # Ensure base MiniLM weights exist for trace embedding.
     # Must run before daemonize — torch.jit.trace can't run after fork.
-    if args.trace:
-        weights_dir = base_dir / ".weights"
-        minilm_model = weights_dir / "base_minilm.pt"
-        minilm_tokenizer = weights_dir / "base_minilm_tokenizer" / "tokenizer.json"
-        if not (minilm_model.exists() and minilm_tokenizer.exists()):
-            print("Downloading and exporting base MiniLM for trace embedding...")
-            sys.stdout.flush()
-            # Run in subprocess to isolate torch.jit.trace from our process.
-            # Remove CUDA_VISIBLE_DEVICES="" (set at top of bench.py) — it causes
-            # double-free crashes in torch.jit.trace with transformers 5.x SDPA.
-            export_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
-            rc = subprocess.run(
-                [sys.executable, str(base_dir / "scripts" / "setup_minilm.py")],
-                cwd=str(base_dir),
-                env=export_env,
-            ).returncode
-            if rc == 0:
-                print(f"Base MiniLM exported to {weights_dir}")
-            else:
-                print("Warning: Failed to export base MiniLM.")
-                print("Traces will lack pre-computed embeddings.")
-            sys.stdout.flush()
+    weights_dir = base_dir / ".weights"
+    minilm_model = weights_dir / "base_minilm.pt"
+    minilm_tokenizer = weights_dir / "base_minilm_tokenizer" / "tokenizer.json"
+    if not (minilm_model.exists() and minilm_tokenizer.exists()):
+        print("Downloading and exporting base MiniLM for trace embedding...")
+        sys.stdout.flush()
+        # Run in subprocess to isolate torch.jit.trace from our process.
+        # Remove CUDA_VISIBLE_DEVICES="" (set at top of bench.py) — it causes
+        # double-free crashes in torch.jit.trace with transformers 5.x SDPA.
+        export_env = {k: v for k, v in os.environ.items() if k != "CUDA_VISIBLE_DEVICES"}
+        rc = subprocess.run(
+            [sys.executable, str(base_dir / "scripts" / "setup_minilm.py")],
+            cwd=str(base_dir),
+            env=export_env,
+        ).returncode
+        if rc == 0:
+            print(f"Base MiniLM exported to {weights_dir}")
+        else:
+            print("Warning: Failed to export base MiniLM.")
+            print("Traces will lack pre-computed embeddings.")
+        sys.stdout.flush()
 
     log_file_path = get_log_file(base_dir)
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -690,7 +686,7 @@ def main():
                 weights_dir = base_dir / ".weights"
                 existing_weights = ml.find_weights(weights_dir, preset, preset_name)
 
-                if existing_weights:
+                if existing_weights and not args.retrain:
                     log(f"[{preset_name}] Found weights: {existing_weights}")
                     weights_path = existing_weights
                 else:
@@ -743,7 +739,6 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.cpu_workers,
                 use_cuda=use_cuda_eval,
-                collect_traces=args.trace or bool(preset.get("fallback")),
                 fallback_configs=args.fallback or preset.get("fallback"),
             )
             log(f"[{preset_name}] Evaluation complete")
