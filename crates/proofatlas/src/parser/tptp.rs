@@ -183,10 +183,14 @@ fn compute_clause_stats(clauses: &[Clause]) -> (usize, usize) {
 fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Option<usize>, memory_limit_mb: Option<usize>) -> Result<CNFFormula, ParseError> {
     let mut all_clauses = result.cnf_formulas;
 
-    // Helper: compute stats for current accumulated clauses on error
-    let make_err = |clauses: &[Clause], msg: String| -> ParseError {
-        let (clause_count, clause_bytes) = compute_clause_stats(clauses);
-        ParseError { message: msg, clause_count, clause_bytes }
+    // Helper: combine accumulated clause stats with the failing formula's stats
+    let make_err = |clauses: &[Clause], e: super::cnf_conversion::CNFConversionError| -> ParseError {
+        let (acc_count, acc_bytes) = compute_clause_stats(clauses);
+        ParseError {
+            message: e.to_string(),
+            clause_count: acc_count + e.clause_count,
+            clause_bytes: acc_bytes + e.clause_bytes,
+        }
     };
 
     // Separate conjectures from other formulas
@@ -207,7 +211,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Op
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
             fof_to_cnf_with_role(formula, clause_role, timeout, max_clauses, memory_limit_mb, parse_ctx.interner.get_mut())
-        }).map_err(|e| make_err(&all_clauses, e.to_string()))?;
+        }).map_err(|e| make_err(&all_clauses, e))?;
         all_clauses.extend(cnf.clauses);
     }
 
@@ -234,7 +238,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Op
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
             fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, max_clauses, memory_limit_mb, parse_ctx.interner.get_mut())
-        }).map_err(|e| make_err(&all_clauses, e.to_string()))?;
+        }).map_err(|e| make_err(&all_clauses, e))?;
         all_clauses.extend(cnf.clauses);
     }
 

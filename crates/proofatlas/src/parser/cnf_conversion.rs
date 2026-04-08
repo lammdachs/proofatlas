@@ -11,9 +11,16 @@ use crate::logic::{
     PredicateSymbol, Term, Variable,
 };
 
-/// Error during CNF conversion
+/// Error during CNF conversion, carrying resource stats at point of failure
 #[derive(Debug, Clone)]
-pub enum CNFConversionError {
+pub struct CNFConversionError {
+    pub kind: CNFConversionErrorKind,
+    pub clause_count: usize,
+    pub clause_bytes: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum CNFConversionErrorKind {
     Timeout,
     ClauseLimit,
     MemoryLimit,
@@ -48,10 +55,10 @@ impl Polarity {
 
 impl std::fmt::Display for CNFConversionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CNFConversionError::Timeout => write!(f, "CNF conversion timed out"),
-            CNFConversionError::ClauseLimit => write!(f, "CNF conversion exceeded clause limit"),
-            CNFConversionError::MemoryLimit => write!(f, "CNF conversion exceeded memory limit"),
+        match self.kind {
+            CNFConversionErrorKind::Timeout => write!(f, "CNF conversion timed out"),
+            CNFConversionErrorKind::ClauseLimit => write!(f, "CNF conversion exceeded clause limit"),
+            CNFConversionErrorKind::MemoryLimit => write!(f, "CNF conversion exceeded memory limit"),
         }
     }
 }
@@ -102,10 +109,14 @@ impl<'a> CNFConverter<'a> {
         }
     }
 
-    fn check_timeout(&self) -> Result<(), CNFConversionError> {
+    fn make_err(&self, kind: CNFConversionErrorKind, total_clauses: usize, clause_bytes: usize) -> CNFConversionError {
+        CNFConversionError { kind, clause_count: total_clauses, clause_bytes }
+    }
+
+    fn check_timeout(&self, total_clauses: usize, clause_bytes: usize) -> Result<(), CNFConversionError> {
         if let Some(timeout) = self.timeout {
             if Instant::now() >= timeout {
-                return Err(CNFConversionError::Timeout);
+                return Err(self.make_err(CNFConversionErrorKind::Timeout, total_clauses, clause_bytes));
             }
         }
         Ok(())
@@ -114,12 +125,12 @@ impl<'a> CNFConverter<'a> {
     fn check_limits(&self, total_clauses: usize, clause_bytes: usize) -> Result<(), CNFConversionError> {
         if let Some(limit) = self.max_clauses {
             if total_clauses >= limit {
-                return Err(CNFConversionError::ClauseLimit);
+                return Err(self.make_err(CNFConversionErrorKind::ClauseLimit, total_clauses, clause_bytes));
             }
         }
         if let Some(limit) = self.memory_limit_bytes {
             if clause_bytes >= limit {
-                return Err(CNFConversionError::MemoryLimit);
+                return Err(self.make_err(CNFConversionErrorKind::MemoryLimit, total_clauses, clause_bytes));
             }
         }
         Ok(())
@@ -907,7 +918,7 @@ impl<'a> CNFConverter<'a> {
         let mut clause_bytes: usize = 0;
 
         while let Some(item) = stack.pop() {
-            self.check_timeout()?;
+            self.check_timeout(total_clauses, clause_bytes)?;
 
             match item {
                 WorkItem::Process(f) => {
