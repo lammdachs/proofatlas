@@ -297,6 +297,7 @@ impl PyProofAtlas {
                 let timeout_instant = Some(Instant::now() + config.timeout);
                 let max_clauses = if config.max_clauses > 0 { Some(config.max_clauses) } else { None };
                 parse_tptp_file(&path_owned, &include_refs, timeout_instant, max_clauses, config.memory_limit)
+                    .map_err(|e| e.message)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
 
@@ -317,6 +318,7 @@ impl PyProofAtlas {
                 let timeout_instant = Some(Instant::now() + config.timeout);
                 let max_clauses = if config.max_clauses > 0 { Some(config.max_clauses) } else { None };
                 parse_tptp(&content_owned, &include_refs, timeout_instant, max_clauses, config.memory_limit)
+                    .map_err(|e| e.message)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
 
@@ -742,13 +744,22 @@ fn worker_loop(
                 WorkerTask::Prove(path) => {
                     let start = Instant::now();
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        atlas.prove_file(&path)
+                        let parsed = match atlas.parse_file(&path) {
+                            Ok(p) => p,
+                            Err(e) => return Err((e.message, e.clause_count, e.clause_bytes)),
+                        };
+                        let parse_clause_count = parsed.clause_count;
+                        let parse_clause_bytes = parsed.clause_bytes;
+                        match atlas.prove_parsed(parsed) {
+                            Ok((proof_result, prover)) => Ok((proof_result, prover, parse_clause_count, parse_clause_bytes)),
+                            Err(e) => Err((e, parse_clause_count, parse_clause_bytes)),
+                        }
                     }));
 
                     let elapsed = start.elapsed().as_secs_f64();
 
                     let (status, clause_strings, num_clauses, iterations, clause_bytes) = match result {
-                        Ok(Ok((proof_result, prover))) => {
+                        Ok(Ok((proof_result, prover, _parse_nc, _parse_cb))) => {
                             use crate::state::ProofResult;
                             let proof_found = matches!(proof_result, ProofResult::Proof { .. });
                             let status = match &proof_result {
@@ -823,12 +834,12 @@ fn worker_loop(
                             let nc = prover.clauses().len();
                             (status.to_string(), strings, nc, iterations, clause_bytes)
                         }
-                        Ok(Err(e)) => {
+                        Ok(Err((e, parse_nc, parse_cb))) => {
                             let s = e.to_lowercase();
-                            if s.contains("timed out") || s.contains("memory limit") {
-                                ("resource_limit".to_string(), None, 0, 0, 0)
+                            if s.contains("timed out") || s.contains("memory limit") || s.contains("clause limit") {
+                                ("resource_limit".to_string(), None, parse_nc, 0, parse_cb)
                             } else {
-                                ("error".to_string(), None, 0, 0, 0)
+                                ("error".to_string(), None, parse_nc, 0, parse_cb)
                             }
                         }
                         Err(_) => ("error".to_string(), None, 0, 0, 0),

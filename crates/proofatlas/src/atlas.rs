@@ -77,19 +77,13 @@ impl ProofAtlas {
     /// Prove a TPTP file. Returns `(ProofResult, Prover)` with the prover
     /// retaining all state (clauses, event log, interner) for inspection.
     pub fn prove_file(&self, path: &str) -> Result<(ProofResult, Prover), String> {
-        let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
-        let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        let (max_clauses, memory_limit_mb) = self.cnf_limits();
-        let parsed = parse_tptp_file(path, &include_refs, timeout_instant, max_clauses, memory_limit_mb)?;
+        let parsed = self.parse_file(path).map_err(|e| e.message)?;
         self.prove_impl(parsed.formula.clauses, parsed.interner)
     }
 
     /// Prove TPTP content from a string. Returns `(ProofResult, Prover)`.
     pub fn prove_string(&self, content: &str) -> Result<(ProofResult, Prover), String> {
-        let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
-        let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        let (max_clauses, memory_limit_mb) = self.cnf_limits();
-        let parsed = parse_tptp(content, &include_refs, timeout_instant, max_clauses, memory_limit_mb)?;
+        let parsed = self.parse_string(content).map_err(|e| e.message)?;
         self.prove_impl(parsed.formula.clauses, parsed.interner)
     }
 
@@ -114,7 +108,7 @@ impl ProofAtlas {
     }
 
     /// Parse a TPTP file without running saturation.
-    pub fn parse_file(&self, path: &str) -> Result<crate::parser::ParsedProblem, String> {
+    pub fn parse_file(&self, path: &str) -> Result<crate::parser::ParsedProblem, crate::parser::ParseError> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
         let (max_clauses, memory_limit_mb) = self.cnf_limits();
@@ -122,11 +116,16 @@ impl ProofAtlas {
     }
 
     /// Parse TPTP content from a string without running saturation.
-    pub fn parse_string(&self, content: &str) -> Result<crate::parser::ParsedProblem, String> {
+    pub fn parse_string(&self, content: &str) -> Result<crate::parser::ParsedProblem, crate::parser::ParseError> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
         let (max_clauses, memory_limit_mb) = self.cnf_limits();
         parse_tptp(content, &include_refs, timeout_instant, max_clauses, memory_limit_mb)
+    }
+
+    /// Prove a pre-parsed problem. Returns `(ProofResult, Prover)`.
+    pub fn prove_parsed(&self, parsed: crate::parser::ParsedProblem) -> Result<(ProofResult, Prover), String> {
+        self.prove_impl(parsed.formula.clauses, parsed.interner)
     }
 
     fn cnf_limits(&self) -> (Option<usize>, Option<usize>) {

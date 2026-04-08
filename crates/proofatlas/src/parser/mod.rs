@@ -8,4 +8,4 @@ pub mod tptp;
 pub use cnf_conversion::{fof_to_cnf, fof_to_cnf_with_role, CNFConversionError};
 pub use fof::{FOFFormula, Quantifier};
 pub use crate::logic::ordering::{orient_all_equalities, orient_clause_equalities};
-pub use tptp::{parse_tptp, parse_tptp_file, ParsedProblem};
+pub use tptp::{parse_tptp, parse_tptp_file, ParsedProblem, ParseError};

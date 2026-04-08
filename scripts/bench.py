@@ -230,6 +230,9 @@ def load_run_result(base_dir: Path, prover: str, preset_name: str, problem: Path
             problem=data["problem"],
             status=data["status"],
             time_s=data["time_s"],
+            iterations=data.get("iterations", 0),
+            clause_count=data.get("clause_count", 0),
+            clause_bytes=data.get("clause_bytes", 0),
         )
     except (json.JSONDecodeError, KeyError, IOError):
         return None
@@ -247,6 +250,9 @@ def save_run_result(base_dir: Path, prover: str, preset_name: str, result: Bench
         "problem": result.problem,
         "status": result.status,
         "time_s": result.time_s,
+        "iterations": result.iterations,
+        "clause_count": result.clause_count,
+        "clause_bytes": result.clause_bytes,
         "prover": prover,
         "preset": preset_name,
         "timestamp": datetime.now().isoformat(),

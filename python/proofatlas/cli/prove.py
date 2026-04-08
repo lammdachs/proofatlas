@@ -201,7 +201,7 @@ def main():
     except Exception as e:
         elapsed = time.time() - start
         err_msg = str(e).lower()
-        if "memory limit" in err_msg:
+        if "memory limit" in err_msg or "clause limit" in err_msg:
             print(f"✗ RESOURCE LIMIT in {elapsed:.3f}s")
             print(f"  CNF conversion exceeded memory limit")
             sys.exit(1)

@@ -30,6 +30,9 @@ class BenchResult:
     problem: str
     status: str  # "proof", "saturated", "resource_limit", "error"
     time_s: float
+    iterations: int = 0
+    clause_count: int = 0
+    clause_bytes: int = 0
 
 
 # ===========================================================================
@@ -161,7 +164,11 @@ class ProofAtlasPool:
         if status == "timeout":
             status = "resource_limit"
 
-        return BenchResult(problem=result.problem, status=status, time_s=result.time_s)
+        return BenchResult(
+            problem=result.problem, status=status, time_s=result.time_s,
+            iterations=result.iterations, clause_count=result.num_clauses,
+            clause_bytes=result.clause_bytes,
+        )
 
     def shutdown(self):
         self.atlas.shutdown_workers()

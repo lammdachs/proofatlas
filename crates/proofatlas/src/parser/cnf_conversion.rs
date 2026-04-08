@@ -147,10 +147,7 @@ impl<'a> CNFConverter<'a> {
             });
         }
 
-        // Step 0b: Apply definitional CNF to biconditionals with quantifiers
-        // When A <=> B contains quantified subformulas, NNF expansion would duplicate them.
-        // Instead, we replace the biconditional with a definition predicate and add
-        // polarity-appropriate definition clauses.
+        // Step 0b: Apply definitional CNF to biconditionals
         let mut definitions = Vec::new();
         let transformed = self.definitional_transform(simplified, Polarity::Positive, &mut definitions);
 
@@ -160,8 +157,6 @@ impl<'a> CNFConverter<'a> {
         });
 
         // Step 0c: Standardize apart - rename bound variables to be unique
-        // This prevents variable capture when the same variable name is used
-        // in different quantifier scopes (e.g., ∃Y.P(Y) => ∀Y.Q(Y))
         let standardized = combined.standardize_apart(self.interner);
 
         // Step 1: Convert to NNF

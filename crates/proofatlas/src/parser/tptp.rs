@@ -28,6 +28,24 @@ use std::time::Instant;
 pub struct ParsedProblem {
     pub formula: CNFFormula,
     pub interner: Interner,
+    /// Number of clauses produced by CNF conversion
+    pub clause_count: usize,
+    /// Total clause storage bytes (heap_size + struct size per clause)
+    pub clause_bytes: usize,
+}
+
+/// Error from parsing, with resource stats accumulated before failure
+#[derive(Debug)]
+pub struct ParseError {
+    pub message: String,
+    pub clause_count: usize,
+    pub clause_bytes: usize,
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
 /// Parse result containing formulas and included files (internal)
@@ -105,20 +123,22 @@ pub fn parse_tptp_file(
     timeout: Option<Instant>,
     max_clauses: Option<usize>,
     memory_limit_mb: Option<usize>,
-) -> Result<ParsedProblem, String> {
+) -> Result<ParsedProblem, ParseError> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
         *ctx.borrow_mut() = Some(ParseContext::new());
     });
 
     let mut visited = HashSet::new();
-    let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)?;
+    let result = parse_file_recursive(file_path, include_dirs, &mut visited, timeout)
+        .map_err(|e| ParseError { message: e, clause_count: 0, clause_bytes: 0 })?;
     let formula = convert_to_cnf(result, timeout, max_clauses, memory_limit_mb)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
 
-    Ok(ParsedProblem { formula, interner })
+    let (clause_count, clause_bytes) = compute_clause_stats(&formula.clauses);
+    Ok(ParsedProblem { formula, interner, clause_count, clause_bytes })
 }
 
 /// Parse a TPTP string and return the CNF formula with interner
@@ -135,25 +155,39 @@ pub fn parse_tptp(
     timeout: Option<Instant>,
     max_clauses: Option<usize>,
     memory_limit_mb: Option<usize>,
-) -> Result<ParsedProblem, String> {
+) -> Result<ParsedProblem, ParseError> {
     // Initialize parsing context
     PARSE_CTX.with(|ctx| {
         *ctx.borrow_mut() = Some(ParseContext::new());
     });
 
     let mut visited = HashSet::new();
-    let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)?;
+    let result = parse_content(input, include_dirs, &PathBuf::from("."), &mut visited, timeout)
+        .map_err(|e| ParseError { message: e, clause_count: 0, clause_bytes: 0 })?;
     let formula = convert_to_cnf(result, timeout, max_clauses, memory_limit_mb)?;
 
     // Extract interner from context
     let interner = PARSE_CTX.with(|ctx| ctx.borrow_mut().take().unwrap().into_interner());
 
-    Ok(ParsedProblem { formula, interner })
+    let (clause_count, clause_bytes) = compute_clause_stats(&formula.clauses);
+    Ok(ParsedProblem { formula, interner, clause_count, clause_bytes })
+}
+
+fn compute_clause_stats(clauses: &[Clause]) -> (usize, usize) {
+    let clause_size = std::mem::size_of::<Clause>();
+    let bytes: usize = clauses.iter().map(|c| c.heap_size() + clause_size).sum();
+    (clauses.len(), bytes)
 }
 
 /// Convert parsed FOF formulas to CNF
-fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Option<usize>, memory_limit_mb: Option<usize>) -> Result<CNFFormula, String> {
+fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Option<usize>, memory_limit_mb: Option<usize>) -> Result<CNFFormula, ParseError> {
     let mut all_clauses = result.cnf_formulas;
+
+    // Helper: compute stats for current accumulated clauses on error
+    let make_err = |clauses: &[Clause], msg: String| -> ParseError {
+        let (clause_count, clause_bytes) = compute_clause_stats(clauses);
+        ParseError { message: msg, clause_count, clause_bytes }
+    };
 
     // Separate conjectures from other formulas
     let mut conjectures = Vec::new();
@@ -173,7 +207,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Op
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
             fof_to_cnf_with_role(formula, clause_role, timeout, max_clauses, memory_limit_mb, parse_ctx.interner.get_mut())
-        }).map_err(|e| e.to_string())?;
+        }).map_err(|e| make_err(&all_clauses, e.to_string()))?;
         all_clauses.extend(cnf.clauses);
     }
 
@@ -200,7 +234,7 @@ fn convert_to_cnf(result: ParseResult, timeout: Option<Instant>, max_clauses: Op
             let mut ctx_ref = ctx.borrow_mut();
             let parse_ctx = ctx_ref.as_mut().unwrap();
             fof_to_cnf_with_role(conjecture_formula, ClauseRole::NegatedConjecture, timeout, max_clauses, memory_limit_mb, parse_ctx.interner.get_mut())
-        }).map_err(|e| e.to_string())?;
+        }).map_err(|e| make_err(&all_clauses, e.to_string()))?;
         all_clauses.extend(cnf.clauses);
     }
 
@@ -1353,13 +1387,13 @@ mod tests {
     #[test]
     fn test_reject_unsupported_statement() {
         let err = parse_tptp("tff(t, type, p: $o).", &[], None, None, None).unwrap_err();
-        assert!(err.contains("Unsupported statement"), "got: {}", err);
+        assert!(err.message.contains("Unsupported statement"), "got: {}", err.message);
 
         let err = parse_tptp("thf(t, type, p: $o).", &[], None, None, None).unwrap_err();
-        assert!(err.contains("Unsupported statement"), "got: {}", err);
+        assert!(err.message.contains("Unsupported statement"), "got: {}", err.message);
 
         let err = parse_tptp("garbage here.", &[], None, None, None).unwrap_err();
-        assert!(err.contains("Unsupported statement"), "got: {}", err);
+        assert!(err.message.contains("Unsupported statement"), "got: {}", err.message);
     }
 
     #[test]
