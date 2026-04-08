@@ -15,6 +15,7 @@ use crate::logic::{
 #[derive(Debug, Clone)]
 pub enum CNFConversionError {
     Timeout,
+    ClauseLimit,
     MemoryLimit,
 }
 
@@ -49,6 +50,7 @@ impl std::fmt::Display for CNFConversionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CNFConversionError::Timeout => write!(f, "CNF conversion timed out"),
+            CNFConversionError::ClauseLimit => write!(f, "CNF conversion exceeded clause limit"),
             CNFConversionError::MemoryLimit => write!(f, "CNF conversion exceeded memory limit"),
         }
     }
@@ -59,18 +61,19 @@ pub fn fof_to_cnf(
     formula: FOFFormula,
     interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None, None, interner)
+    fof_to_cnf_with_role(formula, ClauseRole::Axiom, None, None, None, interner)
 }
 
-/// Convert a FOF formula to CNF with a specific role and optional timeout/memory limit
+/// Convert a FOF formula to CNF with a specific role and optional limits
 pub fn fof_to_cnf_with_role(
     formula: FOFFormula,
     role: ClauseRole,
     timeout: Option<Instant>,
-    memory_limit: Option<usize>,
+    max_clauses: Option<usize>,
+    memory_limit_mb: Option<usize>,
     interner: &mut Interner,
 ) -> Result<CNFFormula, CNFConversionError> {
-    let mut converter = CNFConverter::new(role, timeout, memory_limit, interner);
+    let mut converter = CNFConverter::new(role, timeout, max_clauses, memory_limit_mb, interner);
     converter.convert(formula)
 }
 
@@ -80,19 +83,21 @@ struct CNFConverter<'a> {
     universal_vars: Vec<Variable>,
     role: ClauseRole,
     timeout: Option<Instant>,
-    memory_limit: Option<usize>,
+    max_clauses: Option<usize>,
+    memory_limit_bytes: Option<usize>,
     interner: &'a mut Interner,
 }
 
 impl<'a> CNFConverter<'a> {
-    fn new(role: ClauseRole, timeout: Option<Instant>, memory_limit: Option<usize>, interner: &'a mut Interner) -> Self {
+    fn new(role: ClauseRole, timeout: Option<Instant>, max_clauses: Option<usize>, memory_limit_mb: Option<usize>, interner: &'a mut Interner) -> Self {
         CNFConverter {
             skolem_counter: 0,
             def_counter: 0,
             universal_vars: Vec::new(),
             role,
             timeout,
-            memory_limit,
+            max_clauses,
+            memory_limit_bytes: memory_limit_mb.map(|mb| mb * 1024 * 1024),
             interner,
         }
     }
@@ -106,15 +111,22 @@ impl<'a> CNFConverter<'a> {
         Ok(())
     }
 
-    fn check_memory(&self) -> Result<(), CNFConversionError> {
-        if let Some(limit) = self.memory_limit {
-            if let Some(rss) = crate::config::process_memory_mb() {
-                if rss >= limit {
-                    return Err(CNFConversionError::MemoryLimit);
-                }
+    fn check_limits(&self, total_clauses: usize, clause_bytes: usize) -> Result<(), CNFConversionError> {
+        if let Some(limit) = self.max_clauses {
+            if total_clauses >= limit {
+                return Err(CNFConversionError::ClauseLimit);
+            }
+        }
+        if let Some(limit) = self.memory_limit_bytes {
+            if clause_bytes >= limit {
+                return Err(CNFConversionError::MemoryLimit);
             }
         }
         Ok(())
+    }
+
+    fn clause_byte_size(clause: &Clause) -> usize {
+        std::mem::size_of::<Clause>() + clause.heap_size()
     }
 
     fn convert(&mut self, formula: FOFFormula) -> Result<CNFFormula, CNFConversionError> {
@@ -435,12 +447,9 @@ impl<'a> CNFConverter<'a> {
                 let f1 = self.definitional_transform(*f1, inner_polarity, definitions);
                 let f2 = self.definitional_transform(*f2, inner_polarity, definitions);
 
-                // Check if either side contains quantifiers
-                if self.contains_quantifier(&f1) || self.contains_quantifier(&f2) {
-                    self.create_iff_definition(f1, f2, polarity, definitions)
-                } else {
-                    FOFFormula::Iff(Box::new(f1), Box::new(f2))
-                }
+                // Always use definitional CNF for biconditionals to prevent
+                // exponential blowup from nested equivalences during distribution.
+                self.create_iff_definition(f1, f2, polarity, definitions)
             }
 
             FOFFormula::Xor(f1, f2) => {
@@ -449,13 +458,9 @@ impl<'a> CNFConverter<'a> {
                 let f1 = self.definitional_transform(*f1, inner_polarity, definitions);
                 let f2 = self.definitional_transform(*f2, inner_polarity, definitions);
 
-                if self.contains_quantifier(&f1) || self.contains_quantifier(&f2) {
-                    // Create definition for (A <=> B) with flipped polarity, then negate
-                    let def_atom = self.create_iff_definition(f1, f2, polarity.flip(), definitions);
-                    FOFFormula::Not(Box::new(def_atom))
-                } else {
-                    FOFFormula::Xor(Box::new(f1), Box::new(f2))
-                }
+                // Create definition for (A <=> B) with flipped polarity, then negate
+                let def_atom = self.create_iff_definition(f1, f2, polarity.flip(), definitions);
+                FOFFormula::Not(Box::new(def_atom))
             }
 
             FOFFormula::Nand(f1, f2) => FOFFormula::Nand(
@@ -473,24 +478,6 @@ impl<'a> CNFConverter<'a> {
                 var,
                 Box::new(self.definitional_transform(*f, polarity, definitions)),
             ),
-        }
-    }
-
-    /// Check if a formula contains any quantifiers
-    fn contains_quantifier(&self, formula: &FOFFormula) -> bool {
-        match formula {
-            FOFFormula::Atom { .. } => false,
-            FOFFormula::Not(f) => self.contains_quantifier(f),
-            FOFFormula::And(f1, f2)
-            | FOFFormula::Or(f1, f2)
-            | FOFFormula::Implies(f1, f2)
-            | FOFFormula::Iff(f1, f2)
-            | FOFFormula::Xor(f1, f2)
-            | FOFFormula::Nand(f1, f2)
-            | FOFFormula::Nor(f1, f2) => {
-                self.contains_quantifier(f1) || self.contains_quantifier(f2)
-            }
-            FOFFormula::Quantified(_, _, _) => true,
         }
     }
 
@@ -921,10 +908,11 @@ impl<'a> CNFConverter<'a> {
 
         let mut stack: Vec<WorkItem> = vec![WorkItem::Process(formula)];
         let mut results: Vec<Vec<Clause>> = Vec::new();
+        let mut total_clauses: usize = 0;
+        let mut clause_bytes: usize = 0;
 
         while let Some(item) = stack.pop() {
             self.check_timeout()?;
-            self.check_memory()?;
 
             match item {
                 WorkItem::Process(f) => {
@@ -965,7 +953,10 @@ impl<'a> CNFConverter<'a> {
                         }
 
                         FOFFormula::Atom { .. } | FOFFormula::Not(_) => {
-                            results.push(vec![self.formula_to_clause(f)]);
+                            let clause = self.formula_to_clause(f);
+                            total_clauses += 1;
+                            clause_bytes += Self::clause_byte_size(&clause);
+                            results.push(vec![clause]);
                         }
 
                         _ => panic!("Unexpected formula type in CNF conversion: {:?}", f),
@@ -973,9 +964,11 @@ impl<'a> CNFConverter<'a> {
                 }
 
                 WorkItem::CombineAnd => {
+                    // Concatenation: total_clauses/clause_bytes unchanged (already counted)
                     let right = results.pop().unwrap();
                     let mut left = results.pop().unwrap();
                     left.extend(right);
+                    self.check_limits(total_clauses, clause_bytes)?;
                     results.push(left);
                 }
 
@@ -983,14 +976,26 @@ impl<'a> CNFConverter<'a> {
                     let clauses2 = results.pop().unwrap();
                     let clauses1 = results.pop().unwrap();
 
-                    let mut result = Vec::new();
+                    // Remove inputs from counters
+                    let inputs_count = clauses1.len() + clauses2.len();
+                    let inputs_bytes: usize = clauses1.iter().chain(clauses2.iter())
+                        .map(Self::clause_byte_size).sum();
+                    total_clauses -= inputs_count;
+                    clause_bytes -= inputs_bytes;
+
+                    // Build cross product and add to counters
+                    let mut result = Vec::with_capacity(clauses1.len() * clauses2.len());
                     for c1 in &clauses1 {
                         for c2 in &clauses2 {
                             let mut combined = c1.literals.clone();
                             combined.extend(c2.literals.clone());
-                            result.push(Clause::with_role(combined, self.role));
+                            let clause = Clause::with_role(combined, self.role);
+                            total_clauses += 1;
+                            clause_bytes += Self::clause_byte_size(&clause);
+                            result.push(clause);
                         }
                     }
+                    self.check_limits(total_clauses, clause_bytes)?;
                     results.push(result);
                 }
             }

@@ -14,7 +14,7 @@ fn test_simple_resolution() {
         cnf(not_q_a, negated_conjecture, ~q(a)).
     "#;
 
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     let (result, prover) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
@@ -33,7 +33,7 @@ fn test_equality_reflexivity() {
         cnf(not_self_equal, negated_conjecture, a != a).
     "#;
 
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     let (result, prover) = saturate(parsed.formula, config, create_sink(), parsed.interner);
 
@@ -53,7 +53,7 @@ fn test_satisfiable_formula() {
         cnf(q_b, axiom, q(b)).
     "#;
 
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let mut config = ProverConfig::default();
     config.max_clauses = 100; // Small limit to force saturation
     let (result, _) = saturate(parsed.formula, config, create_sink(), parsed.interner);

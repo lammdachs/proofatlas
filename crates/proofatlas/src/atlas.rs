@@ -79,7 +79,8 @@ impl ProofAtlas {
     pub fn prove_file(&self, path: &str) -> Result<(ProofResult, Prover), String> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        let parsed = parse_tptp_file(path, &include_refs, timeout_instant, self.config.memory_limit)?;
+        let (max_clauses, memory_limit_mb) = self.cnf_limits();
+        let parsed = parse_tptp_file(path, &include_refs, timeout_instant, max_clauses, memory_limit_mb)?;
         self.prove_impl(parsed.formula.clauses, parsed.interner)
     }
 
@@ -87,7 +88,8 @@ impl ProofAtlas {
     pub fn prove_string(&self, content: &str) -> Result<(ProofResult, Prover), String> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        let parsed = parse_tptp(content, &include_refs, timeout_instant, self.config.memory_limit)?;
+        let (max_clauses, memory_limit_mb) = self.cnf_limits();
+        let parsed = parse_tptp(content, &include_refs, timeout_instant, max_clauses, memory_limit_mb)?;
         self.prove_impl(parsed.formula.clauses, parsed.interner)
     }
 
@@ -115,14 +117,21 @@ impl ProofAtlas {
     pub fn parse_file(&self, path: &str) -> Result<crate::parser::ParsedProblem, String> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        parse_tptp_file(path, &include_refs, timeout_instant, self.config.memory_limit)
+        let (max_clauses, memory_limit_mb) = self.cnf_limits();
+        parse_tptp_file(path, &include_refs, timeout_instant, max_clauses, memory_limit_mb)
     }
 
     /// Parse TPTP content from a string without running saturation.
     pub fn parse_string(&self, content: &str) -> Result<crate::parser::ParsedProblem, String> {
         let include_refs: Vec<&str> = self.include_dirs.iter().map(|s| s.as_str()).collect();
         let timeout_instant = Some(std::time::Instant::now() + self.config.timeout);
-        parse_tptp(content, &include_refs, timeout_instant, self.config.memory_limit)
+        let (max_clauses, memory_limit_mb) = self.cnf_limits();
+        parse_tptp(content, &include_refs, timeout_instant, max_clauses, memory_limit_mb)
+    }
+
+    fn cnf_limits(&self) -> (Option<usize>, Option<usize>) {
+        let max_clauses = if self.config.max_clauses > 0 { Some(self.config.max_clauses) } else { None };
+        (max_clauses, self.config.memory_limit)
     }
 
     /// Core proving logic: create sink, build Prover, run saturation.

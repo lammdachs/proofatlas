@@ -724,7 +724,7 @@ fn test_tautology_complementary_literals() {
         cnf(taut, axiom, p(a) | ~p(a) | q(b)).
         cnf(goal, negated_conjecture, ~q(b)).
     "#;
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     let sink: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
     let (result, _) = saturate(parsed.formula, config, sink, parsed.interner);
@@ -750,7 +750,7 @@ fn test_tautology_reflexive_equality() {
         cnf(refl, axiom, f(a) = f(a) | q(b)).
         cnf(goal, negated_conjecture, ~q(b)).
     "#;
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     let sink: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
     let (result, _) = saturate(parsed.formula, config, sink, parsed.interner);
@@ -772,7 +772,7 @@ fn test_non_tautology_not_deleted() {
         cnf(c2, axiom, ~p(X)).
         cnf(c3, negated_conjecture, ~q(b)).
     "#;
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     let sink: Box<dyn ProverSink> = Box::new(AgeWeightSink::new(0.5));
     let (result, _) = saturate(parsed.formula, config, sink, parsed.interner);

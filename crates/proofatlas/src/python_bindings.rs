@@ -249,6 +249,8 @@ impl PyProofAtlas {
                     time_s: r.time_s,
                     clause_strings: r.clause_strings,
                     num_clauses: r.num_clauses,
+                    iterations: r.iterations,
+                    clause_bytes: r.clause_bytes,
                 })),
                 Err(crossbeam_channel::TryRecvError::Empty) => {},
                 Err(crossbeam_channel::TryRecvError::Disconnected) => return Ok(None),
@@ -293,7 +295,8 @@ impl PyProofAtlas {
                 use crate::parser::parse_tptp_file;
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
                 let timeout_instant = Some(Instant::now() + config.timeout);
-                parse_tptp_file(&path_owned, &include_refs, timeout_instant, config.memory_limit)
+                let max_clauses = if config.max_clauses > 0 { Some(config.max_clauses) } else { None };
+                parse_tptp_file(&path_owned, &include_refs, timeout_instant, max_clauses, config.memory_limit)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
 
@@ -312,7 +315,8 @@ impl PyProofAtlas {
                 use crate::parser::parse_tptp;
                 let include_refs: Vec<&str> = include_dirs.iter().map(|s| s.as_str()).collect();
                 let timeout_instant = Some(Instant::now() + config.timeout);
-                parse_tptp(&content_owned, &include_refs, timeout_instant, config.memory_limit)
+                let max_clauses = if config.max_clauses > 0 { Some(config.max_clauses) } else { None };
+                parse_tptp(&content_owned, &include_refs, timeout_instant, max_clauses, config.memory_limit)
             })
             .map_err(|e| PyValueError::new_err(format!("Failed to spawn parser thread: {}", e)))?;
 
@@ -540,6 +544,8 @@ impl PyProver {
         stats.insert("processed".to_string(), self.prover.state.processed.len());
         stats.insert("empty_clauses".to_string(), clauses.iter().filter(|c| c.is_empty()).count());
         stats.insert("unit_clauses".to_string(), clauses.iter().filter(|c| c.literals.len() == 1).count());
+        stats.insert("iterations".to_string(), self.prover.iterations());
+        stats.insert("clause_bytes".to_string(), self.prover.clause_bytes());
         stats
     }
 
@@ -692,6 +698,12 @@ pub struct PyBatchResult {
     /// Number of clauses in the prover state.
     #[pyo3(get)]
     pub num_clauses: usize,
+    /// Number of given-clause iterations completed.
+    #[pyo3(get)]
+    pub iterations: usize,
+    /// Estimated clause storage in bytes.
+    #[pyo3(get)]
+    pub clause_bytes: usize,
 }
 
 #[derive(Clone)]
@@ -712,6 +724,8 @@ struct WorkerResult {
     time_s: f64,
     clause_strings: Option<Vec<String>>,
     num_clauses: usize,
+    iterations: usize,
+    clause_bytes: usize,
 }
 
 /// Worker loop for prover threads (used by PyProofAtlas::start_workers).
@@ -733,16 +747,17 @@ fn worker_loop(
 
                     let elapsed = start.elapsed().as_secs_f64();
 
-                    let (status, clause_strings, num_clauses) = match result {
+                    let (status, clause_strings, num_clauses, iterations, clause_bytes) = match result {
                         Ok(Ok((proof_result, prover))) => {
                             use crate::state::ProofResult;
                             let proof_found = matches!(proof_result, ProofResult::Proof { .. });
-                            let status = match proof_result {
+                            let status = match &proof_result {
                                 ProofResult::Proof { .. } => "proof",
                                 ProofResult::Saturated => "saturated",
                                 ProofResult::ResourceLimit => "resource_limit",
                             };
-
+                            let iterations = prover.iterations();
+                            let clause_bytes = prover.clause_bytes();
                             // Save trace
                             #[cfg(feature = "ml")]
                             if let Some(tc) = trace_config {
@@ -806,17 +821,17 @@ fn worker_loop(
                                 None
                             };
                             let nc = prover.clauses().len();
-                            (status.to_string(), strings, nc)
+                            (status.to_string(), strings, nc, iterations, clause_bytes)
                         }
                         Ok(Err(e)) => {
                             let s = e.to_lowercase();
                             if s.contains("timed out") || s.contains("memory limit") {
-                                ("resource_limit".to_string(), None, 0)
+                                ("resource_limit".to_string(), None, 0, 0, 0)
                             } else {
-                                ("error".to_string(), None, 0)
+                                ("error".to_string(), None, 0, 0, 0)
                             }
                         }
-                        Err(_) => ("error".to_string(), None, 0),
+                        Err(_) => ("error".to_string(), None, 0, 0, 0),
                     };
 
                     let problem = std::path::Path::new(&path)
@@ -830,6 +845,8 @@ fn worker_loop(
                         time_s: elapsed,
                         clause_strings,
                         num_clauses,
+                        iterations,
+                        clause_bytes,
                     });
                 }
             }

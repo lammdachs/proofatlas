@@ -12,7 +12,7 @@ fn create_sink() -> Box<dyn ProverSink> {
 
 /// Run a group theory problem and return (result, prover)
 fn run_group_problem(problem_file: &str, timeout_secs: u64) -> (ProofResult, Prover) {
-    let parsed = parse_tptp_file(problem_file, &[], None, None).expect("Failed to parse TPTP file");
+    let parsed = parse_tptp_file(problem_file, &[], None, None, None).expect("Failed to parse TPTP file");
 
     let config = ProverConfig {
         max_clauses: 10000,

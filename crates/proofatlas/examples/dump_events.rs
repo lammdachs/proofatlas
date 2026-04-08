@@ -7,7 +7,7 @@ use std::time::Duration;
 
 fn main() {
     let parsed = parse_tptp_file(
-        "crates/proofatlas/tests/problems/right_identity.p", &[], None, None
+        "crates/proofatlas/tests/problems/right_identity.p", &[], None, None, None
     ).expect("Failed to parse");
 
     let config = ProverConfig {

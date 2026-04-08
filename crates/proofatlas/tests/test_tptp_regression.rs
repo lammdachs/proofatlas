@@ -14,7 +14,7 @@ fn create_sink() -> Box<dyn ProverSink> {
 }
 
 fn prove_problem(path: &str) -> (ProofResult, Prover) {
-    let parsed = parse_tptp_file(path, &[], None, None).expect("Failed to parse TPTP file");
+    let parsed = parse_tptp_file(path, &[], None, None, None).expect("Failed to parse TPTP file");
     let config = ProverConfig {
         max_clauses: 10000,
         max_iterations: 10000,

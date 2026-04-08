@@ -13,13 +13,13 @@ fn create_sink() -> Box<dyn ProverSink> {
 }
 
 fn prove_tptp(tptp: &str) -> (ProofResult, Prover) {
-    let parsed = parse_tptp(tptp, &[], None, None).unwrap();
+    let parsed = parse_tptp(tptp, &[], None, None, None).unwrap();
     let config = ProverConfig::default();
     saturate(parsed.formula, config, create_sink(), parsed.interner)
 }
 
 fn prove_file(path: &str, timeout_secs: u64) -> (ProofResult, Prover) {
-    let parsed = parse_tptp_file(path, &[], None, None).expect("Failed to parse TPTP file");
+    let parsed = parse_tptp_file(path, &[], None, None, None).expect("Failed to parse TPTP file");
     let config = ProverConfig {
         max_clauses: 10000,
         max_iterations: 10000,
