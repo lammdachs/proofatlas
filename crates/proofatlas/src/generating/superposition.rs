@@ -88,12 +88,11 @@ pub fn superposition(
                                 continue;
                             }
 
-                            // Skip superposing a term into the same position in the same
-                            // literal of the same clause — this always yields a tautology
-                            // (e.g. l=r into itself at l's position gives r=r).
-                            if idx1 == idx2 && from_idx == into_idx && pos == &[pattern_arg_idx] {
-                                continue;
-                            }
+                            // Note: when from_clause == into_clause we still want
+                            // self-superposition to fire — the two scopes give independent
+                            // variable renamings, so the inference is a valid B-G step
+                            // between two copies of the clause. Tautology elimination
+                            // handles the (rare) cases where it produces r=r.
 
                             // Unify pattern (scope 0) with the subterm (scope 1)
                             if let Ok(mgu) = unify_scoped(pattern, 0, subterm, 1) {
