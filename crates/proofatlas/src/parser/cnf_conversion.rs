@@ -509,8 +509,15 @@ impl<'a> CNFConverter<'a> {
         // Sort by variable ID for deterministic ordering
         free_vars.sort_by(|x, y| x.id.cmp(&y.id));
 
-        // Create definition predicate D
-        let def_name = format!("def{}", self.def_counter);
+        // Create definition predicate D. Skip names already in the interner so def
+        // predicates remain unique across multiple formulas in the same TPTP problem.
+        let def_name = loop {
+            let candidate = format!("def{}", self.def_counter);
+            if self.interner.get_predicate(&candidate).is_none() {
+                break candidate;
+            }
+            self.def_counter += 1;
+        };
         self.def_counter += 1;
 
         let def_pred = PredicateSymbol::new(
@@ -608,9 +615,24 @@ impl<'a> CNFConverter<'a> {
                     }
 
                     FOFFormula::Quantified(Quantifier::Exists, var, f) => {
-                        // Create Skolem function/constant
-                        let skolem_name = format!("sk{}", self.skolem_counter);
-                        let skolem_term = if self.universal_vars.is_empty() {
+                        // Create Skolem function/constant.
+                        // Bump the counter past any names already in the interner so Skolems
+                        // are unique across all formulas in a single TPTP problem (multiple
+                        // calls to fof_to_cnf reuse the same interner). Without this, the
+                        // negated conjecture's Skolems would collide with axiom Skolems.
+                        let is_constant = self.universal_vars.is_empty();
+                        let skolem_name = loop {
+                            let candidate = format!("sk{}", self.skolem_counter);
+                            // Check both namespaces to avoid collisions, since the same TPTP
+                            // identifier cannot legally be both a constant and a function.
+                            let exists = self.interner.get_constant(&candidate).is_some()
+                                || self.interner.get_function(&candidate).is_some();
+                            if !exists {
+                                break candidate;
+                            }
+                            self.skolem_counter += 1;
+                        };
+                        let skolem_term = if is_constant {
                             Term::Constant(Constant::new(
                                 self.interner.intern_constant(&skolem_name),
                             ))
