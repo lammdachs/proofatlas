@@ -69,6 +69,23 @@ def test_prove_resource_limit():
         assert prover.status == "resource_limit"
 
 
+def test_statistics_iterations_and_clause_bytes():
+    """Test that iterations and clause_bytes are available via statistics"""
+    atlas = ProofAtlas(max_iterations=3, timeout=60.0)
+    r = atlas.prove_string("""
+    cnf(a1, axiom, p(X,Y) | p(Y,X)).
+    cnf(a2, axiom, ~p(X,Y) | ~p(Y,Z) | p(X,Z)).
+    cnf(a3, axiom, ~p(a,b)).
+    cnf(a4, axiom, p(c,d)).
+    cnf(a5, axiom, p(d,e)).
+    cnf(a6, axiom, p(e,f)).
+    """)
+    assert r.status == "resource_limit"
+    stats = r.statistics()
+    assert stats["iterations"] == 3
+    assert stats["clause_bytes"] > 0
+
+
 def test_prover_properties():
     """Test that Prover has proof_found and status properties"""
     atlas = ProofAtlas(timeout=10.0)

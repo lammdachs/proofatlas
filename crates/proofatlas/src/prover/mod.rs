@@ -204,6 +204,12 @@ impl Prover {
     /// Get all clauses generated during saturation.
     pub fn clauses(&self) -> &[Arc<Clause>] { &self.state.clauses }
 
+    /// Number of given-clause iterations completed.
+    pub fn iterations(&self) -> usize { self.state.current_iteration }
+
+    /// Estimated clause storage in bytes.
+    pub fn clause_bytes(&self) -> usize { self.state.clause_bytes }
+
     /// Get profiling data (None if profiling was not enabled).
     pub fn profile(&self) -> Option<&SaturationProfile> { self.profile.as_ref() }
 
