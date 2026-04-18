@@ -627,8 +627,9 @@ impl PyProver {
         external_labels: Option<Vec<u8>>,
     ) -> PyResult<()> {
         let _ = time_seconds;
+        // Node/clause embeddings disabled — pass None for backend handle
         crate::selection::training::trace::save_trace(
-            &self.prover, &self.result, self.backend_handle.as_ref(),
+            &self.prover, &self.result, None,
             traces_dir, preset, problem, external_labels,
         ).map_err(|e| PyValueError::new_err(e))
     }
@@ -778,14 +779,9 @@ fn worker_loop(
                                 // Save trace for all results (proofs get real labels,
                                 // failures get all-zero labels). Offline relabeling
                                 // can later assign labels from other configs' proofs.
-                                // Skip expensive MiniLM embeddings for unsolved traces.
-                                let handle = if proof_found {
-                                    atlas.backend_handle()
-                                } else {
-                                    None
-                                };
+                                // No MiniLM embeddings — gcn_struct doesn't use them.
                                 let _ = crate::selection::training::trace::save_trace(
-                                    &prover, &proof_result, handle.as_ref(),
+                                    &prover, &proof_result, None,
                                     &tc.traces_dir, &tc.preset, &problem_name, None,
                                 );
                             }

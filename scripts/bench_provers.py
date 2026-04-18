@@ -73,11 +73,6 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
     else:
         kwargs["age_weight_ratio"] = float(preset.get("age_weight_ratio", 0.5))
 
-    if collect_trace:
-        kwargs["enable_trace"] = True
-        if not kwargs.get("weights_path"):
-            kwargs["weights_path"] = weights_path or str(Path(__file__).parent.parent / ".weights")
-
     return kwargs
 
 
