@@ -29,6 +29,29 @@
       "memory_limit": 64,
       "temperature": 0.5
     },
+    "gcn_struct_attention": {
+      "description": "GCN (structural) + Attention, round 0",
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "attention",
+      "traces": "age_weight",
+      "memory_limit": 64,
+      "temperature": 0.5
+    },
+    "gcn_struct_transformer": {
+      "description": "GCN (structural) + Transformer, round 0",
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "scorer": "transformer",
+      "traces": "age_weight",
+      "memory_limit": 64,
+      "temperature": 0.5
+    },
+
     "gcn_struct_mlp_lat_r1": {
       "timeout": 60,
       "max_iterations": 256,
