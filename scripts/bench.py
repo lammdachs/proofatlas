@@ -745,7 +745,7 @@ def main():
                 binary=binary, trace_preset=trace_preset,
                 rerun=args.rerun, n_jobs=args.cpu_workers,
                 use_cuda=use_cuda_eval,
-                fallback_configs=args.fallback or preset.get("fallback"),
+                fallback_configs=None,  # Deprecated: relabeling is now offline
             )
             log(f"[{preset_name}] Evaluation complete")
             sys.stdout.flush()

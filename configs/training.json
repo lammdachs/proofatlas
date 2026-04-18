@@ -1,9 +1,10 @@
 {
   "defaults": {
-    "batch_size": 32,
+    "batch_size_bytes": 536870912,
+    "accumulate_steps": 1,
     "max_epochs": 100,
     "val_ratio": 0.1,
-    "patience": 20,
+    "patience": 10,
     "margin": 0.1,
 
     "optimizer": "adamw",

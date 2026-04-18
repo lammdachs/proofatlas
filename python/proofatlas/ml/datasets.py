@@ -92,6 +92,8 @@ def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True,
 
         has_node_emb = need_node_emb and "node_embeddings" in npz
         has_sentinel = need_node_emb and "node_sentinel_type" in npz
+        node_embeddings = npz["node_embeddings"] if has_node_emb else None
+        node_sentinel_type = npz["node_sentinel_type"] if has_sentinel else None
 
         def _extract_clause_graph(i):
             n_start, n_end = int(node_offsets[i]), int(node_offsets[i + 1])
@@ -117,9 +119,9 @@ def _load_and_sample_graph(trace_file: Path, need_node_emb: bool = True,
             }
 
             if has_node_emb:
-                result["node_embeddings"] = npz["node_embeddings"][n_start:n_end].copy()
+                result["node_embeddings"] = node_embeddings[n_start:n_end].copy()
             if has_sentinel:
-                result["node_sentinel_type"] = npz["node_sentinel_type"][n_start:n_end].copy()
+                result["node_sentinel_type"] = node_sentinel_type[n_start:n_end].copy()
 
             return result
 

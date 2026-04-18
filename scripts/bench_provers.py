@@ -81,35 +81,6 @@ def build_atlas_kwargs(preset: dict, tptp_root: Path, weights_path: str = None,
     return kwargs
 
 
-def _save_fallback_trace(batch_result, base_dir, trace_preset, fallback_configs):
-    """Save trace for a failed proof using fallback config's proof labels.
-
-    Uses clause_strings from the BatchResult (collected by the worker) and
-    proof strings from fallback configs' .strings.json files.
-    """
-    if not batch_result.clause_strings:
-        return
-
-    stem = Path(batch_result.problem).stem
-
-    for fb_name in fallback_configs:
-        strings_path = base_dir / ".data" / "traces" / fb_name / f"{stem}.strings.json"
-        if not strings_path.exists():
-            continue
-
-        with open(strings_path) as f:
-            proof_strings = set(json.load(f))
-
-        labels = [1 if s in proof_strings else 0 for s in batch_result.clause_strings]
-        if sum(labels) > 0:
-            # Save trace via the atlas's prove() + save_trace with external_labels
-            # This re-proves the problem — needed because save_trace requires a Prover
-            # TODO: move trace saving into the Rust worker to avoid re-proving
-            return labels
-
-    return None
-
-
 class ProofAtlasPool:
     """Pool of prover threads sharing a single Backend.
 
@@ -123,11 +94,11 @@ class ProofAtlasPool:
                  fallback_configs=None, preset_name=None):
         from proofatlas import ProofAtlas
 
+        _ = fallback_configs  # Deprecated: relabeling is now offline
         timeout = preset.get("timeout", 10)
         self.process_timeout = max(timeout * 3, timeout + 60)
         self.collect_trace = collect_trace
         self.trace_preset = trace_preset
-        self.fallback_configs = fallback_configs
         self.base_dir = Path(base_dir)
 
         kwargs = build_atlas_kwargs(preset, tptp_root, weights_path, use_cuda,
@@ -135,15 +106,9 @@ class ProofAtlasPool:
                                     preset_name=preset_name)
         self.atlas = ProofAtlas(**kwargs)
         traces_dir = str(base_dir / ".data" / "traces") if collect_trace else None
-        fallback_trace_dirs = None
-        if collect_trace and fallback_configs:
-            fallback_trace_dirs = [
-                str(base_dir / ".data" / "traces" / fb) for fb in fallback_configs
-            ]
         self.atlas.start_workers(
             n_workers, collect_traces=collect_trace,
             traces_dir=traces_dir, trace_preset=trace_preset,
-            fallback_dirs=fallback_trace_dirs,
         )
 
     def start(self):

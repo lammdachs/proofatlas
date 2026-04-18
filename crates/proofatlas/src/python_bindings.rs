@@ -187,6 +187,7 @@ impl PyProofAtlas {
     pub fn start_workers(&mut self, n_workers: usize, collect_traces: bool,
                          traces_dir: Option<String>, trace_preset: Option<String>,
                          fallback_dirs: Option<Vec<String>>) -> PyResult<()> {
+        let _ = fallback_dirs; // Deprecated: relabeling is now offline
         if self.pool_tx.is_some() {
             return Err(PyValueError::new_err("Workers already started"));
         }
@@ -198,7 +199,6 @@ impl PyProofAtlas {
             (Some(dir), Some(preset)) => Some(TraceConfig {
                 traces_dir: dir,
                 preset,
-                fallback_dirs: fallback_dirs.unwrap_or_default(),
             }),
             _ => None,
         };
@@ -712,7 +712,6 @@ pub struct PyBatchResult {
 struct TraceConfig {
     traces_dir: String,
     preset: String,
-    fallback_dirs: Vec<String>, // dirs to search for .strings.json fallback labels
 }
 
 enum WorkerTask {
@@ -776,48 +775,19 @@ fn worker_loop(
                                     .file_name()
                                     .map(|f| f.to_string_lossy().to_string())
                                     .unwrap_or_default();
-                                let handle = atlas.backend_handle();
-
-                                if proof_found {
-                                    // ML solved: save trace with own proof labels
-                                    let _ = crate::selection::training::trace::save_trace(
-                                        &prover, &proof_result, handle.as_ref(),
-                                        &tc.traces_dir, &tc.preset, &problem_name, None,
-                                    );
-                                } else if !tc.fallback_dirs.is_empty() {
-                                    // ML failed: try fallback labeling from .strings.json
-                                    let stem = std::path::Path::new(&problem_name)
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                        .unwrap_or(&problem_name);
-                                    let interner = prover.interner();
-                                    let clauses = prover.clauses();
-
-                                    for fb_dir in &tc.fallback_dirs {
-                                        let strings_path = std::path::PathBuf::from(fb_dir)
-                                            .join(format!("{}.strings.json", stem));
-                                        if let Ok(data) = std::fs::read_to_string(&strings_path) {
-                                            if let Ok(proof_strings) = serde_json::from_str::<Vec<String>>(&data) {
-                                                let proof_set: std::collections::HashSet<&str> =
-                                                    proof_strings.iter().map(|s| s.as_str()).collect();
-                                                let labels: Vec<u8> = clauses.iter()
-                                                    .map(|c| {
-                                                        let s = c.display(interner).to_string();
-                                                        if proof_set.contains(s.as_str()) { 1 } else { 0 }
-                                                    })
-                                                    .collect();
-                                                if labels.iter().any(|&l| l == 1) {
-                                                    let _ = crate::selection::training::trace::save_trace(
-                                                        &prover, &proof_result, handle.as_ref(),
-                                                        &tc.traces_dir, &tc.preset, &problem_name,
-                                                        Some(labels),
-                                                    );
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                // Save trace for all results (proofs get real labels,
+                                // failures get all-zero labels). Offline relabeling
+                                // can later assign labels from other configs' proofs.
+                                // Skip expensive MiniLM embeddings for unsolved traces.
+                                let handle = if proof_found {
+                                    atlas.backend_handle()
+                                } else {
+                                    None
+                                };
+                                let _ = crate::selection::training::trace::save_trace(
+                                    &prover, &proof_result, handle.as_ref(),
+                                    &tc.traces_dir, &tc.preset, &problem_name, None,
+                                );
                             }
                             #[cfg(not(feature = "ml"))]
                             let _ = (proof_found, trace_config);

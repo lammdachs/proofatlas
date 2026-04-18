@@ -41,17 +41,22 @@ pub fn save_trace(
         return Ok(());
     }
 
-    // When no external labels, require a proof to derive labels from
-    if external_labels.is_none() && !matches!(result, ProofResult::Proof { .. }) {
-        return Ok(());
-    }
+    // For non-proof results without external labels, save with all-zero labels
+    // into an "unsolved" subdirectory. Offline relabeling can later assign
+    // labels from other configs' proofs and write to runner@source dirs.
+    let is_proof = matches!(result, ProofResult::Proof { .. });
+    let has_external_labels = external_labels.is_some();
 
     let stem = std::path::Path::new(problem)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(problem);
 
-    let preset_dir = PathBuf::from(traces_dir).join(preset);
+    let preset_dir = if is_proof || has_external_labels {
+        PathBuf::from(traces_dir).join(preset).join("solved")
+    } else {
+        PathBuf::from(traces_dir).join(preset).join("unsolved")
+    };
     std::fs::create_dir_all(&preset_dir)
         .map_err(|e| format!("Failed to create traces dir: {}", e))?;
 
@@ -68,11 +73,13 @@ pub fn save_trace(
             ));
         }
         ext
-    } else {
+    } else if matches!(result, ProofResult::Proof { .. }) {
         let proof_clauses = get_proof_clause_set(prover, result);
         (0..num_clauses)
             .map(|i| if proof_clauses.contains(&i) { 1 } else { 0 })
             .collect()
+    } else {
+        vec![0u8; num_clauses]
     };
 
     // --- Clause features [C, 9] ---
@@ -219,7 +226,7 @@ pub fn save_trace(
         sw.finish().map_err(|e| format!("NPZ finish error: {}", e))?;
     }
 
-    // --- Write proof clause strings ---
+    // --- Write proof clause strings (for fallback matching by other configs) ---
     {
         let proof_strings: Vec<String> = clauses
             .iter()
@@ -235,6 +242,20 @@ pub fn save_trace(
             std::fs::write(&strings_path, json)
                 .map_err(|e| format!("Failed to write strings: {}", e))?;
         }
+    }
+
+    // --- Write all clause strings (for offline relabeling) ---
+    {
+        let all_strings: Vec<String> = clauses
+            .iter()
+            .map(|c| c.display(interner).to_string())
+            .collect();
+
+        let all_path = preset_dir.join(format!("{}.clause_strings.json", stem));
+        let json = serde_json::to_string(&all_strings)
+            .map_err(|e| format!("JSON error: {}", e))?;
+        std::fs::write(&all_path, json)
+            .map_err(|e| format!("Failed to write clause strings: {}", e))?;
     }
 
     Ok(())

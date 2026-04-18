@@ -323,6 +323,67 @@ def _ddp_train_worker(rank, preset, trace_dirs, weights_dir, configs_dir, proble
     )
 
 
+def _generate_cross_labels(traces_base: Path, runner: str, source: str):
+    """Generate cross-labeled traces: relabel runner's unsolved traces with source's proofs.
+
+    Reads runner/unsolved/<problem>.clause_strings.json (all clauses) and
+    source/<problem>.strings.json (proof clauses), matches them, and saves
+    a copy of the trace NPZ with updated labels to runner@source/.
+    """
+    import numpy as np
+
+    unsolved_dir = traces_base / runner / "unsolved"
+    source_dir = traces_base / source / "solved"
+    dest_dir = traces_base / f"{runner}@{source}"
+
+    if not unsolved_dir.exists():
+        log(f"Cross-label: no unsolved traces in {runner}, skipping")
+        return
+    if not source_dir.exists():
+        log(f"Cross-label: missing source {source_dir}, skipping")
+        return
+
+    created = 0
+    for clause_file in sorted(unsolved_dir.glob("*.clause_strings.json")):
+        stem = clause_file.stem.replace(".clause_strings", "")
+
+        # Check source has proof strings
+        source_strings = source_dir / f"{stem}.strings.json"
+        if not source_strings.exists():
+            continue
+
+        # Skip if already generated
+        if (dest_dir / f"{stem}.graph.npz").exists():
+            continue
+
+        with open(clause_file) as f:
+            all_clauses = json.load(f)
+        with open(source_strings) as f:
+            proof_strings = set(json.load(f))
+
+        labels = np.array([1 if s in proof_strings else 0 for s in all_clauses],
+                          dtype=np.uint8)
+        if not labels.any():
+            continue
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for suffix in [".graph.npz", ".sentence.npz"]:
+            src_path = unsolved_dir / f"{stem}{suffix}"
+            if not src_path.exists():
+                continue
+            npz = np.load(src_path)
+            arrays = {k: npz[k] for k in npz.files}
+            npz.close()
+            arrays["labels"] = labels
+            np.savez_compressed(str(dest_dir / f"{stem}{suffix}"), **arrays)
+
+        created += 1
+
+    if created:
+        log(f"Cross-label: created {created} traces in {runner}@{source}")
+
+
 def run_training_job(args, base_dir, preset, problems, tptp_config):
     """Run the actual training (called directly or as daemon)."""
     from proofatlas.ml.training import run_training
@@ -335,13 +396,24 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
     batch_size, accumulate_batches = validate_args(args, preset)
 
     # Resolve trace directories
+    traces_base = base_dir / ".data" / "traces"
     if args.trace_dir:
         trace_dirs = [Path(args.trace_dir)]
     else:
         traces = preset.get("traces") or args.config
         if isinstance(traces, str):
             traces = [traces]
-        trace_dirs = [base_dir / ".data" / "traces" / t for t in traces]
+        trace_dirs = []
+        for t in traces:
+            if "@" in t:
+                d = traces_base / t
+            else:
+                d = traces_base / t / "solved"
+            if "@" in t and not d.exists():
+                # Auto-generate cross-labeled traces: runner@source
+                runner, source = t.split("@", 1)
+                _generate_cross_labels(traces_base, runner, source)
+            trace_dirs.append(d)
 
     # Check that traces exist
     missing = [d for d in trace_dirs if not d.exists() or not any(d.glob("**/*.npz"))]
