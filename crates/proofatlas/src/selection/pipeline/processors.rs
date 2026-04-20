@@ -42,6 +42,9 @@ pub struct GcnScoreProcessor {
     backend: BackendHandle,
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
+    /// Pending embed+score requests: (clause_idx, request_handle).
+    /// Drained before any read of `scores` (select, on_simplify).
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -53,9 +56,21 @@ impl GcnScoreProcessor {
             backend,
             embed_cuda,
             scores: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    /// Drain all pending backend responses into `scores`.
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let score = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32)),
+                Err(_) => 0.0,
+            };
+            self.scores.insert(idx, score);
         }
     }
 }
@@ -64,14 +79,11 @@ impl DataProcessor for GcnScoreProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new(clause);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
-                self.scores.insert(idx, score);
-            }
-            Err(_) => {
-                self.scores.insert(idx, 0.0);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
 
@@ -80,10 +92,13 @@ impl DataProcessor for GcnScoreProcessor {
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        // Simplified clauses may have a pending embed; drain to be safe.
+        self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
             self.scores.shift_remove(&idx);
@@ -109,6 +124,9 @@ pub struct GcnEmbeddingProcessor {
     score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
+    /// Pending embed requests: (clause_idx, request_handle).
+    /// Drained before any read of u_embeddings (select, on_activate, on_simplify).
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -122,9 +140,21 @@ impl GcnEmbeddingProcessor {
             score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    /// Drain all pending embed responses into u_embeddings.
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let emb = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
+                Err(_) => vec![],
+            };
+            self.u_embeddings.insert(idx, emb);
         }
     }
 }
@@ -133,29 +163,29 @@ impl DataProcessor for GcnEmbeddingProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
         self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new(clause);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
-                self.u_embeddings.insert(idx, emb);
-            }
-            Err(_) => {
-                self.u_embeddings.insert(idx, vec![]);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
         }
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         if self.u_embeddings.is_empty() {
             return None;
         }
@@ -192,6 +222,7 @@ pub struct SentenceScoreProcessor {
     interner: Arc<Interner>,
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -204,9 +235,20 @@ impl SentenceScoreProcessor {
             interner,
             embed_cuda,
             scores: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let score = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32)),
+                Err(_) => 0.0,
+            };
+            self.scores.insert(idx, score);
         }
     }
 }
@@ -216,24 +258,23 @@ impl DataProcessor for SentenceScoreProcessor {
         self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
-                self.scores.insert(idx, score);
-            }
-            Err(_) => {
-                self.scores.insert(idx, 0.0);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
 
     fn on_activate(&mut self, _idx: usize) {}
 
     fn on_simplify(&mut self, idx: usize) {
+        self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
             self.scores.shift_remove(&idx);
@@ -258,6 +299,7 @@ pub struct SentenceEmbeddingProcessor {
     score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -272,9 +314,20 @@ impl SentenceEmbeddingProcessor {
             score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let emb = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
+                Err(_) => vec![],
+            };
+            self.u_embeddings.insert(idx, emb);
         }
     }
 }
@@ -284,29 +337,29 @@ impl DataProcessor for SentenceEmbeddingProcessor {
         self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
-                self.u_embeddings.insert(idx, emb);
-            }
-            Err(_) => {
-                self.u_embeddings.insert(idx, vec![]);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
         }
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         if self.u_embeddings.is_empty() {
             return None;
         }
@@ -341,6 +394,7 @@ pub struct FeaturesScoreProcessor {
     backend: BackendHandle,
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -352,9 +406,20 @@ impl FeaturesScoreProcessor {
             backend,
             embed_cuda,
             scores: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let score = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32)),
+                Err(_) => 0.0,
+            };
+            self.scores.insert(idx, score);
         }
     }
 }
@@ -364,24 +429,23 @@ impl DataProcessor for FeaturesScoreProcessor {
         self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
-        match self.backend.submit_sync(self.request_id, "embed_score".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let score = *resp.data.downcast::<f32>().unwrap_or(Box::new(0.0f32));
-                self.scores.insert(idx, score);
-            }
-            Err(_) => {
-                self.scores.insert(idx, 0.0);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
 
     fn on_activate(&mut self, _idx: usize) {}
 
     fn on_simplify(&mut self, idx: usize) {
+        self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
             self.scores.shift_remove(&idx);
@@ -406,6 +470,7 @@ pub struct FeaturesEmbeddingProcessor {
     score_cuda: bool,
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
+    pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
@@ -419,9 +484,20 @@ impl FeaturesEmbeddingProcessor {
             score_cuda,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
+            pending: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+        }
+    }
+
+    fn drain_pending(&mut self) {
+        for (idx, handle) in self.pending.drain(..) {
+            let emb = match handle.recv() {
+                Ok(resp) => *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![])),
+                Err(_) => vec![],
+            };
+            self.u_embeddings.insert(idx, emb);
         }
     }
 }
@@ -431,29 +507,29 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
         self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
-        match self.backend.submit_sync(self.request_id, "embed".to_string(), data, self.embed_cuda) {
-            Ok(resp) => {
-                let emb = *resp.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]));
-                self.u_embeddings.insert(idx, emb);
-            }
-            Err(_) => {
-                self.u_embeddings.insert(idx, vec![]);
-            }
+        match self.backend.submit_async(
+            self.request_id, "embed".to_string(), data, self.embed_cuda,
+        ) {
+            Ok(handle) => self.pending.push((idx, handle)),
+            Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
         }
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.drain_pending();
         if self.u_embeddings.is_empty() {
             return None;
         }

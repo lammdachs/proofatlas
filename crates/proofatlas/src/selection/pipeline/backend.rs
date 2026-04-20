@@ -114,12 +114,54 @@ pub struct BackendHandle {
     tx: channel::Sender<BackendRequest>,
 }
 
+/// A pending request; call `recv()` to block until the response arrives.
+///
+/// Allows async submission: the processor can fire multiple submits in
+/// succession, then collect responses later. The backend worker can batch
+/// concurrent requests (via `try_recv`) while the processor continues with
+/// other work.
+pub struct RequestHandle {
+    id: u64,
+    rx: channel::Receiver<BackendResponse>,
+}
+
+impl RequestHandle {
+    /// Block until the response arrives.
+    pub fn recv(self) -> Result<BackendResponse, String> {
+        self.rx
+            .recv()
+            .map_err(|_| format!("Backend response channel closed (req {})", self.id))
+    }
+}
+
 impl BackendHandle {
     /// Submit a request to the backend. Returns error if the backend is shut down.
     pub fn submit(&self, request: BackendRequest) -> Result<(), String> {
         self.tx
             .send(request)
             .map_err(|_| "Backend channel closed".to_string())
+    }
+
+    /// Submit a request without blocking; returns a handle for later collection.
+    ///
+    /// Enables true batching: the processor fires multiple submits in succession
+    /// while the backend worker drains them into a single batched forward pass.
+    pub fn submit_async(
+        &self,
+        id: u64,
+        model_id: String,
+        data: Box<dyn std::any::Any + Send>,
+        use_cuda: bool,
+    ) -> Result<RequestHandle, String> {
+        let (resp_tx, resp_rx) = channel::unbounded();
+        self.submit(BackendRequest {
+            id,
+            model_id,
+            data,
+            response_tx: resp_tx,
+            use_cuda,
+        })?;
+        Ok(RequestHandle { id, rx: resp_rx })
     }
 
     /// Submit a request and wait for the response synchronously.
