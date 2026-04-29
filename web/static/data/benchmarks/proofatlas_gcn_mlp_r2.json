@@ -1,0 +1,15 @@
+{
+  "generated": "2026-04-18T04:16:39.343442",
+  "prover": "proofatlas",
+  "preset": "gcn_mlp_r2",
+  "completed": 11091,
+  "total": 11091,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 2738,
+    "saturated": 0,
+    "resource_limit": 8353,
+    "error": 0
+  },
+  "proof_rate": 24.686682896041837
+}

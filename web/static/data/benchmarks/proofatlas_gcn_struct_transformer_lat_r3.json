@@ -1,0 +1,15 @@
+{
+  "generated": "2026-04-25T14:12:11.982161",
+  "prover": "proofatlas",
+  "preset": "gcn_struct_transformer_lat_r3",
+  "completed": 11091,
+  "total": 11091,
+  "progress_pct": 100.0,
+  "stats": {
+    "proof": 2803,
+    "saturated": 0,
+    "resource_limit": 8288,
+    "error": 0
+  },
+  "proof_rate": 25.272743666035524
+}

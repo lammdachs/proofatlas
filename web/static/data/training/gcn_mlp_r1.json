@@ -1,0 +1,38 @@
+{
+  "generated": "2026-04-18T04:16:59.656447",
+  "name": "gcn_mlp_r1",
+  "start_time": "2026-04-18T04:16:59.656459",
+  "end_time": null,
+  "total_time_seconds": null,
+  "termination_reason": null,
+  "best_epoch": null,
+  "best_val_loss": null,
+  "model": {
+    "type": "gcn",
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "input_dim": 8,
+    "scorer_type": "mlp"
+  },
+  "training": {
+    "batch_size_bytes": 536870912,
+    "accumulate_steps": 1,
+    "learning_rate": 0.0003,
+    "max_epochs": 100,
+    "optimizer": "adamw",
+    "weight_decay": 0.0001,
+    "cpu_workers": 8,
+    "gpu_workers": 1
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 3.980771749000239,
+      "val_loss": 3.1700473070144652,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 2.9999999999999997e-06
+    }
+  ],
+  "evaluations": []
+}
