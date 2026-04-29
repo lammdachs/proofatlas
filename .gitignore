@@ -1,5 +1,7 @@
-# Paper (separate repo)
+# Papers (separate repos)
 /IJCAR26/
+/ML4SP/
+/FMCAD26/
 
 # Data directories (runtime, gitignored)
 /.data/

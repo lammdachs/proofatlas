@@ -384,6 +384,76 @@ def _generate_cross_labels(traces_base: Path, runner: str, source: str):
         log(f"Cross-label: created {created} traces in {runner}@{source}")
 
 
+def _generate_cross_labels_any(traces_base: Path, runner: str, sources: list):
+    """Generate cross-labeled traces using the first matching source per problem.
+
+    For each unsolved problem in `runner`, iterate through `sources` in order
+    and use the labels from the first source that has a proof for the problem.
+    Writes one trace per problem to runner@any/, never duplicated.
+
+    `sources` is a priority-ordered list of config names restricted by the
+    preset's `cross_label_sources` field — no implicit fallback.
+    """
+    import numpy as np
+
+    unsolved_dir = traces_base / runner / "unsolved"
+    dest_dir = traces_base / f"{runner}@any"
+
+    if not unsolved_dir.exists():
+        log(f"Cross-label: no unsolved traces in {runner}, skipping")
+        return
+
+    created = 0
+    by_source: dict = {s: 0 for s in sources}
+
+    for clause_file in sorted(unsolved_dir.glob("*.clause_strings.json")):
+        stem = clause_file.stem.replace(".clause_strings", "")
+
+        # Skip if already generated (idempotent)
+        if (dest_dir / f"{stem}.graph.npz").exists():
+            continue
+
+        # Find first source with proof strings for this problem
+        chosen_source = None
+        proof_strings = None
+        for source in sources:
+            source_strings = traces_base / source / "solved" / f"{stem}.strings.json"
+            if source_strings.exists():
+                with open(source_strings) as f:
+                    proof_strings = set(json.load(f))
+                chosen_source = source
+                break
+
+        if chosen_source is None:
+            continue
+
+        with open(clause_file) as f:
+            all_clauses = json.load(f)
+
+        labels = np.array([1 if s in proof_strings else 0 for s in all_clauses],
+                          dtype=np.uint8)
+        if not labels.any():
+            continue
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for suffix in [".graph.npz", ".sentence.npz"]:
+            src_path = unsolved_dir / f"{stem}{suffix}"
+            if not src_path.exists():
+                continue
+            npz = np.load(src_path)
+            arrays = {k: npz[k] for k in npz.files}
+            npz.close()
+            arrays["labels"] = labels
+            np.savez_compressed(str(dest_dir / f"{stem}{suffix}"), **arrays)
+
+        created += 1
+        by_source[chosen_source] += 1
+
+    if created:
+        log(f"Cross-label: created {created} traces in {runner}@any {dict(by_source)}")
+
+
 def run_training_job(args, base_dir, preset, problems, tptp_config):
     """Run the actual training (called directly or as daemon)."""
     from proofatlas.ml.training import run_training
@@ -407,12 +477,20 @@ def run_training_job(args, base_dir, preset, problems, tptp_config):
         for t in traces:
             if "@" in t:
                 d = traces_base / t
+                if not d.exists():
+                    runner, source = t.split("@", 1)
+                    if source == "any":
+                        # @any: relabel using first matching source from listed priority list
+                        sources = preset.get("cross_label_sources", [])
+                        if not sources:
+                            log(f"Error: {t} requires 'cross_label_sources' in preset")
+                            sys.exit(1)
+                        _generate_cross_labels_any(traces_base, runner, sources)
+                    else:
+                        # @<source>: pairwise relabeling from one source
+                        _generate_cross_labels(traces_base, runner, source)
             else:
                 d = traces_base / t / "solved"
-            if "@" in t and not d.exists():
-                # Auto-generate cross-labeled traces: runner@source
-                runner, source = t.split("@", 1)
-                _generate_cross_labels(traces_base, runner, source)
             trace_dirs.append(d)
 
     # Check that traces exist

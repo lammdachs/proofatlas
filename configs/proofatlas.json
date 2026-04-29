@@ -29,17 +29,6 @@
       "memory_limit": 64,
       "temperature": 0.5
     },
-    "gcn_struct_attention": {
-      "description": "GCN (structural) + Attention, round 0",
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "scorer": "attention",
-      "traces": "age_weight",
-      "memory_limit": 64,
-      "temperature": 0.5
-    },
     "gcn_struct_transformer": {
       "description": "GCN (structural) + Transformer, round 0",
       "timeout": 60,
@@ -51,7 +40,6 @@
       "memory_limit": 64,
       "temperature": 0.5
     },
-
     "gcn_struct_mlp_lat_r1": {
       "timeout": 60,
       "max_iterations": 256,
@@ -89,51 +77,6 @@
       "scorer": "mlp",
       "traces": [
         "gcn_struct_mlp_lat_r2"
-      ]
-    },
-    "gcn_struct_mlp_cum_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r1",
-      "scorer": "mlp",
-      "traces": [
-        "age_weight",
-        "gcn_struct_mlp"
-      ]
-    },
-    "gcn_struct_mlp_cum_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r2",
-      "scorer": "mlp",
-      "traces": [
-        "age_weight",
-        "gcn_struct_mlp",
-        "gcn_struct_mlp_cum_r1"
-      ]
-    },
-    "gcn_struct_mlp_cum_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r3",
-      "scorer": "mlp",
-      "traces": [
-        "age_weight",
-        "gcn_struct_mlp",
-        "gcn_struct_mlp_cum_r1",
-        "gcn_struct_mlp_cum_r2"
       ]
     },
     "gcn_struct_mlp_awl_r1": {
@@ -189,7 +132,10 @@
       "scorer": "mlp",
       "traces": [
         "gcn_struct_mlp",
-        "gcn_struct_mlp@age_weight"
+        "gcn_struct_mlp@any"
+      ],
+      "cross_label_sources": [
+        "age_weight"
       ]
     },
     "gcn_struct_mlp_xcl_r2": {
@@ -203,8 +149,11 @@
       "scorer": "mlp",
       "traces": [
         "gcn_struct_mlp_xcl_r1",
-        "gcn_struct_mlp_xcl_r1@age_weight",
-        "gcn_struct_mlp_xcl_r1@gcn_struct_mlp"
+        "gcn_struct_mlp_xcl_r1@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp",
+        "age_weight"
       ]
     },
     "gcn_struct_mlp_xcl_r3": {
@@ -218,180 +167,12 @@
       "scorer": "mlp",
       "traces": [
         "gcn_struct_mlp_xcl_r2",
-        "gcn_struct_mlp_xcl_r2@age_weight",
-        "gcn_struct_mlp_xcl_r2@gcn_struct_mlp",
-        "gcn_struct_mlp_xcl_r2@gcn_struct_mlp_xcl_r1"
-      ]
-    },
-    "gcn_struct_attention_lat_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Latest-only chain r1",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention"
-      ]
-    },
-    "gcn_struct_attention_lat_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Latest-only chain r2",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention_lat_r1"
-      ]
-    },
-    "gcn_struct_attention_lat_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Latest-only chain r3",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention_lat_r2"
-      ]
-    },
-    "gcn_struct_attention_cum_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r1",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention"
-      ]
-    },
-    "gcn_struct_attention_cum_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r2",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention",
-        "gcn_struct_attention_cum_r1"
-      ]
-    },
-    "gcn_struct_attention_cum_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r3",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention",
-        "gcn_struct_attention_cum_r1",
-        "gcn_struct_attention_cum_r2"
-      ]
-    },
-    "gcn_struct_attention_awl_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "AW+latest chain r1",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention"
-      ]
-    },
-    "gcn_struct_attention_awl_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "AW+latest chain r2",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention_awl_r1"
-      ]
-    },
-    "gcn_struct_attention_awl_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "AW+latest chain r3",
-      "scorer": "attention",
-      "traces": [
-        "age_weight",
-        "gcn_struct_attention_awl_r2"
-      ]
-    },
-    "gcn_struct_attention_xcl_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cross-label chain r1",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention",
-        "gcn_struct_attention@age_weight"
-      ]
-    },
-    "gcn_struct_attention_xcl_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cross-label chain r2",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention_xcl_r1",
-        "gcn_struct_attention_xcl_r1@age_weight",
-        "gcn_struct_attention_xcl_r1@gcn_struct_attention"
-      ]
-    },
-    "gcn_struct_attention_xcl_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cross-label chain r3",
-      "scorer": "attention",
-      "traces": [
-        "gcn_struct_attention_xcl_r2",
-        "gcn_struct_attention_xcl_r2@age_weight",
-        "gcn_struct_attention_xcl_r2@gcn_struct_attention",
-        "gcn_struct_attention_xcl_r2@gcn_struct_attention_xcl_r1"
+        "gcn_struct_mlp_xcl_r2@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp_xcl_r1",
+        "gcn_struct_mlp",
+        "age_weight"
       ]
     },
     "gcn_struct_transformer_lat_r1": {
@@ -431,51 +212,6 @@
       "scorer": "transformer",
       "traces": [
         "gcn_struct_transformer_lat_r2"
-      ]
-    },
-    "gcn_struct_transformer_cum_r1": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r1",
-      "scorer": "transformer",
-      "traces": [
-        "age_weight",
-        "gcn_struct_transformer"
-      ]
-    },
-    "gcn_struct_transformer_cum_r2": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r2",
-      "scorer": "transformer",
-      "traces": [
-        "age_weight",
-        "gcn_struct_transformer",
-        "gcn_struct_transformer_cum_r1"
-      ]
-    },
-    "gcn_struct_transformer_cum_r3": {
-      "timeout": 60,
-      "max_iterations": 256,
-      "literal_selection": 21,
-      "encoder": "gcn_struct",
-      "memory_limit": 64,
-      "temperature": 0.5,
-      "description": "Cumulative chain r3",
-      "scorer": "transformer",
-      "traces": [
-        "age_weight",
-        "gcn_struct_transformer",
-        "gcn_struct_transformer_cum_r1",
-        "gcn_struct_transformer_cum_r2"
       ]
     },
     "gcn_struct_transformer_awl_r1": {
@@ -531,7 +267,10 @@
       "scorer": "transformer",
       "traces": [
         "gcn_struct_transformer",
-        "gcn_struct_transformer@age_weight"
+        "gcn_struct_transformer@any"
+      ],
+      "cross_label_sources": [
+        "age_weight"
       ]
     },
     "gcn_struct_transformer_xcl_r2": {
@@ -545,8 +284,11 @@
       "scorer": "transformer",
       "traces": [
         "gcn_struct_transformer_xcl_r1",
-        "gcn_struct_transformer_xcl_r1@age_weight",
-        "gcn_struct_transformer_xcl_r1@gcn_struct_transformer"
+        "gcn_struct_transformer_xcl_r1@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer",
+        "age_weight"
       ]
     },
     "gcn_struct_transformer_xcl_r3": {
@@ -560,9 +302,252 @@
       "scorer": "transformer",
       "traces": [
         "gcn_struct_transformer_xcl_r2",
-        "gcn_struct_transformer_xcl_r2@age_weight",
-        "gcn_struct_transformer_xcl_r2@gcn_struct_transformer",
-        "gcn_struct_transformer_xcl_r2@gcn_struct_transformer_xcl_r1"
+        "gcn_struct_transformer_xcl_r2@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer_xcl_r1",
+        "gcn_struct_transformer",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_mlp_lat_r4": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r4",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_lat_r3"
+      ]
+    },
+    "gcn_struct_mlp_xcl_r4": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r4",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_xcl_r3",
+        "gcn_struct_mlp_xcl_r3@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp_xcl_r2",
+        "gcn_struct_mlp_xcl_r1",
+        "gcn_struct_mlp",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_mlp_lat_r5": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r5",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_lat_r4"
+      ]
+    },
+    "gcn_struct_mlp_xcl_r5": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r5",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_xcl_r4",
+        "gcn_struct_mlp_xcl_r4@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp_xcl_r3",
+        "gcn_struct_mlp_xcl_r2",
+        "gcn_struct_mlp_xcl_r1",
+        "gcn_struct_mlp",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_mlp_lat_r6": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r6",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_lat_r5"
+      ]
+    },
+    "gcn_struct_mlp_xcl_r6": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r6",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_xcl_r5",
+        "gcn_struct_mlp_xcl_r5@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp_xcl_r4",
+        "gcn_struct_mlp_xcl_r3",
+        "gcn_struct_mlp_xcl_r2",
+        "gcn_struct_mlp_xcl_r1",
+        "gcn_struct_mlp",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_transformer_lat_r4": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r4",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_lat_r3"
+      ]
+    },
+    "gcn_struct_transformer_xcl_r4": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r4",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_xcl_r3",
+        "gcn_struct_transformer_xcl_r3@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer_xcl_r2",
+        "gcn_struct_transformer_xcl_r1",
+        "gcn_struct_transformer",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_transformer_lat_r5": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r5",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_lat_r4"
+      ]
+    },
+    "gcn_struct_transformer_xcl_r5": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r5",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_xcl_r4",
+        "gcn_struct_transformer_xcl_r4@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer_xcl_r3",
+        "gcn_struct_transformer_xcl_r2",
+        "gcn_struct_transformer_xcl_r1",
+        "gcn_struct_transformer",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_transformer_lat_r6": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r6",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_lat_r5"
+      ]
+    },
+    "gcn_struct_transformer_xcl_r6": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r6",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_xcl_r5",
+        "gcn_struct_transformer_xcl_r5@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer_xcl_r4",
+        "gcn_struct_transformer_xcl_r3",
+        "gcn_struct_transformer_xcl_r2",
+        "gcn_struct_transformer_xcl_r1",
+        "gcn_struct_transformer",
+        "age_weight"
+      ]
+    },
+    "gcn_struct_transformer_lat_r7": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r7",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_lat_r6"
+      ]
+    },
+    "gcn_struct_transformer_xcl_r7": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r7",
+      "scorer": "transformer",
+      "traces": [
+        "gcn_struct_transformer_xcl_r6",
+        "gcn_struct_transformer_xcl_r6@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_transformer_xcl_r5",
+        "gcn_struct_transformer_xcl_r4",
+        "gcn_struct_transformer_xcl_r3",
+        "gcn_struct_transformer_xcl_r2",
+        "gcn_struct_transformer_xcl_r1",
+        "gcn_struct_transformer",
+        "age_weight"
       ]
     }
   }

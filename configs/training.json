@@ -1,6 +1,6 @@
 {
   "defaults": {
-    "batch_size_bytes": 536870912,
+    "batch_size_bytes": 8388608,
     "accumulate_steps": 1,
     "max_epochs": 100,
     "val_ratio": 0.1,
