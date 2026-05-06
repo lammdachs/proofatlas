@@ -52,13 +52,40 @@ pub fn save_trace(
         .and_then(|s| s.to_str())
         .unwrap_or(problem);
 
-    let preset_dir = if is_proof || has_external_labels {
-        PathBuf::from(traces_dir).join(preset).join("solved")
+    let (preset_dir, opposite_dir) = if is_proof || has_external_labels {
+        (
+            PathBuf::from(traces_dir).join(preset).join("solved"),
+            PathBuf::from(traces_dir).join(preset).join("unsolved"),
+        )
     } else {
-        PathBuf::from(traces_dir).join(preset).join("unsolved")
+        (
+            PathBuf::from(traces_dir).join(preset).join("unsolved"),
+            PathBuf::from(traces_dir).join(preset).join("solved"),
+        )
     };
     std::fs::create_dir_all(&preset_dir)
         .map_err(|e| format!("Failed to create traces dir: {}", e))?;
+
+    // Remove any stale trace files in the opposite directory (this problem
+    // flipped solved <-> unsolved between runs); leaving them creates the
+    // overlap pathology where the same stem appears in both subdirs.
+    {
+        let stem = std::path::Path::new(problem)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(problem);
+        for ext in [
+            "graph.npz",
+            "sentence.npz",
+            "strings.json",
+            "clause_strings.json",
+        ] {
+            let p = opposite_dir.join(format!("{}.{}", stem, ext));
+            if p.exists() {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
 
     // --- Lifecycle arrays ---
     let (transfer_step, activate_step, simplify_step, num_steps) =
