@@ -412,6 +412,42 @@
         "age_weight"
       ]
     },
+    "gcn_struct_mlp_lat_r7": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Latest-only chain r7",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_lat_r6"
+      ]
+    },
+    "gcn_struct_mlp_xcl_r7": {
+      "timeout": 60,
+      "max_iterations": 256,
+      "literal_selection": 21,
+      "encoder": "gcn_struct",
+      "memory_limit": 64,
+      "temperature": 0.5,
+      "description": "Cross-label chain r7",
+      "scorer": "mlp",
+      "traces": [
+        "gcn_struct_mlp_xcl_r6",
+        "gcn_struct_mlp_xcl_r6@any"
+      ],
+      "cross_label_sources": [
+        "gcn_struct_mlp_xcl_r5",
+        "gcn_struct_mlp_xcl_r4",
+        "gcn_struct_mlp_xcl_r3",
+        "gcn_struct_mlp_xcl_r2",
+        "gcn_struct_mlp_xcl_r1",
+        "gcn_struct_mlp",
+        "age_weight"
+      ]
+    },
     "gcn_struct_transformer_lat_r4": {
       "timeout": 60,
       "max_iterations": 256,
