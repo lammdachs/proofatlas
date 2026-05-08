@@ -707,7 +707,6 @@ def main():
                     if args.cpu_workers > 1:
                         train_cmd.extend(["--cpu-workers", str(args.cpu_workers)])
 
-                    import subprocess
                     train_env = os.environ.copy()
                     train_env.pop("CUDA_VISIBLE_DEVICES", None)
                     rc = subprocess.run(train_cmd, cwd=str(base_dir), env=train_env).returncode
