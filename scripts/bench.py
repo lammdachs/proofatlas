@@ -586,10 +586,33 @@ def main():
 
     # Ensure base MiniLM weights exist for trace embedding.
     # Must run before daemonize — torch.jit.trace can't run after fork.
+    # Skip the bootstrap entirely when no scheduled config needs symbol
+    # embeddings (e.g., gcn_struct uses node_info="features" — embeddings
+    # would be computed and then discarded at training time).
     weights_dir = base_dir / ".weights"
     minilm_model = weights_dir / "base_minilm.pt"
     minilm_tokenizer = weights_dir / "base_minilm_tokenizer" / "tokenizer.json"
-    if not (minilm_model.exists() and minilm_tokenizer.exists()):
+    embeddings_config_path = base_dir / "configs" / "embeddings.json"
+    embeddings_arches = {}
+    if embeddings_config_path.exists():
+        try:
+            with embeddings_config_path.open() as f:
+                embeddings_arches = json.load(f).get("architectures", {})
+        except Exception:
+            embeddings_arches = {}
+
+    def _needs_minilm(preset: dict) -> bool:
+        encoder_name = preset.get("encoder")
+        if not encoder_name:
+            return False
+        arch = embeddings_arches.get(encoder_name, {})
+        # node_info defaults to "both" for backwards compatibility.
+        # Anything other than "features" requires MiniLM symbol embeddings.
+        return arch.get("node_info", "both") != "features"
+
+    any_run_needs_minilm = any(_needs_minilm(r["preset"]) for r in runs)
+
+    if any_run_needs_minilm and not (minilm_model.exists() and minilm_tokenizer.exists()):
         print("Downloading and exporting base MiniLM for trace embedding...")
         sys.stdout.flush()
         # Run in subprocess to isolate torch.jit.trace from our process.
