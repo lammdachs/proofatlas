@@ -2,11 +2,11 @@
   "generated": "2026-05-06T11:22:11.144240",
   "name": "gcn_struct_mlp_xcl_r4",
   "start_time": "2026-05-06T11:22:11.144249",
-  "end_time": null,
-  "total_time_seconds": null,
-  "termination_reason": null,
-  "best_epoch": null,
-  "best_val_loss": null,
+  "end_time": "2026-05-06T17:02:48.014393",
+  "total_time_seconds": 20437.199686050415,
+  "termination_reason": "early_stopped",
+  "best_epoch": 28,
+  "best_val_loss": 3.1234982644810394,
   "model": {
     "type": "gcn",
     "hidden_dim": 64,
@@ -272,6 +272,62 @@
       "val_acc": null,
       "val_mrr": null,
       "learning_rate": 0.00025159223574386114
+    },
+    {
+      "epoch": 32,
+      "train_loss": 2.2624927056549633,
+      "val_loss": 3.6896035110249237,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00024788786422862526
+    },
+    {
+      "epoch": 33,
+      "train_loss": 2.2596012840981867,
+      "val_loss": 3.2954409332836376,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00024407645377103052
+    },
+    {
+      "epoch": 34,
+      "train_loss": 2.1670347411196254,
+      "val_loss": 3.2912515542086433,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00024016217209245374
+    },
+    {
+      "epoch": 35,
+      "train_loss": 2.1705895676749867,
+      "val_loss": 3.167970103376052,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.0002361492994024415
+    },
+    {
+      "epoch": 36,
+      "train_loss": 2.188277268475345,
+      "val_loss": 3.3631953562007233,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00023204222371836405
+    },
+    {
+      "epoch": 37,
+      "train_loss": 2.1194716333812007,
+      "val_loss": 3.388329120243297,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00022784543606718227
+    },
+    {
+      "epoch": 38,
+      "train_loss": 2.1290616738944013,
+      "val_loss": 3.335352897644043,
+      "val_acc": null,
+      "val_mrr": null,
+      "learning_rate": 0.00022356352557457618
     }
   ],
   "evaluations": []
