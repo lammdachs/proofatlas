@@ -35,7 +35,6 @@
 	let selectedRun = $state('');
 	let loading = $state(true);
 	let noData = $state(false);
-	let showComparison = $state(false);
 
 	let Chart: any = $state(null);
 	let charts: Record<string, any> = {};
@@ -85,7 +84,6 @@
 		const labels = run.epochs.map(e => e.epoch);
 		const trainLoss = run.epochs.map(e => e.train_loss);
 		const valLoss = run.epochs.map(e => e.val_loss);
-		const valAcc = run.epochs.map(e => e.val_acc);
 		const lr = run.epochs.map(e => e.learning_rate);
 
 		const commonOpts = {
@@ -97,7 +95,6 @@
 		// lammdachs colors
 		const blue = '#456878';
 		const berry = '#9E2D39';
-		const green = '#4A6444';
 		const honey = '#B58C18';
 
 		// Destroy old charts
@@ -116,20 +113,6 @@
 					]
 				},
 				options: { ...commonOpts, scales: { x: { title: { display: true, text: 'Epoch' } }, y: { title: { display: true, text: 'Loss' } } } }
-			});
-		}
-
-		const accEl = document.getElementById('acc-chart') as HTMLCanvasElement;
-		if (accEl) {
-			charts.acc = new Chart(accEl, {
-				type: 'line',
-				data: {
-					labels,
-					datasets: [
-						{ label: 'Validation Accuracy', data: valAcc, borderColor: green, backgroundColor: green + '1a', fill: true, tension: 0.1 },
-					]
-				},
-				options: { ...commonOpts, scales: { x: { title: { display: true, text: 'Epoch' } }, y: { title: { display: true, text: 'Accuracy' }, min: 0, max: 1 } } }
 			});
 		}
 
@@ -181,41 +164,6 @@
 		return `${(seconds / 3600).toFixed(1)}h`;
 	}
 
-	function compareRuns() {
-		if (Object.keys(allRuns).length < 2) return;
-		showComparison = true;
-		requestAnimationFrame(() => {
-			const el = document.getElementById('compare-chart') as HTMLCanvasElement;
-			if (!el || !Chart) return;
-			charts.compare?.destroy?.();
-
-			const colors = ['#456878', '#9E2D39', '#4A6444', '#B58C18', '#A76647', '#4F443F'];
-			const datasets = Object.entries(allRuns).map(([name, run], i) => {
-				const label = run.model?.type
-					? `${run.model.type} (${run.model.hidden_dim}h x ${run.model.num_layers}L)`
-					: name;
-				return {
-					label,
-					data: (run.epochs || []).map(e => ({ x: e.epoch, y: e.val_loss })),
-					borderColor: colors[i % colors.length],
-					fill: false,
-					tension: 0.1,
-				};
-			});
-
-			charts.compare = new Chart(el, {
-				type: 'line',
-				data: { datasets },
-				options: {
-					responsive: true,
-					maintainAspectRatio: false,
-					plugins: { legend: { position: 'top' as const }, title: { display: true, text: 'Validation Loss Comparison' } },
-					scales: { x: { type: 'linear', title: { display: true, text: 'Epoch' } }, y: { title: { display: true, text: 'Val Loss' } } }
-				}
-			});
-		});
-	}
-
 	let currentRunData = $derived(allRuns[selectedRun] || null);
 </script>
 
@@ -248,10 +196,6 @@
 					<option value={name}>{name}</option>
 				{/each}
 			</select>
-			<button
-				class="px-3 py-2 bg-blue-400 hover:bg-blue-300 text-gray-900 rounded text-sm font-semibold transition-colors"
-				onclick={compareRuns}
-			>Compare Runs</button>
 		</div>
 
 		{#if currentRunData}
@@ -312,10 +256,6 @@
 					<div class="relative h-72"><canvas id="loss-chart"></canvas></div>
 				</div>
 				<div class="bg-surface-light rounded border border-card-border p-4">
-					<h3 class="font-semibold text-sm text-text mb-2">Validation Accuracy</h3>
-					<div class="relative h-72"><canvas id="acc-chart"></canvas></div>
-				</div>
-				<div class="bg-surface-light rounded border border-card-border p-4">
 					<h3 class="font-semibold text-sm text-text mb-2">Learning Rate</h3>
 					<div class="relative h-72"><canvas id="lr-chart"></canvas></div>
 				</div>
@@ -353,14 +293,6 @@
 					</table>
 				</div>
 			{/if}
-		{/if}
-
-		<!-- Comparison -->
-		{#if showComparison}
-			<div class="bg-surface-light rounded border border-card-border p-4">
-				<h3 class="font-semibold text-sm text-text mb-2">Run Comparison</h3>
-				<div class="relative h-96"><canvas id="compare-chart"></canvas></div>
-			</div>
 		{/if}
 	{/if}
 </div>
