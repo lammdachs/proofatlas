@@ -114,6 +114,52 @@ pub struct SaturationProfile {
     pub selector_cache_misses: usize,
     pub selector_embed_time: Duration,
     pub selector_score_time: Duration,
+
+    /// Per-iteration trace. Populated when profiling is enabled, one entry per
+    /// completed given-clause step.
+    pub iter_trace: Vec<IterStats>,
+}
+
+/// Per-iteration timing breakdown.
+///
+/// All `_ns` fields are nanoseconds of wall time spent on that phase
+/// during this single given-clause iteration.
+#[derive(Debug, Clone, Default)]
+pub struct IterStats {
+    /// 1-indexed iteration number (matches `current_iteration` after this step).
+    pub iter: usize,
+    pub t_total_ns: u64,
+    pub t_process_new_ns: u64,
+    pub t_forward_simplify_ns: u64,
+    pub t_backward_simplify_ns: u64,
+    pub t_select_ns: u64,
+    pub t_generate_ns: u64,
+    pub t_add_inferences_ns: u64,
+    pub t_selector_embed_ns: u64,
+    pub t_selector_score_ns: u64,
+    pub u_size: usize,
+    pub p_size: usize,
+    pub clauses_generated: usize,
+}
+
+impl Serialize for IterStats {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut s = serializer.serialize_struct("IterStats", 13)?;
+        s.serialize_field("iter", &self.iter)?;
+        s.serialize_field("t_total_ns", &self.t_total_ns)?;
+        s.serialize_field("t_process_new_ns", &self.t_process_new_ns)?;
+        s.serialize_field("t_forward_simplify_ns", &self.t_forward_simplify_ns)?;
+        s.serialize_field("t_backward_simplify_ns", &self.t_backward_simplify_ns)?;
+        s.serialize_field("t_select_ns", &self.t_select_ns)?;
+        s.serialize_field("t_generate_ns", &self.t_generate_ns)?;
+        s.serialize_field("t_add_inferences_ns", &self.t_add_inferences_ns)?;
+        s.serialize_field("t_selector_embed_ns", &self.t_selector_embed_ns)?;
+        s.serialize_field("t_selector_score_ns", &self.t_selector_score_ns)?;
+        s.serialize_field("u_size", &self.u_size)?;
+        s.serialize_field("p_size", &self.p_size)?;
+        s.serialize_field("clauses_generated", &self.clauses_generated)?;
+        s.end()
+    }
 }
 
 impl SaturationProfile {
@@ -176,7 +222,7 @@ impl SaturationProfile {
 
 impl Serialize for SaturationProfile {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SaturationProfile", 19)?;
+        let mut s = serializer.serialize_struct("SaturationProfile", 20)?;
 
         // Top-level phase timings
         s.serialize_field("total_time", &secs(&self.total_time))?;
@@ -205,6 +251,8 @@ impl Serialize for SaturationProfile {
         s.serialize_field("selector_cache_misses", &self.selector_cache_misses)?;
         s.serialize_field("selector_embed_time", &secs(&self.selector_embed_time))?;
         s.serialize_field("selector_score_time", &secs(&self.selector_score_time))?;
+
+        s.serialize_field("iter_trace", &self.iter_trace)?;
 
         s.end()
     }

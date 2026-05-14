@@ -480,7 +480,7 @@ pub fn create_ml_pipeline(
     let backend = self::backend::Backend::from_models(vec![Box::new(model)]);
     let handle = backend.handle();
     // Backend is dropped here; worker thread detached but alive via handle.
-    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature, false));
+    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature, false, false));
     create_pipeline(processor, "ml_pipeline".to_string())
 }
 
@@ -627,7 +627,7 @@ mod tests {
         let backend = super::backend::Backend::from_models(vec![Box::new(model)]);
         let handle = backend.handle();
 
-        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0, false));
+        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0, false, false));
         let mut sink = create_pipeline(processor, "test".to_string());
 
         sink.on_transfer(5, &make_clause(2));

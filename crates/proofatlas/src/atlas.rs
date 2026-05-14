@@ -38,6 +38,8 @@ enum SinkKind {
         scorer: String,
         /// Whether CUDA is available (used for per-model device decisions in processors).
         use_cuda: bool,
+        /// If true, drain pending embeds immediately after each submit (synchronous mode).
+        sequential: bool,
     },
 }
 
@@ -71,6 +73,7 @@ impl ProofAtlas {
             temperature: 1.0,
             age_weight_ratio: 0.5,
             enable_trace: false,
+            sequential_inference: false,
         }
     }
 
@@ -153,7 +156,7 @@ impl ProofAtlas {
                 Ok(Box::new(AgeWeightSink::new(*ratio)))
             }
             #[cfg(feature = "ml")]
-            SinkKind::Pipeline { handle, encoder, scorer, use_cuda } => {
+            SinkKind::Pipeline { handle, encoder, scorer, use_cuda, sequential } => {
                 use crate::selection::pipeline::processors;
                 use std::sync::Arc;
 
@@ -161,6 +164,7 @@ impl ProofAtlas {
                 let temp = self.temperature;
                 let h = handle.clone();
                 let cuda = *use_cuda;
+                let seq = *sequential;
 
                 // Device placement per encoder type:
                 // - GCN/features: lightweight → encoder on CPU, scorer follows use_cuda
@@ -175,27 +179,27 @@ impl ProofAtlas {
                 let processor: Box<dyn crate::selection::DataProcessor> = match (encoder.as_str(), scorer.as_str()) {
                     // GCN + MLP: cache scores
                     ("gcn" | "gcn_struct", "mlp") => {
-                        Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda))
+                        Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda, seq))
                     }
                     // GCN + attention/transformer: cache embeddings
                     ("gcn" | "gcn_struct", "attention" | "transformer") => {
-                        Box::new(processors::GcnEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda))
+                        Box::new(processors::GcnEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda, seq))
                     }
                     // Sentence + MLP: cache scores
                     ("sentence", "mlp") => {
-                        Box::new(processors::SentenceScoreProcessor::new(h, int, temp, embed_cuda))
+                        Box::new(processors::SentenceScoreProcessor::new(h, int, temp, embed_cuda, seq))
                     }
                     // Sentence + attention/transformer: cache embeddings
                     ("sentence", "attention" | "transformer") => {
-                        Box::new(processors::SentenceEmbeddingProcessor::new(h, int, temp, embed_cuda, score_cuda))
+                        Box::new(processors::SentenceEmbeddingProcessor::new(h, int, temp, embed_cuda, score_cuda, seq))
                     }
                     // Features + MLP: cache scores
                     ("features", "mlp") => {
-                        Box::new(processors::FeaturesScoreProcessor::new(h, temp, embed_cuda))
+                        Box::new(processors::FeaturesScoreProcessor::new(h, temp, embed_cuda, seq))
                     }
                     // Features + attention/transformer: cache embeddings
                     ("features", "attention" | "transformer") => {
-                        Box::new(processors::FeaturesEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda))
+                        Box::new(processors::FeaturesEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda, seq))
                     }
                     _ => {
                         return Err(format!(
@@ -226,6 +230,7 @@ pub struct ProofAtlasBuilder {
     temperature: f32,
     age_weight_ratio: f64,
     enable_trace: bool,
+    sequential_inference: bool,
 }
 
 impl ProofAtlasBuilder {
@@ -286,6 +291,13 @@ impl ProofAtlasBuilder {
     /// containing `base_minilm.pt` and `base_minilm_tokenizer/`.
     pub fn enable_trace(mut self, enable: bool) -> Self {
         self.enable_trace = enable;
+        self
+    }
+
+    /// Inference mode: when true, on_transfer drains the pending queue immediately
+    /// after each submit (simulates synchronous submit). Default false (async).
+    pub fn sequential_inference(mut self, sequential: bool) -> Self {
+        self.sequential_inference = sequential;
         self
     }
 
@@ -363,6 +375,7 @@ impl ProofAtlasBuilder {
                         encoder: enc.to_string(),
                         scorer: scorer_name.to_string(),
                         use_cuda: self.use_cuda,
+                        sequential: self.sequential_inference,
                     },
                     temperature: self.temperature,
                     _backend: Some(backend),

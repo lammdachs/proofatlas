@@ -29,6 +29,7 @@ use crate::selection::{
 };
 use crate::selection::clause::ProverSink;
 use crate::logic::time_compat::Instant;
+use std::time::Duration;
 
 /// Per-problem saturation engine.
 ///
@@ -316,7 +317,62 @@ impl Prover {
     /// Returns `Some(result)` if the proof search is complete, `None` to continue.
     /// Each step processes all new clauses, then selects one given clause and
     /// generates inferences with it.
+    ///
+    /// When profiling is enabled, records a per-iteration entry in
+    /// `profile.iter_trace` capturing wall time and per-stage breakdown.
     pub fn step(&mut self) -> Option<ProofResult> {
+        struct Snapshot {
+            wall_start: Instant,
+            process_new: Duration,
+            forward_simplify: Duration,
+            backward_simplify: Duration,
+            select_given: Duration,
+            generate_inferences: Duration,
+            add_inferences: Duration,
+            clauses_generated: usize,
+            sel_embed: Duration,
+            sel_score: Duration,
+        }
+
+        let snap = self.profile.as_ref().map(|p| Snapshot {
+            wall_start: Instant::now(),
+            process_new: p.process_new_time,
+            forward_simplify: p.forward_simplify_time,
+            backward_simplify: p.backward_simplify_time,
+            select_given: p.select_given_time,
+            generate_inferences: p.generate_inferences_time,
+            add_inferences: p.add_inferences_time,
+            clauses_generated: p.clauses_generated,
+            sel_embed: self.sink.stats().map(|s| s.embed_time).unwrap_or_default(),
+            sel_score: self.sink.stats().map(|s| s.score_time).unwrap_or_default(),
+        });
+
+        let result = self.step_inner();
+
+        if let (Some(s), Some(p)) = (snap, self.profile.as_mut()) {
+            let sel_embed_now = self.sink.stats().map(|x| x.embed_time).unwrap_or_default();
+            let sel_score_now = self.sink.stats().map(|x| x.score_time).unwrap_or_default();
+            p.iter_trace.push(crate::prover::profile::IterStats {
+                iter: self.state.current_iteration,
+                t_total_ns: s.wall_start.elapsed().as_nanos() as u64,
+                t_process_new_ns: (p.process_new_time - s.process_new).as_nanos() as u64,
+                t_forward_simplify_ns: (p.forward_simplify_time - s.forward_simplify).as_nanos() as u64,
+                t_backward_simplify_ns: (p.backward_simplify_time - s.backward_simplify).as_nanos() as u64,
+                t_select_ns: (p.select_given_time - s.select_given).as_nanos() as u64,
+                t_generate_ns: (p.generate_inferences_time - s.generate_inferences).as_nanos() as u64,
+                t_add_inferences_ns: (p.add_inferences_time - s.add_inferences).as_nanos() as u64,
+                t_selector_embed_ns: (sel_embed_now - s.sel_embed).as_nanos() as u64,
+                t_selector_score_ns: (sel_score_now - s.sel_score).as_nanos() as u64,
+                u_size: self.state.unprocessed.len(),
+                p_size: self.state.processed.len(),
+                clauses_generated: p.clauses_generated - s.clauses_generated,
+            });
+        }
+
+        result
+    }
+
+    fn step_inner(&mut self) -> Option<ProofResult> {
         let now = *self.start_time.get_or_insert_with(Instant::now);
         if self.clause_manager.start_time.is_none() {
             self.clause_manager.start_time = Some(now);

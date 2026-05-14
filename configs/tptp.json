@@ -35,28 +35,31 @@
       "domains": ["PUZ"]
     },
 
-    "concurrency_debug": {
-      "description": "Problems that prove in isolation but fail under concurrent workers",
+    "throughput16": {
+      "description": "16 problems for async-inference throughput study; 2 per outcome group across (transformer_xcl_r6, mlp_xcl_r6, age_weight). Failures hit iter limit (256), not 60s wall.",
       "problems": [
-        "BOO/BOO008-2.p", "BOO/BOO009-2.p", "BOO/BOO010-2.p", "BOO/BOO010-4.p",
-        "BOO/BOO011-1.p", "BOO/BOO012-2.p", "BOO/BOO072-1.p", "BOO/BOO074-1.p",
-        "COL/COL045-1.p", "COL/COL058-1.p",
-        "GEO/GEO014-2.p", "GEO/GEO015-2.p", "GEO/GEO015-3.p",
-        "GEO/GEO016-2.p", "GEO/GEO016-3.p",
-        "GRP/GRP140-1.p", "GRP/GRP167-5.p", "GRP/GRP169-1.p", "GRP/GRP169-2.p",
-        "GRP/GRP172-1.p", "GRP/GRP172-2.p", "GRP/GRP451-1.p", "GRP/GRP466-1.p",
-        "GRP/GRP584-1.p", "GRP/GRP588-1.p", "GRP/GRP591-1.p", "GRP/GRP592-1.p",
-        "GRP/GRP601-1.p", "GRP/GRP603-1.p", "GRP/GRP604-1.p", "GRP/GRP605-1.p",
-        "GRP/GRP606-1.p", "GRP/GRP665-12.p", "GRP/GRP671-1.p",
-        "GRP/GRP680-1.p", "GRP/GRP682-10.p", "GRP/GRP682-11.p", "GRP/GRP683-10.p",
-        "GRP/GRP702-10.p", "GRP/GRP702-11.p", "GRP/GRP702-12.p",
-        "GRP/GRP703-10.p", "GRP/GRP703-11.p", "GRP/GRP703-12.p",
-        "GRP/GRP704-10.p", "GRP/GRP704-11.p", "GRP/GRP704-12.p",
-        "GRP/GRP707-1.p",
-        "HEN/HEN012-3.p", "HWC/HWC001-1.p",
-        "HWV/HWV009-1.p", "HWV/HWV009-2.p", "HWV/HWV009-3.p", "HWV/HWV009-4.p",
-        "HWV/HWV010-1.p", "HWV/HWV010-2.p", "HWV/HWV010-3.p", "HWV/HWV011-1.p",
-        "MGT/MGT036-3.p", "SWV/SWV308-2.p"
+        "SET/SET855-2.p", "GRP/GRP708-1.p",
+        "NUM/NUM001-1.p", "NUM/NUM630+1.p",
+        "CAT/CAT001-4.p", "GEO/GEO175+1.p",
+        "CSR/CSR052+1.p", "REL/REL010+2.p",
+        "SYN/SYN589-1.p", "SWV/SWV019-1.p",
+        "CSR/CSR050+1.p", "BOO/BOO014-2.p",
+        "SYN/SYN311-1.p", "SYN/SYN563-10.p",
+        "SWC/SWC227+1.p", "SWW/SWW099+1.p"
+      ]
+    },
+
+    "throughput32": {
+      "description": "32 problems for async-inference throughput study; 4 per outcome group across (transformer_xcl_r6, mlp_xcl_r6, age_weight). Superset of throughput16; failures hit iter limit (256), not 60s wall.",
+      "problems": [
+        "SET/SET855-2.p", "GRP/GRP708-1.p", "MGT/MGT049-1.p", "LAT/LAT028-1.p",
+        "NUM/NUM001-1.p", "NUM/NUM630+1.p", "SWC/SWC422+1.p", "ITP/ITP012+1.p",
+        "CAT/CAT001-4.p", "GEO/GEO175+1.p", "RNG/RNG123+1.p", "SWV/SWV007-1.p",
+        "CSR/CSR052+1.p", "REL/REL010+2.p", "FLD/FLD017-1.p", "REL/REL010-2.p",
+        "SYN/SYN589-1.p", "SWV/SWV019-1.p", "SWV/SWV159+1.p", "SWV/SWV156+1.p",
+        "CSR/CSR050+1.p", "BOO/BOO014-2.p", "SWC/SWC258+1.p", "ANA/ANA043-2.p",
+        "SYN/SYN311-1.p", "SYN/SYN563-10.p", "FLD/FLD064-3.p", "REL/REL011-2.p",
+        "SWC/SWC227+1.p", "SWW/SWW099+1.p", "PRO/PRO016+4.p", "LCL/LCL084-10.p"
       ]
     }
   }

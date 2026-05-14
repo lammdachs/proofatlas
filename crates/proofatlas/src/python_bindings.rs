@@ -65,8 +65,10 @@ impl PyProofAtlas {
     ///     enable_trace: Enable MiniLM backend for trace embedding (default: false)
     ///     model_name: Model name for weight files (default: "{encoder}_{scorer}")
     ///     temperature: Softmax temperature for ML clause selection (default: 1.0)
+    ///     inference_mode: "async" (default) or "sequential" — sequential drains each
+    ///         embed request immediately after submit, simulating synchronous submit
     #[new]
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, model_name=None, temperature=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, model_name=None, temperature=None, inference_mode=None))]
     pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
@@ -83,6 +85,7 @@ impl PyProofAtlas {
         enable_trace: Option<bool>,
         model_name: Option<String>,
         temperature: Option<f32>,
+        inference_mode: Option<String>,
     ) -> PyResult<Self> {
         let timeout_dur = timeout
             .map(|s| Duration::from_secs_f64(s))
@@ -134,6 +137,15 @@ impl PyProofAtlas {
         }
         if let Some(temp) = temperature {
             builder = builder.temperature(temp);
+        }
+        if let Some(mode) = inference_mode {
+            match mode.as_str() {
+                "sequential" => { builder = builder.sequential_inference(true); }
+                "async" => { builder = builder.sequential_inference(false); }
+                other => return Err(PyValueError::new_err(format!(
+                    "inference_mode must be 'async' or 'sequential', got '{}'", other
+                ))),
+            }
         }
 
         let atlas = builder.build()

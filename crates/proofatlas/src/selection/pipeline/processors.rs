@@ -48,10 +48,12 @@ pub struct GcnScoreProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    /// If true, drain pending immediately after each submit (synchronous mode).
+    sequential: bool,
 }
 
 impl GcnScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             embed_cuda,
@@ -60,6 +62,7 @@ impl GcnScoreProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -82,7 +85,10 @@ impl DataProcessor for GcnScoreProcessor {
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
@@ -130,10 +136,11 @@ pub struct GcnEmbeddingProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    sequential: bool,
 }
 
 impl GcnEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             embed_cuda,
@@ -144,6 +151,7 @@ impl GcnEmbeddingProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -166,7 +174,10 @@ impl DataProcessor for GcnEmbeddingProcessor {
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
@@ -226,10 +237,11 @@ pub struct SentenceScoreProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    sequential: bool,
 }
 
 impl SentenceScoreProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             interner,
@@ -239,6 +251,7 @@ impl SentenceScoreProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -261,7 +274,10 @@ impl DataProcessor for SentenceScoreProcessor {
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
@@ -303,10 +319,11 @@ pub struct SentenceEmbeddingProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    sequential: bool,
 }
 
 impl SentenceEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             interner,
@@ -318,6 +335,7 @@ impl SentenceEmbeddingProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -340,7 +358,10 @@ impl DataProcessor for SentenceEmbeddingProcessor {
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
@@ -398,10 +419,11 @@ pub struct FeaturesScoreProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    sequential: bool,
 }
 
 impl FeaturesScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             embed_cuda,
@@ -410,6 +432,7 @@ impl FeaturesScoreProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -432,7 +455,10 @@ impl DataProcessor for FeaturesScoreProcessor {
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
     }
@@ -474,10 +500,11 @@ pub struct FeaturesEmbeddingProcessor {
     temperature: f32,
     rng_state: u64,
     request_id: u64,
+    sequential: bool,
 }
 
 impl FeaturesEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
         Self {
             backend,
             embed_cuda,
@@ -488,6 +515,7 @@ impl FeaturesEmbeddingProcessor {
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
+            sequential,
         }
     }
 
@@ -510,7 +538,10 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
-            Ok(handle) => self.pending.push((idx, handle)),
+            Ok(handle) => {
+                self.pending.push((idx, handle));
+                if self.sequential { self.drain_pending(); }
+            }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
