@@ -185,13 +185,162 @@ def fig_speedup_vs_ci(cells):
     return out
 
 
+def fig_iter_gantt():
+    """Schematic Gantt-style diagram of one given-clause iteration, sync vs async.
+
+    Shows where the prover thread waits and how that wait moves off-thread under
+    the async architecture. Schematic (not derived from a single run): aims to
+    illustrate the overlap mechanism, not particular wall-clock numbers.
+    """
+    import matplotlib.patches as patches
+
+    # Timings (ms). |Delta|=4 new clauses; per-embed backend cost t_e=3 ms;
+    # per-clause forward/backward simp f=b=1 ms; score_context t_s=4 ms;
+    # activate+generate+add = 1 ms; channel/submit overhead negligible (0.1 ms).
+    f, b, t_e, t_s, taga = 1.0, 1.0, 3.0, 4.0, 1.0
+    delta = 4
+
+    # ---- sync schedule ----
+    sync_prover = []
+    sync_backend = []
+    t = 0.0
+    for i in range(delta):
+        sync_prover.append(("forward", t, f, "#7A5C00")); t += f
+        sync_prover.append(("submit", t, 0.2, "#B58C18"))
+        sync_backend.append(("embed", t + 0.2, t_e, "#456878"))
+        sync_prover.append(("wait", t + 0.2, t_e, "#cccccc")); t += 0.2 + t_e
+        sync_prover.append(("backward", t, b, "#9E2D39")); t += b
+    sync_prover.append(("select", t, 0.2, "#B58C18"))
+    sync_backend.append(("score", t + 0.2, t_s, "#456878"))
+    sync_prover.append(("wait", t + 0.2, t_s, "#cccccc")); t += 0.2 + t_s
+    sync_prover.append(("act/gen/add", t, taga, "#4A6444")); t += taga
+    sync_total = t
+
+    # ---- async schedule ----
+    async_prover = []
+    async_backend = []
+    t = 0.0
+    submit_times = []  # backend can start whenever a request arrives
+    for i in range(delta):
+        async_prover.append(("forward", t, f, "#7A5C00")); t += f
+        async_prover.append(("submit", t, 0.2, "#B58C18"))
+        submit_times.append(t + 0.2)
+        t += 0.2
+        async_prover.append(("backward", t, b, "#9E2D39")); t += b
+    # Backend grabs the first request when free, batches subsequent ones that arrive
+    # during the forward pass; in our schematic the backend can keep up so we
+    # show ONE batched forward pass over the queued requests.
+    batch_start = submit_times[0]
+    batch_end = batch_start + t_e
+    # Drain wait: prover at this point is at time t; if batch_end > t, prover waits
+    async_backend.append(("embed batch", batch_start, t_e, "#456878"))
+    async_prover.append(("select", t, 0.2, "#B58C18"))
+    t += 0.2
+    if batch_end > t:
+        async_prover.append(("drain", t, batch_end - t, "#cccccc"))
+        t = batch_end
+    async_backend.append(("score", t, t_s, "#456878"))
+    async_prover.append(("wait", t, t_s, "#cccccc")); t += t_s
+    async_prover.append(("act/gen/add", t, taga, "#4A6444")); t += taga
+    async_total = t
+
+    # ---- draw ----
+    fig, axes = plt.subplots(4, 1, figsize=(10, 4.6), sharex=True,
+                             gridspec_kw={"hspace": 0.15})
+    xmax = max(sync_total, async_total) + 0.5
+
+    def draw_lane(ax, entries, title):
+        for label, start, dur, color in entries:
+            rect = patches.Rectangle((start, 0.1), dur, 0.8, facecolor=color,
+                                     edgecolor="black", linewidth=0.4)
+            ax.add_patch(rect)
+            if dur >= 0.8:
+                ax.text(start + dur / 2, 0.5, label, ha="center", va="center",
+                        fontsize=7, color="white" if color in ("#9E2D39", "#456878", "#7A5C00", "#4A6444") else "black")
+        ax.set_xlim(0, xmax)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0.5])
+        ax.set_yticklabels([title], fontsize=9)
+        ax.set_xticks([])
+        for s in ("top", "right", "left"):
+            ax.spines[s].set_visible(False)
+        ax.spines["bottom"].set_visible(True)
+
+    draw_lane(axes[0], sync_prover,    "sync, prover")
+    draw_lane(axes[1], sync_backend,   "sync, backend")
+    draw_lane(axes[2], async_prover,   "async, prover")
+    draw_lane(axes[3], async_backend,  "async, backend")
+
+    axes[-1].set_xticks(list(range(0, int(xmax) + 1, 2)))
+    axes[-1].set_xlabel("time (ms, schematic)")
+
+    # Vertical reference lines at end of each iteration
+    for ax in axes:
+        ax.axvline(sync_total, color="black", linestyle=":", linewidth=0.5, alpha=0.5)
+        ax.axvline(async_total, color="black", linestyle=":", linewidth=0.5, alpha=0.5)
+
+    axes[0].set_title(
+        r"One given-clause iteration with $|\Delta|=4$: how the embed wait moves off the prover thread under async",
+        fontsize=9.5, pad=4,
+    )
+    fig.tight_layout()
+    out = OUT / "iteration_gantt.pdf"
+    fig.savefig(out)
+    plt.close(fig)
+    return out
+
+
+def fig_worker_scaling():
+    """Aggregate iter/s vs number of prover workers; one curve per (config, mode)."""
+    src = ROOT / ".data" / "throughput_workers"
+    if not src.exists():
+        return None
+    rows = [json.loads(f.read_text()) for f in src.glob("*.json")]
+    if not rows:
+        return None
+    fig, (ax_agg, ax_pw) = plt.subplots(1, 2, figsize=(11, 4.3))
+    for cfg in ["gcn_struct_transformer_xcl_r6", "gcn_struct_mlp_xcl_r6"]:
+        for mode in ["async", "sequential"]:
+            sub = sorted([r for r in rows if r["config"] == cfg and r["mode"] == mode],
+                         key=lambda r: r["n_workers"])
+            if not sub:
+                continue
+            xs = [r["n_workers"] for r in sub]
+            ys_agg = [r["aggregate_iter_per_s"] for r in sub]
+            ys_pw  = [r["per_worker_iter_per_s"] for r in sub]
+            ax_agg.plot(xs, ys_agg, marker="o", label=f"{SHORT[cfg]} ({mode})",
+                        color=COLORS[cfg][mode],
+                        linestyle="-" if mode == "async" else "--")
+            ax_pw.plot(xs, ys_pw, marker="o", label=f"{SHORT[cfg]} ({mode})",
+                       color=COLORS[cfg][mode],
+                       linestyle="-" if mode == "async" else "--")
+    ax_agg.set_xlabel("Prover workers")
+    ax_agg.set_ylabel("Aggregate iter/s")
+    ax_agg.set_title("Aggregate throughput (8-problem subset)")
+    ax_agg.legend(fontsize=8, loc="best")
+    ax_agg.grid(True, alpha=0.3)
+    ax_agg.set_xticks([1, 2, 4, 8])
+    ax_pw.set_xlabel("Prover workers")
+    ax_pw.set_ylabel("Per-worker iter/s")
+    ax_pw.set_title("Per-worker throughput")
+    ax_pw.legend(fontsize=8, loc="best")
+    ax_pw.grid(True, alpha=0.3)
+    ax_pw.set_xticks([1, 2, 4, 8])
+    fig.tight_layout()
+    out = OUT / "worker_scaling.pdf"
+    fig.savefig(out)
+    plt.close(fig)
+    return out
+
+
 def main():
     cells = load_cells()
     print(f"Loaded {sum(len(v) for v in cells.values())} run records across {len(cells)} (config, mode) cells")
     f1 = fig_latency_cdf(cells)
-    f2 = fig_stage_breakdown(cells)
+    f2 = fig_iter_gantt()
     f3 = fig_speedup_vs_ci(cells)
-    for f in (f1, f2, f3):
+    f4 = fig_worker_scaling()
+    for f in (f1, f2, f3, f4):
         if f: print(f"wrote {f.relative_to(ROOT)}")
 
 
