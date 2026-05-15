@@ -38,8 +38,14 @@ enum SinkKind {
         scorer: String,
         /// Whether CUDA is available (used for per-model device decisions in processors).
         use_cuda: bool,
-        /// If true, drain pending embeds immediately after each submit (synchronous mode).
-        sequential: bool,
+        /// Inference scheduling mode.
+        mode: crate::selection::pipeline::processors::InferenceMode,
+        /// Whether to cache clause embeddings across iterations (default true).
+        /// Only meaningful for the GCN+attention/transformer path.
+        cache_embeddings: bool,
+        /// Minimum number of clauses to buffer before firing a backend embed
+        /// burst in async mode (default 1 = current eager behavior).
+        embed_batch_size: usize,
     },
 }
 
@@ -73,7 +79,9 @@ impl ProofAtlas {
             temperature: 1.0,
             age_weight_ratio: 0.5,
             enable_trace: false,
-            sequential_inference: false,
+            inference_mode: crate::selection::pipeline::processors::InferenceMode::Async,
+            cache_embeddings: true,
+            embed_batch_size: 1,
         }
     }
 
@@ -156,7 +164,7 @@ impl ProofAtlas {
                 Ok(Box::new(AgeWeightSink::new(*ratio)))
             }
             #[cfg(feature = "ml")]
-            SinkKind::Pipeline { handle, encoder, scorer, use_cuda, sequential } => {
+            SinkKind::Pipeline { handle, encoder, scorer, use_cuda, mode, cache_embeddings, embed_batch_size } => {
                 use crate::selection::pipeline::processors;
                 use std::sync::Arc;
 
@@ -164,7 +172,9 @@ impl ProofAtlas {
                 let temp = self.temperature;
                 let h = handle.clone();
                 let cuda = *use_cuda;
-                let seq = *sequential;
+                let m = *mode;
+                let cache = *cache_embeddings;
+                let batch_n = *embed_batch_size;
 
                 // Device placement per encoder type:
                 // - GCN/features: lightweight → encoder on CPU, scorer follows use_cuda
@@ -179,27 +189,27 @@ impl ProofAtlas {
                 let processor: Box<dyn crate::selection::DataProcessor> = match (encoder.as_str(), scorer.as_str()) {
                     // GCN + MLP: cache scores
                     ("gcn" | "gcn_struct", "mlp") => {
-                        Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda, seq))
+                        Box::new(processors::GcnScoreProcessor::new(h, temp, embed_cuda, m))
                     }
-                    // GCN + attention/transformer: cache embeddings
+                    // GCN + attention/transformer: cache embeddings (ablatable)
                     ("gcn" | "gcn_struct", "attention" | "transformer") => {
-                        Box::new(processors::GcnEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda, seq))
+                        Box::new(processors::GcnEmbeddingProcessor::new_full(h, temp, embed_cuda, score_cuda, m, cache, batch_n))
                     }
                     // Sentence + MLP: cache scores
                     ("sentence", "mlp") => {
-                        Box::new(processors::SentenceScoreProcessor::new(h, int, temp, embed_cuda, seq))
+                        Box::new(processors::SentenceScoreProcessor::new(h, int, temp, embed_cuda, m))
                     }
                     // Sentence + attention/transformer: cache embeddings
                     ("sentence", "attention" | "transformer") => {
-                        Box::new(processors::SentenceEmbeddingProcessor::new(h, int, temp, embed_cuda, score_cuda, seq))
+                        Box::new(processors::SentenceEmbeddingProcessor::new(h, int, temp, embed_cuda, score_cuda, m))
                     }
                     // Features + MLP: cache scores
                     ("features", "mlp") => {
-                        Box::new(processors::FeaturesScoreProcessor::new(h, temp, embed_cuda, seq))
+                        Box::new(processors::FeaturesScoreProcessor::new(h, temp, embed_cuda, m))
                     }
                     // Features + attention/transformer: cache embeddings
                     ("features", "attention" | "transformer") => {
-                        Box::new(processors::FeaturesEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda, seq))
+                        Box::new(processors::FeaturesEmbeddingProcessor::new(h, temp, embed_cuda, score_cuda, m))
                     }
                     _ => {
                         return Err(format!(
@@ -230,7 +240,9 @@ pub struct ProofAtlasBuilder {
     temperature: f32,
     age_weight_ratio: f64,
     enable_trace: bool,
-    sequential_inference: bool,
+    inference_mode: crate::selection::pipeline::processors::InferenceMode,
+    cache_embeddings: bool,
+    embed_batch_size: usize,
 }
 
 impl ProofAtlasBuilder {
@@ -294,10 +306,26 @@ impl ProofAtlasBuilder {
         self
     }
 
-    /// Inference mode: when true, on_transfer drains the pending queue immediately
-    /// after each submit (simulates synchronous submit). Default false (async).
-    pub fn sequential_inference(mut self, sequential: bool) -> Self {
-        self.sequential_inference = sequential;
+    /// Inference scheduling mode. Default `Async`.
+    pub fn inference_mode(mut self, mode: crate::selection::pipeline::processors::InferenceMode) -> Self {
+        self.inference_mode = mode;
+        self
+    }
+
+    /// Whether to cache clause embeddings across iterations (default true).
+    /// When false, re-embeds all U and P clauses at every select() — an
+    /// ablation to measure the cost of computing fresh embeddings each step.
+    /// Only meaningful for GCN + attention/transformer configurations.
+    pub fn cache_embeddings(mut self, cache: bool) -> Self {
+        self.cache_embeddings = cache;
+        self
+    }
+
+    /// In async mode, buffer this many on_transfer calls before firing them
+    /// at the backend as a tight burst. Default 1 = fire each submit
+    /// immediately. Leftover < batch_size is flushed on drain.
+    pub fn embed_batch_size(mut self, n: usize) -> Self {
+        self.embed_batch_size = n.max(1);
         self
     }
 
@@ -375,7 +403,9 @@ impl ProofAtlasBuilder {
                         encoder: enc.to_string(),
                         scorer: scorer_name.to_string(),
                         use_cuda: self.use_cuda,
-                        sequential: self.sequential_inference,
+                        mode: self.inference_mode,
+                        cache_embeddings: self.cache_embeddings,
+                        embed_batch_size: self.embed_batch_size,
                     },
                     temperature: self.temperature,
                     _backend: Some(backend),

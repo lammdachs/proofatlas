@@ -49,6 +49,20 @@
       ]
     },
 
+    "throughput_sat16": {
+      "description": "16 non-solvable (iter-cap-fail under all three configs) problems for backend-saturation experiments across 8 TPTP domains.",
+      "problems": [
+        "GEO/GEO082+1.p", "GEO/GEO492+1.p",
+        "GRP/GRP317-1.p", "GRP/GRP366-1.p",
+        "LCL/LCL337-3.p", "LCL/LCL670+1.010.p",
+        "NUM/NUM255-1.p", "NUM/NUM543+1.p",
+        "SET/SET017-4.p", "SET/SET175-6.p",
+        "SEU/SEU218+3.p", "SEU/SEU425+1.p",
+        "SWC/SWC063-1.p", "SWC/SWC310-1.p",
+        "SYN/SYN208-1.p", "SYN/SYN683-1.p"
+      ]
+    },
+
     "throughput32": {
       "description": "32 problems for async-inference throughput study; 4 per outcome group across (transformer_xcl_r6, mlp_xcl_r6, age_weight). Superset of throughput16; failures hit iter limit (256), not 60s wall.",
       "problems": [

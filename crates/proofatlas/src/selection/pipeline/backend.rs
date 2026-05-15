@@ -275,7 +275,11 @@ impl Backend {
                 .or_default()
                 .push_back(first);
 
-            // Drain any additional queued requests (non-blocking)
+            // Drain any additional queued requests (non-blocking).
+            // The processor is expected to fire its embed bursts atomically
+            // (see `embed_batch_size` on the embedding processor); when that
+            // happens, all of those submits are sitting in the channel by the
+            // time the backend wakes, so try_recv suffices.
             while let Ok(req) = rx.try_recv() {
                 pending
                     .entry(req.model_id.clone())

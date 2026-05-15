@@ -43,6 +43,20 @@ pub trait ClauseEmbedder: Send {
         unimplemented!("embed_features not supported by this embedder")
     }
 
+    /// Compute embeddings from pre-built per-clause graph inputs.
+    ///
+    /// Used by the pipeline architecture when the data processing thread
+    /// builds the per-clause graph + clause features eagerly via
+    /// `GraphBuilder::build_one`, so this method only has to concatenate
+    /// the per-clause graphs into a batch tensor and run the forward
+    /// pass. Default: unimplemented (only GCN embedders need this).
+    fn embed_batch_prebuilt(
+        &self,
+        _inputs: &[crate::selection::ml::graph::PrebuiltGcnInput],
+    ) -> Vec<Vec<f32>> {
+        unimplemented!("embed_batch_prebuilt not supported by this embedder")
+    }
+
     /// Provide the symbol interner for clause serialization.
     /// Embedders that need symbol names (e.g., sentence transformers) should
     /// store this and use it during `embed_batch`.

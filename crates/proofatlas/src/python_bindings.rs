@@ -68,7 +68,7 @@ impl PyProofAtlas {
     ///     inference_mode: "async" (default) or "sequential" — sequential drains each
     ///         embed request immediately after submit, simulating synchronous submit
     #[new]
-    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, model_name=None, temperature=None, inference_mode=None))]
+    #[pyo3(signature = (timeout=None, max_iterations=None, literal_selection=None, age_weight_ratio=None, encoder=None, scorer=None, weights_path=None, memory_limit=None, use_cuda=None, enable_profiling=None, include_dir=None, max_clause_size=None, enable_trace=None, model_name=None, temperature=None, inference_mode=None, cache_embeddings=None, embed_batch_size=None))]
     pub fn new(
         timeout: Option<f64>,
         max_iterations: Option<usize>,
@@ -86,6 +86,8 @@ impl PyProofAtlas {
         model_name: Option<String>,
         temperature: Option<f32>,
         inference_mode: Option<String>,
+        cache_embeddings: Option<bool>,
+        embed_batch_size: Option<usize>,
     ) -> PyResult<Self> {
         let timeout_dur = timeout
             .map(|s| Duration::from_secs_f64(s))
@@ -139,13 +141,22 @@ impl PyProofAtlas {
             builder = builder.temperature(temp);
         }
         if let Some(mode) = inference_mode {
-            match mode.as_str() {
-                "sequential" => { builder = builder.sequential_inference(true); }
-                "async" => { builder = builder.sequential_inference(false); }
+            use crate::selection::pipeline::processors::InferenceMode as IM;
+            let m = match mode.as_str() {
+                "async" => IM::Async,
+                "sequential" => IM::Sequential,
+                "deferred" => IM::Deferred,
                 other => return Err(PyValueError::new_err(format!(
-                    "inference_mode must be 'async' or 'sequential', got '{}'", other
+                    "inference_mode must be 'async', 'sequential', or 'deferred', got '{}'", other
                 ))),
-            }
+            };
+            builder = builder.inference_mode(m);
+        }
+        if let Some(cache) = cache_embeddings {
+            builder = builder.cache_embeddings(cache);
+        }
+        if let Some(n) = embed_batch_size {
+            builder = builder.embed_batch_size(n);
         }
 
         let atlas = builder.build()

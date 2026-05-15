@@ -410,6 +410,55 @@ impl GcnEncoder {
 }
 
 #[cfg(feature = "ml")]
+impl GcnEncoder {
+    /// Build batch tensors from pre-built per-clause graphs. Skips
+    /// `GraphBuilder::build_from_clauses` (already done eagerly on the
+    /// processor thread) and only concatenates + tensorizes.
+    fn build_batch_tensors_from_prebuilt(
+        &self,
+        inputs: &[crate::selection::ml::graph::PrebuiltGcnInput],
+    ) -> (tch::Tensor, tch::Tensor, tch::Tensor, tch::Tensor) {
+        let num_clauses = inputs.len();
+        let graph_refs: Vec<&crate::selection::ml::graph::BatchClauseGraph> =
+            inputs.iter().map(|i| &i.graph).collect();
+        let graph = GraphBuilder::concat_prebuilt(&graph_refs);
+        let num_nodes = graph.num_nodes;
+
+        if num_nodes == 0 {
+            let node_features = tch::Tensor::zeros([1, 3], (tch::Kind::Float, self.device));
+            let empty_idx = tch::Tensor::zeros([2, 0], (tch::Kind::Int64, self.device));
+            let empty_vals = tch::Tensor::zeros([0], (tch::Kind::Float, self.device));
+            let adj = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals, [1, 1], (tch::Kind::Float, self.device), true,
+            );
+            let pool_matrix = tch::Tensor::sparse_coo_tensor_indices_size(
+                &empty_idx, &empty_vals,
+                [num_clauses as i64, 1], (tch::Kind::Float, self.device), true,
+            );
+            let clause_features =
+                tch::Tensor::zeros([num_clauses as i64, 9], (tch::Kind::Float, self.device));
+            return (node_features, adj, pool_matrix, clause_features);
+        }
+
+        let node_feat_flat: Vec<f32> = graph.node_features.iter().flat_map(|f| *f).collect();
+        let node_features = tch::Tensor::from_slice(&node_feat_flat)
+            .view([num_nodes as i64, 3])
+            .to_device(self.device);
+        let adj = self.build_adjacency(&graph.edge_indices, num_nodes);
+        let pool_matrix =
+            self.build_pool_matrix(&graph.clause_boundaries, num_clauses, num_nodes);
+        let mut clause_feat_flat = Vec::with_capacity(num_clauses * 9);
+        for input in inputs {
+            clause_feat_flat.extend_from_slice(&input.clause_features);
+        }
+        let clause_features = tch::Tensor::from_slice(&clause_feat_flat)
+            .view([num_clauses as i64, 9])
+            .to_device(self.device);
+        (node_features, adj, pool_matrix, clause_features)
+    }
+}
+
+#[cfg(feature = "ml")]
 impl ClauseEmbedder for GcnEncoder {
     fn embed_batch(&self, clauses: &[&Clause]) -> Vec<Vec<f32>> {
         if clauses.is_empty() {
@@ -431,6 +480,30 @@ impl ClauseEmbedder for GcnEncoder {
         let flat: Vec<f32> = Vec::<f32>::try_from(&embeddings_cpu.view([-1]))
             .expect("Failed to convert embeddings");
 
+        flat.chunks(self.hidden_dim)
+            .take(num_clauses)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    fn embed_batch_prebuilt(
+        &self,
+        inputs: &[crate::selection::ml::graph::PrebuiltGcnInput],
+    ) -> Vec<Vec<f32>> {
+        if inputs.is_empty() {
+            return vec![];
+        }
+        let (node_features, adj, pool_matrix, clause_features) =
+            self.build_batch_tensors_from_prebuilt(inputs);
+        let embeddings = tch::no_grad(|| {
+            self.model
+                .forward_ts(&[node_features, adj, pool_matrix, clause_features])
+                .expect("GCN encoder forward failed")
+        });
+        let embeddings_cpu = embeddings.to_device(tch::Device::Cpu);
+        let num_clauses = inputs.len();
+        let flat: Vec<f32> = Vec::<f32>::try_from(&embeddings_cpu.view([-1]))
+            .expect("Failed to convert embeddings");
         flat.chunks(self.hidden_dim)
             .take(num_clauses)
             .map(|chunk| chunk.to_vec())

@@ -310,8 +310,17 @@ fn dispatch_embed(
 
     let is_string = requests.first().map(|(_, d)| d.is::<String>()).unwrap_or(false);
     let is_features = requests.first().map(|(_, d)| d.is::<Vec<f32>>()).unwrap_or(false);
+    let is_prebuilt = requests.first()
+        .map(|(_, d)| d.is::<crate::selection::ml::graph::PrebuiltGcnInput>())
+        .unwrap_or(false);
 
-    if is_string {
+    if is_prebuilt {
+        let inputs: Vec<crate::selection::ml::graph::PrebuiltGcnInput> = requests
+            .into_iter()
+            .map(|(_, data)| *data.downcast::<crate::selection::ml::graph::PrebuiltGcnInput>().unwrap())
+            .collect();
+        embedder.embed_batch_prebuilt(&inputs)
+    } else if is_string {
         let texts: Vec<String> = requests
             .into_iter()
             .map(|(_, data)| *data.downcast::<String>().unwrap())
@@ -480,7 +489,7 @@ pub fn create_ml_pipeline(
     let backend = self::backend::Backend::from_models(vec![Box::new(model)]);
     let handle = backend.handle();
     // Backend is dropped here; worker thread detached but alive via handle.
-    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature, false, false));
+    let processor = Box::new(processors::GcnScoreProcessor::new(handle, temperature, false, processors::InferenceMode::Async));
     create_pipeline(processor, "ml_pipeline".to_string())
 }
 
@@ -627,7 +636,7 @@ mod tests {
         let backend = super::backend::Backend::from_models(vec![Box::new(model)]);
         let handle = backend.handle();
 
-        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0, false, false));
+        let processor = Box::new(processors::GcnScoreProcessor::new(handle, 1.0, false, processors::InferenceMode::Async));
         let mut sink = create_pipeline(processor, "test".to_string());
 
         sink.on_transfer(5, &make_clause(2));

@@ -188,31 +188,33 @@ def fig_speedup_vs_ci(cells):
 def fig_iter_gantt():
     """Schematic Gantt-style diagram of one given-clause iteration, sync vs async.
 
-    Shows where the prover thread waits and how that wait moves off-thread under
-    the async architecture. Schematic (not derived from a single run): aims to
-    illustrate the overlap mechanism, not particular wall-clock numbers.
+    Compares a thoughtful synchronous design --- defer all embed requests until
+    the prover requests a selection, then fire them as one batch --- against
+    the asynchronous design. Both batch at the backend; the only difference is
+    whether the embed forward pass overlaps with the prover's between-call work
+    or runs strictly after it.
     """
     import matplotlib.patches as patches
 
-    # Timings (ms). |Delta|=4 new clauses; per-embed backend cost t_e=3 ms;
-    # per-clause forward/backward simp f=b=1 ms; score_context t_s=4 ms;
-    # activate+generate+add = 1 ms; channel/submit overhead negligible (0.1 ms).
-    f, b, t_e, t_s, taga = 1.0, 1.0, 3.0, 4.0, 1.0
+    # Timings (ms, schematic). |Delta|=4 new clauses; batched embed forward
+    # pass for the |Delta| clauses costs t_eb=5 ms; per-clause forward/backward
+    # simp f=b=1 ms; score_context t_s=4 ms; activate+generate+add = 1 ms.
+    f, b, t_eb, t_s, taga = 1.0, 1.0, 5.0, 4.0, 1.0
     delta = 4
 
-    # ---- sync schedule ----
+    # ---- sync (deferred-batched) schedule ----
     sync_prover = []
     sync_backend = []
     t = 0.0
     for i in range(delta):
         sync_prover.append(("forward", t, f, "#7A5C00")); t += f
-        sync_prover.append(("submit", t, 0.2, "#B58C18"))
-        sync_backend.append(("embed", t + 0.2, t_e, "#456878"))
-        sync_prover.append(("wait", t + 0.2, t_e, "#cccccc")); t += 0.2 + t_e
         sync_prover.append(("backward", t, b, "#9E2D39")); t += b
+    # At select time, fire batch of all queued embeds, then wait
     sync_prover.append(("select", t, 0.2, "#B58C18"))
-    sync_backend.append(("score", t + 0.2, t_s, "#456878"))
-    sync_prover.append(("wait", t + 0.2, t_s, "#cccccc")); t += 0.2 + t_s
+    sync_backend.append(("embed batch", t + 0.2, t_eb, "#456878"))
+    sync_prover.append(("wait embed", t + 0.2, t_eb, "#cccccc")); t += 0.2 + t_eb
+    sync_backend.append(("score", t, t_s, "#456878"))
+    sync_prover.append(("wait score", t, t_s, "#cccccc")); t += t_s
     sync_prover.append(("act/gen/add", t, taga, "#4A6444")); t += taga
     sync_total = t
 
@@ -220,27 +222,24 @@ def fig_iter_gantt():
     async_prover = []
     async_backend = []
     t = 0.0
-    submit_times = []  # backend can start whenever a request arrives
+    submit_times = []
     for i in range(delta):
         async_prover.append(("forward", t, f, "#7A5C00")); t += f
         async_prover.append(("submit", t, 0.2, "#B58C18"))
         submit_times.append(t + 0.2)
         t += 0.2
         async_prover.append(("backward", t, b, "#9E2D39")); t += b
-    # Backend grabs the first request when free, batches subsequent ones that arrive
-    # during the forward pass; in our schematic the backend can keep up so we
-    # show ONE batched forward pass over the queued requests.
+    # Backend wakes up at the first submit, batches all that have arrived
     batch_start = submit_times[0]
-    batch_end = batch_start + t_e
-    # Drain wait: prover at this point is at time t; if batch_end > t, prover waits
-    async_backend.append(("embed batch", batch_start, t_e, "#456878"))
+    batch_end = batch_start + t_eb
+    async_backend.append(("embed batch", batch_start, t_eb, "#456878"))
     async_prover.append(("select", t, 0.2, "#B58C18"))
     t += 0.2
     if batch_end > t:
         async_prover.append(("drain", t, batch_end - t, "#cccccc"))
         t = batch_end
     async_backend.append(("score", t, t_s, "#456878"))
-    async_prover.append(("wait", t, t_s, "#cccccc")); t += t_s
+    async_prover.append(("wait score", t, t_s, "#cccccc")); t += t_s
     async_prover.append(("act/gen/add", t, taga, "#4A6444")); t += taga
     async_total = t
 
@@ -274,13 +273,12 @@ def fig_iter_gantt():
     axes[-1].set_xticks(list(range(0, int(xmax) + 1, 2)))
     axes[-1].set_xlabel("time (ms, schematic)")
 
-    # Vertical reference lines at end of each iteration
     for ax in axes:
         ax.axvline(sync_total, color="black", linestyle=":", linewidth=0.5, alpha=0.5)
         ax.axvline(async_total, color="black", linestyle=":", linewidth=0.5, alpha=0.5)
 
     axes[0].set_title(
-        r"One given-clause iteration with $|\Delta|=4$: how the embed wait moves off the prover thread under async",
+        r"One given-clause iteration with $|\Delta|=4$: deferred-batched sync vs.\ async",
         fontsize=9.5, pad=4,
     )
     fig.tight_layout()

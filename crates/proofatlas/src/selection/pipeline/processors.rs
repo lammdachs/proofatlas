@@ -28,6 +28,24 @@ use crate::selection::ml::features::extract_clause_features;
 use super::backend::BackendHandle;
 use super::{softmax_sample, softmax_sample_vec, DataProcessor};
 
+/// How embed requests are scheduled relative to the prover's inner loop.
+///
+/// * `Async`: `on_transfer` calls `submit_async` immediately; the backend can
+///   batch and process while the prover continues with backward simplification.
+///   Drain happens at the next score-read point (typically `select`).
+/// * `Sequential`: `on_transfer` calls `submit_async` then drains inline ---
+///   each new clause incurs its own backend round trip. (Strawman sync.)
+/// * `Deferred`: `on_transfer` only buffers the input; at the start of
+///   `select`, all buffered inputs are submitted in rapid succession so the
+///   backend batches them into a single forward pass, then drained.
+///   (Thoughtful sync: captures the batching benefit but loses the overlap.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InferenceMode {
+    Async,
+    Sequential,
+    Deferred,
+}
+
 // =============================================================================
 // GcnScoreProcessor — gcn_mlp
 // =============================================================================
@@ -45,24 +63,27 @@ pub struct GcnScoreProcessor {
     /// Pending embed+score requests: (clause_idx, request_handle).
     /// Drained before any read of `scores` (select, on_simplify).
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    /// Buffered inputs for `Deferred` mode: (clause_idx, prepared input).
+    /// Fired as one rapid batch of submit_async calls at start of `select`.
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    /// If true, drain pending immediately after each submit (synchronous mode).
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl GcnScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, mode: InferenceMode) -> Self {
         Self {
             backend,
             embed_cuda,
             scores: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
         }
     }
 
@@ -76,18 +97,36 @@ impl GcnScoreProcessor {
             self.scores.insert(idx, score);
         }
     }
+
+    /// In `Deferred` mode, fire all buffered submits at once so the backend
+    /// can batch them.
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.scores.insert(idx, 0.0); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for GcnScoreProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
-        self.request_id += 1;
         let data: Box<dyn std::any::Any + Send> = Box::new(clause);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        self.request_id += 1;
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
@@ -98,12 +137,15 @@ impl DataProcessor for GcnScoreProcessor {
     }
 
     fn on_simplify(&mut self, idx: usize) {
-        // Simplified clauses may have a pending embed; drain to be safe.
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
         self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.fire_deferred();
         self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
@@ -128,30 +170,77 @@ pub struct GcnEmbeddingProcessor {
     backend: BackendHandle,
     embed_cuda: bool,
     score_cuda: bool,
+    /// If true (default), embeddings are computed once on transfer and reused
+    /// across many select() calls. If false, embeddings are re-computed
+    /// for all current U and P clauses at every select() — an ablation that
+    /// stresses the backend much harder.
+    cache_embeddings: bool,
+    /// Cached embeddings (only used when cache_embeddings=true).
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
+    /// Clauses tracked for uncached mode (only used when cache_embeddings=false).
+    u_clauses: IndexMap<usize, Arc<Clause>>,
+    p_clauses: IndexMap<usize, Arc<Clause>>,
     /// Pending embed requests: (clause_idx, request_handle).
     /// Drained before any read of u_embeddings (select, on_activate, on_simplify).
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    /// Buffered inputs for `Deferred` mode.
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
+    /// Async mode: buffer of submits not yet sent to the backend.
+    /// When the buffer fills to `embed_batch_size`, all are fired in a tight
+    /// burst (so the backend's try_recv loop catches them as one fat batch).
+    to_submit: Vec<(usize, Box<dyn std::any::Any + Send>)>,
+    /// Minimum clauses to accumulate before firing the burst in async mode.
+    /// `1` means: fire immediately on each on_transfer (the original behavior).
+    /// Any leftover < batch_size is flushed on drain (e.g. at select).
+    embed_batch_size: usize,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl GcnEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, mode: InferenceMode) -> Self {
+        Self::new_full(backend, temperature, embed_cuda, score_cuda, mode, true, 1)
+    }
+
+    pub fn new_with_cache(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, mode: InferenceMode, cache_embeddings: bool) -> Self {
+        Self::new_full(backend, temperature, embed_cuda, score_cuda, mode, cache_embeddings, 1)
+    }
+
+    pub fn new_full(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, mode: InferenceMode, cache_embeddings: bool, embed_batch_size: usize) -> Self {
         Self {
             backend,
             embed_cuda,
             score_cuda,
+            cache_embeddings,
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
+            u_clauses: IndexMap::new(),
+            p_clauses: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
+            to_submit: Vec::new(),
+            embed_batch_size: embed_batch_size.max(1),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
+        }
+    }
+
+    /// Fire all currently-buffered submits at the backend in one tight burst.
+    /// Caller drains the resulting handles via `drain_pending` when scores are needed.
+    fn fire_buffer(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.to_submit).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.u_embeddings.insert(idx, vec![]); }
+            }
         }
     }
 
@@ -165,24 +254,69 @@ impl GcnEmbeddingProcessor {
             self.u_embeddings.insert(idx, emb);
         }
     }
+
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.u_embeddings.insert(idx, vec![]); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for GcnEmbeddingProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
+        if !self.cache_embeddings {
+            // Uncached: just track the clause; embedding happens at select.
+            self.u_clauses.insert(idx, clause);
+            return;
+        }
+        // Eagerly build the per-clause graph + features on this thread
+        // (the processor worker thread, in parallel with the prover's
+        // continued simp loop). The backend only has to concatenate and
+        // run the forward pass.
+        let prebuilt = crate::selection::ml::graph::PrebuiltGcnInput {
+            graph: crate::selection::ml::graph::GraphBuilder::build_one(&clause),
+            clause_features: crate::selection::ml::features::extract_clause_features(&clause),
+        };
+        let data: Box<dyn std::any::Any + Send> = Box::new(prebuilt);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        if self.mode == InferenceMode::Async && self.embed_batch_size > 1 {
+            // Buffer until we hit the threshold, then fire the burst.
+            self.to_submit.push((idx, data));
+            if self.to_submit.len() >= self.embed_batch_size {
+                self.fire_buffer();
+            }
+            return;
+        }
         self.request_id += 1;
-        let data: Box<dyn std::any::Any + Send> = Box::new(clause);
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        if !self.cache_embeddings {
+            if let Some(c) = self.u_clauses.shift_remove(&idx) {
+                self.p_clauses.insert(idx, c);
+            }
+            return;
+        }
+        self.fire_deferred();
+        self.fire_buffer();
         self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
@@ -190,15 +324,83 @@ impl DataProcessor for GcnEmbeddingProcessor {
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        if !self.cache_embeddings {
+            self.u_clauses.shift_remove(&idx);
+            self.p_clauses.shift_remove(&idx);
+            return;
+        }
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
+        // Drop buffered submit if the clause is being removed before firing.
+        self.to_submit.retain(|(i, _)| *i != idx);
         self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
-        self.drain_pending();
-        if self.u_embeddings.is_empty() {
-            return None;
+        if !self.cache_embeddings {
+            // Uncached: re-embed all current U and P clauses at every select.
+            self.u_embeddings.clear();
+            self.p_embeddings.clear();
+            // Fire all submits (mode controls whether each waits or batches at backend).
+            let mut pending_u: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)> = Vec::new();
+            let mut pending_p: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)> = Vec::new();
+            let u_jobs: Vec<(usize, Arc<Clause>)> = self.u_clauses.iter().map(|(i,c)| (*i, c.clone())).collect();
+            let p_jobs: Vec<(usize, Arc<Clause>)> = self.p_clauses.iter().map(|(i,c)| (*i, c.clone())).collect();
+            for (idx, clause) in u_jobs {
+                self.request_id += 1;
+                let data: Box<dyn std::any::Any + Send> = Box::new(clause);
+                match self.backend.submit_async(self.request_id, "embed".to_string(), data, self.embed_cuda) {
+                    Ok(handle) => {
+                        pending_u.push((idx, handle));
+                        if self.mode == InferenceMode::Sequential {
+                            if let Some((idx, handle)) = pending_u.pop() {
+                                let emb = handle.recv().map(|r| *r.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]))).unwrap_or_default();
+                                self.u_embeddings.insert(idx, emb);
+                            }
+                        }
+                    }
+                    Err(_) => { self.u_embeddings.insert(idx, vec![]); }
+                }
+            }
+            for (idx, clause) in p_jobs {
+                self.request_id += 1;
+                let data: Box<dyn std::any::Any + Send> = Box::new(clause);
+                match self.backend.submit_async(self.request_id, "embed".to_string(), data, self.embed_cuda) {
+                    Ok(handle) => {
+                        pending_p.push((idx, handle));
+                        if self.mode == InferenceMode::Sequential {
+                            if let Some((idx, handle)) = pending_p.pop() {
+                                let emb = handle.recv().map(|r| *r.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]))).unwrap_or_default();
+                                self.p_embeddings.insert(idx, emb);
+                            }
+                        }
+                    }
+                    Err(_) => { self.p_embeddings.insert(idx, vec![]); }
+                }
+            }
+            // Drain remaining (async/deferred — fat batches at backend)
+            for (idx, handle) in pending_u.drain(..) {
+                let emb = handle.recv().map(|r| *r.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]))).unwrap_or_default();
+                self.u_embeddings.insert(idx, emb);
+            }
+            for (idx, handle) in pending_p.drain(..) {
+                let emb = handle.recv().map(|r| *r.data.downcast::<Vec<f32>>().unwrap_or(Box::new(vec![]))).unwrap_or_default();
+                self.p_embeddings.insert(idx, emb);
+            }
+            if self.u_embeddings.is_empty() {
+                return None;
+            }
+            // Fall through to existing score_context + sample (uses self.u_embeddings/p_embeddings).
+        } else {
+            self.fire_deferred();
+            self.fire_buffer();
+            self.drain_pending();
+            if self.u_embeddings.is_empty() {
+                return None;
+            }
         }
 
         // Collect U and P embeddings for context scoring
@@ -234,24 +436,26 @@ pub struct SentenceScoreProcessor {
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl SentenceScoreProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, mode: InferenceMode) -> Self {
         Self {
             backend,
             interner,
             embed_cuda,
             scores: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
         }
     }
 
@@ -264,19 +468,35 @@ impl SentenceScoreProcessor {
             self.scores.insert(idx, score);
         }
     }
+
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.scores.insert(idx, 0.0); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for SentenceScoreProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
-        self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        self.request_id += 1;
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
@@ -285,11 +505,15 @@ impl DataProcessor for SentenceScoreProcessor {
     fn on_activate(&mut self, _idx: usize) {}
 
     fn on_simplify(&mut self, idx: usize) {
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
         self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.fire_deferred();
         self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
@@ -316,14 +540,15 @@ pub struct SentenceEmbeddingProcessor {
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl SentenceEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, interner: Arc<Interner>, temperature: f32, embed_cuda: bool, score_cuda: bool, mode: InferenceMode) -> Self {
         Self {
             backend,
             interner,
@@ -332,10 +557,11 @@ impl SentenceEmbeddingProcessor {
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
         }
     }
 
@@ -348,25 +574,42 @@ impl SentenceEmbeddingProcessor {
             self.u_embeddings.insert(idx, emb);
         }
     }
+
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.u_embeddings.insert(idx, vec![]); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for SentenceEmbeddingProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
-        self.request_id += 1;
         let s = clause.display(&self.interner).to_string();
         let data: Box<dyn std::any::Any + Send> = Box::new(s);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        self.request_id += 1;
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        self.fire_deferred();
         self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
@@ -374,12 +617,16 @@ impl DataProcessor for SentenceEmbeddingProcessor {
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
         self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.fire_deferred();
         self.drain_pending();
         if self.u_embeddings.is_empty() {
             return None;
@@ -416,23 +663,25 @@ pub struct FeaturesScoreProcessor {
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl FeaturesScoreProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, mode: InferenceMode) -> Self {
         Self {
             backend,
             embed_cuda,
             scores: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
         }
     }
 
@@ -445,19 +694,35 @@ impl FeaturesScoreProcessor {
             self.scores.insert(idx, score);
         }
     }
+
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed_score".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.scores.insert(idx, 0.0); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for FeaturesScoreProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
-        self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        self.request_id += 1;
         match self.backend.submit_async(
             self.request_id, "embed_score".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.scores.insert(idx, 0.0); }
         }
@@ -466,11 +731,15 @@ impl DataProcessor for FeaturesScoreProcessor {
     fn on_activate(&mut self, _idx: usize) {}
 
     fn on_simplify(&mut self, idx: usize) {
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
         self.drain_pending();
         self.scores.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.fire_deferred();
         self.drain_pending();
         let selected = softmax_sample(&self.scores, self.temperature, &mut self.rng_state);
         if let Some(idx) = selected {
@@ -497,14 +766,15 @@ pub struct FeaturesEmbeddingProcessor {
     u_embeddings: IndexMap<usize, Vec<f32>>,
     p_embeddings: IndexMap<usize, Vec<f32>>,
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
+    deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
     temperature: f32,
     rng_state: u64,
     request_id: u64,
-    sequential: bool,
+    mode: InferenceMode,
 }
 
 impl FeaturesEmbeddingProcessor {
-    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, sequential: bool) -> Self {
+    pub fn new(backend: BackendHandle, temperature: f32, embed_cuda: bool, score_cuda: bool, mode: InferenceMode) -> Self {
         Self {
             backend,
             embed_cuda,
@@ -512,10 +782,11 @@ impl FeaturesEmbeddingProcessor {
             u_embeddings: IndexMap::new(),
             p_embeddings: IndexMap::new(),
             pending: Vec::new(),
+            deferred: Vec::new(),
             temperature,
             rng_state: 0x12345678_9abcdef0,
             request_id: 0,
-            sequential,
+            mode,
         }
     }
 
@@ -528,25 +799,42 @@ impl FeaturesEmbeddingProcessor {
             self.u_embeddings.insert(idx, emb);
         }
     }
+
+    fn fire_deferred(&mut self) {
+        for (idx, data) in std::mem::take(&mut self.deferred).into_iter() {
+            self.request_id += 1;
+            match self.backend.submit_async(
+                self.request_id, "embed".to_string(), data, self.embed_cuda,
+            ) {
+                Ok(handle) => self.pending.push((idx, handle)),
+                Err(_) => { self.u_embeddings.insert(idx, vec![]); }
+            }
+        }
+    }
 }
 
 impl DataProcessor for FeaturesEmbeddingProcessor {
     fn on_transfer(&mut self, idx: usize, clause: Arc<Clause>) {
-        self.request_id += 1;
         let features = extract_clause_features(&clause).to_vec();
         let data: Box<dyn std::any::Any + Send> = Box::new(features);
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.push((idx, data));
+            return;
+        }
+        self.request_id += 1;
         match self.backend.submit_async(
             self.request_id, "embed".to_string(), data, self.embed_cuda,
         ) {
             Ok(handle) => {
                 self.pending.push((idx, handle));
-                if self.sequential { self.drain_pending(); }
+                if self.mode == InferenceMode::Sequential { self.drain_pending(); }
             }
             Err(_) => { self.u_embeddings.insert(idx, vec![]); }
         }
     }
 
     fn on_activate(&mut self, idx: usize) {
+        self.fire_deferred();
         self.drain_pending();
         if let Some(emb) = self.u_embeddings.shift_remove(&idx) {
             self.p_embeddings.insert(idx, emb);
@@ -554,12 +842,16 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
     }
 
     fn on_simplify(&mut self, idx: usize) {
+        if self.mode == InferenceMode::Deferred {
+            self.deferred.retain(|(i, _)| *i != idx);
+        }
         self.drain_pending();
         self.u_embeddings.shift_remove(&idx);
         self.p_embeddings.shift_remove(&idx);
     }
 
     fn select(&mut self) -> Option<usize> {
+        self.fire_deferred();
         self.drain_pending();
         if self.u_embeddings.is_empty() {
             return None;

@@ -271,6 +271,19 @@ impl Default for GraphBuilder {
     }
 }
 
+/// Per-clause pre-built input for the GCN embedder.
+///
+/// Bundles the single-clause graph (built off the backend's hot path,
+/// eagerly on the processor thread in `on_transfer`) with the
+/// 9-dimensional clause-level features that the embedder also consumes.
+/// At batch time these are concatenated into the full `BatchClauseGraph`
+/// + features tensor without redoing any per-clause work.
+#[derive(Debug, Clone)]
+pub struct PrebuiltGcnInput {
+    pub graph: BatchClauseGraph,
+    pub clause_features: [f32; 9],
+}
+
 /// Multi-clause graph representation for batch inference
 #[derive(Debug, Clone)]
 pub struct BatchClauseGraph {
@@ -324,6 +337,44 @@ impl GraphBuilder {
                     Self::collect_term_names(arg, interner, names);
                 }
             }
+        }
+    }
+
+    /// Build the single-clause version of `BatchClauseGraph`. Identical to
+    /// running `build_from_clauses` on a slice of length 1; provided so the
+    /// processor can do the per-clause work eagerly on the processor thread
+    /// (in parallel with the prover's continued simp loop) rather than at
+    /// batch dispatch time.
+    pub fn build_one(clause: &Clause) -> BatchClauseGraph {
+        Self::build_from_clauses(&[clause])
+    }
+
+    /// Concatenate per-clause `BatchClauseGraph`s (each containing one clause's
+    /// worth of nodes) into a single batched graph with offset node ids,
+    /// suitable for the GCN forward pass.
+    pub fn concat_prebuilt(graphs: &[&BatchClauseGraph]) -> BatchClauseGraph {
+        let mut features: Vec<[f32; 3]> = Vec::new();
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        let mut clause_boundaries: Vec<(usize, usize)> = Vec::new();
+        let mut edge_boundaries: Vec<(usize, usize)> = Vec::new();
+        let mut next_id: usize = 0;
+        for g in graphs {
+            let start = next_id;
+            let edge_start = edges.len();
+            features.extend(g.node_features.iter().copied());
+            for (s, t) in &g.edge_indices {
+                edges.push((s + start, t + start));
+            }
+            next_id += g.num_nodes;
+            clause_boundaries.push((start, next_id));
+            edge_boundaries.push((edge_start, edges.len()));
+        }
+        BatchClauseGraph {
+            num_nodes: next_id,
+            edge_indices: edges,
+            node_features: features,
+            clause_boundaries,
+            edge_boundaries,
         }
     }
 
