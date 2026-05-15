@@ -23,14 +23,15 @@ DATA = ROOT / ".data" / "throughput_ablation"
 OUT = ROOT / "ML4SP" / "figures"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# Cell ordering and palette
-CELLS = ["cache_batched", "cache_eager", "nocache_batched", "nocache_eager", "cache_sequential"]
+# Cell ordering: cache=T cells grouped on the left, cache=F on the right.
+CELLS = ["cache_batched", "cache_eager", "cache_sequential", "nocache_batched", "nocache_eager"]
+FIG_CELLS = CELLS
 CELL_LABELS = {
     "cache_batched":     "cache, batched",
     "cache_eager":       "cache, eager",
     "nocache_batched":   "no cache, batched",
     "nocache_eager":     "no cache, eager",
-    "cache_sequential":  "strawman (seq)",
+    "cache_sequential":  "cache, sequential",
 }
 CELL_COLORS = {
     "cache_batched":     "#456878",
@@ -65,7 +66,7 @@ def per_problem_median_wall(runs, cell):
 def fig_cache_bars(runs):
     """Headline figure: median per-problem wall time per cell."""
     rows = []
-    for cell in CELLS:
+    for cell in FIG_CELLS:
         per_prob = per_problem_median_wall(runs, cell)
         if not per_prob:
             continue

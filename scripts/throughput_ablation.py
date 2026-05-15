@@ -8,7 +8,7 @@ Grid:
       (cache=T, mode=eager)    -- async with embed_batch_size=1
       (cache=F, mode=batched)
       (cache=F, mode=eager)
-      (cache=T, mode=sequential)  -- strawman baseline (drain-after-each-submit)
+      (cache=T, mode=sequential)  -- reference (drain-after-each-submit)
   - 3 reps per cell
 
 Output: .data/throughput_ablation/<cell>__<problem>__rep<N>.json
