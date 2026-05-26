@@ -92,3 +92,4 @@ large_benchmark.txt
 
 # NFS lock files
 .nfs*
+/VampireWS/

@@ -157,6 +157,17 @@ def run_vampire(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_
         "--avatar", avatar,
     ]
 
+    # Optional cross-prover alignment knobs (clause selection + term ordering).
+    awr = preset.get("age_weight_ratio")
+    if awr is not None:
+        cmd.extend(["--age_weight_ratio", str(awr)])
+    kws = preset.get("kbo_weight_scheme")
+    if kws is not None:
+        cmd.extend(["--kbo_weight_scheme", str(kws)])
+    term_ordering = preset.get("term_ordering")
+    if term_ordering is not None:
+        cmd.extend(["--term_ordering", str(term_ordering)])
+
     if memory_limit is not None:
         cmd.extend(["--memory_limit", str(memory_limit)])
     if activation_limit is not None:
@@ -210,6 +221,12 @@ def run_spass(problem: Path, base_dir: Path, preset: dict, binary: Path, tptp_ro
         cmd.append(f"-Memory={memory}")
     if loops is not None:
         cmd.append(f"-Loops={loops}")
+    # Optional cross-prover alignment knobs (clause selection + term ordering).
+    for key, flag in (("WDRatio", "WDRatio"), ("FuncWeight", "FuncWeight"),
+                      ("VarWeight", "VarWeight"), ("Ordering", "Ordering")):
+        val = preset.get(key)
+        if val is not None:
+            cmd.append(f"-{flag}={val}")
     cmd.append(str(problem))
 
     start = time.time()

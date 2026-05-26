@@ -18,6 +18,13 @@
       "age_weight_ratio": 0.5,
       "memory_limit": 64
     },
+    "age_weight_time": {
+      "description": "Age-weight, time-limited (prover comparison)",
+      "timeout": 10,
+      "literal_selection": 21,
+      "age_weight_ratio": 0.5,
+      "memory_limit": 4096
+    },
     "gcn_struct_mlp": {
       "description": "GCN (structural) + MLP, round 0",
       "timeout": 60,
