@@ -28,7 +28,7 @@ pub trait ProverSink: Send {
     fn on_activate(&mut self, clause_idx: usize);
 
     /// Clause removed from U or P by simplification.
-    fn on_simplify(&mut self, clause_idx: usize);
+    fn on_delete(&mut self, clause_idx: usize);
 
     /// Request clause selection. Returns the index of the selected clause.
     ///

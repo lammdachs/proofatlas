@@ -655,7 +655,7 @@ impl Prover {
                     for rule in &mut self.generating_inferences {
                         rule.on_delete(clause_idx, clause);
                     }
-                    self.sink.on_simplify(clause_idx);
+                    self.sink.on_delete(clause_idx);
                 } else if self.state.processed.shift_remove(&clause_idx) {
                     let clause = &self.state.clauses[clause_idx];
                     for rule in &mut self.simplifying_inferences {
@@ -664,7 +664,7 @@ impl Prover {
                     for rule in &mut self.generating_inferences {
                         rule.on_delete(clause_idx, clause);
                     }
-                    self.sink.on_simplify(clause_idx);
+                    self.sink.on_delete(clause_idx);
                 }
 
                 // If there's a replacement clause, add it to N

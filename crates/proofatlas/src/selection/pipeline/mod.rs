@@ -42,7 +42,7 @@ pub enum ProverSignal {
     /// Clause moved U→P (activated as given clause).
     Activate(usize),
     /// Clause removed from U or P by simplification.
-    Simplify(usize),
+    Delete(usize),
     /// Request clause selection. The data processing thread sends the
     /// selected clause index (or None) back via the response channel.
     Select(mpsc::Sender<Option<usize>>),
@@ -65,7 +65,7 @@ pub trait DataProcessor: Send {
     /// Handle a clause moving U→P (activated as given clause).
     fn on_activate(&mut self, idx: usize);
     /// Handle a clause being removed by simplification.
-    fn on_simplify(&mut self, idx: usize);
+    fn on_delete(&mut self, idx: usize);
     /// Select the next clause. Returns its index, removing it from internal state.
     fn select(&mut self) -> Option<usize>;
 }
@@ -121,9 +121,9 @@ impl ProverSink for ChannelSink {
         }
     }
 
-    fn on_simplify(&mut self, clause_idx: usize) {
+    fn on_delete(&mut self, clause_idx: usize) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(ProverSignal::Simplify(clause_idx));
+            let _ = tx.send(ProverSignal::Delete(clause_idx));
         }
     }
 
@@ -362,7 +362,7 @@ fn signal_loop(rx: mpsc::Receiver<ProverSignal>, mut processor: Box<dyn DataProc
         match signal {
             ProverSignal::Transfer(idx, clause) => processor.on_transfer(idx, clause),
             ProverSignal::Activate(idx) => processor.on_activate(idx),
-            ProverSignal::Simplify(idx) => processor.on_simplify(idx),
+            ProverSignal::Delete(idx) => processor.on_delete(idx),
             ProverSignal::Select(resp_tx) => {
                 let _ = resp_tx.send(processor.select());
             }
@@ -580,7 +580,7 @@ mod tests {
         sink.on_transfer(1, &make_clause(2));
 
         // Simplify clause 0
-        sink.on_simplify(0);
+        sink.on_delete(0);
 
         // Only clause 1 should be available
         let s = sink.select();

@@ -61,7 +61,7 @@ pub struct GcnScoreProcessor {
     embed_cuda: bool,
     scores: IndexMap<usize, f32>,
     /// Pending embed+score requests: (clause_idx, request_handle).
-    /// Drained before any read of `scores` (select, on_simplify).
+    /// Drained before any read of `scores` (select, on_delete).
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     /// Buffered inputs for `Deferred` mode: (clause_idx, prepared input).
     /// Fired as one rapid batch of submit_async calls at start of `select`.
@@ -136,7 +136,7 @@ impl DataProcessor for GcnScoreProcessor {
         // Score is clause-intrinsic for MLP — already removed during select
     }
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if self.mode == InferenceMode::Deferred {
             self.deferred.retain(|(i, _)| *i != idx);
         }
@@ -182,7 +182,7 @@ pub struct GcnEmbeddingProcessor {
     u_clauses: IndexMap<usize, Arc<Clause>>,
     p_clauses: IndexMap<usize, Arc<Clause>>,
     /// Pending embed requests: (clause_idx, request_handle).
-    /// Drained before any read of u_embeddings (select, on_activate, on_simplify).
+    /// Drained before any read of u_embeddings (select, on_activate, on_delete).
     pending: Vec<(usize, crate::selection::pipeline::backend::RequestHandle)>,
     /// Buffered inputs for `Deferred` mode.
     deferred: Vec<(usize, Box<dyn std::any::Any + Send>)>,
@@ -323,7 +323,7 @@ impl DataProcessor for GcnEmbeddingProcessor {
         }
     }
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if !self.cache_embeddings {
             self.u_clauses.shift_remove(&idx);
             self.p_clauses.shift_remove(&idx);
@@ -504,7 +504,7 @@ impl DataProcessor for SentenceScoreProcessor {
 
     fn on_activate(&mut self, _idx: usize) {}
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if self.mode == InferenceMode::Deferred {
             self.deferred.retain(|(i, _)| *i != idx);
         }
@@ -616,7 +616,7 @@ impl DataProcessor for SentenceEmbeddingProcessor {
         }
     }
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if self.mode == InferenceMode::Deferred {
             self.deferred.retain(|(i, _)| *i != idx);
         }
@@ -730,7 +730,7 @@ impl DataProcessor for FeaturesScoreProcessor {
 
     fn on_activate(&mut self, _idx: usize) {}
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if self.mode == InferenceMode::Deferred {
             self.deferred.retain(|(i, _)| *i != idx);
         }
@@ -841,7 +841,7 @@ impl DataProcessor for FeaturesEmbeddingProcessor {
         }
     }
 
-    fn on_simplify(&mut self, idx: usize) {
+    fn on_delete(&mut self, idx: usize) {
         if self.mode == InferenceMode::Deferred {
             self.deferred.retain(|(i, _)| *i != idx);
         }
