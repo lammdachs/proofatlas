@@ -216,16 +216,53 @@ mod tests {
         let selector = SelectAll;
         let results = factoring(&clause, 0, &selector);
 
-        // With SelectAll, both P literals are selected
-        // P(X) factors with P(Y), and P(Y) factors with P(X)
-        // Both produce the same clause: P(X) v Q(Z) (with appropriate substitution)
+        // With SelectAll, both P literals are selected: P(X) factors with P(Y)
+        // and P(Y) with P(X), both yielding P(_) v Q(Z) modulo renaming.
         assert_eq!(results.len(), 2);
         for r in &results {
-            if let StateChange::Add(clause, _, _) = r {
-                assert_eq!(clause.literals.len(), 2);
-            } else {
+            let StateChange::Add(clause, _, _) = r else {
                 panic!("Expected StateChange::Add");
-            }
+            };
+            assert_eq!(clause.literals.len(), 2, "one of the two P literals is merged away");
+            // Exactly one P literal (the merged pair) and the untouched Q(Z).
+            let p_lit = clause.literals.iter().find(|l| l.predicate == p)
+                .expect("factor keeps a single P literal");
+            assert!(p_lit.polarity && matches!(p_lit.args.as_slice(), [Term::Variable(_)]));
+            let q_lit = clause.literals.iter().find(|l| l.predicate == q)
+                .expect("factor keeps the Q literal");
+            assert!(q_lit.polarity && matches!(q_lit.args.as_slice(), [Term::Variable(_)]),
+                "Q(Z) is carried over unchanged");
         }
+    }
+
+    #[test]
+    fn test_factoring_negative_gates() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 1);
+        let q = ctx.pred("Q", 1);
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
+        let selector = SelectAll;
+
+        // Different predicates: P(X) v Q(Y) has no factorable pair.
+        let diff_pred = Clause::new(vec![
+            Literal::positive(p, vec![x.clone()]),
+            Literal::positive(q, vec![y.clone()]),
+        ]);
+        assert!(
+            factoring(&diff_pred, 0, &selector).is_empty(),
+            "factoring needs two literals of the same predicate"
+        );
+
+        // Opposite polarity: P(X) v ~P(Y) must not factor (factoring merges
+        // same-polarity literals only).
+        let opp_pol = Clause::new(vec![
+            Literal::positive(p, vec![x.clone()]),
+            Literal::negative(p, vec![y.clone()]),
+        ]);
+        assert!(
+            factoring(&opp_pol, 0, &selector).is_empty(),
+            "factoring must not merge literals of opposite polarity"
+        );
     }
 }

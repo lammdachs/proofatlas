@@ -48,20 +48,30 @@ fn test_factoring_with_select_all_detailed() {
     let selector = SelectAll;
     let results = factoring(&clause, 0, &selector);
 
-    println!("Number of factors: {}", results.len());
-    for (i, result) in results.iter().enumerate() {
-        if let proofatlas::StateChange::Add(clause, _, _) = result {
-            println!("Factor {}: {}", i + 1, clause);
+    // With SelectAll every literal is selected, and `factoring` tries each
+    // ordered pair (i, j) with i != j of same-predicate, same-polarity
+    // literals. For P(X) ∨ P(Y) ∨ P(Z) that is the 6 ordered pairs, each of
+    // which unifies, so the rule emits exactly 6 factors. (They are all
+    // isomorphic modulo variable renaming — "two distinct singleton P
+    // literals" — and the redundant copies are removed later by forward
+    // simplification, not by `factoring` itself.)
+    assert_eq!(
+        results.len(),
+        6,
+        "SelectAll factoring of three P-literals should emit all 6 ordered pairs"
+    );
+
+    // Every factor must be a 2-literal clause whose literals are both the
+    // positive predicate P (dropping exactly one literal after unification).
+    for result in &results {
+        let proofatlas::StateChange::Add(factor, rule, _) = result else {
+            panic!("factoring should emit Add changes, got {result:?}");
+        };
+        assert_eq!(rule, "Factoring");
+        assert_eq!(factor.literals.len(), 2, "each factor drops exactly one literal");
+        for lit in &factor.literals {
+            assert!(lit.polarity, "factor literals stay positive");
+            assert_eq!(lit.predicate, p, "factor literals are the P predicate");
         }
     }
-
-    // With SelectAll, all literals are selected
-    // We can factor:
-    // - P(X) with P(Y): produces P(X) ∨ P(Z)
-    // - P(X) with P(Z): produces P(X) ∨ P(Y)
-    // - P(Y) with P(X): produces P(Y) ∨ P(Z)
-    // - P(Y) with P(Z): produces P(Y) ∨ P(X)
-    // - P(Z) with P(X): produces P(Z) ∨ P(Y)
-    // - P(Z) with P(Y): produces P(Z) ∨ P(X)
-    // But duplicates should be removed, so we expect 3 unique factors
 }

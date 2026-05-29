@@ -160,6 +160,12 @@ mod tests {
 
         let result = unify(&x, &y).unwrap();
         assert_eq!(result.map.len(), 1);
+        // The substitution must actually unify the two terms.
+        assert_eq!(
+            x.apply_substitution(&result),
+            y.apply_substitution(&result),
+            "unifier must make X and Y equal"
+        );
     }
 
     #[test]
@@ -177,15 +183,25 @@ mod tests {
     #[test]
     fn test_unify_functions() {
         let mut ctx = TestContext::new();
+        let x_id = ctx.var_id("X");
+        let y_id = ctx.var_id("Y");
         let x = ctx.var("X");
         let y = ctx.var("Y");
         let t1 = ctx.func("f", vec![x, y]);
-        let a2 = ctx.const_("a");
-        let a3 = ctx.const_("a");
-        let t2 = ctx.func("f", vec![a2, a3]);
+        let a = ctx.const_("a");
+        let t2 = ctx.func("f", vec![a.clone(), a.clone()]);
 
         let result = unify(&t1, &t2).unwrap();
         assert_eq!(result.map.len(), 2);
+        // Both variables must bind to a, and applying the unifier must make the
+        // two terms identical.
+        assert_eq!(result.map.get(&x_id), Some(&a), "X must bind to a");
+        assert_eq!(result.map.get(&y_id), Some(&a), "Y must bind to a");
+        assert_eq!(
+            t1.apply_substitution(&result),
+            t2.apply_substitution(&result),
+            "unifier must make f(X,Y) and f(a,a) equal"
+        );
     }
 
     #[test]

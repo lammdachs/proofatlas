@@ -705,10 +705,19 @@ fn test_superposition_both_directions() {
 
     let kbo = KBO::new(KBOConfig::default());
     let results = superposition(&from, &into, 0, 1, &SelectAll, &mut ctx.interner, &kbo);
-    // At least one direction should produce a rewrite
-    // (depends on KBO ordering of a vs b)
-    // We just check it doesn't crash
-    let _ = count_adds(&results);
+    // a and b are distinct constants, hence KBO-comparable, so the oriented
+    // equation rewrites the matching side of the other equality: at least one
+    // rewrite must be produced, and every result is itself an equality literal.
+    assert!(
+        count_adds(&results) >= 1,
+        "superposition between a=b and b=a must produce at least one rewrite"
+    );
+    for r in &results {
+        if let proofatlas::StateChange::Add(c, _, _) = r {
+            assert_eq!(c.literals.len(), 1, "result is a single (rewritten) equality");
+            assert_eq!(c.literals[0].predicate, eq, "result literal is an equality");
+        }
+    }
 }
 
 // =========================================================================
@@ -899,17 +908,34 @@ fn test_demodulation_uses_matching_not_unification() {
     let p = ctx.pred("P", 1);
     let x = ctx.var("X");
     let a = ctx.const_("a");
-
-    // Unit equality: X = a  (X is a pattern variable)
-    let unit_eq = Clause::new(vec![Literal::positive(eq, vec![x.clone(), a.clone()])]);
-    // Target: P(b)
     let b = ctx.const_("b");
-    let target = Clause::new(vec![Literal::positive(p, vec![b.clone()])]);
+    let y = ctx.var("Y");
+    let gx = ctx.func("g", vec![x.clone()]);
+    let gb = ctx.func("g", vec![b.clone()]);
 
-    // Matching X against b succeeds (X -> b)
-    // But we need lσ > rσ: b > a (depends on KBO precedence)
-    let results = demodulate(&unit_eq, &target, 0, 1, &ctx.interner);
-    // Whether this succeeds depends on KBO ordering of b vs a
-    // The key point is that matching is one-way (pattern variables in unit_eq only)
-    let _ = results;
+    // Unit equality g(X) = a, a valid rewrite rule (g(X) > a under KBO:
+    // larger weight, and X occurs on the left).
+    let unit_eq = Clause::new(vec![Literal::positive(eq, vec![gx.clone(), a.clone()])]);
+
+    // Positive: matching g(X) against the ground subterm g(b) binds X -> b and
+    // rewrites P(g(b)) to P(a).
+    let target_match = Clause::new(vec![Literal::positive(p, vec![gb.clone()])]);
+    let matched = demodulate(&unit_eq, &target_match, 0, 1, &ctx.interner);
+    assert_eq!(count_adds(&matched), 1, "g(X)=a should rewrite P(g(b)) by matching X->b");
+    if let Some(proofatlas::StateChange::Add(c, _, _)) = matched.first() {
+        assert_eq!(c.literals.len(), 1);
+        assert_eq!(c.literals[0].predicate, p);
+        assert_eq!(c.literals[0].args, vec![a.clone()], "P(g(b)) rewrites to P(a)");
+    }
+
+    // Negative: demodulation matches one-way, so the pattern g(X) cannot be
+    // matched against a bare target variable Y. Unification *would* bind
+    // Y -> g(X) and wrongly rewrite; matching must not, so P(Y) is untouched.
+    let target_var = Clause::new(vec![Literal::positive(p, vec![y.clone()])]);
+    let unmatched = demodulate(&unit_eq, &target_var, 0, 1, &ctx.interner);
+    assert_eq!(
+        count_adds(&unmatched),
+        0,
+        "demodulation uses matching, not unification: P(Y) must not be rewritten"
+    );
 }

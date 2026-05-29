@@ -530,13 +530,16 @@ mod tests {
             "Superposition should find positions in the right side of equalities"
         );
 
-        // Find the expected result: a = b
+        // Find the expected result: a = b (f(X)=X rewrites f(b) to b, turning
+        // a = f(b) into a = b). Check the actual arguments, not just the shape.
         let found = results.iter().any(|r| {
             if let StateChange::Add(clause, _, _) = r {
                 clause.literals.len() == 1
                     && clause.literals[0].polarity
                     && clause.literals[0].predicate.name(&ctx.interner) == "="
                     && clause.literals[0].args.len() == 2
+                    && clause.literals[0].args.contains(&a)
+                    && clause.literals[0].args.contains(&b)
             } else {
                 false
             }

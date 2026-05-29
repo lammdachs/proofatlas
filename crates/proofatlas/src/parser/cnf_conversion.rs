@@ -1114,8 +1114,16 @@ mod tests {
         let cnf = fof_to_cnf(formula, &mut ctx.interner).unwrap();
 
         assert_eq!(cnf.clauses.len(), 2);
-        assert_eq!(cnf.clauses[0].literals.len(), 1);
-        assert_eq!(cnf.clauses[1].literals.len(), 1);
+        // Both clauses must be positive unit clauses, one P and one Q.
+        let mut names: Vec<&str> = Vec::new();
+        for clause in &cnf.clauses {
+            assert_eq!(clause.literals.len(), 1, "each conjunct yields a unit clause");
+            let lit = &clause.literals[0];
+            assert!(lit.polarity, "P & Q yields positive literals");
+            names.push(ctx.interner.resolve_predicate(lit.predicate.id));
+        }
+        names.sort();
+        assert_eq!(names, vec!["P", "Q"], "the two units are exactly P and Q");
     }
 
     #[test]
@@ -1133,14 +1141,54 @@ mod tests {
         assert_eq!(cnf.clauses.len(), 1);
         assert_eq!(cnf.clauses[0].literals.len(), 1);
 
-        // Check that the variable was replaced with a Skolem constant
-        match &cnf.clauses[0].literals[0].args[0] {
+        // The single literal must be the positive atom P(sk0), with its
+        // existential variable replaced by a Skolem *constant* (no enclosing
+        // universal, so arity 0).
+        let lit = &cnf.clauses[0].literals[0];
+        assert!(lit.polarity, "P(x) is positive");
+        assert_eq!(ctx.interner.resolve_predicate(lit.predicate.id), "P");
+        assert_eq!(lit.args.len(), 1);
+        match &lit.args[0] {
             Term::Constant(c) => {
                 let name = ctx.interner.resolve_constant(c.id);
                 assert!(name.starts_with("sk"), "Expected Skolem constant, got: {}", name);
             }
-            _ => panic!("Expected Skolem constant"),
+            other => panic!("Expected Skolem constant, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_skolemization_under_universal_is_a_function() {
+        // ∀Y ∃X. P(X, Y) — the existential X is inside the scope of the
+        // universal Y, so X must skolemize to a *function* of Y, not a
+        // constant. Skolemizing it as a constant would be unsound.
+        let mut ctx = TestContext::new();
+        let y = ctx.var("Y");
+        let x = ctx.var("X");
+        let x_term = ctx.var_term("X");
+        let y_term = ctx.var_term("Y");
+        let body = ctx.atom_formula("P", vec![x_term, y_term]);
+        let inner = FOFFormula::Quantified(Quantifier::Exists, x, Box::new(body));
+        let formula = FOFFormula::Quantified(Quantifier::Forall, y, Box::new(inner));
+
+        let cnf = fof_to_cnf(formula, &mut ctx.interner).unwrap();
+        assert_eq!(cnf.clauses.len(), 1);
+        let lit = &cnf.clauses[0].literals[0];
+        assert!(lit.polarity);
+        assert_eq!(lit.args.len(), 2);
+
+        // First argument: a Skolem function applied to the universal variable.
+        let Term::Function(f, args) = &lit.args[0] else {
+            panic!("existential under a universal must skolemize to a function, got {:?}", lit.args[0]);
+        };
+        assert_eq!(f.arity, 1, "Skolem function depends on the one enclosing universal");
+        assert_eq!(args.len(), 1);
+        // Second argument: the universal variable itself, and the Skolem
+        // function's argument must be that same variable.
+        let Term::Variable(univ) = &lit.args[1] else {
+            panic!("second argument should be the universal variable");
+        };
+        assert_eq!(&args[0], &Term::Variable(*univ), "Skolem function is applied to the universal var");
     }
 
     /// Test CNF conversion of biconditional with quantifiers on both sides

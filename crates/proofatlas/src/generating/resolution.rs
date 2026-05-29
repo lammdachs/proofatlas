@@ -273,11 +273,68 @@ mod tests {
         let selector = SelectAll;
         let results = resolution(&clause1, &clause2, 0, 1, &selector, &mut ctx.interner);
         assert_eq!(results.len(), 1);
-        if let StateChange::Add(clause, rule, _) = &results[0] {
-            assert_eq!(clause.literals.len(), 2);
-            assert_eq!(rule, "Resolution");
-        } else {
+        let StateChange::Add(clause, rule, _) = &results[0] else {
             panic!("Expected StateChange::Add");
-        }
+        };
+        assert_eq!(rule, "Resolution");
+        assert_eq!(clause.literals.len(), 2);
+        // The resolvent must be exactly Q(X) v R(b): the P(a)/~P(a) pair is
+        // removed and the remaining literals carried over (X may be renamed).
+        let q_lit = clause
+            .literals
+            .iter()
+            .find(|l| l.predicate == q)
+            .expect("resolvent must contain the Q literal");
+        assert!(q_lit.polarity, "Q literal stays positive");
+        assert!(
+            matches!(q_lit.args.as_slice(), [Term::Variable(_)]),
+            "Q's argument is a variable, got {:?}",
+            q_lit.args
+        );
+        let r_lit = clause
+            .literals
+            .iter()
+            .find(|l| l.predicate == r)
+            .expect("resolvent must contain the R literal");
+        assert!(r_lit.polarity, "R literal stays positive");
+        assert_eq!(r_lit.args, vec![b.clone()], "R's argument is b");
+        // The resolved-away predicate P must be gone.
+        assert!(
+            clause.literals.iter().all(|l| l.predicate != p),
+            "the P(a)/~P(a) pair must be resolved away"
+        );
+    }
+
+    #[test]
+    fn test_resolution_negative_gates() {
+        let mut ctx = TestContext::new();
+        let p = ctx.pred("P", 1);
+        let a = ctx.const_("a");
+        let b = ctx.const_("b");
+        let selector = SelectAll;
+
+        // (1) Same polarity: P(a) and P(a) share no complementary literal.
+        let c_pos1 = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+        let c_pos2 = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+        assert!(
+            resolution(&c_pos1, &c_pos2, 0, 1, &selector, &mut ctx.interner).is_empty(),
+            "resolution must not fire on two positive literals"
+        );
+
+        // (2) Non-unifiable complementary literals: P(a) and ~P(b).
+        let c_a = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+        let c_nb = Clause::new(vec![Literal::negative(p, vec![b.clone()])]);
+        assert!(
+            resolution(&c_a, &c_nb, 0, 1, &selector, &mut ctx.interner).is_empty(),
+            "resolution must not fire when the complementary atoms do not unify"
+        );
+
+        // (3) Different predicate: P(a) and ~Q(a).
+        let q = ctx.pred("Q", 1);
+        let c_nq = Clause::new(vec![Literal::negative(q, vec![a.clone()])]);
+        assert!(
+            resolution(&c_a, &c_nq, 0, 1, &selector, &mut ctx.interner).is_empty(),
+            "resolution must not fire across different predicates"
+        );
     }
 }

@@ -51,10 +51,15 @@ macro_rules! tptp_no_proof {
         #[test]
         fn $name() {
             let (result, _) = prove_problem($file);
+            // Asserting `Saturated` (not merely "not Proof") is the stronger
+            // soundness contract: a soundness bug masked by exhausting the
+            // resource budget would pass a `!matches!(_, Proof)` check but not
+            // this one. Every problem here is confirmed to genuinely saturate.
             assert!(
-                !matches!(result, ProofResult::Proof { .. }),
-                "{}: must NOT find proof for satisfiable problem",
-                stringify!($name)
+                matches!(result, ProofResult::Saturated),
+                "{}: satisfiable problem must saturate without a proof, got {:?}",
+                stringify!($name),
+                result
             );
         }
     };

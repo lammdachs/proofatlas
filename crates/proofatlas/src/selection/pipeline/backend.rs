@@ -433,18 +433,18 @@ mod tests {
     }
 
     #[test]
-    fn test_backend_shutdown_on_drop() {
+    fn test_handle_keeps_worker_alive_after_backend_dropped() {
+        // The worker exits only when *all* BackendHandle senders are dropped.
+        // A handle cloned out of the Backend before the Backend is dropped
+        // therefore keeps the worker alive, and requests still succeed.
         let handle = {
             let backend = Backend::from_models(vec![Box::new(DoublerModel)]);
             backend.handle()
         };
-        // Backend dropped, but handle still exists.
-        // Submit should still work if there are pending requests (they were drained).
-        // After the worker exits, submit returns error.
-        // (Exact behavior depends on timing; the key is no deadlock/panic.)
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let result = handle.submit_sync(1, "doubler".to_string(), Box::new(1.0f32), false);
-        // May succeed or fail depending on timing, but shouldn't panic
-        let _ = result;
+        // `backend` is dropped here; `handle` still holds a live sender.
+        let result = handle
+            .submit_sync(1, "doubler".to_string(), Box::new(1.0f32), false)
+            .expect("worker should still be alive while a handle exists");
+        assert_eq!(*result.data.downcast::<f32>().unwrap(), 2.0);
     }
 }

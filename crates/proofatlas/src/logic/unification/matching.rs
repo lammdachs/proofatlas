@@ -130,6 +130,36 @@ mod tests {
     }
 
     #[test]
+    fn test_match_is_one_directional_at_depth() {
+        // Matching binds only PATTERN variables; a variable in the TERM is
+        // never instantiated. This is what distinguishes matching from
+        // unification, and getting it wrong (binding the term variable) would
+        // make demodulation unsound. Exercise it at a nested position.
+        let mut ctx = TestContext::new();
+        let x = ctx.var("X");
+        let y = ctx.var("Y");
+        let a = ctx.const_("a");
+        let fx = ctx.func("f", vec![x.clone()]);
+        let fa = ctx.func("f", vec![a.clone()]);
+        let fy = ctx.func("f", vec![y.clone()]);
+
+        // Pattern variable under f binds to the term's subterm: X -> a.
+        let subst = match_term(&fx, &fa).expect("f(X) matches f(a)");
+        assert_eq!(fx.apply_substitution(&subst), fa);
+
+        // Pattern constant under f cannot match a term variable: matching must
+        // fail (unification would instead bind Y -> a).
+        assert!(
+            match_term(&fa, &fy).is_err(),
+            "f(a) must NOT match f(Y): matching does not instantiate term variables"
+        );
+
+        // Pattern variable may match a term variable one-directionally: X -> Y.
+        let subst2 = match_term(&fx, &fy).expect("f(X) matches f(Y) by binding X->Y");
+        assert_eq!(fx.apply_substitution(&subst2), fy);
+    }
+
+    #[test]
     fn test_match_function() {
         let mut ctx = TestContext::new();
         let x = ctx.var("X");

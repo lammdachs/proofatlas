@@ -1401,6 +1401,25 @@ mod tests {
     }
 
     #[test]
+    fn test_reject_malformed_clause_bodies() {
+        // Malformed cnf(...)/fof(...) bodies must be rejected, not silently
+        // accepted. These exercise the formula-grammar error paths (unbalanced
+        // parens, dangling connectives, empty bodies, unknown roles) rather
+        // than the unknown-statement-keyword path above.
+        for src in [
+            "cnf(t, axiom, p(a).",          // unbalanced parenthesis
+            "fof(t, axiom, p(a) & ).",      // dangling connective
+            "cnf(t, axiom, ).",             // empty body
+            "cnf(t, notarole, p(a)).",      // unknown clause role
+        ] {
+            assert!(
+                parse_tptp(src, &[], None, None, None).is_err(),
+                "parser must reject malformed input: {src:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_comments_still_skipped() {
         // Line comments
         let result = parse_tptp(

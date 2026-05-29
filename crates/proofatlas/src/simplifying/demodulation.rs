@@ -409,4 +409,40 @@ mod tests {
             panic!("Expected StateChange::Add");
         }
     }
+
+    #[test]
+    fn test_demodulation_respects_ordering() {
+        // Demodulation may only rewrite l -> r when l > r under KBO. The unit
+        // equality below is between a and f(a); f(a) > a (greater weight), so
+        // the only legal direction is f(a) -> a. Rewriting a -> f(a) would be
+        // unsound (and non-terminating) and must never happen.
+        let mut ctx = TestContext::new();
+        let a = ctx.const_("a");
+        let fa = ctx.func("f", vec![a.clone()]);
+        let eq_pred = ctx.pred("=", 2);
+        let p = ctx.pred("P", 1);
+
+        // Stored as a = f(a); orientation must be derived from KBO, not from
+        // the order the sides happen to be written in.
+        let unit_eq = Clause::new(vec![Literal::positive(eq_pred, vec![a.clone(), fa.clone()])]);
+
+        // Legal direction: P(f(a)) contains the larger term f(a), rewrite to P(a).
+        let target_large = Clause::new(vec![Literal::positive(p, vec![fa.clone()])]);
+        let rewritten = demodulate(&unit_eq, &target_large, 0, 1, &ctx.interner);
+        assert_eq!(rewritten.len(), 1, "f(a) -> a is the oriented direction");
+        if let StateChange::Add(c, _, _) = &rewritten[0] {
+            assert_eq!(c.literals, vec![Literal::positive(p, vec![a.clone()])]);
+        } else {
+            panic!("Expected StateChange::Add");
+        }
+
+        // Illegal direction: P(a) would only rewrite via a -> f(a), which the
+        // ordering forbids. No demodulation may occur.
+        let target_small = Clause::new(vec![Literal::positive(p, vec![a.clone()])]);
+        let blocked = demodulate(&unit_eq, &target_small, 0, 1, &ctx.interner);
+        assert!(
+            blocked.is_empty(),
+            "a -> f(a) is the wrong direction and must be blocked, got {blocked:?}"
+        );
+    }
 }

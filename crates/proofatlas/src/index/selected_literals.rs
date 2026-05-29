@@ -151,6 +151,35 @@ mod tests {
     }
 
     #[test]
+    fn test_on_delete_isolates_clauses_sharing_a_key() {
+        // Two clauses share the (P, positive) key. Deleting one must leave the
+        // other's candidate entry intact; a bug in the shared-vector purge
+        // would drop the wrong clause and silently lose inferences.
+        let mut interner = Interner::new();
+        let p_id = interner.intern_predicate("P");
+        let a_id = interner.intern_constant("a");
+        let b_id = interner.intern_constant("b");
+
+        let selector: Arc<dyn LiteralSelector> = Arc::new(SelectAll);
+        let mut index = SelectedLiteralIndex::new(selector, None);
+
+        let p = PredicateSymbol::new(p_id, 1);
+        let c0 = Arc::new(Clause::new(vec![Literal::positive(p, vec![Term::Constant(Constant::new(a_id))])]));
+        let c1 = Arc::new(Clause::new(vec![Literal::positive(p, vec![Term::Constant(Constant::new(b_id))])]));
+        index.on_activate(0, &c0);
+        index.on_activate(1, &c1);
+        assert_eq!(index.candidates_by_predicate(p_id, true).len(), 2);
+
+        // Delete clause 0; clause 1 must survive, and selected_literals(0) gone.
+        index.on_delete(0, &c0);
+        let remaining = index.candidates_by_predicate(p_id, true);
+        assert_eq!(remaining.len(), 1, "exactly the surviving clause remains");
+        assert_eq!(remaining[0].0, 1, "the surviving entry is clause 1, not clause 0");
+        assert!(index.selected_literals(0).is_none(), "deleted clause's selection is cleared");
+        assert!(index.selected_literals(1).is_some(), "surviving clause's selection is intact");
+    }
+
+    #[test]
     fn test_equality_clause_tracking() {
         let mut interner = Interner::new();
         let eq_id = interner.intern_predicate("=");

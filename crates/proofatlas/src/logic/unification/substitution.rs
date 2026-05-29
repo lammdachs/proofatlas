@@ -178,7 +178,7 @@ impl Clause {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logic::{Constant, Interner};
+    use crate::logic::{Constant, FunctionSymbol, Interner};
 
     #[test]
     fn test_term_substitution() {
@@ -216,5 +216,70 @@ mod tests {
         assert!(!subst.contains(y_id));
         assert_eq!(subst.get(x_id), Some(&term_a));
         assert_eq!(subst.get(y_id), None);
+    }
+
+    #[test]
+    fn test_compose_applies_in_order() {
+        // compose(self, other) must behave as "apply self, then other".
+        let mut interner = Interner::new();
+        let x = Variable::new(interner.intern_variable("X"));
+        let y = Variable::new(interner.intern_variable("Y"));
+        let g = interner.intern_function("g");
+        let b = Term::Constant(Constant::new(interner.intern_constant("b")));
+        let gx = Term::Function(FunctionSymbol::new(g, 1), vec![Term::Variable(x)]);
+        let gb = Term::Function(FunctionSymbol::new(g, 1), vec![b.clone()]);
+
+        let mut sigma = Substitution::new(); // {X -> Y}
+        sigma.insert(x, Term::Variable(y));
+        let mut tau = Substitution::new(); // {Y -> b}
+        tau.insert(y, b.clone());
+
+        let composed = sigma.compose(&tau);
+        assert_eq!(gx.apply_substitution(&composed), gb);
+        // Equivalent to applying sigma then tau by hand.
+        assert_eq!(
+            gx.apply_substitution(&sigma).apply_substitution(&tau),
+            gb
+        );
+    }
+
+    #[test]
+    fn test_insert_normalized_propagates() {
+        // insert_normalized must propagate a later binding into earlier ones:
+        // X -> f(Y), then Y -> a, leaves X -> f(a).
+        let mut interner = Interner::new();
+        let x = Variable::new(interner.intern_variable("X"));
+        let y = Variable::new(interner.intern_variable("Y"));
+        let f = interner.intern_function("f");
+        let a = Term::Constant(Constant::new(interner.intern_constant("a")));
+        let fy = Term::Function(FunctionSymbol::new(f, 1), vec![Term::Variable(y)]);
+        let fa = Term::Function(FunctionSymbol::new(f, 1), vec![a.clone()]);
+
+        let mut subst = Substitution::new();
+        subst.insert_normalized(x, fy);
+        subst.insert_normalized(y, a.clone());
+        assert_eq!(subst.get(x.id), Some(&fa), "X must be fully propagated to f(a)");
+        assert_eq!(subst.get(y.id), Some(&a));
+    }
+
+    #[test]
+    fn test_bind_mark_backtrack_trail() {
+        // The bind/mark/backtrack trail underlies subsumption: backtrack must
+        // restore exactly the bindings made after the mark, and no others.
+        let mut interner = Interner::new();
+        let x = Variable::new(interner.intern_variable("X"));
+        let y = Variable::new(interner.intern_variable("Y"));
+        let a = Term::Constant(Constant::new(interner.intern_constant("a")));
+        let b = Term::Constant(Constant::new(interner.intern_constant("b")));
+
+        let mut subst = Substitution::new();
+        subst.bind(x, a.clone());
+        let mark = subst.mark();
+        subst.bind(y, b.clone());
+        assert_eq!(subst.get(y.id), Some(&b));
+
+        subst.backtrack(mark);
+        assert_eq!(subst.get(y.id), None, "binding after the mark is undone");
+        assert_eq!(subst.get(x.id), Some(&a), "binding before the mark survives");
     }
 }
