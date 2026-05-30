@@ -399,6 +399,19 @@ fn parse_content(
         }
     }
 
+    // Anything left in `current_statement` after the loop never terminated with
+    // a '.', so it is either an incomplete final statement (e.g.
+    // "cnf(t, axiom, p(a)") or trailing junk after the last statement (e.g.
+    // "cnf(t, axiom, p(a)). )))"). Reject it rather than silently dropping it.
+    let leftover = current_statement.trim();
+    if !leftover.is_empty() {
+        let preview: String = leftover.chars().take(80).collect();
+        return Err(format!(
+            "Incomplete or malformed trailing input (no terminating '.'): {}",
+            preview
+        ));
+    }
+
     Ok(ParseResult {
         cnf_formulas,
         fof_formulas,
@@ -1411,12 +1424,25 @@ mod tests {
             "fof(t, axiom, p(a) & ).",      // dangling connective
             "cnf(t, axiom, ).",             // empty body
             "cnf(t, notarole, p(a)).",      // unknown clause role
+            "cnf(t, axiom, p(a)",           // incomplete: never terminates with '.'
+            "cnf(t, axiom, p(a)). )))",     // trailing junk after a valid statement
         ] {
             assert!(
                 parse_tptp(src, &[], None, None, None).is_err(),
                 "parser must reject malformed input: {src:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_trailing_comment_and_whitespace_still_ok() {
+        // The leftover-input check must not reject legitimate trailing
+        // whitespace, blank lines, or full-line comments after the last '.'.
+        let r = parse_tptp(
+            "cnf(t, axiom, p(a)).\n\n% trailing comment\n",
+            &[], None, None, None,
+        ).expect("trailing blank lines and comments are valid");
+        assert_eq!(r.formula.clauses.len(), 1);
     }
 
     #[test]
