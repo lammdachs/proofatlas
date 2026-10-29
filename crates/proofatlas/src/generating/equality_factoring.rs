@@ -1,7 +1,7 @@
 //! Equality factoring inference rule
 
 use super::common::{collect_literals_except, is_ordered_greater};
-use crate::logic::{Clause, Interner, Literal, Position, PredicateSymbol, KBO};
+use crate::logic::{Clause, Interner, Literal, Position, PredicateSymbol, Term, KBO};
 use crate::state::{SaturationState, StateChange, GeneratingInference, VerificationError};
 use crate::logic::clause_manager::ClauseManager;
 use crate::selection::LiteralSelector;
@@ -11,7 +11,11 @@ use std::sync::Arc;
 /// Apply equality factoring rule
 /// From l = r v s = t v C where sigma = mgu(l, s), l = r is selected
 /// Constraints: l*sigma not smaller than r*sigma, l*sigma not smaller than t*sigma, r*sigma not smaller than t*sigma
-/// Derive (l = r v r != t v C)*sigma
+/// Derive (r != t v s = t v C)*sigma
+///
+/// Every ordered pair of distinct positive equalities is tried, with both
+/// orientations of each, since literal order in a clause is syntactic and an
+/// equation with incomparable sides is stored in either orientation.
 pub fn equality_factoring(
     clause: &Clause,
     idx: usize,
@@ -34,57 +38,45 @@ pub fn equality_factoring(
         return results;
     }
 
-    // Try to factor each pair of positive equality literals
-    for i in 0..positive_eq_literals.len() {
-        let (idx1, lit1) = positive_eq_literals[i];
+    let eq_symbol = PredicateSymbol::new(interner.intern_predicate("="), 2);
 
+    for &(idx1, lit1) in &positive_eq_literals {
         // Only consider if lit1 is selected
         if !selected.contains(&idx1) {
             continue;
         }
 
-        let (s1, t1) = get_equality_terms(lit1).unwrap();
+        for &(idx2, lit2) in &positive_eq_literals {
+            if idx2 == idx1 {
+                continue;
+            }
 
-        for j in i + 1..positive_eq_literals.len() {
-            let (idx2, lit2) = positive_eq_literals[j];
-            let (s2, t2) = get_equality_terms(lit2).unwrap();
+            for (l, r) in orientations(lit1) {
+                for (s, t) in orientations(lit2) {
+                    let Ok(sigma) = unify(l, s) else { continue };
 
-            // Try to unify l with s (s1 with s2)
-            if let Ok(sigma) = unify(s1, s2) {
-                // Apply substitution
-                // Using naming from quick reference: l=s1, r=t1, s=s2, t=t2
-                let l_sigma = s1.apply_substitution(&sigma);
-                let r_sigma = t1.apply_substitution(&sigma);
-                let _s_sigma = s2.apply_substitution(&sigma);
-                let t_sigma = t2.apply_substitution(&sigma);
+                    let l_sigma = l.apply_substitution(&sigma);
+                    let r_sigma = r.apply_substitution(&sigma);
+                    let s_sigma = s.apply_substitution(&sigma);
+                    let t_sigma = t.apply_substitution(&sigma);
 
-                // Check ordering constraints: l*sigma not smaller than r*sigma, l*sigma not smaller than t*sigma, r*sigma not smaller than t*sigma
-                // "not smaller" means Greater or Incomparable
-                let l_not_smaller_r = is_ordered_greater(&l_sigma, &r_sigma, &kbo);
-                let l_not_smaller_t = is_ordered_greater(&l_sigma, &t_sigma, &kbo);
-                let r_not_smaller_t = is_ordered_greater(&r_sigma, &t_sigma, &kbo);
+                    // "not smaller" means Greater or Incomparable
+                    if !(is_ordered_greater(&l_sigma, &r_sigma, kbo)
+                        && is_ordered_greater(&l_sigma, &t_sigma, kbo)
+                        && is_ordered_greater(&r_sigma, &t_sigma, kbo))
+                    {
+                        continue;
+                    }
 
-                if l_not_smaller_r && l_not_smaller_t && r_not_smaller_t {
-                    // Build the conclusion: (l = r v r != t v C)*sigma
-                    let mut new_literals = Vec::new();
-
-                    // Add r != t
-                    let eq_symbol = PredicateSymbol::new(interner.intern_predicate("="), 2);
-                    let neq_literal = Literal::negative(eq_symbol, vec![r_sigma.clone(), t_sigma.clone()]);
-                    new_literals.push(neq_literal);
-
-                    // Add l = r (the first equality literal)
-                    let eq_literal = Literal::positive(eq_symbol, vec![l_sigma, r_sigma]);
-                    new_literals.push(eq_literal);
-
-                    // Add all other literals from C (except the two equalities we're factoring)
+                    let mut new_literals = vec![
+                        Literal::negative(eq_symbol, vec![r_sigma, t_sigma.clone()]),
+                        Literal::positive(eq_symbol, vec![s_sigma, t_sigma]),
+                    ];
                     new_literals.extend(collect_literals_except(clause, &[idx1, idx2], &sigma));
-
-                    let conclusion = Clause::new(new_literals);
 
                     // Orientation and normalization handled by apply_change
                     results.push(StateChange::Add(
-                        Arc::new(conclusion),
+                        Arc::new(Clause::new(new_literals)),
                         "EqualityFactoring".into(),
                         vec![Position::clause(idx)],
                     ));
@@ -96,13 +88,9 @@ pub fn equality_factoring(
     results
 }
 
-/// Get the two terms from an equality literal (assumes already verified to be equality)
-fn get_equality_terms(lit: &Literal) -> Option<(&crate::logic::Term, &crate::logic::Term)> {
-    if lit.predicate.arity == 2 && lit.args.len() == 2 {
-        Some((&lit.args[0], &lit.args[1]))
-    } else {
-        None
-    }
+/// Both orientations (lhs, rhs) of an equality literal (assumes already verified to be equality)
+fn orientations(lit: &Literal) -> [(&Term, &Term); 2] {
+    [(&lit.args[0], &lit.args[1]), (&lit.args[1], &lit.args[0])]
 }
 
 /// Equality factoring inference rule.
@@ -147,7 +135,7 @@ impl GeneratingInference for EqualityFactoringRule {
         let premise = &state.clauses[premises[0].clause];
         let interner = &cm.interner;
 
-        // Find pairs of positive equality literals whose LHS sides unify
+        // Find pairs of positive equality literals with unifiable sides
         let positive_eq_lits: Vec<(usize, &crate::logic::Literal)> = premise
             .literals
             .iter()
@@ -163,51 +151,51 @@ impl GeneratingInference for EqualityFactoringRule {
             });
         }
 
-        for i in 0..positive_eq_lits.len() {
-            let (idx1, lit1) = positive_eq_lits[i];
-            let (s1, t1) = (&lit1.args[0], &lit1.args[1]);
+        let eq_symbol = crate::logic::PredicateSymbol::new(
+            interner.get_predicate("=").unwrap_or_else(|| {
+                let mut int = interner.clone();
+                int.intern_predicate("=")
+            }),
+            2,
+        );
 
-            for j in (i + 1)..positive_eq_lits.len() {
-                let (idx2, lit2) = positive_eq_lits[j];
-                let (s2, t2) = (&lit2.args[0], &lit2.args[1]);
+        for &(idx1, lit1) in &positive_eq_lits {
+            for &(idx2, lit2) in &positive_eq_lits {
+                if idx2 == idx1 {
+                    continue;
+                }
 
-                if let Ok(sigma) = crate::logic::unify(s1, s2) {
-                    // Build the expected conclusion: (l = r v r != t v C)*sigma
-                    let l_sigma = s1.apply_substitution(&sigma);
-                    let r_sigma = t1.apply_substitution(&sigma);
-                    let t_sigma = t2.apply_substitution(&sigma);
+                for (l, r) in orientations(lit1) {
+                    for (s, t) in orientations(lit2) {
+                        let Ok(sigma) = crate::logic::unify(l, s) else { continue };
 
-                    let eq_symbol = crate::logic::PredicateSymbol::new(
-                        interner.get_predicate("=").unwrap_or_else(|| {
-                            let mut int = interner.clone();
-                            int.intern_predicate("=")
-                        }),
-                        2,
-                    );
+                        // Build the expected conclusion: (r != t v s = t v C)*sigma
+                        let t_sigma = t.apply_substitution(&sigma);
+                        let mut expected_lits = vec![
+                            crate::logic::Literal::negative(
+                                eq_symbol,
+                                vec![r.apply_substitution(&sigma), t_sigma.clone()],
+                            ),
+                            crate::logic::Literal::positive(
+                                eq_symbol,
+                                vec![s.apply_substitution(&sigma), t_sigma],
+                            ),
+                        ];
+                        expected_lits.extend(super::common::collect_literals_except(
+                            premise, &[idx1, idx2], &sigma,
+                        ));
 
-                    let mut expected_lits = Vec::new();
-                    expected_lits.push(crate::logic::Literal::negative(
-                        eq_symbol,
-                        vec![r_sigma.clone(), t_sigma.clone()],
-                    ));
-                    expected_lits.push(crate::logic::Literal::positive(
-                        eq_symbol,
-                        vec![l_sigma, r_sigma],
-                    ));
-                    expected_lits.extend(super::common::collect_literals_except(
-                        premise, &[idx1, idx2], &sigma,
-                    ));
+                        let mut int = interner.clone();
+                        let mut reconstructed = Clause::new(expected_lits);
+                        reconstructed.normalize(&mut int);
+                        crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
 
-                    let mut int = interner.clone();
-                    let mut reconstructed = Clause::new(expected_lits);
-                    reconstructed.normalize(&mut int);
-                    crate::logic::ordering::orient_equalities::orient_clause_equalities(&mut reconstructed, &int);
-
-                    // Check if conclusion matches
-                    if conclusion.literals.len() == reconstructed.literals.len()
-                        && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
-                    {
-                        return Ok(());
+                        // Check if conclusion matches
+                        if conclusion.literals.len() == reconstructed.literals.len()
+                            && conclusion.literals.iter().all(|cl| reconstructed.literals.contains(cl))
+                        {
+                            return Ok(());
+                        }
                     }
                 }
             }

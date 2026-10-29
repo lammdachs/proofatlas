@@ -6,7 +6,7 @@
 use proofatlas::{
     equality_factoring, equality_resolution, factoring, resolution, superposition,
     Clause, Constant, FunctionSymbol, Interner, KBO, KBOConfig, Literal,
-    PredicateSymbol, SelectAll, StateChange, Term, Variable,
+    PredicateSymbol, SelectAll, SelectUniqueMaximalOrNegOrMaximal, StateChange, Term, Variable,
 };
 
 /// Test context that holds the interner and provides helper methods
@@ -631,6 +631,64 @@ fn test_equality_factoring_needs_two_positive_equalities() {
     let kbo = KBO::new(KBOConfig::default());
     let results = equality_factoring(&clause, 0, &SelectAll, &mut ctx.interner, &kbo);
     assert_eq!(count_adds(&results), 0);
+}
+
+/// Whether `clause` contains an equality literal of the given polarity between `a` and `b`, in either orientation
+fn has_eq(clause: &Clause, polarity: bool, a: &Term, b: &Term) -> bool {
+    clause.literals.iter().any(|l| {
+        l.polarity == polarity
+            && ((&l.args[0] == a && &l.args[1] == b) || (&l.args[0] == b && &l.args[1] == a))
+    })
+}
+
+#[test]
+fn test_equality_factoring_independent_of_literal_order() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let a = ctx.const_("a");
+    let b = ctx.const_("b");
+    let c = ctx.const_("c");
+    let fa = ctx.func("f", vec![a.clone()]);
+    let kbo = KBO::new(KBOConfig::default());
+    let sel = SelectUniqueMaximalOrNegOrMaximal::new();
+
+    let lit_b = Literal::positive(eq, vec![fa.clone(), b.clone()]);
+    let lit_c = Literal::positive(eq, vec![fa.clone(), c.clone()]);
+    for literals in [vec![lit_b.clone(), lit_c.clone()], vec![lit_c, lit_b]] {
+        // f(a) = b v f(a) = c with c > b: f(a) = c is selected, the conclusion is c != b v f(a) = b
+        let clause = Clause::new(literals);
+        let results = equality_factoring(&clause, 0, &sel, &mut ctx.interner, &kbo);
+        assert_eq!(count_adds(&results), 1, "literal order must not matter");
+        let conclusion = get_conclusion(&results[0]);
+        assert_eq!(conclusion.literals.len(), 2);
+        assert!(has_eq(conclusion, false, &b, &c));
+        assert!(has_eq(conclusion, true, &fa, &b));
+    }
+}
+
+#[test]
+fn test_equality_factoring_incomparable_sides() {
+    let mut ctx = TestCtx::new();
+    let eq = ctx.eq_pred();
+    let x = ctx.var("X");
+    let y = ctx.var("Y");
+    let a = ctx.const_("a");
+    let fx = ctx.func("f", vec![x.clone()]);
+    let fy = ctx.func("f", vec![y.clone()]);
+    let kbo = KBO::new(KBOConfig::default());
+    let sel = SelectUniqueMaximalOrNegOrMaximal::new();
+
+    // f(X) = f(Y) v f(Y) = a: the maximal side f(Y) of the selected literal is stored on the right
+    let clause = Clause::new(vec![
+        Literal::positive(eq, vec![fx.clone(), fy.clone()]),
+        Literal::positive(eq, vec![fy.clone(), a.clone()]),
+    ]);
+    let results = equality_factoring(&clause, 0, &sel, &mut ctx.interner, &kbo);
+    assert_eq!(count_adds(&results), 1);
+    let conclusion = get_conclusion(&results[0]);
+    assert_eq!(conclusion.literals.len(), 2);
+    assert!(has_eq(conclusion, false, &fx, &a));
+    assert!(has_eq(conclusion, true, &fy, &a));
 }
 
 // =========================================================================
